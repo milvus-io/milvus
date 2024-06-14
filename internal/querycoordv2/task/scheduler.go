@@ -135,6 +135,7 @@ type Scheduler interface {
 	RemoveByNode(node int64)
 	GetNodeSegmentDelta(nodeID int64) int
 	GetNodeChannelDelta(nodeID int64) int
+	GetExecutedFlag(nodeID int64) <-chan struct{}
 	GetChannelTaskNum() int
 	GetSegmentTaskNum() int
 	Sync(segmentID, replicaID int64) bool
@@ -495,6 +496,18 @@ func (scheduler *taskScheduler) GetNodeChannelDelta(nodeID int64) int {
 	defer scheduler.rwmutex.RUnlock()
 
 	return calculateNodeDelta(nodeID, scheduler.channelTasks)
+}
+
+func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
+	scheduler.rwmutex.RLock()
+	defer scheduler.rwmutex.RUnlock()
+
+	executor, ok := scheduler.executors[nodeID]
+	if !ok {
+		return nil
+	}
+
+	return executor.GetExecutedFlag()
 }
 
 func (scheduler *taskScheduler) GetChannelTaskNum() int {

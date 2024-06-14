@@ -302,6 +302,16 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("queryCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		assert.Equal(t, 200, Params.CollectionObserverInterval.GetAsInt())
+		params.Save("queryCoord.collectionObserverInterval", "100")
+		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
+		params.Reset("queryCoord.collectionObserverInterval")
+
+		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Save("queryCoord.checkExecutedFlagInterval", "200")
+		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Reset("queryCoord.checkExecutedFlagInterval")
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
