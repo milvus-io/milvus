@@ -768,6 +768,9 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 	buffer.lastWrittenMemorySize.Store(buffer.writer.WrittenMemorySize())
 
 	t.spillCount.Inc()
+
+	log.Info("finish spill binlogs", zap.Int64("spillCount", t.spillCount.Load()),
+		zap.Uint64("lastWrittenMemorySize", buffer.lastWrittenMemorySize.Load()))
 	if buffer.flushedRowNum > t.plan.GetMaxSegmentRows() {
 		if err := t.packBufferToSegment(ctx, buffer); err != nil {
 			return err
