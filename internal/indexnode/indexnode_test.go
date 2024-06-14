@@ -357,10 +357,9 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 				PartitionID:         s.partID,
 				SegmentID:           s.segID,
 				FieldID:             s.fieldID,
-				FieldName:           "floatVector",
-				FieldType:           schemapb.DataType_FloatVector,
-				Dim:                 8,
-				DataIds:             []int64{s.logID + 13},
+				// v2.4.x does not fill the field type
+				Dim:     8,
+				DataIds: []int64{s.logID + 13},
 			}
 
 			status, err := s.in.CreateJob(ctx, req)
