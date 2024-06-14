@@ -123,14 +123,14 @@ func (a *FixedSizeAllocator[T]) Reallocate(id T, delta *Resource) (allocated boo
 		return a.Allocate(id, delta)
 	}
 
+	a.lock.Lock()
+	defer a.lock.Unlock()
 	r.Add(delta)
 	if !zero.Le(r) {
 		r.Sub(delta)
 		return false, nil
 	}
 
-	a.lock.Lock()
-	defer a.lock.Unlock()
 	if a.used.Add(delta).Le(a.limit) {
 		if !zero.Le(delta) {
 			// If delta is negative, notify waiters
