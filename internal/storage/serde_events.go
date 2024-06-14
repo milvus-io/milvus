@@ -550,7 +550,6 @@ func NewDeltalogSerializeWriter(partitionID, segmentID UniqueID, eventWriter *De
 
 		var memorySize uint64
 		for _, vv := range v {
-
 			strVal, err := json.Marshal(vv)
 			if err != nil {
 				return nil, memorySize, err
