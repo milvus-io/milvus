@@ -7,6 +7,25 @@ import (
 	"go.uber.org/zap"
 )
 
+type GetFieldNameOpt func(opt *getFieldNameOpt)
+
+type getFieldNameOpt struct {
+	elementType entity.FieldType
+	isDynamic   bool
+}
+
+func TWithElementType(eleType entity.FieldType) GetFieldNameOpt {
+	return func(opt *getFieldNameOpt) {
+		opt.elementType = eleType
+	}
+}
+
+func TWithIsDynamic(isDynamic bool) GetFieldNameOpt {
+	return func(opt *getFieldNameOpt) {
+		opt.isDynamic = isDynamic
+	}
+}
+
 func GetFieldNameByElementType(t entity.FieldType) string {
 	switch t {
 	case entity.FieldTypeBool:
@@ -26,11 +45,16 @@ func GetFieldNameByElementType(t entity.FieldType) string {
 	case entity.FieldTypeVarChar:
 		return common.DefaultVarcharArrayField
 	default:
+		log.Warn("GetFieldNameByElementType", zap.Any("ElementType", t))
 		return common.DefaultArrayFieldName
 	}
 }
 
-func GetFieldNameByFieldType(t entity.FieldType, eleType ...entity.FieldType) string {
+func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string {
+	opt := &getFieldNameOpt{}
+	for _, o := range opts {
+		o(opt)
+	}
 	switch t {
 	case entity.FieldTypeBool:
 		return common.DefaultBoolFieldName
@@ -49,9 +73,12 @@ func GetFieldNameByFieldType(t entity.FieldType, eleType ...entity.FieldType) st
 	case entity.FieldTypeVarChar:
 		return common.DefaultVarcharFieldName
 	case entity.FieldTypeJSON:
+		if opt.isDynamic{
+			return common.DefaultDynamicFieldName
+		}
 		return common.DefaultJSONFieldName
 	case entity.FieldTypeArray:
-		return GetFieldNameByElementType(eleType[0])
+		return GetFieldNameByElementType(opt.elementType)
 	case entity.FieldTypeBinaryVector:
 		return common.DefaultBinaryVecFieldName
 	case entity.FieldTypeFloatVector:
@@ -78,6 +105,7 @@ const (
 	Int64VarcharSparseVec CollectionFieldsType = 5 // int64 + varchar + sparse vector
 	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
 	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
+	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
 )
 
 type GenFieldsOption struct {
@@ -276,6 +304,42 @@ func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
 	return fields
 }
 
+type FieldsInt64VecAllScalar struct{} // except sparse vector field
+func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Field {
+	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	fields := []*entity.Field{
+		pkField,
+	}
+	// scalar fields and array fields
+	for _, fieldType := range GetAllScalarFieldType() {
+		if fieldType == entity.FieldTypeInt64 {
+			continue
+		} else if fieldType == entity.FieldTypeArray {
+			for _, eleType := range GetAllArrayElementType() {
+				arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
+				if eleType == entity.FieldTypeVarChar {
+					arrayField.WithMaxLength(option.MaxLength)
+				}
+				fields = append(fields, arrayField)
+			}
+		} else if fieldType == entity.FieldTypeVarChar {
+			varcharField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithMaxLength(option.MaxLength)
+			fields = append(fields, varcharField)
+		} else {
+			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
+			fields = append(fields, scalarField)
+		}
+
+	}
+	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
+	fields = append(fields, vecField)
+
+	if option.AutoID {
+		pkField.WithIsAutoID(option.AutoID)
+	}
+	return fields
+}
+
 func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, option *GenFieldsOption) []*entity.Field {
 	log.Info("GenFieldsForCollection", zap.Any("GenFieldsOption", option))
 	switch collectionFieldsType {
@@ -293,6 +357,8 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return FieldsInt64MultiVec{}.GenFields(*option)
 	case AllFields:
 		return FieldsAllFields{}.GenFields(*option)
+	case Int64VecAllScalar:
+		return FieldsInt64VecAllScalar{}.GenFields(*option)
 	default:
 		return FieldsInt64Vec{}.GenFields(*option)
 	}

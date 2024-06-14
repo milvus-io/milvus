@@ -59,6 +59,21 @@ func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
 	return false
 }
 
+func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	hits := make([]bool, lc.Size())
+	if s.currentStat != nil {
+		s.currentStat.BatchPkExist(lc, hits)
+	}
+
+	for _, bf := range s.historyStats {
+		bf.BatchPkExist(lc, hits)
+	}
+	return hits
+}
+
 // ID implement candidate.
 func (s *BloomFilterSet) ID() int64 {
 	return s.segmentID
@@ -80,12 +95,12 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	defer s.statsMutex.Unlock()
 
 	if s.currentStat == nil {
-		bf := bloomfilter.NewBloomFilterWithType(
-			paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
-			paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bf,
+			PkFilter: bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue(),
+			),
 		}
 	}
 

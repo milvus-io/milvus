@@ -96,6 +96,7 @@ type IMetaTable interface {
 	ListUserRole(tenant string) ([]string, error)
 }
 
+// MetaTable is a persistent meta set of all databases, collections and partitions.
 type MetaTable struct {
 	ctx     context.Context
 	catalog metastore.RootCoordCatalog
@@ -113,6 +114,7 @@ type MetaTable struct {
 	permissionLock sync.RWMutex
 }
 
+// NewMetaTable creates a new MetaTable with specified catalog and allocator.
 func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog, tsoAllocator tso.Allocator) (*MetaTable, error) {
 	mt := &MetaTable{
 		ctx:          contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue()),

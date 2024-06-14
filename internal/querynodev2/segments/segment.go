@@ -186,8 +186,12 @@ func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 // MayPkExist returns true if the given PK exists in the PK range and being positive through the bloom filter,
 // false otherwise,
 // may returns true even the PK doesn't exist actually
-func (s *baseSegment) MayPkExist(lc *storage.LocationsCache) bool {
-	return s.bloomFilterSet.MayPkExist(lc)
+func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
+	return s.bloomFilterSet.MayPkExist(pk)
+}
+
+func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	return s.bloomFilterSet.BatchPkExist(lc)
 }
 
 // ResourceUsageEstimate returns the estimated resource usage of the segment.

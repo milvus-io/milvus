@@ -27,6 +27,7 @@ import (
 type Candidate interface {
 	// MayPkExist checks whether primary key could exists in this candidate.
 	MayPkExist(lc *storage.LocationsCache) bool
+	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
 	ID() int64
 	Partition() int64
