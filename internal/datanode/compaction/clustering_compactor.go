@@ -100,6 +100,8 @@ type ClusterBuffer struct {
 	writer       *SegmentWriter
 	bufferRowNum atomic.Int64
 
+	lastWrittenMemorySize uint64
+
 	flushedRowNum  int64
 	flushedBinlogs map[typeutil.UniqueID]*datapb.FieldBinlog
 
@@ -407,7 +409,8 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getWrittenMemoryBufferSize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
-		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize())
+		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()-buffer.lastWrittenMemorySize)
+		buffer.lastWrittenMemorySize = buffer.writer.WrittenMemorySize()
 	}
 	return totalBufferSize
 }
