@@ -16,22 +16,26 @@
 
 package mqwrapper
 
+import (
+	"github.com/milvus-io/milvus/pkg/mq/common"
+)
+
 // Client is the interface that provides operations of message queues
 type Client interface {
 	// CreateProducer creates a producer instance
-	CreateProducer(options ProducerOptions) (Producer, error)
+	CreateProducer(options common.ProducerOptions) (Producer, error)
 
 	// Subscribe creates a consumer instance and subscribe a topic
 	Subscribe(options ConsumerOptions) (Consumer, error)
 
 	// Get the earliest MessageID
-	EarliestMessageID() MessageID
+	EarliestMessageID() common.MessageID
 
 	// String to msg ID
-	StringToMsgID(string) (MessageID, error)
+	StringToMsgID(string) (common.MessageID, error)
 
 	// Deserialize MessageId from a byte array
-	BytesToMsgID([]byte) (MessageID, error)
+	BytesToMsgID([]byte) (common.MessageID, error)
 
 	// Close the client and free associated resources
 	Close()

@@ -18,7 +18,7 @@ package nmq
 
 import (
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 // MessageIDType is a type alias for server.UniqueID that represents the ID of a Nmq message.
@@ -30,10 +30,10 @@ type nmqID struct {
 }
 
 // Check if nmqID implements MessageID interface
-var _ mqwrapper.MessageID = &nmqID{}
+var _ mqcommon.MessageID = &nmqID{}
 
 // NewNmqID creates and returns a new instance of the nmqID struct with the given MessageID.
-func NewNmqID(id MessageIDType) mqwrapper.MessageID {
+func NewNmqID(id MessageIDType) mqcommon.MessageID {
 	return &nmqID{
 		messageID: id,
 	}

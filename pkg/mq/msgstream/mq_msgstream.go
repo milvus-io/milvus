@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -127,7 +128,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 		}
 
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(mqwrapper.ProducerOptions{Topic: channel, EnableCompression: true})
+			pp, err := ms.client.CreateProducer(common.ProducerOptions{Topic: channel, EnableCompression: true})
 			if err != nil {
 				return err
 			}
@@ -168,7 +169,7 @@ func (ms *mqMsgStream) CheckTopicValid(channel string) error {
 
 // AsConsumerWithPosition Create consumer to receive message from channels, with initial position
 // if initial position is set to latest, last message in the channel is exclusive
-func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
+func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -319,7 +320,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 				return err
 			}
 
-			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
+			msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
 			InjectCtx(spanCtx, msg.Properties)
 
 			ms.producerLock.RLock()
@@ -362,7 +363,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 			return ids, err
 		}
 
-		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
+		msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
 		InjectCtx(spanCtx, msg.Properties)
 
 		ms.producerLock.Lock()
@@ -382,7 +383,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 	return ids, nil
 }
 
-func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqwrapper.Message) (TsMsg, error) {
+func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
 	if msg.Payload() == nil {
 		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
@@ -567,7 +568,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 }
 
 // AsConsumerWithPosition subscribes channels as consumer for a MsgStream and seeks to a certain position.
-func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error {
+func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue

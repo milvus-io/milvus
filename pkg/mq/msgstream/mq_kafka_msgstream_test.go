@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
@@ -128,7 +128,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 
 	// pick a seekPosition
 	var seekPosition *msgpb.MsgPosition
-	outputStream := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionEarliest)
+	outputStream := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
 		assert.Equal(t, result.Msgs[0].ID(), int64(i))
@@ -140,7 +140,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	outputStream.Close()
 
 	// create a consumer can consume data from seek position to last msg
-	outputStream2 := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
+	outputStream2 := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, common.SubscriptionPositionUnknown)
 	lastMsgID, err := outputStream2.GetLatestMsgID(c)
 	defer outputStream2.Close()
 	assert.NoError(t, err)
@@ -407,7 +407,7 @@ func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqTtMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, common.SubscriptionPositionLatest)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -457,7 +457,7 @@ func getKafkaInputStream(ctx context.Context, kafkaAddress string, producerChann
 	return inputStream
 }
 
-func getKafkaOutputStream(ctx context.Context, kafkaAddress string, consumerChannels []string, consumerSubName string, position mqwrapper.SubscriptionInitialPosition) MsgStream {
+func getKafkaOutputStream(ctx context.Context, kafkaAddress string, consumerChannels []string, consumerSubName string, position common.SubscriptionInitialPosition) MsgStream {
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
@@ -469,7 +469,7 @@ func getKafkaTtOutputStream(ctx context.Context, kafkaAddress string, consumerCh
 	factory := ProtoUDFactory{}
 	kafkaClient := kafkawrapper.NewKafkaClientInstance(kafkaAddress)
 	outputStream, _ := NewMqTtMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionEarliest)
+	outputStream.AsConsumer(context.Background(), consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	return outputStream
 }
 
@@ -481,7 +481,7 @@ func getKafkaTtOutputStreamAndSeek(ctx context.Context, kafkaAddress string, pos
 	for _, c := range positions {
 		consumerName = append(consumerName, c.ChannelName)
 	}
-	outputStream.AsConsumer(context.Background(), consumerName, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
+	outputStream.AsConsumer(context.Background(), consumerName, funcutil.RandomString(8), common.SubscriptionPositionUnknown)
 	outputStream.Seek(context.Background(), positions, false)
 	return outputStream
 }

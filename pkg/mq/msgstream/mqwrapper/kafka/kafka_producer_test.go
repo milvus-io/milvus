@@ -11,7 +11,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 func TestKafkaProducer_SendSuccess(t *testing.T) {
@@ -23,14 +23,14 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	kafkaProd := producer.(*kafkaProducer)
 	assert.Equal(t, kafkaProd.Topic(), topic)
 
-	msg2 := &mqwrapper.ProducerMessage{
+	msg2 := &common.ProducerMessage{
 		Payload:    []byte{},
 		Properties: map[string]string{},
 	}
@@ -52,7 +52,7 @@ func TestKafkaProducer_SendFail(t *testing.T) {
 		assert.NoError(t, err)
 		producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: topic}
 
-		msg := &mqwrapper.ProducerMessage{
+		msg := &common.ProducerMessage{
 			Payload:    []byte{1},
 			Properties: map[string]string{},
 		}
@@ -76,7 +76,7 @@ func TestKafkaProducer_SendFailAfterClose(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
 
@@ -85,7 +85,7 @@ func TestKafkaProducer_SendFailAfterClose(t *testing.T) {
 	kafkaProd := producer.(*kafkaProducer)
 	assert.Equal(t, kafkaProd.Topic(), topic)
 
-	msg2 := &mqwrapper.ProducerMessage{
+	msg2 := &common.ProducerMessage{
 		Payload:    []byte{},
 		Properties: map[string]string{},
 	}
