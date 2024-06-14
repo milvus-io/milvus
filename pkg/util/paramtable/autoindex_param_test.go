@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -140,7 +141,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.Panics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 	})
 
@@ -154,7 +155,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.Panics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 	})
 
@@ -168,7 +169,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.Panics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 	})
 
@@ -182,7 +183,58 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, binary vector", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
+		p := &autoIndexConfig{
+			BinaryIndexParams: ParamItem{
+				Key: "autoIndex.params.binary.build",
+			},
+		}
+		p.BinaryIndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+		})
+		metricType, exist := p.BinaryIndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, sparse vector", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.sparse.build", `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
+		p := &autoIndexConfig{
+			SparseIndexParams: ParamItem{
+				Key: "autoIndex.params.sparse.build",
+			},
+		}
+		p.SparseIndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
+		})
+		metricType, exist := p.SparseIndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.SparseFloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, ivf flat", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
@@ -199,24 +251,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
-		})
-		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
-		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
-	})
-
-	t.Run("normal case, ivf flat", func(t *testing.T) {
-		mgr := config.NewManager()
-		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
-		p := &autoIndexConfig{
-			IndexParams: ParamItem{
-				Key: "autoIndex.params.build",
-			},
-		}
-		p.IndexParams.Init(mgr)
-		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
@@ -233,7 +268,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
@@ -250,7 +285,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
@@ -267,7 +302,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		}
 		p.IndexParams.Init(mgr)
 		assert.NotPanics(t, func() {
-			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+			p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)

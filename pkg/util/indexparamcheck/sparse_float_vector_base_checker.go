@@ -39,7 +39,7 @@ func (c sparseFloatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType
 	return nil
 }
 
-func (c sparseFloatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {
+func (c sparseFloatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
 	setDefaultIfNotExist(params, common.MetricTypeKey, SparseFloatVectorDefaultMetricType)
 }
 

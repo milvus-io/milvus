@@ -970,8 +970,8 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	Params.AutoIndexConfig.Enable.Init(mgr)
 
 	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-	mgr.SetConfig("autoIndex.params.sparsebuild", `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
-	mgr.SetConfig("autoIndex.params.binarybuild", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
+	mgr.SetConfig("autoIndex.params.sparse.build", `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
 	Params.AutoIndexConfig.IndexParams.Init(mgr)
 	Params.AutoIndexConfig.SparseIndexParams.Init(mgr)
 	Params.AutoIndexConfig.BinaryIndexParams.Init(mgr)
@@ -1057,9 +1057,15 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	mgr := config.NewManager()
 	mgr.SetConfig("autoIndex.enable", "false")
 	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+	mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`)
+	mgr.SetConfig("autoIndex.params.sparse.build", `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
 	Params.AutoIndexConfig.Enable.Init(mgr)
 	Params.AutoIndexConfig.IndexParams.Init(mgr)
+	Params.AutoIndexConfig.BinaryIndexParams.Init(mgr)
+	Params.AutoIndexConfig.SparseIndexParams.Init(mgr)
 	autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+	autoIndexConfigBinary := Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+	autoIndexConfigSparse := Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
@@ -1067,7 +1073,48 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		},
 	}
 
-	t.Run("case 1, empty parameters", func(t *testing.T) {
+	fieldSchemaBinary := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		},
+	}
+
+	fieldSchemaSparse := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+	}
+
+	t.Run("case 1, empty parameters binary", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchemaBinary,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: autoIndexConfigBinary[common.MetricTypeKey]},
+		}, task.newExtraParams)
+	})
+
+	t.Run("case 1, empty parameters sparse", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchemaSparse,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: autoIndexConfigSparse[common.MetricTypeKey]},
+		}, task.newExtraParams)
+	})
+
+	t.Run("case 1, empty parameters float vector", func(t *testing.T) {
 		task := &createIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
