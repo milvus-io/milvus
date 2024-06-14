@@ -2117,19 +2117,19 @@ def gen_fp16_vectors(num, dim):
     return raw_vectors, fp16_vectors
 
 
-def gen_sparse_vectors(nb, dim):
-    """
-    generate sparse vector data
-    return sparse_vectors
-    """
+def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
+    # default sparse format is dok, dict of keys
+    # another option is coo, coordinate List
+
     rng = np.random.default_rng()
-    entities = [
-        {
-         d: rng.random() for d in random.sample(range(dim), random.randint(1, 1))
-        }
-        for _ in range(nb)
-    ]
-    return entities
+    vectors = [{
+        d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))
+    } for _ in range(nb)]
+    if sparse_format == "coo":
+        vectors = [
+            {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
+        ]
+    return vectors
 
 
 def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
