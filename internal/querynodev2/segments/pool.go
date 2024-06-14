@@ -45,6 +45,9 @@ var (
 	loadOnce   sync.Once
 	warmupPool atomic.Pointer[conc.Pool[any]]
 	warmupOnce sync.Once
+
+	bfPool      atomic.Pointer[conc.Pool[any]]
+	bfApplyOnce sync.Once
 )
 
 // initSQPool initialize
@@ -115,6 +118,19 @@ func initWarmupPool() {
 	})
 }
 
+func initBFApplyPool() {
+	bfApplyOnce.Do(func() {
+		pt := paramtable.Get()
+		poolSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
+		pool := conc.NewPool[any](
+			poolSize,
+		)
+
+		bfPool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key, config.NewHandler("qn.bfapply.parallel", ResizeBFApplyPool))
+	})
+}
+
 // GetSQPool returns the singleton pool instance for search/query operations.
 func GetSQPool() *conc.Pool[any] {
 	initSQPool()
@@ -135,6 +151,11 @@ func GetLoadPool() *conc.Pool[any] {
 func GetWarmupPool() *conc.Pool[any] {
 	initWarmupPool()
 	return warmupPool.Load()
+}
+
+func GetBFApplyPool() *conc.Pool[any] {
+	initBFApplyPool()
+	return bfPool.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {
@@ -160,6 +181,14 @@ func ResizeWarmupPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
 		resizePool(GetWarmupPool(), newSize, "WarmupPool")
+	}
+}
+
+func ResizeBFApplyPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
+		resizePool(GetBFApplyPool(), newSize, "BFApplyPool")
 	}
 }
 

@@ -760,7 +760,7 @@ like the old password verification when updating the credential`,
 
 	p.BloomFilterApplyBatchSize = ParamItem{
 		Key:          "common.bloomFilterApplyBatchSize",
-		Version:      "2.4.4",
+		Version:      "2.4.5",
 		DefaultValue: "1000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
@@ -2181,6 +2181,7 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
+	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2772,6 +2773,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "queryNode.bloomFilterApplyBatchSize",
+		Version:      "2.4.5",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3699,6 +3709,8 @@ type dataNodeConfig struct {
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
+
+	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4033,6 +4045,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
+
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "datanode.bloomFilterApplyBatchSize",
+		Version:      "2.4.5",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
