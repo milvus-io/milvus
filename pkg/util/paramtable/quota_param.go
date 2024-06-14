@@ -327,7 +327,7 @@ seconds, (0 ~ 65536)`,
 	p.FlushLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.FlushLimitEnabled.Init(base.mgr)
@@ -373,7 +373,7 @@ seconds, (0 ~ 65536)`,
 	p.MaxFlushRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.flushRate.collection.max",
 		Version:      "2.3.9",
-		DefaultValue: "-1",
+		DefaultValue: "0.1",
 		Formatter: func(v string) string {
 			if !p.FlushLimitEnabled.GetAsBool() {
 				return max

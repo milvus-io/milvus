@@ -647,10 +647,10 @@ quotaAndLimits:
     db:
       max: -1 # qps of db level, default no limit, rate for CreateIndex, DropIndex
   flushRate:
-    enabled: false
+    enabled: true
     max: -1 # qps, default no limit, rate for flush
     collection:
-      max: -1 # qps, default no limit, rate for flush at collection level.
+      max: 0.1 # qps, default no limit, rate for flush at collection level.
     db:
       max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:
