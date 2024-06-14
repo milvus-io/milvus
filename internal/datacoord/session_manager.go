@@ -213,7 +213,7 @@ func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan 
 		return err
 	}
 
-	resp, err := cli.Compaction(ctx, plan)
+	resp, err := cli.CompactionV2(ctx, plan)
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Warn("failed to execute compaction", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
 		return err
