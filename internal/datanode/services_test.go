@@ -19,8 +19,8 @@ package datanode
 import (
 	"context"
 	"math/rand"
-	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -160,44 +160,49 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
+		const (
+			collection = int64(100)
+			channel    = "ch-0"
+		)
+
 		mockC := compaction.NewMockCompactor(s.T())
-		s.node.compactionExecutor.executing.Insert(int64(3), mockC)
-
-		mockC2 := compaction.NewMockCompactor(s.T())
-		s.node.compactionExecutor.executing.Insert(int64(2), mockC2)
-
-		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionPlanResult{
+		mockC.EXPECT().GetPlanID().Return(int64(1))
+		mockC.EXPECT().GetCollection().Return(collection)
+		mockC.EXPECT().GetChannelName().Return(channel)
+		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 1,
 			State:  commonpb.CompactionState_Completed,
-			Segments: []*datapb.CompactionSegment{
-				{SegmentID: 10},
-			},
-		})
+		}, nil)
+		s.node.compactionExecutor.Execute(mockC)
 
-		s.node.compactionExecutor.completed.Insert(int64(4), &datapb.CompactionPlanResult{
-			PlanID: 4,
-			Type:   datapb.CompactionType_Level0DeleteCompaction,
-			State:  commonpb.CompactionState_Completed,
-		})
+		mockC2 := compaction.NewMockCompactor(s.T())
+		mockC2.EXPECT().GetPlanID().Return(int64(2))
+		mockC2.EXPECT().GetCollection().Return(collection)
+		mockC2.EXPECT().GetChannelName().Return(channel)
+		mockC2.EXPECT().Complete().Return()
+		mockC2.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
+			PlanID: 2,
+			State:  commonpb.CompactionState_Executing,
+		}, nil)
+		s.node.compactionExecutor.Execute(mockC2)
 
-		stat, err := s.node.GetCompactionState(s.ctx, nil)
-		s.Assert().NoError(err)
-		s.Assert().Equal(4, len(stat.GetResults()))
-
-		var mu sync.RWMutex
-		cnt := 0
-		for _, v := range stat.GetResults() {
-			if v.GetState() == commonpb.CompactionState_Completed {
-				mu.Lock()
-				cnt++
-				mu.Unlock()
+		s.Eventually(func() bool {
+			stat, err := s.node.GetCompactionState(s.ctx, nil)
+			s.Assert().NoError(err)
+			s.Assert().Equal(2, len(stat.GetResults()))
+			doneCnt := 0
+			execCnt := 0
+			for _, res := range stat.GetResults() {
+				if res.GetState() == commonpb.CompactionState_Completed {
+					doneCnt++
+				}
+				if res.GetState() == commonpb.CompactionState_Executing {
+					execCnt++
+				}
 			}
-		}
-		mu.Lock()
-		s.Assert().Equal(2, cnt)
-		mu.Unlock()
-
-		s.Assert().Equal(1, s.node.compactionExecutor.completed.Len())
+			return doneCnt == 1 && execCnt == 1
+		}, 5*time.Second, 10*time.Millisecond)
 	})
 
 	s.Run("unhealthy", func() {
