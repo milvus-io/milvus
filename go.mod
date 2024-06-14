@@ -10,7 +10,7 @@ require (
 	github.com/aliyun/credentials-go v1.2.7
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
 	github.com/apache/arrow/go/v12 v12.0.1
-	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
 	github.com/casbin/casbin/v2 v2.44.2
@@ -39,7 +39,7 @@ require (
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.8.4
-	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
+	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	github.com/tidwall/gjson v1.14.4
 	github.com/tikv/client-go/v2 v2.0.4
@@ -69,6 +69,7 @@ require (
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pkg/errors v0.9.1
 	github.com/valyala/fastjson v1.6.4
+	google.golang.org/protobuf v1.33.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -110,9 +111,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dvsekhvalnov/jose2go v1.6.0 // indirect
 	github.com/expr-lang/expr v1.15.7 // indirect
-	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
-	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
-	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
@@ -235,7 +233,6 @@ require (
 	google.golang.org/genproto v0.0.0-20230706204954-ccb25ca9f130 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230629202037-9506855d4529 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240401170217-c3f982113cda // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect

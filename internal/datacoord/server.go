@@ -38,7 +38,6 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -47,10 +46,11 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -729,7 +729,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
 
-	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, mqwrapper.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, common.SubscriptionPositionLatest)
 	log.Info("DataCoord creates the timetick channel consumer",
 		zap.String("timeTickChannel", timeTickChannel),
 		zap.String("subscription", subName))
