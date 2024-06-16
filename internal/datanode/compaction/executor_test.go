@@ -32,9 +32,10 @@ func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test execute", func(t *testing.T) {
 		planID := int64(1)
 		mockC := NewMockCompactor(t)
-		mockC.EXPECT().GetPlanID().Return(planID).Once()
-		mockC.EXPECT().GetChannelName().Return("ch1").Once()
+		mockC.EXPECT().GetPlanID().Return(planID)
+		mockC.EXPECT().GetChannelName().Return("ch1")
 		executor := NewExecutor()
+		executor.Execute(mockC)
 		executor.Execute(mockC)
 
 		assert.EqualValues(t, 1, len(executor.taskCh))

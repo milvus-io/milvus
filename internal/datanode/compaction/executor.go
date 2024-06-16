@@ -71,16 +71,18 @@ func NewExecutor() *executor {
 }
 
 func (e *executor) Execute(task Compactor) {
+	_, ok := e.executing.GetOrInsert(task.GetPlanID(), task)
+	if ok {
+		log.Warn("duplicated compaction task",
+			zap.Int64("planID", task.GetPlanID()),
+			zap.String("channel", task.GetChannelName()))
+		return
+	}
 	e.taskCh <- task
-	e.toExecutingState(task)
 }
 
 func (e *executor) Slots() int64 {
 	return paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64() - int64(e.executing.Len())
-}
-
-func (e *executor) toExecutingState(task Compactor) {
-	e.executing.Insert(task.GetPlanID(), task)
 }
 
 func (e *executor) toCompleteState(task Compactor) {
