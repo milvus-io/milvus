@@ -354,8 +354,8 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 	return s.datanode.GetMetrics(ctx, request)
 }
 
-func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan) (*commonpb.Status, error) {
-	return s.datanode.Compaction(ctx, request)
+func (s *Server) CompactionV2(ctx context.Context, request *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return s.datanode.CompactionV2(ctx, request)
 }
 
 // GetCompactionState gets the Compaction tasks state of DataNode
