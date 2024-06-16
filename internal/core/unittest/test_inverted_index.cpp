@@ -40,8 +40,9 @@ gen_field_meta(int64_t collection_id = 1,
         .segment_id = segment_id,
         .field_id = field_id,
     };
-    meta.schema.set_data_type(static_cast<proto::schema::DataType>(data_type));
-    meta.schema.set_element_type(
+    meta.field_schema.set_data_type(
+        static_cast<proto::schema::DataType>(data_type));
+    meta.field_schema.set_element_type(
         static_cast<proto::schema::DataType>(element_type));
     return meta;
 }

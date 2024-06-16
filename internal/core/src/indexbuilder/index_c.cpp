@@ -274,7 +274,8 @@ CreateIndexV2(CIndex* res_index,
             build_index_info->collectionid(),
             build_index_info->partitionid(),
             build_index_info->segmentid(),
-            build_index_info->field_schema().fieldid()};
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
         milvus::storage::IndexMeta index_meta{
             build_index_info->segmentid(),
             build_index_info->field_schema().fieldid(),

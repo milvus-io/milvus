@@ -20,7 +20,6 @@ set(MILVUS_TEST_FILES
         test_bf.cpp
         test_bf_sparse.cpp
         test_binary.cpp
-        test_bitmap.cpp
         test_bool_index.cpp
         test_common.cpp
         test_concurrent_vector.cpp
@@ -33,6 +32,7 @@ set(MILVUS_TEST_FILES
         test_growing_index.cpp
         test_indexing.cpp
         test_hybrid_index.cpp
+        test_array_bitmap_index.cpp
         test_index_c_api.cpp
         test_index_wrapper.cpp
         test_init.cpp

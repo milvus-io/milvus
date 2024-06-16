@@ -123,7 +123,7 @@ TEST_F(StringIndexMarisaTest, Reverse) {
     auto index_types = GetIndexTypes<std::string>();
     for (const auto& index_type : index_types) {
         auto index = milvus::index::IndexFactory::GetInstance()
-                         .CreateScalarIndex<std::string>(index_type);
+                         .CreatePrimitiveScalarIndex<std::string>(index_type);
         index->Build(nb, strs.data());
         assert_reverse<std::string>(index.get(), strs);
     }
