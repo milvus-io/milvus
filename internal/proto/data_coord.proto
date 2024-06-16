@@ -110,7 +110,7 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
-  rpc Compaction(CompactionPlan) returns (common.Status) {}
+  rpc CompactionV2(CompactionPlan) returns (common.Status) {}
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
   rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
 

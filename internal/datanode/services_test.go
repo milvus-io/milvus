@@ -226,7 +226,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Channel: dmChannelName,
 		}
 
-		resp, err := node.Compaction(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
 	})
@@ -245,7 +245,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			},
 		}
 
-		resp, err := node.Compaction(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
 	})
@@ -265,7 +265,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Type: datapb.CompactionType_ClusteringCompaction,
 		}
 
-		_, err := node.Compaction(ctx, req)
+		_, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 	})
 }

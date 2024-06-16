@@ -66,7 +66,7 @@ func Test_NewClient(t *testing.T) {
 		r5, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r5, err)
 
-		r6, err := client.Compaction(ctx, nil)
+		r6, err := client.CompactionV2(ctx, nil)
 		retCheck(retNotNil, r6, err)
 
 		r8, err := client.ResendSegmentStats(ctx, nil)
