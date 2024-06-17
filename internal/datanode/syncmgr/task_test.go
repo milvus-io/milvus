@@ -292,61 +292,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	})
 }
 
-func (s *SyncTaskSuite) TestCompactToNull() {
-	bfs := metacache.NewBloomFilterSet()
-	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
-		FieldID:      101,
-		Name:         "ID",
-		IsPrimaryKey: true,
-		DataType:     schemapb.DataType_Int64,
-	}, 16)
-	s.Require().NoError(err)
-
-	ids := []int64{1, 2, 3, 4, 5, 6, 7}
-	for _, id := range ids {
-		err = fd.AppendRow(id)
-		s.Require().NoError(err)
-	}
-
-	bfs.UpdatePKRange(fd)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
-	metacache.UpdateNumOfRows(1000)(seg)
-	metacache.CompactTo(metacache.NullSegment)(seg)
-	seg.GetBloomFilterSet().Roll()
-	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-
-	task := s.getSuiteSyncTask()
-	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-	task.WithTimeRange(50, 100)
-	task.WithCheckpoint(&msgpb.MsgPosition{
-		ChannelName: s.channelName,
-		MsgID:       []byte{1, 2, 3, 4},
-		Timestamp:   100,
-	})
-
-	err = task.Run()
-	s.NoError(err)
-}
-
 func (s *SyncTaskSuite) TestRunError() {
-	s.Run("target_segment_not_match", func() {
-		flag := false
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID: s.segmentID,
-		}, metacache.NewBloomFilterSet())
-		metacache.CompactTo(s.segmentID + 1)(seg)
-		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true).Once()
-
-		handler := func(_ error) { flag = true }
-		task := s.getSuiteSyncTask().WithFailureCallback(handler)
-
-		task.targetSegmentID.Store(s.segmentID)
-		err := task.Run()
-
-		s.Error(err)
-		s.False(flag, "target not match shall not trigger error handler")
-	})
-
 	s.Run("segment_not_found", func() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
@@ -425,63 +371,6 @@ func (s *SyncTaskSuite) TestNextID() {
 		s.Panics(func() {
 			task.nextID()
 		})
-	})
-}
-
-func (s *SyncTaskSuite) TestCalcTargetID() {
-	task := s.getSuiteSyncTask()
-
-	s.Run("normal_calc_segment", func() {
-		s.Run("not_compacted", func() {
-			segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				ID:           s.segmentID,
-				PartitionID:  s.partitionID,
-				CollectionID: s.collectionID,
-			}, metacache.NewBloomFilterSet())
-			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(segment, true).Once()
-
-			targetID, err := task.CalcTargetSegment()
-			s.Require().NoError(err)
-			s.Equal(s.segmentID, targetID)
-			s.Equal(s.segmentID, task.targetSegmentID.Load())
-		})
-
-		s.Run("compacted_normal", func() {
-			segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				ID:           s.segmentID,
-				PartitionID:  s.partitionID,
-				CollectionID: s.collectionID,
-			}, metacache.NewBloomFilterSet())
-			metacache.CompactTo(1000)(segment)
-			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(segment, true).Once()
-
-			targetID, err := task.CalcTargetSegment()
-			s.Require().NoError(err)
-			s.EqualValues(1000, targetID)
-			s.EqualValues(1000, task.targetSegmentID.Load())
-		})
-
-		s.Run("compacted_null", func() {
-			segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				ID:           s.segmentID,
-				PartitionID:  s.partitionID,
-				CollectionID: s.collectionID,
-			}, metacache.NewBloomFilterSet())
-			metacache.CompactTo(metacache.NullSegment)(segment)
-			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(segment, true).Once()
-
-			targetID, err := task.CalcTargetSegment()
-			s.Require().NoError(err)
-			s.Equal(s.segmentID, targetID)
-			s.Equal(s.segmentID, task.targetSegmentID.Load())
-		})
-	})
-
-	s.Run("segment_not_found", func() {
-		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false).Once()
-
-		_, err := task.CalcTargetSegment()
-		s.Error(err)
 	})
 }
 

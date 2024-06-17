@@ -313,7 +313,6 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 func (wb *writeBufferBase) cleanupCompactedSegments() {
 	segmentIDs := wb.metaCache.GetSegmentIDsBy(
 		metacache.WithSegmentState(commonpb.SegmentState_Dropped),
-		metacache.WithCompacted(),
 		metacache.WithNoSyncingTask())
 	// remove compacted only when there is no writebuffer
 	targetIDs := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {

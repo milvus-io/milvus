@@ -270,7 +270,6 @@ func (s *StorageV2SerializerSuite) TestSerializeInsert() {
 		bfs := s.getBfs()
 		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 		metacache.UpdateNumOfRows(1000)(segInfo)
-		metacache.CompactTo(metacache.NullSegment)(segInfo)
 		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
 			action(segInfo)
 		}).Return().Once()
