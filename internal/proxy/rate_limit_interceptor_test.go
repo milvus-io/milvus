@@ -48,6 +48,10 @@ func (l *limiterMock) Check(collection []int64, rt internalpb.RateType, n int) e
 	return nil
 }
 
+func (l *limiterMock) Alloc(ctx context.Context, collection []int64, rt internalpb.RateType, n int) error {
+	return l.Check(collection, rt, n)
+}
+
 func TestRateLimitInterceptor(t *testing.T) {
 	t.Run("test getRequestInfo", func(t *testing.T) {
 		mockCache := NewMockCache(t)
