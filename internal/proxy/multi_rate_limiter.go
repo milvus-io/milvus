@@ -261,17 +261,22 @@ func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
 }
 
 func (rl *rateLimiter) getQuotaExceededError(rt internalpb.RateType) error {
+	var errCode commonpb.ErrorCode
+	var ok bool
 	switch rt {
 	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
-		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
-			return merr.WrapErrServiceQuotaExceeded(GetQuotaErrorString(errCode))
-		}
+		errCode, ok = rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite)
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
-		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
-			return merr.WrapErrServiceQuotaExceeded(GetQuotaErrorString(errCode))
-		}
+		errCode, ok = rl.quotaStates.Get(milvuspb.QuotaState_DenyToRead)
 	}
-	return nil
+
+	// for example: set rate through collection.set_properties({"collection.insertRate.max.mb": 0})
+	// in this case: current insert rate = 0, but quotaStates[milvuspb.QuotaState_DenyToWrite] not exist, insert ops should also be limited
+	if !ok {
+		errCode = commonpb.ErrorCode_RateLimit
+	}
+
+	return merr.WrapErrServiceQuotaExceeded(GetQuotaErrorString(errCode))
 }
 
 func (rl *rateLimiter) getRateLimitError(rate float64) error {
