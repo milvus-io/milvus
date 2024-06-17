@@ -14,7 +14,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Boost REQUIRED)
-find_package(Arrow REQUIRED)
+find_package(Arrow REQUIRED COMPONENTS
+             parquet arrow)
 find_package(Protobuf REQUIRED)
 find_package(glog REQUIRED)
 find_package(AWSSDK REQUIRED)
