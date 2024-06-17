@@ -813,13 +813,12 @@ func NewDeleteLog(pk PrimaryKey, ts Timestamp) *DeleteLog {
 
 func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 	var messageMap map[string]*json.RawMessage
-	err := json.Unmarshal(data, &messageMap)
-	if err != nil {
+	var err error
+	if err = json.Unmarshal(data, &messageMap); err != nil {
 		return err
 	}
 
-	err = json.Unmarshal(*messageMap["pkType"], &dl.PkType)
-	if err != nil {
+	if err = json.Unmarshal(*messageMap["pkType"], &dl.PkType); err != nil {
 		return err
 	}
 
@@ -830,13 +829,11 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 		dl.Pk = &VarCharPrimaryKey{}
 	}
 
-	err = json.Unmarshal(*messageMap["pk"], dl.Pk)
-	if err != nil {
+	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {
 		return err
 	}
 
-	err = json.Unmarshal(*messageMap["ts"], &dl.Ts)
-	if err != nil {
+	if err = json.Unmarshal(*messageMap["ts"], &dl.Ts); err != nil {
 		return err
 	}
 
@@ -1120,8 +1117,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
-			if err != nil {
+			if err = eventWriter.AddOneStringToPayload(req); err != nil {
 				return nil, err
 			}
 			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
@@ -1130,8 +1126,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
-			if err != nil {
+			if err = eventWriter.AddOneStringToPayload(req); err != nil {
 				return nil, err
 			}
 			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
@@ -1140,8 +1135,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
-			if err != nil {
+			if err = eventWriter.AddOneStringToPayload(req); err != nil {
 				return nil, err
 			}
 			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
@@ -1150,8 +1144,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
-			if err != nil {
+			if err = eventWriter.AddOneStringToPayload(req); err != nil {
 				return nil, err
 			}
 			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
@@ -1162,12 +1155,10 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	// https://github.com/milvus-io/milvus/issues/9620
 	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
-	err = writer.Finish()
-	if err != nil {
+	if err = writer.Finish(); err != nil {
 		return nil, err
 	}
-	buffer, err = writer.GetBuffer()
-	if err != nil {
+	if buffer, err = writer.GetBuffer(); err != nil {
 		return nil, err
 	}
 	blobs = append(blobs, &Blob{
