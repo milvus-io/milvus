@@ -15,7 +15,7 @@
 set( KNOWHERE_VERSION v2.2.6 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set( KNOWHERE_VERSION 2.2.9 )
+    set( KNOWHERE_VERSION 2.2.10 )
     set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
 endif()
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
