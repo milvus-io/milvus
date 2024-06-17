@@ -63,6 +63,50 @@ func (_c *MockSegment_AddIndex_Call) RunAndReturn(run func(int64, *IndexedFieldI
 	return _c
 }
 
+// BatchPkExist provides a mock function with given fields: lc
+func (_m *MockSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	ret := _m.Called(lc)
+
+	var r0 []bool
+	if rf, ok := ret.Get(0).(func(*storage.BatchLocationsCache) []bool); ok {
+		r0 = rf(lc)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]bool)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_BatchPkExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BatchPkExist'
+type MockSegment_BatchPkExist_Call struct {
+	*mock.Call
+}
+
+// BatchPkExist is a helper method to define mock.On call
+//   - lc *storage.BatchLocationsCache
+func (_e *MockSegment_Expecter) BatchPkExist(lc interface{}) *MockSegment_BatchPkExist_Call {
+	return &MockSegment_BatchPkExist_Call{Call: _e.mock.On("BatchPkExist", lc)}
+}
+
+func (_c *MockSegment_BatchPkExist_Call) Run(run func(lc *storage.BatchLocationsCache)) *MockSegment_BatchPkExist_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.BatchLocationsCache))
+	})
+	return _c
+}
+
+func (_c *MockSegment_BatchPkExist_Call) Return(_a0 []bool) *MockSegment_BatchPkExist_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_BatchPkExist_Call) RunAndReturn(run func(*storage.BatchLocationsCache) []bool) *MockSegment_BatchPkExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CASVersion provides a mock function with given fields: _a0, _a1
 func (_m *MockSegment) CASVersion(_a0 int64, _a1 int64) bool {
 	ret := _m.Called(_a0, _a1)
@@ -488,13 +532,13 @@ func (_c *MockSegment_LastDeltaTimestamp_Call) RunAndReturn(run func() uint64) *
 	return _c
 }
 
-// MayPkExist provides a mock function with given fields: pk
-func (_m *MockSegment) MayPkExist(pk storage.PrimaryKey) bool {
-	ret := _m.Called(pk)
+// MayPkExist provides a mock function with given fields: lc
+func (_m *MockSegment) MayPkExist(lc *storage.LocationsCache) bool {
+	ret := _m.Called(lc)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(storage.PrimaryKey) bool); ok {
-		r0 = rf(pk)
+	if rf, ok := ret.Get(0).(func(*storage.LocationsCache) bool); ok {
+		r0 = rf(lc)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -508,14 +552,14 @@ type MockSegment_MayPkExist_Call struct {
 }
 
 // MayPkExist is a helper method to define mock.On call
-//   - pk storage.PrimaryKey
-func (_e *MockSegment_Expecter) MayPkExist(pk interface{}) *MockSegment_MayPkExist_Call {
-	return &MockSegment_MayPkExist_Call{Call: _e.mock.On("MayPkExist", pk)}
+//   - lc *storage.LocationsCache
+func (_e *MockSegment_Expecter) MayPkExist(lc interface{}) *MockSegment_MayPkExist_Call {
+	return &MockSegment_MayPkExist_Call{Call: _e.mock.On("MayPkExist", lc)}
 }
 
-func (_c *MockSegment_MayPkExist_Call) Run(run func(pk storage.PrimaryKey)) *MockSegment_MayPkExist_Call {
+func (_c *MockSegment_MayPkExist_Call) Run(run func(lc *storage.LocationsCache)) *MockSegment_MayPkExist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(storage.PrimaryKey))
+		run(args[0].(*storage.LocationsCache))
 	})
 	return _c
 }
@@ -525,7 +569,7 @@ func (_c *MockSegment_MayPkExist_Call) Return(_a0 bool) *MockSegment_MayPkExist_
 	return _c
 }
 
-func (_c *MockSegment_MayPkExist_Call) RunAndReturn(run func(storage.PrimaryKey) bool) *MockSegment_MayPkExist_Call {
+func (_c *MockSegment_MayPkExist_Call) RunAndReturn(run func(*storage.LocationsCache) bool) *MockSegment_MayPkExist_Call {
 	_c.Call.Return(run)
 	return _c
 }

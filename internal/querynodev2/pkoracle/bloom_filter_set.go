@@ -43,20 +43,35 @@ type BloomFilterSet struct {
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
-func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
+func (s *BloomFilterSet) MayPkExist(pk *storage.LocationsCache) bool {
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
-	if s.currentStat != nil && s.currentStat.PkExist(pk) {
+	if s.currentStat != nil && s.currentStat.TestLocationCache(pk) {
 		return true
 	}
 
 	// for sealed, if one of the stats shows it exist, then we have to check it
 	for _, historyStat := range s.historyStats {
-		if historyStat.PkExist(pk) {
+		if historyStat.TestLocationCache(pk) {
 			return true
 		}
 	}
 	return false
+}
+
+func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	hits := make([]bool, lc.Size())
+	if s.currentStat != nil {
+		s.currentStat.BatchPkExist(lc, hits)
+	}
+
+	for _, bf := range s.historyStats {
+		bf.BatchPkExist(lc, hits)
+	}
+	return hits
 }
 
 // ID implement candidate.

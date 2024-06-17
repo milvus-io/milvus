@@ -111,6 +111,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.preCreatedTopic.timeticker", "timeticker")
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
+
+		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -379,6 +381,7 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("querynode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -447,6 +450,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		params.Save("datanode.flushMgrCleanInterval", "200")
 		assert.Equal(t, 200*time.Second, Params.FlushMgrCleanInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
