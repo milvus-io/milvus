@@ -149,7 +149,11 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 	distArray := make([]float32, leftNum*rightNum)
 
 	// Multi-threads to calculate distance.
-	waitGroup := new(sync.WaitGroup)
+	var waitGroup sync.WaitGroup
+	CalcWorker := func(index int64) {
+		CalcFFBatch(dim, left, index, right, metricUpper, &distArray)
+		waitGroup.Done()
+	}
 	// avoid too many goroutines by ants pool
 	pool := conc.NewDefaultPool[any]()
 	defer pool.Release()
@@ -157,8 +161,7 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 		waitGroup.Add(1)
 		index := i
 		pool.Submit(func() (r any, err error) {
-			CalcFFBatch(dim, left, index, right, metricUpper, &distArray)
-			waitGroup.Done()
+			CalcWorker(index)
 			return
 		})
 	}
