@@ -290,6 +290,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			return nil, err
 		}
 		eventWriter.SetEventTimestamp(startTs, endTs)
+		eventWriter.Reserve(int(rowNum))
 
 		var memorySize int64
 		for _, block := range data {
