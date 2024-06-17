@@ -62,7 +62,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.SearchParamKey:  queryInfo.GetSearchParams(),
 			common.SegmentNumKey:   estSegmentNum,
 			common.WithFilterKey:   withFilter,
-			common.DataTypeKey:     plan.GetVectorAnns().GetVectorType(),
+			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool(),
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
