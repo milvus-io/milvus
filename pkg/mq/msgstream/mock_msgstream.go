@@ -445,13 +445,13 @@ func (_c *MockMsgStream_Produce_Call) RunAndReturn(run func(*MsgPack) error) *Mo
 	return _c
 }
 
-// Seek provides a mock function with given fields: ctx, offset
-func (_m *MockMsgStream) Seek(ctx context.Context, offset []*msgpb.MsgPosition) error {
-	ret := _m.Called(ctx, offset)
+// Seek provides a mock function with given fields: ctx, msgPositions, includeCurrentMsg
+func (_m *MockMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosition, includeCurrentMsg bool) error {
+	ret := _m.Called(ctx, msgPositions, includeCurrentMsg)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*msgpb.MsgPosition) error); ok {
-		r0 = rf(ctx, offset)
+	if rf, ok := ret.Get(0).(func(context.Context, []*msgpb.MsgPosition, bool) error); ok {
+		r0 = rf(ctx, msgPositions, includeCurrentMsg)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -466,14 +466,15 @@ type MockMsgStream_Seek_Call struct {
 
 // Seek is a helper method to define mock.On call
 //   - ctx context.Context
-//   - offset []*msgpb.MsgPosition
-func (_e *MockMsgStream_Expecter) Seek(ctx interface{}, offset interface{}) *MockMsgStream_Seek_Call {
-	return &MockMsgStream_Seek_Call{Call: _e.mock.On("Seek", ctx, offset)}
+//   - msgPositions []*msgpb.MsgPosition
+//   - includeCurrentMsg bool
+func (_e *MockMsgStream_Expecter) Seek(ctx interface{}, msgPositions interface{}, includeCurrentMsg interface{}) *MockMsgStream_Seek_Call {
+	return &MockMsgStream_Seek_Call{Call: _e.mock.On("Seek", ctx, msgPositions, includeCurrentMsg)}
 }
 
-func (_c *MockMsgStream_Seek_Call) Run(run func(ctx context.Context, offset []*msgpb.MsgPosition)) *MockMsgStream_Seek_Call {
+func (_c *MockMsgStream_Seek_Call) Run(run func(ctx context.Context, msgPositions []*msgpb.MsgPosition, includeCurrentMsg bool)) *MockMsgStream_Seek_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]*msgpb.MsgPosition))
+		run(args[0].(context.Context), args[1].([]*msgpb.MsgPosition), args[2].(bool))
 	})
 	return _c
 }
@@ -483,7 +484,7 @@ func (_c *MockMsgStream_Seek_Call) Return(_a0 error) *MockMsgStream_Seek_Call {
 	return _c
 }
 
-func (_c *MockMsgStream_Seek_Call) RunAndReturn(run func(context.Context, []*msgpb.MsgPosition) error) *MockMsgStream_Seek_Call {
+func (_c *MockMsgStream_Seek_Call) RunAndReturn(run func(context.Context, []*msgpb.MsgPosition, bool) error) *MockMsgStream_Seek_Call {
 	_c.Call.Return(run)
 	return _c
 }

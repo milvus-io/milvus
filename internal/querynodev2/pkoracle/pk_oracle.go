@@ -19,10 +19,8 @@ package pkoracle
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -30,6 +28,7 @@ import (
 type PkOracle interface {
 	// GetCandidates returns segment candidates of which pk might belongs to.
 	Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error)
+	BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool
 	// RegisterCandidate adds candidate into pkOracle.
 	Register(candidate Candidate, workerID int64) error
 	// RemoveCandidate removes candidate
@@ -43,30 +42,12 @@ var _ PkOracle = (*pkOracle)(nil)
 // pkOracle implementation.
 type pkOracle struct {
 	candidates *typeutil.ConcurrentMap[string, candidateWithWorker]
-
-	hashFuncNumMutex sync.RWMutex
-	maxHashFuncNum   uint
-}
-
-func (pko *pkOracle) GetMaxHashFuncNum() uint {
-	pko.hashFuncNumMutex.RLock()
-	defer pko.hashFuncNumMutex.RUnlock()
-	return pko.maxHashFuncNum
-}
-
-func (pko *pkOracle) TryUpdateHashFuncNum(newValue uint) {
-	pko.hashFuncNumMutex.Lock()
-	defer pko.hashFuncNumMutex.Unlock()
-	if newValue > pko.maxHashFuncNum {
-		pko.maxHashFuncNum = newValue
-	}
 }
 
 // Get implements PkOracle.
 func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error) {
 	var result []int64
-	var locations []uint64
-
+	lc := storage.NewLocationsCache(pk)
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
@@ -74,15 +55,7 @@ func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]i
 			}
 		}
 
-		if locations == nil {
-			locations = storage.Locations(pk, pko.GetMaxHashFuncNum())
-			if len(locations) == 0 {
-				log.Warn("pkOracle: no location found for pk")
-				return true
-			}
-		}
-
-		if candidate.TestLocations(pk, locations) {
+		if candidate.MayPkExist(lc) {
 			result = append(result, candidate.ID())
 		}
 		return true
@@ -91,13 +64,31 @@ func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]i
 	return result, nil
 }
 
+func (pko *pkOracle) BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool {
+	result := make(map[int64][]bool)
+
+	lc := storage.NewBatchLocationsCache(pks)
+	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
+		for _, filter := range filters {
+			if !filter(candidate) {
+				return true
+			}
+		}
+
+		hits := candidate.BatchPkExist(lc)
+		result[candidate.ID()] = hits
+		return true
+	})
+
+	return result
+}
+
 func (pko *pkOracle) candidateKey(candidate Candidate, workerID int64) string {
 	return fmt.Sprintf("%s-%d-%d", candidate.Type().String(), workerID, candidate.ID())
 }
 
 // Register register candidate
 func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
-	pko.TryUpdateHashFuncNum(candidate.GetHashFuncNum())
 	pko.candidates.Insert(pko.candidateKey(candidate, workerID), candidateWithWorker{
 		Candidate: candidate,
 		workerID:  workerID,
@@ -108,7 +99,6 @@ func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
 
 // Remove removes candidate from pko.
 func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
-	max := uint(0)
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
@@ -116,14 +106,9 @@ func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
 			}
 		}
 		pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID))
-		if candidate.GetHashFuncNum() > max {
-			max = candidate.GetHashFuncNum()
-		}
-
 		return true
 	})
 
-	pko.TryUpdateHashFuncNum(max)
 	return nil
 }
 

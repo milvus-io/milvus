@@ -57,6 +57,7 @@ using distance_t = float;
 
 using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
+using bin1 = knowhere::bin1;
 
 enum class DataType {
     NONE = 0,
@@ -135,6 +136,16 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             throw SegcoreError(DataTypeInvalid,
                                fmt::format("invalid type is {}", data_type));
         }
+    }
+}
+
+template <typename T>
+inline size_t
+GetVecRowSize(int64_t dim) {
+    if constexpr (std::is_same_v<T, bin1>) {
+        return (dim / 8) * sizeof(bin1);
+    } else {
+        return dim * sizeof(T);
     }
 }
 
@@ -362,6 +373,18 @@ inline bool
 IndexIsSparse(const IndexType& index_type) {
     return index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
            index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+}
+
+inline bool
+IsFloatVectorMetricType(const MetricType& metric_type) {
+    return metric_type == knowhere::metric::L2 ||
+           metric_type == knowhere::metric::IP ||
+           metric_type == knowhere::metric::COSINE;
+}
+
+inline bool
+IsBinaryVectorMetricType(const MetricType& metric_type) {
+    return !IsFloatVectorMetricType(metric_type);
 }
 
 // Plus 1 because we can't use greater(>) symbol

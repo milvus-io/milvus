@@ -96,8 +96,8 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		return id, id + n, nil
 	})
 	manager := NewMockManager(t)
-	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string) (*SegmentInfo, error) {
+	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string, level datapb.SegmentLevel) (*SegmentInfo, error) {
 			return &SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:            rand.Int63(),
@@ -105,6 +105,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 					PartitionID:   partitionID,
 					InsertChannel: vchannel,
 					IsImporting:   true,
+					Level:         level,
 				},
 			}, nil
 		})
@@ -536,6 +537,12 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.Equal(t, mockErr, reason)
+
+	// job does not exist
+	progress, state, _, _, reason = GetJobProgress(-1, imeta, meta)
+	assert.Equal(t, int64(0), progress)
+	assert.Equal(t, internalpb.ImportJobState_Failed, state)
+	assert.NotEqual(t, "", reason)
 
 	// pending state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))

@@ -878,9 +878,12 @@ func TestDeleteData(t *testing.T) {
 	pks, err := GenInt64PrimaryKeys(1, 2, 3)
 	require.NoError(t, err)
 
+	pks2, err := GenInt64PrimaryKeys(4, 5, 6)
+	require.NoError(t, err)
+
 	t.Run("merge", func(t *testing.T) {
 		first := NewDeleteData(pks, []Timestamp{100, 101, 102})
-		second := NewDeleteData(pks, []Timestamp{100, 101, 102})
+		second := NewDeleteData(pks2, []Timestamp{103, 104, 105})
 		require.EqualValues(t, first.RowCount, second.RowCount)
 		require.EqualValues(t, first.Size(), second.Size())
 		require.EqualValues(t, 3, first.RowCount)
@@ -891,6 +894,8 @@ func TestDeleteData(t *testing.T) {
 		assert.Equal(t, len(first.Tss), 6)
 		assert.EqualValues(t, first.RowCount, 6)
 		assert.EqualValues(t, first.Size(), 144)
+		assert.ElementsMatch(t, first.Pks, append(pks, pks2...))
+		assert.ElementsMatch(t, first.Tss, []Timestamp{100, 101, 102, 103, 104, 105})
 
 		assert.NotNil(t, second)
 		assert.EqualValues(t, 0, second.RowCount)

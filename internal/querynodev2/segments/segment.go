@@ -182,16 +182,12 @@ func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 // MayPkExist returns true if the given PK exists in the PK range and being positive through the bloom filter,
 // false otherwise,
 // may returns true even the PK doesn't exist actually
-func (s *baseSegment) MayPkExist(pk storage.PrimaryKey) bool {
+func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 	return s.bloomFilterSet.MayPkExist(pk)
 }
 
-func (s *baseSegment) TestLocations(pk storage.PrimaryKey, loc []uint64) bool {
-	return s.bloomFilterSet.TestLocations(pk, loc)
-}
-
-func (s *baseSegment) GetHashFuncNum() uint {
-	return s.bloomFilterSet.GetHashFuncNum()
+func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	return s.bloomFilterSet.BatchPkExist(lc)
 }
 
 // ResourceUsageEstimate returns the estimated resource usage of the segment.
@@ -1379,6 +1375,10 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 		}).Await()
 	case "async":
 		GetWarmupPool().Submit(func() (any, error) {
+			// bad implemtation, warmup is async at another goroutine and hold the rlock.
+			// the state transition of segment in segment loader will blocked.
+			// add a waiter to avoid it.
+			s.ptrLock.BlockUntilDataLoadedOrReleased()
 			if !s.ptrLock.RLockIf(state.IsNotReleased) {
 				return nil, nil
 			}

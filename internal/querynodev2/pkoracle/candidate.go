@@ -26,9 +26,8 @@ import (
 // Candidate is the interface for pk oracle candidate.
 type Candidate interface {
 	// MayPkExist checks whether primary key could exists in this candidate.
-	MayPkExist(pk storage.PrimaryKey) bool
-	TestLocations(pk storage.PrimaryKey, locs []uint64) bool
-	GetHashFuncNum() uint
+	MayPkExist(lc *storage.LocationsCache) bool
+	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
 	ID() int64
 	Partition() int64

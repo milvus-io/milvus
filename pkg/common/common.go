@@ -99,6 +99,7 @@ const (
 	SearchParamKey  = "search_param"
 	SegmentNumKey   = "segment_num"
 	WithFilterKey   = "with_filter"
+	DataTypeKey     = "data_type"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
 
@@ -110,6 +111,8 @@ const (
 	MaxCapacityKey = "max_capacity"
 
 	DropRatioBuildKey = "drop_ratio_build"
+
+	IsSparseKey = "is_sparse"
 )
 
 //  Collection properties key

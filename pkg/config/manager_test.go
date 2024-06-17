@@ -222,7 +222,7 @@ func TestCachedConfig(t *testing.T) {
 		time.Sleep(time.Second)
 		_, exist := mgr.GetCachedValue("a.b")
 		assert.False(t, exist)
-		mgr.SetCachedValue("a.b", "aaa")
+		mgr.CASCachedValue("a.b", "aaa", "aaa")
 		val, exist := mgr.GetCachedValue("a.b")
 		assert.True(t, exist)
 		assert.Equal(t, "aaa", val.(string))
@@ -237,10 +237,9 @@ func TestCachedConfig(t *testing.T) {
 	{
 		_, exist := mgr.GetCachedValue("c.d")
 		assert.False(t, exist)
-		mgr.SetCachedValue("cd", "xxx")
-		val, exist := mgr.GetCachedValue("cd")
-		assert.True(t, exist)
-		assert.Equal(t, "xxx", val.(string))
+		mgr.CASCachedValue("cd", "", "xxx")
+		_, exist = mgr.GetCachedValue("cd")
+		assert.False(t, exist)
 
 		// after refresh, the cached value should be reset
 		ctx := context.Background()

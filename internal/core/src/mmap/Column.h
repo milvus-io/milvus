@@ -43,7 +43,7 @@
 namespace milvus {
 
 /*
-* If string field's value all empty, need a string padding to avoid 
+* If string field's value all empty, need a string padding to avoid
 * mmap failing because size_ is zero which causing invalid arguement
 * array has the same problem
 * TODO: remove it when support NULL value
@@ -84,6 +84,7 @@ class ColumnBase {
     }
 
     // mmap mode ctor
+    // User must call Seal to build the view for variable length column.
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
         : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
                          ? 1
@@ -106,12 +107,16 @@ class ColumnBase {
     }
 
     // mmap mode ctor
+    // User must call Seal to build the view for variable length column.
     ColumnBase(const File& file,
                size_t size,
                int dim,
                const DataType& data_type)
-        : type_size_(GetDataTypeSize(data_type, dim)),
-          num_rows_(size / GetDataTypeSize(data_type, dim)),
+        : type_size_(IsSparseFloatVectorDataType(data_type)
+                         ? 1
+                         : GetDataTypeSize(data_type, dim)),
+          num_rows_(
+              IsSparseFloatVectorDataType(data_type) ? 1 : (size / type_size_)),
           size_(size),
           cap_size_(size),
           is_map_anonymous_(false) {
@@ -153,8 +158,15 @@ class ColumnBase {
         column.size_ = 0;
     }
 
+    // Data() points at an addr that contains the elements
     virtual const char*
     Data() const {
+        return data_;
+    }
+
+    // MmappedData() returns the mmaped address
+    const char*
+    MmappedData() const {
         return data_;
     }
 
@@ -273,6 +285,7 @@ class ColumnBase {
     // capacity in bytes
     size_t cap_size_{0};
     size_t padding_{0};
+    // type_size_ is not used for sparse float vector column.
     const size_t type_size_{1};
     size_t num_rows_{0};
 
@@ -344,8 +357,7 @@ class Column : public ColumnBase {
     }
 };
 
-// mmap not yet supported, thus SparseFloatColumn is not using fields in super
-// class such as ColumnBase::data.
+// when mmap is used, size_, data_ and num_rows_ of ColumnBase are used.
 class SparseFloatColumn : public ColumnBase {
  public:
     // memory mode ctor
@@ -356,7 +368,13 @@ class SparseFloatColumn : public ColumnBase {
                       size_t size,
                       const FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
-        AssertInfo(false, "SparseFloatColumn mmap mode not supported");
+    }
+    // mmap mode ctor
+    SparseFloatColumn(const File& file,
+                      size_t size,
+                      int dim,
+                      const DataType& data_type)
+        : ColumnBase(file, size, dim, data_type) {
     }
 
     SparseFloatColumn(SparseFloatColumn&& column) noexcept
@@ -370,14 +388,6 @@ class SparseFloatColumn : public ColumnBase {
     const char*
     Data() const override {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
-    }
-
-    // This is used to advice mmap prefetch, we don't currently support mmap for
-    // sparse float vector thus not implemented for now.
-    size_t
-    ByteSize() const override {
-        throw std::runtime_error(
-            "ByteSize not supported for sparse float column");
     }
 
     size_t
@@ -411,6 +421,34 @@ class SparseFloatColumn : public ColumnBase {
     int64_t
     Dim() const {
         return dim_;
+    }
+
+    void
+    Seal(std::vector<uint64_t> indices) {
+        AssertInfo(!indices.empty(),
+                   "indices should not be empty, Seal() of "
+                   "SparseFloatColumn must be called only "
+                   "at mmap mode");
+        AssertInfo(data_,
+                   "data_ should not be nullptr, Seal() of "
+                   "SparseFloatColumn must be called only "
+                   "at mmap mode");
+        num_rows_ = indices.size();
+        // so that indices[num_rows_] - indices[num_rows_ - 1] is the size of
+        // the last row.
+        indices.push_back(size_);
+        for (size_t i = 0; i < num_rows_; i++) {
+            auto vec_size = indices[i + 1] - indices[i];
+            AssertInfo(
+                vec_size % knowhere::sparse::SparseRow<float>::element_size() ==
+                    0,
+                "Incorrect sparse vector size: {}",
+                vec_size);
+            vec_.emplace_back(
+                vec_size / knowhere::sparse::SparseRow<float>::element_size(),
+                (uint8_t*)(data_) + indices[i],
+                false);
+        }
     }
 
  private:
@@ -459,9 +497,7 @@ class VariableColumn : public ColumnBase {
 
     std::string_view
     RawAt(const int i) const {
-        size_t len = (i == indices_.size() - 1) ? size_ - indices_.back()
-                                                : indices_[i + 1] - indices_[i];
-        return std::string_view(data_ + indices_[i], len);
+        return std::string_view(views_[i]);
     }
 
     void
@@ -502,6 +538,10 @@ class VariableColumn : public ColumnBase {
         }
 
         ConstructViews();
+
+        // Not need indices_ after
+        indices_.clear();
+        std::vector<uint64_t>().swap(indices_);
     }
 
  protected:

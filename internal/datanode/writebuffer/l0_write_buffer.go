@@ -9,13 +9,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,46 +51,91 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, storageV2Ca
 }
 
 func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
-	for _, delMsg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
-		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
-		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) storage.LocationsCache { return storage.NewLocationsCache(pk) })
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
-			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
-		for _, segment := range segments {
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	split := func(pks []storage.PrimaryKey, pkTss []uint64, partitionSegments []*metacache.SegmentInfo, partitionGroups []*inData) []bool {
+		lc := storage.NewBatchLocationsCache(pks)
+
+		// use hits to cache result
+		hits := make([]bool, len(pks))
+
+		for _, segment := range partitionSegments {
 			if segment.CompactTo() != 0 {
 				continue
 			}
-			var deletePks []storage.PrimaryKey
-			var deleteTss []typeutil.Timestamp
-			for idx, lc := range lcs {
-				if segment.GetBloomFilterSet().PkExists(lc) {
-					deletePks = append(deletePks, pks[idx])
-					deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
-				}
-			}
-			if len(deletePks) > 0 {
-				wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
-			}
+			hits = segment.GetBloomFilterSet().BatchPkExistWithHits(lc, hits)
 		}
 
-		for _, inData := range groups {
-			if delMsg.GetPartitionID() == common.AllPartitionsID || delMsg.GetPartitionID() == inData.partitionID {
-				var deletePks []storage.PrimaryKey
-				var deleteTss []typeutil.Timestamp
-				for idx, pk := range pks {
-					ts := delMsg.GetTimestamps()[idx]
-					if inData.pkExists(pk, ts) {
-						deletePks = append(deletePks, pk)
-						deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
-					}
-				}
-				if len(deletePks) > 0 {
-					wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
-				}
+		for _, inData := range partitionGroups {
+			hits = inData.batchPkExists(pks, pkTss, hits)
+		}
+
+		return hits
+	}
+
+	type BatchApplyRet = struct {
+		// represent the idx for delete msg in deleteMsgs
+		DeleteDataIdx int
+		// represent the start idx for the batch in each deleteMsg
+		StartIdx int
+		Hits     []bool
+	}
+
+	pksInDeleteMsgs := make([][]storage.PrimaryKey, len(deleteMsgs))
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	var futures []*conc.Future[any]
+	pool := io.GetBFApplyPool()
+	for didx, delMsg := range deleteMsgs {
+		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
+		pksInDeleteMsgs[didx] = pks
+		pkTss := delMsg.GetTimestamps()
+		partitionSegments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
+		partitionGroups := lo.Filter(groups, func(inData *inData, _ int) bool {
+			return delMsg.GetPartitionID() == common.AllPartitionsID || delMsg.GetPartitionID() == inData.partitionID
+		})
+
+		for idx := 0; idx < len(pks); idx += batchSize {
+			startIdx := idx
+			endIdx := idx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
 			}
+			retIdx += 1
+			tmpRetIdx := retIdx
+			deleteMsgId := didx
+			future := pool.Submit(func() (any, error) {
+				hits := split(pks[startIdx:endIdx], pkTss[startIdx:endIdx], partitionSegments, partitionGroups)
+				retMap.Insert(tmpRetIdx, &BatchApplyRet{
+					DeleteDataIdx: deleteMsgId,
+					StartIdx:      startIdx,
+					Hits:          hits,
+				})
+				return nil, nil
+			})
+			futures = append(futures, future)
 		}
 	}
+	conc.AwaitAll(futures...)
+
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		l0SegmentID := wb.getL0SegmentID(deleteMsgs[value.DeleteDataIdx].GetPartitionID(), startPos)
+		pks := pksInDeleteMsgs[value.DeleteDataIdx]
+		pkTss := deleteMsgs[value.DeleteDataIdx].GetTimestamps()
+
+		var deletePks []storage.PrimaryKey
+		var deleteTss []typeutil.Timestamp
+		for i, hit := range value.Hits {
+			if hit {
+				deletePks = append(deletePks, pks[value.StartIdx+i])
+				deleteTss = append(deleteTss, pkTss[value.StartIdx+i])
+			}
+		}
+		if len(deletePks) > 0 {
+			wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
+		}
+		return true
+	})
 }
 
 func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {

@@ -291,8 +291,10 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         false_filtered_out = true;
         segment->timestamp_filter(bitset_holder, timestamp_);
     }
-    retrieve_result.result_offsets_ =
+    auto results_pair =
         segment->find_first(node.limit_, bitset_holder, false_filtered_out);
+    retrieve_result.result_offsets_ = std::move(results_pair.first);
+    retrieve_result.has_more_result = results_pair.second;
     retrieve_result_opt_ = std::move(retrieve_result);
 }
 

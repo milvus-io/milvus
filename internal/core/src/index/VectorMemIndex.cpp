@@ -61,6 +61,7 @@ VectorMemIndex<T>::VectorMemIndex(
     const IndexVersion& version,
     const storage::FileManagerContext& file_manager_context)
     : VectorIndex(index_type, metric_type) {
+    CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
                index_type + " doesn't support metric: " + metric_type);
     if (file_manager_context.Valid()) {
@@ -90,6 +91,7 @@ VectorMemIndex<T>::VectorMemIndex(
     : VectorIndex(create_index_info.index_type, create_index_info.metric_type),
       space_(space),
       create_index_info_(create_index_info) {
+    CheckMetricTypeSupport<T>(create_index_info.metric_type);
     AssertInfo(!is_unsupported(create_index_info.index_type,
                                create_index_info.metric_type),
                create_index_info.index_type +
@@ -668,12 +670,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto tensor = res.value()->GetTensor();
     auto row_num = res.value()->GetRows();
     auto dim = res.value()->GetDim();
-    int64_t data_size;
-    if (is_in_bin_list(index_type)) {
-        data_size = dim / 8 * row_num;
-    } else {
-        data_size = dim * row_num * sizeof(float);
-    }
+    int64_t data_size = milvus::GetVecRowSize<T>(dim) * row_num;
     std::vector<uint8_t> raw_data;
     raw_data.resize(data_size);
     memcpy(raw_data.data(), tensor, data_size);
@@ -954,7 +951,7 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     LOG_INFO("load vector index done");
 }
 template class VectorMemIndex<float>;
-template class VectorMemIndex<uint8_t>;
+template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
 

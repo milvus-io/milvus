@@ -108,6 +108,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.preCreatedTopic.timeticker", "timeticker")
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
+
+		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -307,6 +309,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
 
 		assert.Equal(t, 4, Params.ChannelExclusiveNodeFactor.GetAsInt())
+
+		assert.Equal(t, 200, Params.CollectionObserverInterval.GetAsInt())
+		params.Save("queryCoord.collectionObserverInterval", "100")
+		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
+		params.Reset("queryCoord.collectionObserverInterval")
+
+		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Save("queryCoord.checkExecutedFlagInterval", "200")
+		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Reset("queryCoord.checkExecutedFlagInterval")
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -406,6 +418,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
+
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -481,6 +495,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

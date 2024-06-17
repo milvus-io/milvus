@@ -19,6 +19,7 @@ package paramtable
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -32,7 +33,10 @@ type autoIndexConfig struct {
 	EnableOptimize ParamItem `refreshable:"true"`
 
 	IndexParams           ParamItem  `refreshable:"true"`
+	SparseIndexParams     ParamItem  `refreshable:"true"`
+	BinaryIndexParams     ParamItem  `refreshable:"true"`
 	PrepareParams         ParamItem  `refreshable:"true"`
+	LoadAdaptParams       ParamItem  `refreshable:"true"`
 	ExtraParams           ParamItem  `refreshable:"true"`
 	IndexType             ParamItem  `refreshable:"true"`
 	AutoIndexTypeName     ParamItem  `refreshable:"true"`
@@ -71,11 +75,33 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	}
 	p.IndexParams.Init(base.mgr)
 
+	p.SparseIndexParams = ParamItem{
+		Key:          "autoIndex.params.sparse.build",
+		Version:      "2.4.5",
+		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
+		Export:       true,
+	}
+	p.SparseIndexParams.Init(base.mgr)
+
+	p.BinaryIndexParams = ParamItem{
+		Key:          "autoIndex.params.binary.build",
+		Version:      "2.4.5",
+		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`,
+		Export:       true,
+	}
+	p.BinaryIndexParams.Init(base.mgr)
+
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
 		Version: "2.3.2",
 	}
 	p.PrepareParams.Init(base.mgr)
+
+	p.LoadAdaptParams = ParamItem{
+		Key:     "autoIndex.params.load",
+		Version: "2.4.5",
+	}
+	p.LoadAdaptParams.Init(base.mgr)
 
 	p.ExtraParams = ParamItem{
 		Key:     "autoIndex.params.extra",
@@ -168,31 +194,36 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 }
 
 func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricType(mgr *config.Manager) {
-	m := p.IndexParams.GetAsJSONMap()
+	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+	p.panicIfNotValidAndSetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
+}
+
+func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricTypeHelper(key string, m map[string]string, dtype schemapb.DataType, mgr *config.Manager) {
 	if m == nil {
-		panic("autoIndex.build not invalid, should be json format")
+		panic(fmt.Sprintf("%s invalid, should be json format", key))
 	}
 
 	indexType, ok := m[common.IndexTypeKey]
 	if !ok {
-		panic("autoIndex.build not invalid, index type not found")
+		panic(fmt.Sprintf("%s invalid, index type not found", key))
 	}
 
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
-		panic(fmt.Sprintf("autoIndex.build not invalid, unsupported index type: %s", indexType))
+		panic(fmt.Sprintf("%s invalid, unsupported index type: %s", key, indexType))
 	}
 
-	checker.SetDefaultMetricTypeIfNotExist(m)
+	checker.SetDefaultMetricTypeIfNotExist(m, dtype)
 
 	if err := checker.StaticCheck(m); err != nil {
-		panic(fmt.Sprintf("autoIndex.build not invalid, parameters not invalid, error: %s", err.Error()))
+		panic(fmt.Sprintf("%s invalid, parameters invalid, error: %s", key, err.Error()))
 	}
 
-	p.reset(m, mgr)
+	p.reset(key, m, mgr)
 }
 
-func (p *autoIndexConfig) reset(m map[string]string, mgr *config.Manager) {
+func (p *autoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
 	j := funcutil.MapToJSON(m)
-	mgr.SetConfig("autoIndex.params.build", string(j))
+	mgr.SetConfig(key, string(j))
 }

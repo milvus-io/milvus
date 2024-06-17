@@ -119,6 +119,10 @@ mq:
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
   mqBufSize: 16 # MQ client consumer buffer length
+  dispatcher:
+    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    targetBufSize: 16 # the lenth of channel buffer for targe
+    maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -281,6 +285,8 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
+  collectionObserverInterval: 200
+  checkExecutedFlagInterval: 100
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -313,8 +319,6 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
-    # used for zilliz-cloud ; please ignore it for open source.
-    knowhereScoreConsistency: false
     chunkRows: 128 # The number of vectors in a chunk.
     interimIndex:
       enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.
@@ -322,6 +326,7 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+    knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -329,9 +334,9 @@ queryNode:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable.
+    # options: async, sync, disable. 
     # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
@@ -642,10 +647,10 @@ quotaAndLimits:
     db:
       max: -1 # qps of db level, default no limit, rate for CreateIndex, DropIndex
   flushRate:
-    enabled: false
+    enabled: true
     max: -1 # qps, default no limit, rate for flush
     collection:
-      max: -1 # qps, default no limit, rate for flush at collection level.
+      max: 0.1 # qps, default no limit, rate for flush at collection level.
     db:
       max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:

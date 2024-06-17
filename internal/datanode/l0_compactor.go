@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -242,38 +243,92 @@ func (t *levelZeroCompactionTask) splitDelta(
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
 
-	// segments shall be safe to read outside
-	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
-	split := func(pk storage.PrimaryKey) []int64 {
-		lc := storage.NewLocationsCache(pk)
-		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
-			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(lc)
-		})
-	}
-
-	targetSeg := lo.Associate(segments, func(info *metacache.SegmentInfo) (int64, *metacache.SegmentInfo) {
-		return info.SegmentID(), info
+	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) (int64, *datapb.CompactionSegmentBinlogs) {
+		return segment.GetSegmentID(), segment
 	})
 
+	// segments shall be safe to read outside
+	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
 	// spilt all delete data to segments
-	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
-	for _, delta := range allDelta {
-		for i, pk := range delta.Pks {
-			predicted := split(pk)
+	retMap := t.applyBFInParallel(allDelta, io.GetBFApplyPool(), segments)
 
-			for _, gotSeg := range predicted {
-				writer, ok := targetSegBuffer[gotSeg]
-				if !ok {
-					segment := targetSeg[gotSeg]
-					writer = NewSegmentDeltaWriter(gotSeg, segment.PartitionID(), t.getCollection())
-					targetSegBuffer[gotSeg] = writer
+	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		startIdx := value.StartIdx
+		pk2SegmentIDs := value.Segment2Hits
+
+		pks := allDelta[value.DeleteDataIdx].Pks
+		tss := allDelta[value.DeleteDataIdx].Tss
+
+		for segmentID, hits := range pk2SegmentIDs {
+			for i, hit := range hits {
+				if hit {
+					writer, ok := targetSegBuffer[segmentID]
+					if !ok {
+						segment := allSeg[segmentID]
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), t.getCollection())
+						targetSegBuffer[segmentID] = writer
+					}
+					writer.Write(pks[startIdx+i], tss[startIdx+i])
 				}
-				writer.Write(pk, delta.Tss[i])
 			}
 		}
-	}
+		return true
+	})
 
 	return targetSegBuffer
+}
+
+type BatchApplyRet = struct {
+	DeleteDataIdx int
+	StartIdx      int
+	Segment2Hits  map[int64][]bool
+}
+
+func (t *levelZeroCompactionTask) applyBFInParallel(deleteDatas []*storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+
+	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
+		segment2Hits := make(map[int64][]bool, 0)
+		lc := storage.NewBatchLocationsCache(pks)
+		for _, s := range segmentBfs {
+			segmentID := s.SegmentID()
+			hits := s.GetBloomFilterSet().BatchPkExist(lc)
+			segment2Hits[segmentID] = hits
+		}
+		return segment2Hits
+	}
+
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	var futures []*conc.Future[any]
+	for didx, data := range deleteDatas {
+		pks := data.Pks
+		for idx := 0; idx < len(pks); idx += batchSize {
+			startIdx := idx
+			endIdx := startIdx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+
+			retIdx += 1
+			tmpRetIndex := retIdx
+			deleteDataId := didx
+			future := pool.Submit(func() (any, error) {
+				ret := batchPredict(pks[startIdx:endIdx])
+				retMap.Insert(tmpRetIndex, &BatchApplyRet{
+					DeleteDataIdx: deleteDataId,
+					StartIdx:      startIdx,
+					Segment2Hits:  ret,
+				})
+				return nil, nil
+			})
+			futures = append(futures, future)
+		}
+	}
+	conc.AwaitAll(futures...)
+
+	return retMap
 }
 
 func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {

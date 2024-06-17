@@ -237,14 +237,15 @@ type commonConfig struct {
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
-	StorageScheme         ParamItem `refreshable:"false"`
-	EnableStorageV2       ParamItem `refreshable:"false"`
-	StoragePathPrefix     ParamItem `refreshable:"false"`
-	TTMsgEnabled          ParamItem `refreshable:"true"`
-	TraceLogMode          ParamItem `refreshable:"true"`
-	BloomFilterSize       ParamItem `refreshable:"true"`
-	MaxBloomFalsePositive ParamItem `refreshable:"true"`
-	PanicWhenPluginFail   ParamItem `refreshable:"false"`
+	StorageScheme             ParamItem `refreshable:"false"`
+	EnableStorageV2           ParamItem `refreshable:"false"`
+	StoragePathPrefix         ParamItem `refreshable:"false"`
+	TTMsgEnabled              ParamItem `refreshable:"true"`
+	TraceLogMode              ParamItem `refreshable:"true"`
+	BloomFilterSize           ParamItem `refreshable:"true"`
+	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
+	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
+	PanicWhenPluginFail       ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -733,6 +734,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.BloomFilterApplyBatchSize = ParamItem{
+		Key:          "common.bloomFilterApplyBatchSize",
+		Version:      "2.4.5",
+		DefaultValue: "1000",
+		Doc:          "batch size when to apply pk to bloom filter",
+		Export:       true,
+	}
+	p.BloomFilterApplyBatchSize.Init(base.mgr)
 
 	p.PanicWhenPluginFail = ParamItem{
 		Key:          "common.panicWhenPluginFail",
@@ -1510,6 +1520,9 @@ type queryCoordConfig struct {
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
+
+	CollectionObserverInterval ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval  ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1995,6 +2008,24 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelExclusiveNodeFactor.Init(base.mgr)
+
+	p.CollectionObserverInterval = ParamItem{
+		Key:          "queryCoord.collectionObserverInterval",
+		Version:      "2.4.4",
+		DefaultValue: "200",
+		Doc:          "the interval of collection observer",
+		Export:       false,
+	}
+	p.CollectionObserverInterval.Init(base.mgr)
+
+	p.CheckExecutedFlagInterval = ParamItem{
+		Key:          "queryCoord.checkExecutedFlagInterval",
+		Version:      "2.4.4",
+		DefaultValue: "100",
+		Doc:          "the interval of check executed flag to force to pull dist",
+		Export:       false,
+	}
+	p.CheckExecutedFlagInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2090,6 +2121,8 @@ type queryNodeConfig struct {
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
+
+	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2672,6 +2705,15 @@ user-task-polling:
 		Doc:          "use stream search mode when searching or querying",
 	}
 	p.UseStreamComputing.Init(base.mgr)
+
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "queryNode.bloomFilterApplyBatchSize",
+		Version:      "2.4.5",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3403,7 +3445,8 @@ type dataNodeConfig struct {
 	// Compaction
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 
-	GracefulStopTimeout ParamItem `refreshable:"true"`
+	GracefulStopTimeout            ParamItem `refreshable:"true"`
+	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3709,6 +3752,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "datanode.bloomFilterApplyBatchSize",
+		Version:      "2.4.5",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

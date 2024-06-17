@@ -607,9 +607,9 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
-	retrieveLimit := typeutil.Unlimited
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
-		retrieveLimit = queryParams.limit + queryParams.offset
+		// reduceStopForBest will try to get as many results as possible
+		// so loopEnd in this case will be set to the sum of all results' size
 		if !queryParams.reduceStopForBest {
 			loopEnd = int(queryParams.limit)
 		}
@@ -618,7 +618,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	// handle offset
 	if queryParams != nil && queryParams.offset > 0 {
 		for i := int64(0); i < queryParams.offset; i++ {
-			sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
+			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 			if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
 				return ret, nil
 			}
@@ -626,16 +626,11 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 	}
 
-	reduceStopForBest := false
-	if queryParams != nil {
-		reduceStopForBest = queryParams.reduceStopForBest
-	}
-
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
-		if sel == -1 || (reduceStopForBest && drainOneResult) {
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
 			break
 		}
 

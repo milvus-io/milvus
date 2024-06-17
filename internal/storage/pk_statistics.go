@@ -21,6 +21,7 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -125,22 +126,7 @@ func Locations(pk PrimaryKey, k uint) []uint64 {
 	return nil
 }
 
-func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
-	// empty pkStatics
-	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
-		return false
-	}
-
-	// check bf first, TestLocation just do some bitset compute, cost is cheaper
-	if !st.PkFilter.TestLocations(locs) {
-		return false
-	}
-
-	// check pk range first, ugly but key it for now
-	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
-}
-
-func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
+func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
@@ -155,26 +141,78 @@ func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
 	return st.MinPK.LE(lc.pk) && st.MaxPK.GE(lc.pk)
 }
 
+func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return hits
+	}
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	locations := lc.Locations(st.PkFilter.K())
+	pks := lc.PKs()
+	for i := range pks {
+		// todo: a bit ugly, hits[i]'s value will depends on multi bf in single segment,
+		// hits array will be removed after we merge bf in segment
+		if !hits[i] {
+			hits[i] = st.PkFilter.TestLocations(locations[i]) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
+		}
+	}
+
+	return hits
+}
+
 // LocationsCache is a helper struct caching pk bloom filter locations.
 // Note that this helper is not concurrent safe and shall be used in same goroutine.
 type LocationsCache struct {
 	pk        PrimaryKey
-	locations map[uint][]uint64
+	locations []uint64
 }
 
-func (lc LocationsCache) Locations(k uint) []uint64 {
-	locs, ok := lc.locations[k]
-	if ok {
-		return locs
+func (lc *LocationsCache) GetPk() PrimaryKey {
+	return lc.pk
+}
+
+func (lc *LocationsCache) Locations(k uint) []uint64 {
+	if int(k) > len(lc.locations) {
+		lc.locations = Locations(lc.pk, k)
 	}
-	locs = Locations(lc.pk, k)
-	lc.locations[k] = locs
-	return locs
+	return lc.locations[:k]
 }
 
-func NewLocationsCache(pk PrimaryKey) LocationsCache {
-	return LocationsCache{
-		pk:        pk,
-		locations: make(map[uint][]uint64),
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
+		pk: pk,
+	}
+}
+
+type BatchLocationsCache struct {
+	pks []PrimaryKey
+	k   uint
+
+	locations [][]uint64
+}
+
+func (lc *BatchLocationsCache) PKs() []PrimaryKey {
+	return lc.pks
+}
+
+func (lc *BatchLocationsCache) Size() int {
+	return len(lc.pks)
+}
+
+func (lc *BatchLocationsCache) Locations(k uint) [][]uint64 {
+	if k > lc.k {
+		lc.k = k
+		lc.locations = lo.Map(lc.pks, func(pk PrimaryKey, _ int) []uint64 {
+			return Locations(pk, lc.k)
+		})
+	}
+
+	return lc.locations
+}
+
+func NewBatchLocationsCache(pks []PrimaryKey) *BatchLocationsCache {
+	return &BatchLocationsCache{
+		pks: pks,
 	}
 }

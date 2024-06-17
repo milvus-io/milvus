@@ -33,6 +33,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
@@ -43,6 +44,17 @@ import (
 )
 
 const dim = 128
+
+func CheckLogID(fieldBinlogs []*datapb.FieldBinlog) error {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, l := range fieldBinlog.GetBinlogs() {
+			if l.GetLogID() == 0 {
+				return fmt.Errorf("unexpected log id 0")
+			}
+		}
+	}
+	return nil
+}
 
 func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, numRows int) error {
 	_, err := GenerateParquetFileAndReturnInsertData(filePath, schema, numRows)

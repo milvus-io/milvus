@@ -13,8 +13,8 @@ type floatVectorBaseChecker struct {
 }
 
 func (c floatVectorBaseChecker) staticCheck(params map[string]string) error {
-	if !CheckStrByValues(params, Metric, METRICS) {
-		return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], METRICS)
+	if !CheckStrByValues(params, Metric, FloatVectorMetrics) {
+		return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], FloatVectorMetrics)
 	}
 
 	return nil
@@ -35,7 +35,7 @@ func (c floatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) erro
 	return nil
 }
 
-func (c floatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {
+func (c floatVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
 	setDefaultIfNotExist(params, common.MetricTypeKey, FloatVectorDefaultMetricType)
 }
 

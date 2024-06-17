@@ -329,8 +329,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
             is_sparse = true;
             vec_field_data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
-        } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
-                   index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        } else if (IsBinaryVectorMetricType(metric_type)) {
             is_binary = true;
             vec_field_data_type = milvus::DataType::VECTOR_BINARY;
         } else {

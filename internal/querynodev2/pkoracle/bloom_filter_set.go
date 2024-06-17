@@ -17,7 +17,6 @@
 package pkoracle
 
 import (
-	"context"
 	"sync"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
@@ -46,61 +45,35 @@ type BloomFilterSet struct {
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
-func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
+func (s *BloomFilterSet) MayPkExist(pk *storage.LocationsCache) bool {
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
-	if s.currentStat != nil && s.currentStat.PkExist(pk) {
+	if s.currentStat != nil && s.currentStat.TestLocationCache(pk) {
 		return true
 	}
 
 	// for sealed, if one of the stats shows it exist, then we have to check it
 	for _, historyStat := range s.historyStats {
-		if historyStat.PkExist(pk) {
+		if historyStat.TestLocationCache(pk) {
 			return true
 		}
 	}
 	return false
 }
 
-func (s *BloomFilterSet) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
-	log := log.Ctx(context.TODO()).WithRateGroup("BloomFilterSet.TestLocations", 1, 60)
+func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
+	hits := make([]bool, lc.Size())
 	if s.currentStat != nil {
-		k := s.currentStat.PkFilter.K()
-		if k > uint(len(locs)) {
-			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
-				zap.Int("locationNum", len(locs)),
-				zap.Uint("hashFuncNum", k),
-				zap.Int64("segmentID", s.segmentID))
-			return true
-		}
-
-		if s.currentStat.TestLocations(pk, locs[:k]) {
-			return true
-		}
+		s.currentStat.BatchPkExist(lc, hits)
 	}
 
-	// for sealed, if one of the stats shows it exist, then we have to check it
-	for _, historyStat := range s.historyStats {
-		k := historyStat.PkFilter.K()
-		if k > uint(len(locs)) {
-			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
-				zap.Int("locationNum", len(locs)),
-				zap.Uint("hashFuncNum", k),
-				zap.Int64("segmentID", s.segmentID))
-			return true
-		}
-		if historyStat.TestLocations(pk, locs[:k]) {
-			return true
-		}
+	for _, bf := range s.historyStats {
+		bf.BatchPkExist(lc, hits)
 	}
-	return false
-}
-
-func (s *BloomFilterSet) GetHashFuncNum() uint {
-	return s.kHashFunc
+	return hits
 }
 
 // ID implement candidate.
@@ -124,13 +97,11 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	defer s.statsMutex.Unlock()
 
 	if s.currentStat == nil {
-		m, k := bloom.EstimateParameters(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
-		if k > s.kHashFunc {
-			s.kHashFunc = k
-		}
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.New(m, k),
+			PkFilter: bloom.NewWithEstimates(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			),
 		}
 	}
 

@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	"github.com/valyala/fastjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -944,8 +945,8 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 }
 
 func (data *DeleteData) Merge(other *DeleteData) {
-	data.Pks = append(other.Pks, other.Pks...)
-	data.Tss = append(other.Tss, other.Tss...)
+	data.Pks = append(data.Pks, other.Pks...)
+	data.Tss = append(data.Tss, other.Tss...)
 	data.RowCount += other.RowCount
 	data.memSize += other.Size()
 
@@ -1059,14 +1060,18 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 		}
 		defer rr.Release()
 
+		var p fastjson.Parser
+		deleteLog := &DeleteLog{}
+
 		for rr.Next() {
 			rec := rr.Record()
 			defer rec.Release()
 			column := rec.Column(0)
 			for i := 0; i < column.Len(); i++ {
-				deleteLog := &DeleteLog{}
 				strVal := column.ValueStr(i)
-				if err = json.Unmarshal([]byte(strVal), deleteLog); err != nil {
+
+				v, err := p.Parse(strVal)
+				if err != nil {
 					// compatible with versions that only support int64 type primary keys
 					// compatible with fmt.Sprintf("%d,%d", pk, ts)
 					// compatible error info (unmarshal err invalid character ',' after top-level value)
@@ -1085,6 +1090,15 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
 					if err != nil {
 						return err
+					}
+				} else {
+					deleteLog.Ts = v.GetUint64("ts")
+					deleteLog.PkType = v.GetInt64("pkType")
+					switch deleteLog.PkType {
+					case int64(schemapb.DataType_Int64):
+						deleteLog.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
+					case int64(schemapb.DataType_VarChar):
+						deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
 					}
 				}
 

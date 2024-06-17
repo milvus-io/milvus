@@ -197,6 +197,14 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            case DataType::VECTOR_BINARY: {
+                return std::make_unique<VectorDiskAnnIndex<bin1>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -211,7 +219,7 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
@@ -311,6 +319,22 @@ IndexFactory::CreateVectorIndex(
                     space,
                     file_manager_context);
             }
+            case DataType::VECTOR_BINARY: {
+                return std::make_unique<VectorDiskAnnIndex<bin1>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -325,7 +349,7 @@ IndexFactory::CreateVectorIndex(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_FLOAT16: {
