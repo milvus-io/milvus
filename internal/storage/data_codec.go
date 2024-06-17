@@ -452,234 +452,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				binlogReader.Close()
 				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 			}
-			switch dataType {
-			case schemapb.DataType_Bool:
-				singleData := data.([]bool)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &BoolFieldData{
-						Data: make([]bool, 0, rowNum),
-					}
-				}
-				boolFieldData := insertData.Data[fieldID].(*BoolFieldData)
-
-				boolFieldData.Data = append(boolFieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = boolFieldData
-
-			case schemapb.DataType_Int8:
-				singleData := data.([]int8)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &Int8FieldData{
-						Data: make([]int8, 0, rowNum),
-					}
-				}
-				int8FieldData := insertData.Data[fieldID].(*Int8FieldData)
-
-				int8FieldData.Data = append(int8FieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = int8FieldData
-
-			case schemapb.DataType_Int16:
-				singleData := data.([]int16)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &Int16FieldData{
-						Data: make([]int16, 0, rowNum),
-					}
-				}
-				int16FieldData := insertData.Data[fieldID].(*Int16FieldData)
-
-				int16FieldData.Data = append(int16FieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = int16FieldData
-
-			case schemapb.DataType_Int32:
-				singleData := data.([]int32)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &Int32FieldData{
-						Data: make([]int32, 0, rowNum),
-					}
-				}
-				int32FieldData := insertData.Data[fieldID].(*Int32FieldData)
-
-				int32FieldData.Data = append(int32FieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = int32FieldData
-
-			case schemapb.DataType_Int64:
-				singleData := data.([]int64)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &Int64FieldData{
-						Data: make([]int64, 0, rowNum),
-					}
-				}
-				int64FieldData := insertData.Data[fieldID].(*Int64FieldData)
-
-				int64FieldData.Data = append(int64FieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = int64FieldData
-
-			case schemapb.DataType_Float:
-				singleData := data.([]float32)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &FloatFieldData{
-						Data: make([]float32, 0, rowNum),
-					}
-				}
-				floatFieldData := insertData.Data[fieldID].(*FloatFieldData)
-
-				floatFieldData.Data = append(floatFieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = floatFieldData
-
-			case schemapb.DataType_Double:
-				singleData := data.([]float64)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &DoubleFieldData{
-						Data: make([]float64, 0, rowNum),
-					}
-				}
-				doubleFieldData := insertData.Data[fieldID].(*DoubleFieldData)
-
-				doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = doubleFieldData
-
-			case schemapb.DataType_String, schemapb.DataType_VarChar:
-				singleData := data.([]string)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &StringFieldData{
-						Data: make([]string, 0, rowNum),
-					}
-				}
-				stringFieldData := insertData.Data[fieldID].(*StringFieldData)
-
-				stringFieldData.Data = append(stringFieldData.Data, singleData...)
-				stringFieldData.DataType = dataType
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = stringFieldData
-
-			case schemapb.DataType_Array:
-				singleData := data.([]*schemapb.ScalarField)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &ArrayFieldData{
-						Data: make([]*schemapb.ScalarField, 0, rowNum),
-					}
-				}
-				arrayFieldData := insertData.Data[fieldID].(*ArrayFieldData)
-
-				arrayFieldData.Data = append(arrayFieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = arrayFieldData
-
-			case schemapb.DataType_JSON:
-				singleData := data.([][]byte)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &JSONFieldData{
-						Data: make([][]byte, 0, rowNum),
-					}
-				}
-				jsonFieldData := insertData.Data[fieldID].(*JSONFieldData)
-
-				jsonFieldData.Data = append(jsonFieldData.Data, singleData...)
-				totalLength += len(singleData)
-				insertData.Data[fieldID] = jsonFieldData
-
-			case schemapb.DataType_BinaryVector:
-				singleData := data.([]byte)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &BinaryVectorFieldData{
-						Data: make([]byte, 0, rowNum*dim),
-					}
-				}
-				binaryVectorFieldData := insertData.Data[fieldID].(*BinaryVectorFieldData)
-
-				binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
-				}
-				totalLength += length
-				binaryVectorFieldData.Dim = dim
-				insertData.Data[fieldID] = binaryVectorFieldData
-
-			case schemapb.DataType_Float16Vector:
-				singleData := data.([]byte)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &Float16VectorFieldData{
-						Data: make([]byte, 0, rowNum*dim),
-					}
-				}
-				float16VectorFieldData := insertData.Data[fieldID].(*Float16VectorFieldData)
-
-				float16VectorFieldData.Data = append(float16VectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
-				}
-				totalLength += length
-				float16VectorFieldData.Dim = dim
-				insertData.Data[fieldID] = float16VectorFieldData
-
-			case schemapb.DataType_BFloat16Vector:
-				singleData := data.([]byte)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &BFloat16VectorFieldData{
-						Data: make([]byte, 0, rowNum*dim),
-					}
-				}
-				bfloat16VectorFieldData := insertData.Data[fieldID].(*BFloat16VectorFieldData)
-
-				bfloat16VectorFieldData.Data = append(bfloat16VectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
-				}
-				totalLength += length
-				bfloat16VectorFieldData.Dim = dim
-				insertData.Data[fieldID] = bfloat16VectorFieldData
-
-			case schemapb.DataType_FloatVector:
-				singleData := data.([]float32)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &FloatVectorFieldData{
-						Data: make([]float32, 0, rowNum*dim),
-					}
-				}
-				floatVectorFieldData := insertData.Data[fieldID].(*FloatVectorFieldData)
-
-				floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
-				}
-				totalLength += length
-				floatVectorFieldData.Dim = dim
-				insertData.Data[fieldID] = floatVectorFieldData
-
-			case schemapb.DataType_SparseFloatVector:
-				singleData := data.(*SparseFloatVectorFieldData)
-				if insertData.Data[fieldID] == nil {
-					insertData.Data[fieldID] = &SparseFloatVectorFieldData{}
-				}
-				vec := insertData.Data[fieldID].(*SparseFloatVectorFieldData)
-				vec.AppendAllRows(singleData)
-
-				totalLength += singleData.RowNum()
-				insertData.Data[fieldID] = vec
-
-			default:
+			length, err := AddInsertData(dataType, data, insertData, fieldID, rowNum, eventReader, dim)
+			if err != nil {
 				eventReader.Close()
 				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, fmt.Errorf("undefined data type %d", dataType)
+				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 			}
+			totalLength += length
 			eventReader.Close()
 		}
 
@@ -697,6 +476,227 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 	}
 
 	return collectionID, partitionID, segmentID, nil
+}
+
+func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *InsertData, fieldID int64, rowNum int, eventReader *EventReader, dim int) (dataLength int, err error) {
+	switch dataType {
+	case schemapb.DataType_Bool:
+		singleData := data.([]bool)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &BoolFieldData{
+				Data: make([]bool, 0, rowNum),
+			}
+		}
+		boolFieldData := insertData.Data[fieldID].(*BoolFieldData)
+
+		boolFieldData.Data = append(boolFieldData.Data, singleData...)
+		insertData.Data[fieldID] = boolFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Int8:
+		singleData := data.([]int8)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &Int8FieldData{
+				Data: make([]int8, 0, rowNum),
+			}
+		}
+		int8FieldData := insertData.Data[fieldID].(*Int8FieldData)
+
+		int8FieldData.Data = append(int8FieldData.Data, singleData...)
+		insertData.Data[fieldID] = int8FieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Int16:
+		singleData := data.([]int16)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &Int16FieldData{
+				Data: make([]int16, 0, rowNum),
+			}
+		}
+		int16FieldData := insertData.Data[fieldID].(*Int16FieldData)
+
+		int16FieldData.Data = append(int16FieldData.Data, singleData...)
+		insertData.Data[fieldID] = int16FieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Int32:
+		singleData := data.([]int32)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &Int32FieldData{
+				Data: make([]int32, 0, rowNum),
+			}
+		}
+		int32FieldData := insertData.Data[fieldID].(*Int32FieldData)
+
+		int32FieldData.Data = append(int32FieldData.Data, singleData...)
+		insertData.Data[fieldID] = int32FieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Int64:
+		singleData := data.([]int64)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &Int64FieldData{
+				Data: make([]int64, 0, rowNum),
+			}
+		}
+		int64FieldData := insertData.Data[fieldID].(*Int64FieldData)
+
+		int64FieldData.Data = append(int64FieldData.Data, singleData...)
+		insertData.Data[fieldID] = int64FieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Float:
+		singleData := data.([]float32)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &FloatFieldData{
+				Data: make([]float32, 0, rowNum),
+			}
+		}
+		floatFieldData := insertData.Data[fieldID].(*FloatFieldData)
+
+		floatFieldData.Data = append(floatFieldData.Data, singleData...)
+		insertData.Data[fieldID] = floatFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Double:
+		singleData := data.([]float64)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &DoubleFieldData{
+				Data: make([]float64, 0, rowNum),
+			}
+		}
+		doubleFieldData := insertData.Data[fieldID].(*DoubleFieldData)
+
+		doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
+		insertData.Data[fieldID] = doubleFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		singleData := data.([]string)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &StringFieldData{
+				Data: make([]string, 0, rowNum),
+			}
+		}
+		stringFieldData := insertData.Data[fieldID].(*StringFieldData)
+
+		stringFieldData.Data = append(stringFieldData.Data, singleData...)
+		stringFieldData.DataType = dataType
+		insertData.Data[fieldID] = stringFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Array:
+		singleData := data.([]*schemapb.ScalarField)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &ArrayFieldData{
+				Data: make([]*schemapb.ScalarField, 0, rowNum),
+			}
+		}
+		arrayFieldData := insertData.Data[fieldID].(*ArrayFieldData)
+
+		arrayFieldData.Data = append(arrayFieldData.Data, singleData...)
+		insertData.Data[fieldID] = arrayFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_JSON:
+		singleData := data.([][]byte)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &JSONFieldData{
+				Data: make([][]byte, 0, rowNum),
+			}
+		}
+		jsonFieldData := insertData.Data[fieldID].(*JSONFieldData)
+
+		jsonFieldData.Data = append(jsonFieldData.Data, singleData...)
+		insertData.Data[fieldID] = jsonFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_BinaryVector:
+		singleData := data.([]byte)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &BinaryVectorFieldData{
+				Data: make([]byte, 0, rowNum*dim),
+			}
+		}
+		binaryVectorFieldData := insertData.Data[fieldID].(*BinaryVectorFieldData)
+
+		binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
+		length, err := eventReader.GetPayloadLengthFromReader()
+		if err != nil {
+			return length, err
+		}
+		binaryVectorFieldData.Dim = dim
+		insertData.Data[fieldID] = binaryVectorFieldData
+		return length, nil
+
+	case schemapb.DataType_Float16Vector:
+		singleData := data.([]byte)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &Float16VectorFieldData{
+				Data: make([]byte, 0, rowNum*dim),
+			}
+		}
+		float16VectorFieldData := insertData.Data[fieldID].(*Float16VectorFieldData)
+
+		float16VectorFieldData.Data = append(float16VectorFieldData.Data, singleData...)
+		length, err := eventReader.GetPayloadLengthFromReader()
+		if err != nil {
+			return length, err
+		}
+		float16VectorFieldData.Dim = dim
+		insertData.Data[fieldID] = float16VectorFieldData
+		return length, nil
+
+	case schemapb.DataType_BFloat16Vector:
+		singleData := data.([]byte)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &BFloat16VectorFieldData{
+				Data: make([]byte, 0, rowNum*dim),
+			}
+		}
+		bfloat16VectorFieldData := insertData.Data[fieldID].(*BFloat16VectorFieldData)
+
+		bfloat16VectorFieldData.Data = append(bfloat16VectorFieldData.Data, singleData...)
+		length, err := eventReader.GetPayloadLengthFromReader()
+		if err != nil {
+			return length, err
+		}
+		bfloat16VectorFieldData.Dim = dim
+		insertData.Data[fieldID] = bfloat16VectorFieldData
+		return length, nil
+
+	case schemapb.DataType_FloatVector:
+		singleData := data.([]float32)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &FloatVectorFieldData{
+				Data: make([]float32, 0, rowNum*dim),
+			}
+		}
+		floatVectorFieldData := insertData.Data[fieldID].(*FloatVectorFieldData)
+
+		floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
+		length, err := eventReader.GetPayloadLengthFromReader()
+		if err != nil {
+			return 0, err
+		}
+		floatVectorFieldData.Dim = dim
+		insertData.Data[fieldID] = floatVectorFieldData
+		return length, nil
+
+	case schemapb.DataType_SparseFloatVector:
+		singleData := data.(*SparseFloatVectorFieldData)
+		if insertData.Data[fieldID] == nil {
+			insertData.Data[fieldID] = &SparseFloatVectorFieldData{}
+		}
+		vec := insertData.Data[fieldID].(*SparseFloatVectorFieldData)
+		vec.AppendAllRows(singleData)
+		insertData.Data[fieldID] = vec
+		return singleData.RowNum(), nil
+
+	default:
+		return 0, fmt.Errorf("undefined data type %d", dataType)
+	}
+	return 0, nil
 }
 
 // Deserialize transfer blob back to insert data.
