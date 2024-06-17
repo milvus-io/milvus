@@ -268,7 +268,7 @@ func validateFieldName(fieldName string) error {
 	for i := 1; i < fieldNameSize; i++ {
 		c := fieldName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Field name cannot only contain numbers, letters, and underscores."
+			msg := invalidMsg + "Field name can only contain numbers, letters, and underscores."
 			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
@@ -1073,7 +1073,7 @@ func validateIndexName(indexName string) error {
 	for i := 1; i < indexNameSize; i++ {
 		c := indexName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Index name cannot only contain numbers, letters, and underscores."
+			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
 			return errors.New(msg)
 		}
 	}
