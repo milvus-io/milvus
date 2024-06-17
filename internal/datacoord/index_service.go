@@ -48,8 +48,6 @@ func (s *Server) serverID() int64 {
 }
 
 func (s *Server) startIndexService(ctx context.Context) {
-	s.indexBuilder.Start()
-
 	s.serverLoopWg.Add(1)
 	go s.createIndexForSegmentLoop(ctx)
 }
@@ -73,7 +71,13 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
 	}
-	s.indexBuilder.enqueue(buildID)
+	s.taskScheduler.enqueue(&indexBuildTask{
+		buildID: buildID,
+		taskInfo: &indexpb.IndexTaskInfo{
+			BuildID: buildID,
+			State:   commonpb.IndexState_Unissued,
+		},
+	})
 	return nil
 }
 

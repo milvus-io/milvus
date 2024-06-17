@@ -35,6 +35,50 @@ func (_m *MockSegment) EXPECT() *MockSegment_Expecter {
 	return &MockSegment_Expecter{mock: &_m.Mock}
 }
 
+// BatchPkExist provides a mock function with given fields: lc
+func (_m *MockSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	ret := _m.Called(lc)
+
+	var r0 []bool
+	if rf, ok := ret.Get(0).(func(*storage.BatchLocationsCache) []bool); ok {
+		r0 = rf(lc)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]bool)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_BatchTestLocationCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BatchPkExist'
+type MockSegment_BatchTestLocationCache_Call struct {
+	*mock.Call
+}
+
+// BatchPkExist is a helper method to define mock.On call
+//   - lc *storage.BatchLocationsCache
+func (_e *MockSegment_Expecter) BatchPkExist(lc interface{}) *MockSegment_BatchTestLocationCache_Call {
+	return &MockSegment_BatchTestLocationCache_Call{Call: _e.mock.On("BatchPkExist", lc)}
+}
+
+func (_c *MockSegment_BatchTestLocationCache_Call) Run(run func(lc *storage.BatchLocationsCache)) *MockSegment_BatchTestLocationCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.BatchLocationsCache))
+	})
+	return _c
+}
+
+func (_c *MockSegment_BatchTestLocationCache_Call) Return(_a0 []bool) *MockSegment_BatchTestLocationCache_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_BatchTestLocationCache_Call) RunAndReturn(run func(*storage.BatchLocationsCache) []bool) *MockSegment_BatchTestLocationCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CASVersion provides a mock function with given fields: _a0, _a1
 func (_m *MockSegment) CASVersion(_a0 int64, _a1 int64) bool {
 	ret := _m.Called(_a0, _a1)

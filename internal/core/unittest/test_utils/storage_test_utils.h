@@ -23,6 +23,7 @@
 #include "storage/Types.h"
 #include "storage/InsertData.h"
 #include "storage/ThreadPools.h"
+#include <boost/filesystem.hpp>
 
 using milvus::DataType;
 using milvus::FieldDataPtr;
@@ -103,7 +104,7 @@ PrepareInsertBinlog(int64_t collection_id,
 
 std::map<std::string, int64_t>
 PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
-             const std::vector<const uint8_t*>& buffers,
+             const std::vector<void*>& buffers,
              const std::vector<int64_t>& element_counts,
              const std::vector<std::string>& object_keys,
              FieldDataMeta& field_data_meta,
@@ -120,7 +121,7 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
         futures.push_back(
             pool.Submit(milvus::storage::EncodeAndUploadFieldSlice,
                         remote_chunk_manager,
-                        const_cast<uint8_t*>(buffers[i]),
+                        buffers[i],
                         element_counts[i],
                         field_data_meta,
                         field_meta,
@@ -136,5 +137,62 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
     milvus::storage::ReleaseArrowUnused();
     return remote_paths_to_size;
 }
+
+auto
+gen_field_meta(int64_t collection_id = 1,
+               int64_t partition_id = 2,
+               int64_t segment_id = 3,
+               int64_t field_id = 101) -> milvus::storage::FieldDataMeta {
+    return milvus::storage::FieldDataMeta{
+        .collection_id = collection_id,
+        .partition_id = partition_id,
+        .segment_id = segment_id,
+        .field_id = field_id,
+    };
+}
+
+auto
+gen_index_meta(int64_t segment_id = 3,
+               int64_t field_id = 101,
+               int64_t index_build_id = 1000,
+               int64_t index_version = 10000) -> milvus::storage::IndexMeta {
+    return milvus::storage::IndexMeta{
+        .segment_id = segment_id,
+        .field_id = field_id,
+        .build_id = index_build_id,
+        .index_version = index_version,
+    };
+}
+
+auto
+gen_local_storage_config(const std::string& root_path)
+    -> milvus::storage::StorageConfig {
+    auto ret = milvus::storage::StorageConfig{};
+    ret.storage_type = "local";
+    ret.root_path = root_path;
+    return ret;
+}
+
+struct ChunkManagerWrapper {
+    ChunkManagerWrapper(milvus::storage::ChunkManagerPtr cm) : cm_(cm) {
+    }
+
+    ~ChunkManagerWrapper() {
+        for (const auto& file : written_) {
+            cm_->Remove(file);
+        }
+
+        boost::filesystem::remove_all(cm_->GetRootPath());
+    }
+
+    void
+    Write(const std::string& filepath, void* buf, uint64_t len) {
+        written_.insert(filepath);
+        cm_->Write(filepath, buf, len);
+    }
+
+    const milvus::storage::ChunkManagerPtr cm_;
+    std::unordered_set<std::string> written_;
+};
 
 }  // namespace

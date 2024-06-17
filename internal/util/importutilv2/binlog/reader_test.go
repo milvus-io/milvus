@@ -282,7 +282,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	expectInsertData, err := storage.NewInsertData(schema)
 	suite.NoError(err)
 	for _, field := range schema.GetFields() {
-		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldData(field.GetDataType(), field)
+		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldData(field.GetDataType(), field, suite.numRows)
 		suite.NoError(err)
 	}
 OUTER:

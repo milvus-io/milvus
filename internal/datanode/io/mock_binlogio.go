@@ -76,61 +76,6 @@ func (_c *MockBinlogIO_Download_Call) RunAndReturn(run func(context.Context, []s
 	return _c
 }
 
-// JoinFullPath provides a mock function with given fields: paths
-func (_m *MockBinlogIO) JoinFullPath(paths ...string) string {
-	_va := make([]interface{}, len(paths))
-	for _i := range paths {
-		_va[_i] = paths[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(...string) string); ok {
-		r0 = rf(paths...)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
-// MockBinlogIO_JoinFullPath_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'JoinFullPath'
-type MockBinlogIO_JoinFullPath_Call struct {
-	*mock.Call
-}
-
-// JoinFullPath is a helper method to define mock.On call
-//   - paths ...string
-func (_e *MockBinlogIO_Expecter) JoinFullPath(paths ...interface{}) *MockBinlogIO_JoinFullPath_Call {
-	return &MockBinlogIO_JoinFullPath_Call{Call: _e.mock.On("JoinFullPath",
-		append([]interface{}{}, paths...)...)}
-}
-
-func (_c *MockBinlogIO_JoinFullPath_Call) Run(run func(paths ...string)) *MockBinlogIO_JoinFullPath_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]string, len(args)-0)
-		for i, a := range args[0:] {
-			if a != nil {
-				variadicArgs[i] = a.(string)
-			}
-		}
-		run(variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockBinlogIO_JoinFullPath_Call) Return(_a0 string) *MockBinlogIO_JoinFullPath_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBinlogIO_JoinFullPath_Call) RunAndReturn(run func(...string) string) *MockBinlogIO_JoinFullPath_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Upload provides a mock function with given fields: ctx, kvs
 func (_m *MockBinlogIO) Upload(ctx context.Context, kvs map[string][]byte) error {
 	ret := _m.Called(ctx, kvs)

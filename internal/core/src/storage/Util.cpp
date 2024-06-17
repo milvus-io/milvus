@@ -533,13 +533,16 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
 
 std::pair<std::string, size_t>
 EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
-                          uint8_t* buf,
+                          void* buf,
                           int64_t element_count,
                           FieldDataMeta field_data_meta,
                           const FieldMeta& field_meta,
                           std::string object_key) {
-    auto field_data =
-        CreateFieldData(field_meta.get_data_type(), field_meta.get_dim(), 0);
+    // dim should not be used for sparse float vector field
+    auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
+                   ? -1
+                   : field_meta.get_dim();
+    auto field_data = CreateFieldData(field_meta.get_data_type(), dim, 0);
     field_data->FillFieldData(buf, element_count);
     auto insertData = std::make_shared<InsertData>(field_data);
     insertData->SetFieldDataMeta(field_data_meta);

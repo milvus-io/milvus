@@ -159,8 +159,8 @@ lint-fix: getdeps
 #TODO: Check code specifications by golangci-lint
 static-check: getdeps
 	@echo "Running $@ check"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/.golangci.yml
-	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
@@ -465,6 +465,7 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=internal/datacoord --filename=mock_channelmanager.go --output=internal/datacoord  --structname=MockChannelManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage
@@ -510,7 +511,10 @@ generate-mockery-chunk-manager: getdeps
 generate-mockery-pkg:
 	$(MAKE) -C pkg generate-mockery
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg
+generate-mockery-log:
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/logservice/.mockery.yaml
+
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-log
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"

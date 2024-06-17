@@ -264,6 +264,49 @@ func (_c *MockSessionManager_DeleteSession_Call) RunAndReturn(run func(*NodeInfo
 	return _c
 }
 
+// DropCompactionPlan provides a mock function with given fields: nodeID, req
+func (_m *MockSessionManager) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
+	ret := _m.Called(nodeID, req)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.DropCompactionPlanRequest) error); ok {
+		r0 = rf(nodeID, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSessionManager_DropCompactionPlan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionPlan'
+type MockSessionManager_DropCompactionPlan_Call struct {
+	*mock.Call
+}
+
+// DropCompactionPlan is a helper method to define mock.On call
+//   - nodeID int64
+//   - req *datapb.DropCompactionPlanRequest
+func (_e *MockSessionManager_Expecter) DropCompactionPlan(nodeID interface{}, req interface{}) *MockSessionManager_DropCompactionPlan_Call {
+	return &MockSessionManager_DropCompactionPlan_Call{Call: _e.mock.On("DropCompactionPlan", nodeID, req)}
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) Run(run func(nodeID int64, req *datapb.DropCompactionPlanRequest)) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.DropCompactionPlanRequest))
+	})
+	return _c
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) Return(_a0 error) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSessionManager_DropCompactionPlan_Call) RunAndReturn(run func(int64, *datapb.DropCompactionPlanRequest) error) *MockSessionManager_DropCompactionPlan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImport provides a mock function with given fields: nodeID, in
 func (_m *MockSessionManager) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	ret := _m.Called(nodeID, in)

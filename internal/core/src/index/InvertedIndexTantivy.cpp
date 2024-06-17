@@ -66,7 +66,7 @@ template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx,
     std::shared_ptr<milvus_storage::Space> space)
-    : space_(space), schema_(ctx.fieldDataMeta.schema) {
+    : space_(space), schema_(ctx.fieldDataMeta.field_schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx, ctx.space_);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx, ctx.space_);
     auto field =
@@ -204,6 +204,25 @@ apply_hits(TargetBitmap& bitset, const RustArrayWrapper& w, bool v) {
     }
 }
 
+inline void
+apply_hits_with_filter(TargetBitmap& bitset,
+                       const RustArrayWrapper& w,
+                       const std::function<bool(size_t /* offset */)>& filter) {
+    for (size_t j = 0; j < w.array_.len; j++) {
+        auto the_offset = w.array_.array[j];
+        bitset[the_offset] = filter(the_offset);
+    }
+}
+
+inline void
+apply_hits_with_callback(
+    const RustArrayWrapper& w,
+    const std::function<void(size_t /* offset */)>& callback) {
+    for (size_t j = 0; j < w.array_.len; j++) {
+        callback(w.array_.array[j]);
+    }
+}
+
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
@@ -217,9 +236,30 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
+InvertedIndexTantivy<T>::InApplyFilter(
+    size_t n, const T* values, const std::function<bool(size_t)>& filter) {
     TargetBitmap bitset(Count());
-    bitset.set();
+    for (size_t i = 0; i < n; ++i) {
+        auto array = wrapper_->term_query(values[i]);
+        apply_hits_with_filter(bitset, array, filter);
+    }
+    return bitset;
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::InApplyCallback(
+    size_t n, const T* values, const std::function<void(size_t)>& callback) {
+    for (size_t i = 0; i < n; ++i) {
+        auto array = wrapper_->term_query(values[i]);
+        apply_hits_with_callback(array, callback);
+    }
+}
+
+template <typename T>
+const TargetBitmap
+InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
+    TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
         auto array = wrapper_->term_query(values[i]);
         apply_hits(bitset, array, false);
@@ -311,6 +351,9 @@ void
 InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
                                           const void* values,
                                           const Config& config) {
+    if constexpr (std::is_same_v<bool, T>) {
+        schema_.set_data_type(proto::schema::DataType::Bool);
+    }
     if constexpr (std::is_same_v<int8_t, T>) {
         schema_.set_data_type(proto::schema::DataType::Int8);
     }
@@ -341,7 +384,15 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     std::string field = "test_inverted_index";
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         field.c_str(), d_type_, path_.c_str());
-    wrapper_->add_data<T>(static_cast<const T*>(values), n);
+    if (config.find("is_array") != config.end()) {
+        // only used in ut.
+        auto arr = static_cast<const boost::container::vector<T>*>(values);
+        for (size_t i = 0; i < n; i++) {
+            wrapper_->template add_multi_data(arr[i].data(), arr[i].size());
+        }
+    } else {
+        wrapper_->add_data<T>(static_cast<const T*>(values), n);
+    }
     finish();
 }
 

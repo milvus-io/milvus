@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -70,6 +71,7 @@ type SessionManager interface {
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	CheckHealth(ctx context.Context) error
 	QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error)
+	DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error
 	Close()
 }
 
@@ -211,7 +213,7 @@ func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan 
 		return err
 	}
 
-	resp, err := cli.Compaction(ctx, plan)
+	resp, err := cli.CompactionV2(ctx, plan)
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Warn("failed to execute compaction", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
 		return err
@@ -545,6 +547,43 @@ func (c *SessionManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse,
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("planID", req.GetPlanID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		if errors.Is(err, merr.ErrNodeNotFound) {
+			log.Info("node not found, skip dropping compaction plan")
+			return nil
+		}
+		log.Warn("failed to get client", zap.Error(err))
+		return err
+	}
+
+	err = retry.Do(context.Background(), func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		defer cancel()
+
+		resp, err := cli.DropCompactionPlan(ctx, req)
+		if err := VerifyResponse(resp, err); err != nil {
+			log.Warn("failed to drop compaction plan", zap.Error(err))
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Warn("failed to drop compaction plan after retry", zap.Error(err))
+		return err
+	}
+
+	log.Info("success to drop compaction plan")
+	return nil
 }
 
 // Close release sessions

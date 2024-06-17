@@ -88,6 +88,46 @@ func registerDefaults() {
 	})
 }
 
+func RegisterStopComponent(triggerComponentStop func(role string) error) {
+	// register restful api to trigger stop
+	Register(&Handler{
+		Path: RouteTriggerStopPath,
+		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			role := req.URL.Query().Get("role")
+			log.Info("start to trigger component stop", zap.String("role", role))
+			if err := triggerComponentStop(role); err != nil {
+				log.Warn("failed to trigger component stop", zap.Error(err))
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to trigger component stop, %s"}`, err.Error())))
+				return
+			}
+			log.Info("finish to trigger component stop", zap.String("role", role))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"msg": "OK"}`))
+		},
+	})
+}
+
+func RegisterCheckComponentReady(checkActive func(role string) error) {
+	// register restful api to check component ready
+	Register(&Handler{
+		Path: RouteCheckComponentReady,
+		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			role := req.URL.Query().Get("role")
+			log.Info("start to check component ready", zap.String("role", role))
+			if err := checkActive(role); err != nil {
+				log.Warn("failed to check component ready", zap.Error(err))
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to to check component ready, %s"}`, err.Error())))
+				return
+			}
+			log.Info("finish to check component ready", zap.String("role", role))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"msg": "OK"}`))
+		},
+	})
+}
+
 func Register(h *Handler) {
 	if metricsServer == nil {
 		if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {

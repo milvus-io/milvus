@@ -169,6 +169,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 					IsPrimaryKey: false,
 					Description:  "description_10",
 					DataType:     schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "8"},
+					},
 				},
 				{
 					FieldID:      109,
@@ -176,6 +179,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 					IsPrimaryKey: false,
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "8"},
+					},
 				},
 				{
 					FieldID:      110,
@@ -190,6 +196,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 					IsPrimaryKey: false,
 					Description:  "description_13",
 					DataType:     schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
 				},
 				{
 					FieldID:      112,
@@ -197,6 +206,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 					IsPrimaryKey: false,
 					Description:  "description_14",
 					DataType:     schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
 				},
 			},
 		},

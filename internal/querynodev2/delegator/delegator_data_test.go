@@ -261,6 +261,13 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
 			})
+			ms.EXPECT().BatchPkExist(mock.Anything).RunAndReturn(func(lc *storage.BatchLocationsCache) []bool {
+				hits := make([]bool, lc.Size())
+				for i, pk := range lc.PKs() {
+					hits[i] = pk.EQ(storage.NewInt64PrimaryKey(10))
+				}
+				return hits
+			})
 			return ms
 		})
 	}, nil)
@@ -1061,7 +1068,9 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	defer s.chunkManager.Remove(context.Background(), statsPath1)
 
 	// reload and check partition stats
-	s.delegator.maybeReloadPartitionStats(context.Background())
+	partVersions := make(map[int64]int64)
+	partVersions[partitionID1] = 1
+	s.delegator.loadPartitionStats(context.Background(), partVersions)
 	s.Equal(1, len(s.delegator.partitionStats))
 	s.NotNil(s.delegator.partitionStats[partitionID1])
 	p1Stats := s.delegator.partitionStats[partitionID1]

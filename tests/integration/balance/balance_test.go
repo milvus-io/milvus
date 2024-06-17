@@ -59,6 +59,7 @@ func (s *BalanceTestSuit) SetupSuite() {
 
 func (s *BalanceTestSuit) TearDownSuite() {
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+
 	s.MiniClusterSuite.TearDownSuite()
 }
 

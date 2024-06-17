@@ -58,14 +58,6 @@ func TestWatchChannel(t *testing.T) {
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
-	assert.NoError(t, err)
-	err = node.Start()
-	assert.NoError(t, err)
-	defer node.Stop()
-	err = node.Register()
-	assert.NoError(t, err)
-
-	defer cancel()
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -76,8 +68,14 @@ func TestWatchChannel(t *testing.T) {
 
 	node.broker = broker
 
-	node.timeTickSender.Stop()
-	node.timeTickSender = newTimeTickSender(node.broker, 0)
+	assert.NoError(t, err)
+	err = node.Start()
+	assert.NoError(t, err)
+	defer node.Stop()
+	err = node.Register()
+	assert.NoError(t, err)
+
+	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())

@@ -136,6 +136,10 @@ func (t *SyncTask) Run() (err error) {
 	var has bool
 	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
+		if t.isDrop {
+			log.Info("segment dropped, discard sync task")
+			return nil
+		}
 		log.Warn("failed to sync data, segment not found in metacache")
 		err := merr.WrapErrSegmentNotFound(t.segmentID)
 		return err
@@ -198,14 +202,14 @@ func (t *SyncTask) Run() (err error) {
 	}
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchSize)}
-	switch {
-	case t.isDrop:
-		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Dropped))
-	case t.isFlush:
+	if t.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
-
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
+
+	if t.isDrop {
+		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segment.SegmentID()))
+	}
 
 	log.Info("task done", zap.Float64("flushedSize", totalSize))
 

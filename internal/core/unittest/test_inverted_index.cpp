@@ -25,8 +25,6 @@
 
 using namespace milvus;
 
-// TODO: I would suggest that our all indexes use this test to simulate the real production environment.
-
 namespace milvus::test {
 auto
 gen_field_meta(int64_t collection_id = 1,
@@ -42,8 +40,9 @@ gen_field_meta(int64_t collection_id = 1,
         .segment_id = segment_id,
         .field_id = field_id,
     };
-    meta.schema.set_data_type(static_cast<proto::schema::DataType>(data_type));
-    meta.schema.set_element_type(
+    meta.field_schema.set_data_type(
+        static_cast<proto::schema::DataType>(data_type));
+    meta.field_schema.set_element_type(
         static_cast<proto::schema::DataType>(element_type));
     return meta;
 }

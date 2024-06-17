@@ -5074,6 +5074,8 @@ class TestSearchBase(TestcaseBase):
         # 4. check the search results
         for i in range(default_nq):
             assert res_ip[i].ids == res_cosine[i].ids
+            log.info(res_cosine[i].distances)
+            log.info(res_ip[i].distances)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_without_connect(self):
@@ -5874,6 +5876,10 @@ class TestSearchPagination(TestcaseBase):
     def enable_dynamic_field(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def vector_data_type(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -5897,10 +5903,8 @@ class TestSearchPagination(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim,
                                                     enable_dynamic_field=enable_dynamic_field)[0]
         # 2. search pagination with offset
-        search_param = {"metric_type": "COSINE",
-                        "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, limit,
                                          default_search_exp, _async=_async,
@@ -5937,10 +5941,8 @@ class TestSearchPagination(TestcaseBase):
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search
-        search_param = {"metric_type": "COSINE",
-                        "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [default_string_field_name, default_float_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, default_limit,
@@ -5998,6 +6000,40 @@ class TestSearchPagination(TestcaseBase):
         assert len(search_res[0].ids) == len(res[0].ids[offset:])
         assert sorted(search_res[0].distances, key=numpy.float32) == sorted(
             res[0].distances[offset:], key=numpy.float32)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_all_vector_type_with_pagination(self, vector_data_type):
+        """
+        target: test search with pagination using different vector datatype
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        # 1. create a collection
+        auto_id = False
+        enable_dynamic_field = True
+        offset = 100
+        limit = 20
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim,
+                                                    enable_dynamic_field=enable_dynamic_field,
+                                                    vector_data_type=vector_data_type)[0]
+        # 2. search pagination with offset
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, vector_data_type)
+        search_res = collection_w.search(vectors[:default_nq], default_search_field,
+                                         search_param, limit,
+                                         default_search_exp,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "limit": limit})[0]
+        # 3. search with offset+limit
+        res = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                                  limit + offset, default_search_exp)[0]
+        res_distance = res[0].distances[offset:]
+        # assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
@@ -9854,7 +9890,8 @@ class TestSearchIterator(TestcaseBase):
     """ Test case of search iterator """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_iterator_normal(self):
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_search_iterator_normal(self, vector_data_type):
         """
         target: test search iterator normal
         method: 1. search iterator
@@ -9863,12 +9900,13 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         dim = 128
-        collection_w = self.init_collection_general(
-            prefix, True, dim=dim, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, dim=dim, is_index=False,
+                                                    vector_data_type=vector_data_type)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": "L2"}
+        vectors = cf.gen_vectors_based_on_vector_type(1, dim, vector_data_type)
         batch_size = 200
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,

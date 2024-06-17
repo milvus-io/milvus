@@ -244,7 +244,7 @@ func (c *ColumnFloat16Vector) FieldData() *schemapb.FieldData {
 		FieldName: c.name,
 	}
 
-	data := make([]byte, 0, len(c.values)*c.dim)
+	data := make([]byte, 0, len(c.values)*c.dim*2)
 
 	for _, vector := range c.values {
 		data = append(data, vector...)
@@ -330,7 +330,7 @@ func (c *ColumnBFloat16Vector) FieldData() *schemapb.FieldData {
 		FieldName: c.name,
 	}
 
-	data := make([]byte, 0, len(c.values)*c.dim)
+	data := make([]byte, 0, len(c.values)*c.dim*2)
 
 	for _, vector := range c.values {
 		data = append(data, vector...)

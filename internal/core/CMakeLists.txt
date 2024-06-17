@@ -293,10 +293,21 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install clustering
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/clustering/
+        DESTINATION include/clustering
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # Install common
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
+)
+
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/futures/
+        DESTINATION include/futures
+        FILES_MATCHING PATTERN "*.h"
 )
 
 install(DIRECTORY ${CMAKE_BINARY_DIR}/lib/

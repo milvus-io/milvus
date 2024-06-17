@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {

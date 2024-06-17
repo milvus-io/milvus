@@ -194,6 +194,27 @@ func (s *ManagerSuite) TestRemoveChannel() {
 	})
 }
 
+func (s *ManagerSuite) TestDropPartitions() {
+	manager := s.manager
+
+	s.Run("drop_not_exist", func() {
+		s.NotPanics(func() {
+			manager.DropPartitions("not_exist_channel", nil)
+		})
+	})
+
+	s.Run("drop_partitions", func() {
+		wb := NewMockWriteBuffer(s.T())
+		wb.EXPECT().DropPartitions(mock.Anything).Return()
+
+		manager.mut.Lock()
+		manager.buffers[s.channelName] = wb
+		manager.mut.Unlock()
+
+		manager.DropPartitions(s.channelName, []int64{1})
+	})
+}
+
 func (s *ManagerSuite) TestMemoryCheck() {
 	manager := s.manager
 	param := paramtable.Get()

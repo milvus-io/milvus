@@ -18,7 +18,6 @@ package io
 
 import (
 	"context"
-	"path"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -34,8 +33,6 @@ import (
 type BinlogIO interface {
 	Download(ctx context.Context, paths []string) ([][]byte, error)
 	Upload(ctx context.Context, kvs map[string][]byte) error
-	// JoinFullPath returns the full path by join the paths with the chunkmanager's rootpath
-	JoinFullPath(paths ...string) string
 }
 
 type BinlogIoImpl struct {
@@ -43,8 +40,8 @@ type BinlogIoImpl struct {
 	pool *conc.Pool[any]
 }
 
-func NewBinlogIO(cm storage.ChunkManager, ioPool *conc.Pool[any]) BinlogIO {
-	return &BinlogIoImpl{cm, ioPool}
+func NewBinlogIO(cm storage.ChunkManager) BinlogIO {
+	return &BinlogIoImpl{cm, GetOrCreateIOPool()}
 }
 
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
@@ -105,8 +102,4 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 	}
 
 	return conc.AwaitAll(futures...)
-}
-
-func (b *BinlogIoImpl) JoinFullPath(paths ...string) string {
-	return path.Join(b.ChunkManager.RootPath(), path.Join(paths...))
 }

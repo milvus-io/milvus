@@ -47,7 +47,7 @@ func GetAllVectorFieldType() []entity.FieldType {
 	}
 }
 
-func GetAllScaleFieldType() []entity.FieldType {
+func GetAllScalarFieldType() []entity.FieldType {
 	return []entity.FieldType{
 		entity.FieldTypeBool,
 		entity.FieldTypeInt8,
@@ -63,7 +63,7 @@ func GetAllScaleFieldType() []entity.FieldType {
 }
 
 func GetAllFieldsType() []entity.FieldType {
-	allFieldType := GetAllScaleFieldType()
+	allFieldType := GetAllScalarFieldType()
 	allFieldType = append(allFieldType, entity.FieldTypeBinaryVector,
 		entity.FieldTypeFloatVector,
 		entity.FieldTypeFloat16Vector,
@@ -128,17 +128,26 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 }
 
 func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	ip *InsertParams, option *GenColumnOption) (*CollectionPrepare, clientv2.InsertResult) {
+	ip *InsertParams, option *GenDataOption) (*CollectionPrepare, clientv2.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
 	fields := ip.Schema.Fields
 	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName)
 	for _, field := range fields {
-		column := GenColumnData(ip.Nb, field.DataType, *option)
-		insertOpt.WithColumns(column)
+		if field.IsDynamic {
+			insertOpt.WithColumns(GenDynamicColumnData(option.start, ip.Nb)...)
+		} else {
+			if field.DataType == entity.FieldTypeArray{
+				option.TWithElementType(field.ElementType)
+			}
+			column := GenColumnData(ip.Nb, field.DataType, *option)
+			insertOpt.WithColumns(column)
+		}
 	}
-
+	if ip.PartitionName != "" {
+		insertOpt.WithPartition(ip.PartitionName)
+	}
 	insertRes, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
 	return chainTask, insertRes

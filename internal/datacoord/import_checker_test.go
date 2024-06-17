@@ -52,7 +52,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	cluster := NewMockCluster(s.T())
 	alloc := NewNMockAllocator(s.T())

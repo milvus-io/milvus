@@ -838,8 +838,9 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("groupingField", ['user_id', None])
+    @pytest.mark.parametrize("sparse_format", ['dok', 'coo'])
     def test_search_vector_with_sparse_float_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, groupingField):
+                                                      is_partition_key, enable_dynamic_schema, groupingField, sparse_format):
         """
         Insert a vector with a simple payload
         """
@@ -879,7 +880,7 @@ class TestSearchVector(TestBase):
                         "user_id": idx%100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
-                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format=sparse_format),
                     }
                 else:
                     tmp = {
@@ -887,7 +888,7 @@ class TestSearchVector(TestBase):
                         "user_id": idx%100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
-                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format=sparse_format),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -902,7 +903,7 @@ class TestSearchVector(TestBase):
         # search data
         payload = {
             "collectionName": name,
-            "data": [gen_vector(datatype="SparseFloatVector", dim=dim)],
+            "data": [gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="dok")],
             "filter": "word_count > 100",
             "outputFields": ["*"],
             "searchParams": {
@@ -918,7 +919,24 @@ class TestSearchVector(TestBase):
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
 
-
+        # search data
+        payload = {
+            "collectionName": name,
+            "data": [gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="coo")],
+            "filter": "word_count > 100",
+            "outputFields": ["*"],
+            "searchParams": {
+                "metricType": "IP",
+                "params": {
+                    "drop_ratio_search": "0.2",
+                }
+            },
+            "limit": 500,
+        }
+        if groupingField:
+            payload["groupingField"] = groupingField
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
 
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("auto_id", [True])

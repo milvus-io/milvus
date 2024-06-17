@@ -594,6 +594,7 @@ struct InsertRecord {
         timestamps_.clear();
         reserved = 0;
         ack_responder_.clear();
+        timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         fields_data_.clear();
     }
@@ -609,6 +610,9 @@ struct InsertRecord {
     // used for preInsert of growing segment
     std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
+
+    // used for timestamps index of sealed segment
+    TimestampIndex timestamp_index_;
 
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;

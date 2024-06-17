@@ -2363,6 +2363,20 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_binary_vec_field_name])
         assert res[0].keys() == set(fields)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_query_output_all_vector_type(self, vector_data_type):
+        """
+        target: test query output different vector type
+        method: create index and specify vec field as output field
+        expected: return primary field and vec field
+        """
+        collection_w, vectors = self.init_collection_general(prefix, True,
+                                                             vector_data_type=vector_data_type)[0:2]
+        fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_float_vec_field_name])
+        assert res[0].keys() == set(fields)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_partition_repeatedly(self):
         """
@@ -3739,6 +3753,27 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
+                                                 "batch_size": batch_size})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_query_iterator_output_different_vector_type(self, vector_data_type):
+        """
+        target: test query iterator with output fields
+        method: 1. query iterator output different vector type
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        batch_size = 400
+        collection_w = self.init_collection_general(prefix, True,
+                                                    vector_data_type=vector_data_type)[0]
+        # 2. query iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(batch_size, expr=expr,
+                                    output_fields=[ct.default_float_vec_field_name],
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)

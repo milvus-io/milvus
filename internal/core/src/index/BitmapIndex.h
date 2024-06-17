@@ -50,17 +50,6 @@ class BitmapIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context,
         std::shared_ptr<milvus_storage::Space> space);
 
-    explicit BitmapIndex(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager)
-        : file_manager_(file_manager) {
-    }
-
-    explicit BitmapIndex(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager,
-        std::shared_ptr<milvus_storage::Space> space)
-        : file_manager_(file_manager), space_(space) {
-    }
-
     ~BitmapIndex() override = default;
 
     BinarySet
@@ -117,6 +106,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
+
     BinarySet
     UploadV2(const Config& config = {}) override;
 
@@ -125,6 +115,11 @@ class BitmapIndex : public ScalarIndex<T> {
         return true;
     }
 
+    void
+    LoadWithoutAssemble(const BinarySet& binary_set,
+                        const Config& config) override;
+
+ public:
     int64_t
     Cardinality() {
         if (build_mode_ == BitmapIndexBuildMode::ROARING) {
@@ -134,11 +129,13 @@ class BitmapIndex : public ScalarIndex<T> {
         }
     }
 
-    void
-    LoadWithoutAssemble(const BinarySet& binary_set,
-                        const Config& config) override;
-
  private:
+    void
+    BuildPrimitiveField(const std::vector<FieldDataPtr>& datas);
+
+    void
+    BuildArrayField(const std::vector<FieldDataPtr>& datas);
+
     size_t
     GetIndexDataSize();
 
@@ -188,6 +185,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     size_t total_num_rows_{0};
+    proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;
 };
