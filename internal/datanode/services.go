@@ -313,8 +313,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	for _, segID := range missingSegments {
 		segID := segID
+		newSeg := req.GetSegmentInfos()[segID]
+		newSegments = append(newSegments, newSeg)
 		future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-			newSeg := req.GetSegmentInfos()[segID]
 			var val *metacache.BloomFilterSet
 			var err error
 			err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
