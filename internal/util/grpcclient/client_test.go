@@ -370,28 +370,38 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
-	retry, reset, _ := base.checkGrpcErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
+	retry, reset, forceReset, _ := base.checkGrpcErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
 	assert.True(t, retry)
 	assert.True(t, reset)
+	assert.False(t, forceReset)
 
-	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
 	assert.False(t, retry)
 	assert.True(t, reset)
+	assert.True(t, forceReset)
+
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unavailable, "fake context canceled"))
+	assert.True(t, retry)
+	assert.True(t, reset)
+	assert.True(t, forceReset)
 
 	// test serverId mismatch
-	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
+	assert.True(t, forceReset)
 
 	// test cross cluster
-	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrServiceCrossClusterRouting.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrServiceCrossClusterRouting.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
+	assert.True(t, forceReset)
 
 	// test default
-	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotFound.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotFound.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
+	assert.False(t, forceReset)
 }
 
 type server struct {
