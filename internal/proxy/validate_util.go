@@ -141,7 +141,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 	}
 	errDimMismatch := func(fieldName string, dataDim int64, schemaDim int64) error {
 		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
-		return merr.WrapErrParameterInvalid(dataDim, schemaDim, msg)
+		return merr.WrapErrParameterInvalid(schemaDim, dataDim, msg)
 	}
 	for _, field := range data {
 		switch field.GetType() {
