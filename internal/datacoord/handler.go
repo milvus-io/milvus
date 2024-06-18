@@ -150,10 +150,17 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 				// skip major compaction not fully completed.
 				continue
 			}
+
 			segmentInfos[s.GetID()] = s
 			switch {
 			case s.GetState() == commonpb.SegmentState_Dropped:
-				droppedIDs.Insert(s.GetID())
+				if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() == currentPartitionStatsVersion {
+					//if segment.partStatsVersion is equal to currentPartitionStatsVersion,
+					//it must have been indexed, this is guaranteed by clustering compaction process
+					indexedIDs.Insert(s.GetID())
+				} else {
+					droppedIDs.Insert(s.GetID())
+				}
 			case !isFlushState(s.GetState()):
 				growingIDs.Insert(s.GetID())
 			case s.GetLevel() == datapb.SegmentLevel_L0:

@@ -825,7 +825,8 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 			defer sd.partitionStatsMut.Unlock()
 			sd.partitionStats[partID] = partStats
 		}()
-		log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID))
+		log.Info("Updated partitionStats for partition", zap.Int64("collectionID", sd.collectionID), zap.Int64("partitionID", partID),
+			zap.Int64("newVersion", newVersion), zap.Int64("oldVersion", curStats.GetVersion()))
 	}
 }
 
