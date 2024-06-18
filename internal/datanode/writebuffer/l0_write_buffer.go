@@ -185,7 +185,6 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	wb.cleanupCompactedSegments()
 	return nil
 }
 
