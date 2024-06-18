@@ -398,7 +398,7 @@ func (kv *txnTiKV) MultiRemove(keys []string) error {
 
 	for _, key := range keys {
 		key = path.Join(kv.rootPath, key)
-		loggingErr = txn.Delete([]byte(key))
+		err = txn.Delete([]byte(key))
 		if err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiRemove", key))
 			return loggingErr
