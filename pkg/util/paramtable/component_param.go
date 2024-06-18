@@ -939,7 +939,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.MaxPartitionNum = ParamItem{
 		Key:          "rootCoord.maxPartitionNum",
 		Version:      "2.0.0",
-		DefaultValue: "4096",
+		DefaultValue: "1024",
 		Doc:          "Maximum number of partitions in a collection",
 		Export:       true,
 	}
