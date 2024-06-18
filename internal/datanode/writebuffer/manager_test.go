@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -53,6 +54,7 @@ func (s *ManagerSuite) SetupSuite() {
 			},
 		},
 	}
+	initcore.InitMmapManager(paramtable.Get())
 
 	s.channelName = "by-dev-rootcoord-dml_0_100_v0"
 }

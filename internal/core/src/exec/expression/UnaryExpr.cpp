@@ -112,7 +112,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
                 result = ExecRangeVisitorImpl<std::string>();
             } else {
                 result = ExecRangeVisitorImpl<std::string_view>();
@@ -294,7 +297,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
 
             // filtering by index, get candidates.
             auto size_per_chunk = segment_->size_per_chunk();
-            auto retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+            auto retrieve = [ size_per_chunk, this ](int64_t offset) -> auto{
                 auto chunk_idx = offset / size_per_chunk;
                 auto chunk_offset = offset % size_per_chunk;
                 const auto& chunk =

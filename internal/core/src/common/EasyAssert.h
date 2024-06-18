@@ -61,6 +61,9 @@ enum ErrorCode {
     MetricTypeNotMatch = 2031,
     DimNotMatch = 2032,
     ClusterSkip = 2033,
+    MemAllocateFailed = 2034,
+    MemAllocateSizeNotMatch = 2035,
+    MmapError = 2036,
     KnowhereError = 2100,
 
     // timeout or cancel related.

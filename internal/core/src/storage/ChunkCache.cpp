@@ -19,14 +19,12 @@
 #include "mmap/Utils.h"
 
 namespace milvus::storage {
-
 std::shared_ptr<ColumnBase>
-ChunkCache::Read(const std::string& filepath) {
-    auto path = CachePath(filepath);
-
+ChunkCache::Read(const std::string& filepath,
+                 const MmapChunkDescriptor& descriptor) {
     {
         std::shared_lock lck(mutex_);
-        auto it = columns_.find(path);
+        auto it = columns_.find(filepath);
         if (it != columns_.end()) {
             AssertInfo(it->second, "unexpected null column, file={}", filepath);
             return it->second;
@@ -36,29 +34,26 @@ ChunkCache::Read(const std::string& filepath) {
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
 
     std::unique_lock lck(mutex_);
-    auto it = columns_.find(path);
+    auto it = columns_.find(filepath);
     if (it != columns_.end()) {
         return it->second;
     }
-    auto column = Mmap(path, field_data->GetFieldData());
+    auto column = Mmap(field_data->GetFieldData(), descriptor);
     AssertInfo(column, "unexpected null column, file={}", filepath);
-    columns_.emplace(path, column);
+    columns_.emplace(filepath, column);
     return column;
 }
 
 void
 ChunkCache::Remove(const std::string& filepath) {
-    auto path = CachePath(filepath);
     std::unique_lock lck(mutex_);
-    columns_.erase(path);
+    columns_.erase(filepath);
 }
 
 void
 ChunkCache::Prefetch(const std::string& filepath) {
-    auto path = CachePath(filepath);
-
     std::shared_lock lck(mutex_);
-    auto it = columns_.find(path);
+    auto it = columns_.find(filepath);
     if (it == columns_.end()) {
         return;
     }
@@ -68,35 +63,23 @@ ChunkCache::Prefetch(const std::string& filepath) {
         reinterpret_cast<void*>(const_cast<char*>(column->MmappedData())),
         column->ByteSize(),
         read_ahead_policy_);
-    AssertInfo(ok == 0,
-               "failed to madvise to the data file {}, err: {}",
-               path,
-               strerror(errno));
+    if (ok != 0) {
+        LOG_WARN(
+            "failed to madvise to the data file {}, addr {}, size {}, err: {}",
+            filepath,
+            column->MmappedData(),
+            column->ByteSize(),
+            strerror(errno));
+    }
 }
 
 std::shared_ptr<ColumnBase>
-ChunkCache::Mmap(const std::filesystem::path& path,
-                 const FieldDataPtr& field_data) {
-    auto dir = path.parent_path();
-    std::filesystem::create_directories(dir);
-
+ChunkCache::Mmap(const FieldDataPtr& field_data,
+                 const MmapChunkDescriptor& descriptor) {
     auto dim = field_data->get_dim();
     auto data_type = field_data->get_data_type();
 
-    auto file = File::Open(path.string(), O_CREAT | O_TRUNC | O_RDWR);
-
-    // write the field data to disk
     auto data_size = field_data->Size();
-    // unused
-    std::vector<std::vector<uint64_t>> element_indices{};
-    auto written = WriteFieldData(file, data_type, field_data, element_indices);
-    AssertInfo(written == data_size,
-               "failed to write data file {}, written "
-               "{} but total {}, err: {}",
-               path.c_str(),
-               written,
-               data_size,
-               strerror(errno));
 
     std::shared_ptr<ColumnBase> column{};
 
@@ -108,40 +91,17 @@ ChunkCache::Mmap(const std::filesystem::path& path,
             offset += field_data->Size(i);
         }
         auto sparse_column = std::make_shared<SparseFloatColumn>(
-            file, data_size, dim, data_type);
+            data_size, dim, data_type, mcm_, descriptor);
         sparse_column->Seal(std::move(indices));
         column = std::move(sparse_column);
     } else if (IsVariableDataType(data_type)) {
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
-        column = std::make_shared<Column>(file, data_size, dim, data_type);
+        column = std::make_shared<Column>(
+            data_size, dim, data_type, mcm_, descriptor);
     }
-
-    // unlink
-    auto ok = unlink(path.c_str());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap data file {}, err: {}",
-               path.c_str(),
-               strerror(errno));
-
+    column->AppendBatch(field_data);
     return column;
 }
-
-std::string
-ChunkCache::CachePath(const std::string& filepath) {
-    auto path = std::filesystem::path(filepath);
-    auto prefix = std::filesystem::path(path_prefix_);
-
-    // Cache path shall not use absolute filepath direct, it shall always under path_prefix_
-    if (path.is_absolute()) {
-        return (prefix /
-                filepath.substr(path.root_directory().string().length(),
-                                filepath.length()))
-            .string();
-    }
-
-    return (prefix / filepath).string();
-}
-
 }  // namespace milvus::storage
