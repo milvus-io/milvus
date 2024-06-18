@@ -583,7 +583,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 }
 
 func TestAppendPrepareInfo_parse(t *testing.T) {
-	t.Run("parse prepare info", func(t *testing.T) {
+	t.Run("parse load info", func(t *testing.T) {
 		var params paramtable.ComponentParam
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
@@ -593,9 +593,16 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.PrepareParams.Key, string(str))
 
+		mapString2 := make(map[string]string)
+		mapString2["key2"] = "value2"
+		str2, err2 := json.Marshal(mapString2)
+		assert.NoError(t, err2)
+		params.Save(params.AutoIndexConfig.LoadAdaptParams.Key, string(str2))
+
 		resultMapString := make(map[string]string)
 		err = AppendPrepareLoadParams(&params, resultMapString)
 		assert.NoError(t, err)
 		assert.Equal(t, resultMapString["key1"], "value1")
+		assert.Equal(t, resultMapString["key2"], "value2")
 	})
 }
