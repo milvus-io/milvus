@@ -185,7 +185,7 @@ natsmq:
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  maxPartitionNum: 1024 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
