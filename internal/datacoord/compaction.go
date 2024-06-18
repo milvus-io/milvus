@@ -570,11 +570,12 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 		}
 	case datapb.CompactionType_ClusteringCompaction:
 		task = &clusteringCompactionTask{
-			CompactionTask:   t,
-			meta:             c.meta,
-			sessions:         c.sessions,
-			handler:          c.handler,
-			analyzeScheduler: c.analyzeScheduler,
+			CompactionTask:      t,
+			meta:                c.meta,
+			sessions:            c.sessions,
+			handler:             c.handler,
+			analyzeScheduler:    c.analyzeScheduler,
+			lastUpdateStateTime: time.Now().UnixMilli(),
 		}
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
