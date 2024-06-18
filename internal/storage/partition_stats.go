@@ -46,6 +46,9 @@ func NewPartitionStatsSnapshot() *PartitionStatsSnapshot {
 }
 
 func (ps *PartitionStatsSnapshot) GetVersion() int64 {
+	if ps == nil {
+		return 0
+	}
 	return ps.Version
 }
 
