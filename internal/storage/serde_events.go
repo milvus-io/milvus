@@ -29,10 +29,10 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -147,9 +147,6 @@ func (crr *compositeBinlogRecordReader) Close() {
 }
 
 func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
-	if blobKey == "" {
-		return 0, 0
-	}
 	if _, _, _, colId, logId, ok := metautil.ParseInsertLogPath(blobKey); ok {
 		return colId, logId
 	}
@@ -157,41 +154,31 @@ func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
 		// data_codec.go generate single field id as blob key.
 		return colId, 0
 	}
-	return -1, -1
+	return InvalidUniqueID, InvalidUniqueID
 }
 
 func newCompositeBinlogRecordReader(blobs []*Blob) (*compositeBinlogRecordReader, error) {
-	sort.Slice(blobs, func(i, j int) bool {
-		iCol, iLog := parseBlobKey(blobs[i].Key)
-		jCol, jLog := parseBlobKey(blobs[j].Key)
-
-		if iCol == jCol {
-			return iLog < jLog
-		}
-		return iCol < jCol
-	})
-
-	blobm := make([][]*Blob, 0)
-	var fieldId FieldID = -1
-	var currentCol []*Blob
-
+	blobMap := make(map[FieldID][]*Blob)
 	for _, blob := range blobs {
 		colId, _ := parseBlobKey(blob.Key)
-		if colId != fieldId {
-			if currentCol != nil {
-				blobm = append(blobm, currentCol)
-			}
-			currentCol = make([]*Blob, 0)
-			fieldId = colId
+		if _, exists := blobMap[colId]; !exists {
+			blobMap[colId] = []*Blob{blob}
+		} else {
+			blobMap[colId] = append(blobMap[colId], blob)
 		}
-		currentCol = append(currentCol, blob)
 	}
-	if currentCol != nil {
-		blobm = append(blobm, currentCol)
-	}
+	sortedBlobs := make([][]*Blob, 0, len(blobMap))
+	for _, blobsForField := range blobMap {
+		sort.Slice(blobsForField, func(i, j int) bool {
+			_, iLog := parseBlobKey(blobsForField[i].Key)
+			_, jLog := parseBlobKey(blobsForField[j].Key)
 
+			return iLog < jLog
+		})
+		sortedBlobs = append(sortedBlobs, blobsForField)
+	}
 	return &compositeBinlogRecordReader{
-		blobs: blobm,
+		blobs: sortedBlobs,
 	}, nil
 }
 
@@ -207,8 +194,7 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 			value := v[i]
 			if value == nil {
 				value = &Value{}
-				m := make(map[FieldID]interface{}, len(r.Schema()))
-				value.Value = m
+				value.Value = make(map[FieldID]interface{}, len(r.Schema()))
 				v[i] = value
 			}
 
@@ -221,15 +207,16 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 					if ok {
 						m[j] = d // TODO: avoid memory copy here.
 					} else {
-						return errors.New(fmt.Sprintf("unexpected type %s", dt))
+						return merr.WrapErrServiceInternal(fmt.Sprintf("unexpected type %s", dt))
 					}
 				}
 			}
 
-			if _, ok := m[common.RowIDField]; !ok {
-				panic("no row id column found")
+			rowID, ok := m[common.RowIDField].(int64)
+			if !ok {
+				return merr.WrapErrIoKeyNotFound("no row id column found")
 			}
-			value.ID = m[common.RowIDField].(int64)
+			value.ID = rowID
 			value.Timestamp = m[common.TimeStampField].(int64)
 
 			pk, err := GenPrimaryKeyByRawData(m[PKfieldID], r.Schema()[PKfieldID])
@@ -422,7 +409,7 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				}
 				ok = typeEntry.serialize(builders[fid], e)
 				if !ok {
-					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
+					return nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
 				eventWriters[fid].memorySize += int(typeEntry.sizeof(e))
 				memorySize += typeEntry.sizeof(e)
