@@ -1,5 +1,7 @@
 import random
 from time import sleep
+
+import numpy as np
 import pytest
 import copy
 
@@ -1446,6 +1448,47 @@ class TestIndexInvalid(TestcaseBase):
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
                                               ct.err_msg: f"<'int' object has no attribute 'items'"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_invalid_sparse_metric_type(self, metric_type, index):
+        """
+        target: unsupported metric_type create index
+        method: unsupported metric_type creates an index
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        param = cf.get_index_params_params(index)
+        params = {"index_type": index, "metric_type": metric_type, "params": param}
+        error = {ct.err_code: 65535, ct.err_msg: "only IP is the supported metric type for sparse index"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                            check_task=CheckTasks.err_res,
+                            check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    def test_invalid_sparse_ratio(self, ratio, index):
+        """
+        target: index creation for unsupported ratio parameter
+        method: indexing of unsupported ratio parameters
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid drop_ratio_build: {ratio}, must be in range [0, 1): invalid parameter[expected=valid index params"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                                              check_task=CheckTasks.err_res,
+                                              check_items=error)
 
 
 @pytest.mark.tags(CaseLabel.GPU)
