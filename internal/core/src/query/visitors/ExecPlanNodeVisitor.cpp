@@ -25,7 +25,7 @@
 #include "plan/PlanNode.h"
 #include "exec/Task.h"
 #include "segcore/SegmentInterface.h"
-#include "query/GroupByOperator.h"
+#include "query/groupby/SearchGroupByOperator.h"
 namespace milvus::query {
 
 namespace impl {
@@ -193,14 +193,20 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                            search_result);
     search_result.total_data_cnt_ = final_view.size();
     if (search_result.vector_iterators_.has_value()) {
+        AssertInfo(search_result.vector_iterators_.value().size() ==
+                       search_result.total_nq_,
+                   "Vector Iterators' count must be equal to total_nq_, Check "
+                   "your code");
         std::vector<GroupByValueType> group_by_values;
-        GroupBy(search_result.vector_iterators_.value(),
-                node.search_info_,
-                group_by_values,
-                *segment,
-                search_result.seg_offsets_,
-                search_result.distances_);
+        SearchGroupBy(search_result.vector_iterators_.value(),
+                      node.search_info_,
+                      group_by_values,
+                      *segment,
+                      search_result.seg_offsets_,
+                      search_result.distances_,
+                      search_result.topk_per_nq_prefix_sum_);
         search_result.group_by_values_ = std::move(group_by_values);
+        search_result.group_size_ = node.search_info_.group_size_;
         AssertInfo(search_result.seg_offsets_.size() ==
                        search_result.group_by_values_.value().size(),
                    "Wrong state! search_result group_by_values_ size:{} is not "

@@ -28,7 +28,7 @@
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
 #include "query/SearchBruteForce.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "index/IndexFactory.h"
 #include "common/QueryResult.h"
 #include "segcore/Types.h"

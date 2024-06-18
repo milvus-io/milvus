@@ -25,8 +25,9 @@
 namespace milvus {
 
 struct SearchInfo {
-    int64_t topk_;
-    int64_t round_decimal_;
+    int64_t topk_{0};
+    int64_t group_size_{1};
+    int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
     knowhere::Json search_params_;
