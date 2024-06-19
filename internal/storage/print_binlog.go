@@ -22,11 +22,11 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 

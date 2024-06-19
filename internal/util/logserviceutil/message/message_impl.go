@@ -3,7 +3,7 @@ package message
 import (
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 type messageImpl struct {
@@ -38,7 +38,7 @@ func (m *messageImpl) EstimateSize() int {
 
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
-	t := proto.EncodeVarint(tt)
+	t := protowire.AppendVarint(nil, tt)
 	m.properties.Set(messageTimeTick, string(t))
 	return m
 }
@@ -66,7 +66,7 @@ func (m *immutableMessageImpl) TimeTick() uint64 {
 		panic(fmt.Sprintf("there's a bug in the message codes, timetick lost in properties of message, id: %+v", m.id))
 	}
 	v := []byte(value)
-	tt, n := proto.DecodeVarint(v)
+	tt, n := protowire.ConsumeVarint(v)
 	if n != len(v) {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick in properties of message, id: %+v", m.id))
 	}

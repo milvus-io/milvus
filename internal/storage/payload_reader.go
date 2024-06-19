@@ -11,9 +11,9 @@ import (
 	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -288,7 +288,7 @@ func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, error) {
 	}
 	return readByteAndConvert(r, func(bytes parquet.ByteArray) *schemapb.ScalarField {
 		v := &schemapb.ScalarField{}
-		proto.Unmarshal(bytes, v)
+		_ = proto.Unmarshal(bytes, v)
 		return v
 	})
 }

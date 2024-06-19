@@ -22,17 +22,18 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/x448/float16"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // Generic Clone for proto message
-func Clone[T proto.Message](msg T) T {
-	return proto.Clone(msg).(T)
+func Clone[T protoadapt.MessageV1](msg T) T {
+	return protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(msg))).(T)
 }
 
 // Float32ToBytes converts a float to byte slice.

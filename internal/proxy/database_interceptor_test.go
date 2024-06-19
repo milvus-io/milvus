@@ -4,12 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
@@ -45,7 +46,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 	})
 
 	t.Run("test ok for all request", func(t *testing.T) {
-		availableReqs := []proto.Message{
+		availableReqs := []protoadapt.MessageV1{
 			&milvuspb.CreateCollectionRequest{},
 			&milvuspb.DropCollectionRequest{},
 			&milvuspb.HasCollectionRequest{},
@@ -110,7 +111,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			assert.True(t, len(after) > len(before))
 		}
 
-		unavailableReqs := []proto.Message{
+		unavailableReqs := []protoadapt.MessageV1{
 			&milvuspb.GetMetricsRequest{},
 			&milvuspb.DummyRequest{},
 			&milvuspb.CalcDistanceRequest{},

@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -46,6 +46,8 @@ import (
 )
 
 var paginationSize = 2000
+
+var errNil = fmt.Errorf("proto: Marshal called with nil")
 
 type Catalog struct {
 	MetaKv               kv.MetaKv
@@ -686,6 +688,9 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 }
 
 func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
+	if job == nil {
+		return errNil
+	}
 	key := buildImportJobKey(job.GetJobID())
 	value, err := proto.Marshal(job)
 	if err != nil {
@@ -717,6 +722,9 @@ func (kc *Catalog) DropImportJob(jobID int64) error {
 }
 
 func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
+	if task == nil {
+		return errNil
+	}
 	key := buildPreImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {
@@ -750,6 +758,9 @@ func (kc *Catalog) DropPreImportTask(taskID int64) error {
 }
 
 func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
+	if task == nil {
+		return errNil
+	}
 	key := buildImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {

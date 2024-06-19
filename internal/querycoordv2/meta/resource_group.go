@@ -2,10 +2,10 @@ package meta
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 

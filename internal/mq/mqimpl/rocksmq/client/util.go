@@ -14,9 +14,8 @@ package client
 import (
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 )
 
 func MarshalHeader(header *commonpb.MsgHeader) ([]byte, error) {

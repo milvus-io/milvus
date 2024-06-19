@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/milvus-io/milvus/internal/mocks/util/logserviceutil/mock_message"
 	"github.com/milvus-io/milvus/internal/util/logserviceutil/message"
@@ -28,7 +28,7 @@ func TestMessage(t *testing.T) {
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
-	tt, n := proto.DecodeVarint([]byte(v))
+	tt, n := protowire.ConsumeVarint([]byte(v))
 	assert.Equal(t, uint64(123), tt)
 	assert.Equal(t, len([]byte(v)), n)
 
@@ -55,7 +55,7 @@ func TestMessage(t *testing.T) {
 		WithProperties(map[string]string{
 			"key": "value",
 			"_t":  "1",
-			"_tt": string(proto.EncodeVarint(456)),
+			"_tt": string(protowire.AppendVarint(nil, 456)),
 			"_v":  "1",
 			"_lc": "lcMsgID",
 		}).

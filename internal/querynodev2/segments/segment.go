@@ -35,7 +35,6 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -53,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	typeutil_internal "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -424,16 +424,22 @@ func (s *LocalSegment) initializeSegment() error {
 		})
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
-				FieldBinlog: *info.FieldBinlog,
-				RowCount:    loadInfo.GetNumOfRows(),
+				FieldBinlog: datapb.FieldBinlog{
+					FieldID: info.FieldBinlog.FieldID,
+					Binlogs: info.FieldBinlog.Binlogs,
+				},
+				RowCount: loadInfo.GetNumOfRows(),
 			})
 		}
 	}
 
 	for _, binlogs := range fieldBinlogs {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
-			FieldBinlog: *binlogs,
-			RowCount:    loadInfo.GetNumOfRows(),
+			FieldBinlog: datapb.FieldBinlog{
+				FieldID: binlogs.FieldID,
+				Binlogs: binlogs.Binlogs,
+			},
+			RowCount: loadInfo.GetNumOfRows(),
 		})
 	}
 
