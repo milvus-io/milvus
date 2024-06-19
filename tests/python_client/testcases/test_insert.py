@@ -1348,6 +1348,25 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("invalid_vector_type ", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
+        """
+        target: insert illegal data type
+        method: insert illegal data type
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        nb = 100
+        data = cf.gen_default_list_sparse_data(nb=nb)[:-1]
+        invalid_vec = cf.gen_vectors(nb, dim=128, vector_data_type=invalid_vector_type)
+        data.append(invalid_vec)
+        error = {ct.err_code: 1, ct.err_msg: 'input must be a sparse matrix in supported format'}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestInsertInvalidBinary(TestcaseBase):
     """
@@ -1871,6 +1890,30 @@ class TestUpsertValid(TestcaseBase):
         })
         collection_w.upsert(df)
         assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    def test_upsert_sparse_data(self, index):
+        """
+        target: multiple upserts and counts(*)
+        method: multiple upserts and counts(*)
+        expected: number of data entries normal
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data(nb=ct.default_nb)
+        collection_w.upsert(data=data)
+        assert collection_w.num_entities == ct.default_nb
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        collection_w.load()
+        for i in range(5):
+            collection_w.upsert(data=data)
+            collection_w.query(expr=f'{ct.default_int64_field_name} >= 0', output_fields=[ct.default_count_output]
+                                        , check_task=CheckTasks.check_query_results,
+                                         check_items={"exp_res": [{"count(*)": ct.default_nb}]})
 
 
 class TestUpsertInvalid(TestcaseBase):
