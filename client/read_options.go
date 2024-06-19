@@ -225,11 +225,17 @@ func (opt *queryOption) WithFilter(expr string) *queryOption {
 }
 
 func (opt *queryOption) WithOffset(offset int) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
 	opt.queryParams[spOffset] = strconv.Itoa(offset)
 	return opt
 }
 
 func (opt *queryOption) WithLimit(limit int) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
 	opt.queryParams[spLimit] = strconv.Itoa(limit)
 	return opt
 }
