@@ -35,6 +35,7 @@ import (
 
 type Record interface {
 	Schema() map[FieldID]schemapb.DataType
+	ArrowSchema() *arrow.Schema
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
@@ -81,6 +82,14 @@ func (r *compositeRecord) Release() {
 
 func (r *compositeRecord) Schema() map[FieldID]schemapb.DataType {
 	return r.schema
+}
+
+func (r *compositeRecord) ArrowSchema() *arrow.Schema {
+	var fields []arrow.Field
+	for _, rec := range r.recs {
+		fields = append(fields, rec.Schema().Field(0))
+	}
+	return arrow.NewSchema(fields, nil)
 }
 
 type serdeEntry struct {
@@ -575,6 +584,10 @@ func (r *selectiveRecord) Schema() map[FieldID]schemapb.DataType {
 	return r.schema
 }
 
+func (r *selectiveRecord) ArrowSchema() *arrow.Schema {
+	return r.ArrowSchema()
+}
+
 func (r *selectiveRecord) Column(i FieldID) arrow.Array {
 	if i == r.selectedFieldId {
 		return r.r.Column(i)
@@ -679,6 +692,46 @@ func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Wr
 	}, nil
 }
 
+var _ RecordWriter = (*multiFieldRecordWriter)(nil)
+
+type multiFieldRecordWriter struct {
+	fw       *pqarrow.FileWriter
+	fieldIds []FieldID
+	schema   *arrow.Schema
+
+	numRows int
+}
+
+func (mfw *multiFieldRecordWriter) Write(r Record) error {
+	mfw.numRows += r.Len()
+	columns := make([]arrow.Array, len(mfw.fieldIds))
+	for i, fieldId := range mfw.fieldIds {
+		columns[i] = r.Column(fieldId)
+	}
+	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
+	defer rec.Release()
+	return mfw.fw.WriteBuffered(rec)
+}
+
+func (mfw *multiFieldRecordWriter) Close() {
+	mfw.fw.Close()
+}
+
+func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
+	schema := arrow.NewSchema(fields, nil)
+	fw, err := pqarrow.NewFileWriter(schema, writer,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
+		pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, err
+	}
+	return &multiFieldRecordWriter{
+		fw:       fw,
+		fieldIds: fieldIds,
+		schema:   schema,
+	}, nil
+}
+
 type SerializeWriter[T any] struct {
 	rw         RecordWriter
 	serializer Serializer[T]
@@ -771,6 +824,10 @@ func (sr *simpleArrowRecord) Len() int {
 
 func (sr *simpleArrowRecord) Release() {
 	sr.r.Release()
+}
+
+func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
+	return sr.r.Schema()
 }
 
 func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, field2Col map[FieldID]int) *simpleArrowRecord {
