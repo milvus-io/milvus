@@ -41,6 +41,39 @@ func (s *InsertDataSuite) TestInsertData() {
 		s.Nil(idata)
 	})
 
+	s.Run("nullable field schema", func() {
+		tests := []struct {
+			description string
+			dataType    schemapb.DataType
+		}{
+			{"nullable bool field", schemapb.DataType_Bool},
+			{"nullable int8 field", schemapb.DataType_Int8},
+			{"nullable int16 field", schemapb.DataType_Int16},
+			{"nullable int32 field", schemapb.DataType_Int32},
+			{"nullable int64 field", schemapb.DataType_Int64},
+			{"nullable float field", schemapb.DataType_Float},
+			{"nullable double field", schemapb.DataType_Double},
+			{"nullable json field", schemapb.DataType_JSON},
+			{"nullable array field", schemapb.DataType_Array},
+			{"nullable string/varchar field", schemapb.DataType_String},
+		}
+
+		for _, test := range tests {
+			s.Run(test.description, func() {
+				schema := &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							DataType: test.dataType,
+							Nullable: true,
+						},
+					},
+				}
+				_, err := NewInsertData(schema)
+				s.Nil(err)
+			})
+		}
+	})
+
 	s.Run("invalid schema", func() {
 		tests := []struct {
 			description string
@@ -180,6 +213,14 @@ func (s *InsertDataSuite) TestGetDataType() {
 		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
 		s.True(ok)
 		s.Equal(field.GetDataType(), fieldData.GetDataType())
+	}
+}
+
+func (s *InsertDataSuite) TestGetNullable() {
+	for _, field := range s.schema.GetFields() {
+		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
+		s.True(ok)
+		s.Equal(field.GetNullable(), fieldData.GetNullable())
 	}
 }
 
