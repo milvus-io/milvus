@@ -28,6 +28,7 @@ import "C"
 
 import (
 	"context"
+	"math"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -53,6 +54,12 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 	err := merr.SegcoreError(int32(errorCode), errorMsg)
 	log.Warn("CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
 	return err
+}
+
+// UnmarshalCProto unmarshal the proto from C memory
+func UnmarshalCProto(cRes *C.CProto, msg proto.Message) error {
+	blob := (*(*[math.MaxInt32]byte)(cRes.proto_blob))[:int(cRes.proto_size):int(cRes.proto_size)]
+	return proto.Unmarshal(blob, msg)
 }
 
 // HandleCProto deal with the result proto returned from CGO

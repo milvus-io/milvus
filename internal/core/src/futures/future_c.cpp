@@ -14,6 +14,8 @@
 #include "future_c.h"
 #include "folly/init/Init.h"
 #include "Future.h"
+#include "Executor.h"
+#include "log/Log.h"
 
 extern "C" void
 future_cancel(CFuture* future) {
@@ -48,4 +50,11 @@ extern "C" void
 future_destroy(CFuture* future) {
     milvus::futures::IFuture::releaseLeakedFuture(
         static_cast<milvus::futures::IFuture*>(static_cast<void*>(future)));
+}
+
+extern "C" void
+executor_set_thread_num(int thread_num) {
+    milvus::futures::getGlobalCPUExecutor()->setNumThreads(thread_num);
+    LOG_INFO("future executor setup cpu executor with thread num: {}",
+             thread_num);
 }

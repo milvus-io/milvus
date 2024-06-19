@@ -23,9 +23,9 @@ var (
 	initOnce      sync.Once
 )
 
-// InitCGO initializes the cgo caller and future manager.
+// initCGO initializes the cgo caller and future manager.
 // Please call this function before using any cgo utilities.
-func InitCGO() {
+func initCGO() {
 	initOnce.Do(func() {
 		nodeID := paramtable.GetStringNodeID()
 		chSize := int64(math.Ceil(float64(hardware.GetCPUNum()) * paramtable.Get().QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
@@ -39,6 +39,7 @@ func InitCGO() {
 		}
 		futureManager = newActiveFutureManager(nodeID)
 		futureManager.Run()
+		initExecutor()
 	})
 }
 
