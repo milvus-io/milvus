@@ -296,9 +296,10 @@ class OffsetOrderedArray : public OffsetMap {
 
 template <bool is_sealed = false>
 struct InsertRecord {
-    InsertRecord(const Schema& schema,
-                 const int64_t size_per_chunk,
-                 const storage::MmapChunkDescriptor mmap_descriptor = nullptr)
+    InsertRecord(
+        const Schema& schema,
+        const int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : timestamps_(size_per_chunk), mmap_descriptor_(mmap_descriptor) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
 
@@ -630,7 +631,7 @@ struct InsertRecord {
  private:
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
     mutable std::shared_mutex shared_mutex_{};
-    storage::MmapChunkDescriptor mmap_descriptor_;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };
 
 }  // namespace milvus::segcore

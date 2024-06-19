@@ -94,7 +94,7 @@ class ColumnBase {
                int dim,
                const DataType& data_type,
                storage::MmapChunkManagerPtr mcm,
-               storage::MmapChunkDescriptor descriptor)
+               storage::MmapChunkDescriptorPtr descriptor)
         : mcm_(mcm),
           mmap_descriptor_(descriptor),
           type_size_(GetDataTypeSize(data_type, dim)),
@@ -340,7 +340,7 @@ class ColumnBase {
 
     // length in bytes
     size_t size_{0};
-    storage::MmapChunkDescriptor mmap_descriptor_ = nullptr;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
 
  private:
     void
@@ -401,7 +401,7 @@ class Column : public ColumnBase {
            int dim,
            const DataType& data_type,
            storage::MmapChunkManagerPtr mcm,
-           storage::MmapChunkDescriptor descriptor)
+           storage::MmapChunkDescriptorPtr descriptor)
         : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 
@@ -440,7 +440,7 @@ class SparseFloatColumn : public ColumnBase {
                       int dim,
                       const DataType& data_type,
                       storage::MmapChunkManagerPtr mcm,
-                      storage::MmapChunkDescriptor descriptor)
+                      storage::MmapChunkDescriptorPtr descriptor)
         : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 
@@ -543,7 +543,7 @@ class VariableColumn : public ColumnBase {
                    int dim,
                    const DataType& data_type,
                    storage::MmapChunkManagerPtr mcm,
-                   storage::MmapChunkDescriptor descriptor)
+                   storage::MmapChunkDescriptorPtr descriptor)
         : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 
@@ -658,7 +658,7 @@ class ArrayColumn : public ColumnBase {
                 int dim,
                 const DataType& data_type,
                 storage::MmapChunkManagerPtr mcm,
-                storage::MmapChunkDescriptor descriptor)
+                storage::MmapChunkDescriptorPtr descriptor)
         : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 

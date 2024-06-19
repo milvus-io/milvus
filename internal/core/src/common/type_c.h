@@ -22,6 +22,7 @@
 extern "C" {
 #endif
 
+// WARNING: do not change the enum value of Growing and Sealed
 enum SegmentType {
     Invalid = 0,
     Growing = 1,

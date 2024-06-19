@@ -212,8 +212,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
         : mmap_descriptor_(storage::MmapManager::GetInstance()
                                    .GetMmapConfig()
                                    .GetEnableGrowingMmap()
-                               ? storage::MmapChunkDescriptor(
-                                     new storage::MmapChunkDescriptorValue(
+                               ? storage::MmapChunkDescriptorPtr(
+                                     new storage::MmapChunkDescriptor(
                                          {segment_id, SegmentType::Growing}))
                                : nullptr),
           segcore_config_(segcore_config),
@@ -317,7 +317,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  private:
-    storage::MmapChunkDescriptor mmap_descriptor_ = nullptr;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
     IndexMetaPtr index_meta_;

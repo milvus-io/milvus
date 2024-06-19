@@ -821,7 +821,7 @@ SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
 std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
     const storage::ChunkCachePtr& cc,
     const std::string& data_path,
-    const storage::MmapChunkDescriptor& descriptor) {
+    const storage::MmapChunkDescriptorPtr& descriptor) {
     auto column = cc->Read(data_path, descriptor);
     cc->Prefetch(data_path);
     return {data_path, column};
@@ -1032,9 +1032,8 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       id_(segment_id),
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve) {
-    mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptorValue>(
-        new storage::MmapChunkDescriptorValue(
-            {segment_id, SegmentType::Sealed}));
+    mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
+        new storage::MmapChunkDescriptor({segment_id, SegmentType::Sealed}));
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     mcm->Register(mmap_descriptor_);
 }

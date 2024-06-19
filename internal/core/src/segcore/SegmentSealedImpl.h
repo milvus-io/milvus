@@ -280,7 +280,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
  private:
     // mmap descriptor, used in chunk cache
-    storage::MmapChunkDescriptor mmap_descriptor_ = nullptr;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;

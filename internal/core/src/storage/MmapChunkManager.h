@@ -30,18 +30,24 @@
 #include "storage/LocalChunkManagerSingleton.h"
 namespace milvus::storage {
 // use segment id and segment type to descripe a segment in mmap chunk manager, segment only in two type (growing or sealed) in mmap chunk manager
-struct MmapChunkDescriptorValue {
+struct MmapChunkDescriptor {
+    struct DescriptorHash {
+        size_t
+        operator()(const MmapChunkDescriptor& x) const {
+            //SegmentType::Growing = 0x01,SegmentType::Sealed = 0x10
+            size_t sign = ((size_t)x.segment_type) << (sizeof(size_t) * 8 - 1);
+            return ((size_t)x.segment_id) | sign;
+        }
+    };
+    bool
+    operator==(const MmapChunkDescriptor& x) const {
+        return segment_id == x.segment_id && segment_type == x.segment_type;
+    }
     int64_t segment_id;
     SegmentType segment_type;
 };
-using MmapChunkDescriptor = std::shared_ptr<MmapChunkDescriptorValue>;
+using MmapChunkDescriptorPtr = std::shared_ptr<MmapChunkDescriptor>;
 
-struct DescriptorHash {
-    size_t
-    operator()(const MmapChunkDescriptor& x) const {
-        return x->segment_id * 10 + (size_t)x->segment_type;
-    }
-};
 /**
  * @brief MmapBlock is a basic unit of MmapChunkManager. It handle all memory mmaping in one tmp file.
  * static function(TotalBlocksSize) is used to get total files size of chunk mmap.
@@ -175,13 +181,13 @@ class MmapChunkManager {
                               const uint64_t file_size);
     ~MmapChunkManager();
     void
-    Register(const MmapChunkDescriptor key);
+    Register(const MmapChunkDescriptorPtr descriptor);
     void
-    UnRegister(const MmapChunkDescriptor key);
+    UnRegister(const MmapChunkDescriptorPtr descriptor);
     bool
-    HasKey(const MmapChunkDescriptor key);
+    HasRegister(const MmapChunkDescriptorPtr descriptor);
     void*
-    Allocate(const MmapChunkDescriptor key, const uint64_t size);
+    Allocate(const MmapChunkDescriptorPtr descriptor, const uint64_t size);
     uint64_t
     GetDiskAllocSize() {
         std::shared_lock<std::shared_mutex> lck(mtx_);
@@ -205,7 +211,7 @@ class MmapChunkManager {
     mutable std::shared_mutex mtx_;
     std::unordered_map<MmapChunkDescriptor,
                        std::vector<MmapBlockPtr>,
-                       DescriptorHash>
+                       MmapChunkDescriptor::DescriptorHash>
         blocks_table_;
     std::unique_ptr<MmapBlocksHandler> blocks_handler_ = nullptr;
     std::string mmap_file_prefix_;
