@@ -2833,7 +2833,6 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
-	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
@@ -2947,15 +2946,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
-
-	p.EnableBalanceChannelWithRPC = ParamItem{
-		Key:          "dataCoord.channel.balanceWithRpc",
-		Version:      "2.4.0",
-		DefaultValue: "true",
-		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
-		Export:       true,
-	}
-	p.EnableBalanceChannelWithRPC.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",

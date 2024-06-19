@@ -32,20 +32,22 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/pipeline"
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-const returnError = "ReturnError"
-
-type ctxKey struct{}
 
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
@@ -70,7 +72,7 @@ func TestMain(t *testing.M) {
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 
-	rateCol, err = newRateCollector()
+	err = util.InitGlobalRateCollector()
 	if err != nil {
 		panic("init test failed, err = " + err.Error())
 	}
@@ -79,11 +81,31 @@ func TestMain(t *testing.M) {
 	os.Exit(code)
 }
 
+func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
+	factory := dependency.NewDefaultFactory(true)
+	node := NewDataNode(ctx, factory)
+	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
+	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
+
+	broker := &broker.MockBroker{}
+	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
+
+	node.broker = broker
+	node.timeTickSender = util.NewTimeTickSender(broker, 0)
+
+	syncMgr, _ := syncmgr.NewSyncManager(node.chunkManager, node.allocator)
+
+	node.syncMgr = syncMgr
+	node.writeBufferManager = writebuffer.NewManager(syncMgr)
+
+	return node
+}
+
 func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	node := NewIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
@@ -123,7 +145,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&RootCoordFactory{}, true, "valid input"},
+			{&util.RootCoordFactory{}, true, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -146,7 +168,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&DataCoordFactory{}, true, "valid input"},
+			{&util.DataCoordFactory{}, true, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -164,7 +186,7 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test getSystemInfoMetrics", func(t *testing.T) {
 		emptyNode := &DataNode{}
 		emptyNode.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
-		emptyNode.flowgraphManager = newFlowgraphManager()
+		emptyNode.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
@@ -179,64 +201,14 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test getSystemInfoMetrics with quotaMetric error", func(t *testing.T) {
 		emptyNode := &DataNode{}
 		emptyNode.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
-		emptyNode.flowgraphManager = newFlowgraphManager()
+		emptyNode.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
-		rateCol.Deregister(metricsinfo.InsertConsumeThroughput)
+		util.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		rateCol.Register(metricsinfo.InsertConsumeThroughput)
-	})
-
-	t.Run("Test BackGroundGC", func(t *testing.T) {
-		vchanNameCh := make(chan string)
-		node.clearSignal = vchanNameCh
-		node.stopWaiter.Add(1)
-		go node.BackGroundGC(vchanNameCh)
-
-		testDataSyncs := []struct {
-			dmChannelName string
-		}{
-			{"fake-by-dev-rootcoord-dml-backgroundgc-1"},
-			{"fake-by-dev-rootcoord-dml-backgroundgc-2"},
-		}
-
-		for _, test := range testDataSyncs {
-			err = node.flowgraphManager.AddandStartWithEtcdTickler(node, &datapb.VchannelInfo{
-				CollectionID: 1, ChannelName: test.dmChannelName,
-			}, &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
-					},
-					{
-						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
-					},
-					{
-						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
-					},
-					{
-						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "128"},
-						},
-					},
-				},
-			}, genTestTickler())
-			assert.NoError(t, err)
-			vchanNameCh <- test.dmChannelName
-		}
-
-		assert.Eventually(t, func() bool {
-			for _, test := range testDataSyncs {
-				if node.flowgraphManager.HasFlowgraph(test.dmChannelName) {
-					return false
-				}
-			}
-			return true
-		}, 2*time.Second, 10*time.Millisecond)
+		util.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
 	})
 }
