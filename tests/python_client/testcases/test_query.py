@@ -2275,6 +2275,28 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, output_fields=["*"], check_items=CheckTasks.check_query_results,
                            check_task={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #33883")
+    def test_query_to_get_latest_entity_with_dup_ids(self):
+        """
+        target: test query to get latest entity with duplicate primary keys
+        method: 1.create collection and insert dup primary key = 0
+                2.query with expr=dup_id
+        expected: return the latest entity
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        nb = 200
+        rounds = 10
+        for i in range(rounds):
+            df = cf.gen_default_dataframe_data(nb=nb, start=i * nb)
+            df[ct.default_int64_field_name] = 0
+            collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_index)
+        collection_w.load()
+        expr = f'{ct.default_int64_field_name} == 0'
+        res = collection_w.query(expr=expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == 1 and res[0][ct.default_float_field_name] == (rounds * nb - 1) * 1.0
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self):
         """
