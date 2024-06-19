@@ -28,4 +28,5 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 fi
 
 echo "Starting standalone..."
+export ETCD_USE_EMBED=true
 nohup ./bin/milvus run standalone --run-with-subprocess > /tmp/standalone.log 2>&1 &

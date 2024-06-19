@@ -61,7 +61,7 @@ mkdir -p logpb
 
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
-protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
+protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=. --plugin=protoc-gen-go=${ROOT_DIR}/bin/protoc-gen-go-v1.3.2"
 
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
