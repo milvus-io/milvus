@@ -345,9 +345,11 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 		if taskType == TaskTypeMove {
 			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(task.SegmentID(), false))
-			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
-			if len(views) == 0 ||
-				!lo.Contains(nodeSegmentDist, task.Actions()[1].Node()) {
+			if len(views) == 0 {
+				return merr.WrapErrServiceInternal("segment's delegator not found, stop balancing")
+			}
+			segmentInTargetNode := scheduler.distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(task.Actions()[1].Node()), meta.WithSegmentID(task.SegmentID()))
+			if len(segmentInTargetNode) == 0 {
 				return merr.WrapErrServiceInternal("source segment released, stop balancing")
 			}
 		}

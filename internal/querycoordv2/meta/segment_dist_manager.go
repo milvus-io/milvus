@@ -227,20 +227,3 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 	}
 	return ret
 }
-
-// return node list which contains the given segmentID
-func (m *SegmentDistManager) GetSegmentDist(segmentID int64) []int64 {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]int64, 0)
-	for nodeID, segments := range m.segments {
-		for _, segment := range segments.segments {
-			if segment.GetID() == segmentID {
-				ret = append(ret, nodeID)
-				break
-			}
-		}
-	}
-	return ret
-}
