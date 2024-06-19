@@ -2084,12 +2084,8 @@ class TestAutoIndex(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
-        collection_w.create_index(binary_field_name, {},
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "HNSW only support float vector data type: invalid "
-                                                           "parameter[expected=valid index params][actual=invalid "
-                                                           "index params]"})
+        collection_w.create_index(binary_field_name, {})
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'JACCARD'}
 
 
 @pytest.mark.tags(CaseLabel.GPU)
