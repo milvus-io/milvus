@@ -511,8 +511,8 @@ generate-mockery-chunk-manager: getdeps
 generate-mockery-pkg:
 	$(MAKE) -C pkg generate-mockery
 
-generate-mockery-log:
-	$(INSTALL_PATH)/mockery --config $(PWD)/internal/logservice/.mockery.yaml
+generate-mockery-streaming:
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/streamingservice/.mockery.yaml
 
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-log
 
