@@ -3442,7 +3442,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.interval",
 		Version:      "2.0.0",
 		DefaultValue: "3600",
-		Doc:          "gc interval in seconds",
+		Doc:          "meta-based gc scanning interval in seconds",
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
@@ -3451,7 +3451,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.scanInterval",
 		Version:      "2.4.0",
 		DefaultValue: "168", // hours, default 7 * 24 hours
-		Doc:          "garbage collection scan residue interval in hours",
+		Doc:          "orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours",
 		Export:       true,
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
@@ -3461,7 +3461,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "86400",
-		Doc:          "file meta missing tolerance duration in seconds, default to 24hr(1d)",
+		Doc:          "orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
@@ -3470,7 +3470,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "10800",
-		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
+		Doc:          "meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
