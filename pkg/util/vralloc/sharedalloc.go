@@ -25,7 +25,7 @@ type SharedAllocator struct {
 // GroupedAllocator is a shared allocator that can be grouped with other shared allocators. The sum of used resources of all
 // children should not exceed the limit.
 type GroupedAllocator struct {
-	Allocator[string]
+	SharedAllocator
 	name     string
 	children map[string]Allocator[string]
 }
@@ -68,12 +68,6 @@ func (sa *SharedAllocator) Release(id string) *Resource {
 	r := sa.Allocator.Release(id)
 	if sa.parent != nil {
 		sa.parent.Reallocate(sa.name, zero.Diff(r))
-		// Notify its siblings
-		for name := range sa.parent.children {
-			if name != sa.name {
-				sa.parent.children[name].notify()
-			}
-		}
 	}
 	return r
 }
@@ -82,12 +76,34 @@ func (sa *SharedAllocator) Release(id string) *Resource {
 // The short resource is a positive value, e.g., if there is additional 8 bytes in disk needed, returns (0, 0, 8).
 // Allocate on identical id is not allowed, in which case it returns (false, nil). Use #Reallocate instead.
 func (ga *GroupedAllocator) Allocate(id string, r *Resource) (allocated bool, short *Resource) {
-	panic("allocate on child instead")
+	return false, nil
 }
 
 // Release releases the resource
 func (ga *GroupedAllocator) Release(id string) *Resource {
-	panic("release on child instead")
+	return nil
+}
+
+func (ga *GroupedAllocator) Reallocate(id string, delta *Resource) (allocated bool, short *Resource) {
+	allocated, short = ga.SharedAllocator.Reallocate(id, delta)
+	if allocated {
+		// Propagate to parent.
+		if ga.parent != nil {
+			allocated, short = ga.parent.Reallocate(ga.name, delta)
+			if !allocated {
+				ga.SharedAllocator.Reallocate(id, zero.Diff(delta))
+				return
+			}
+		}
+		// Notify siblings of id.
+		for name := range ga.children {
+			if name != id {
+				ga.children[name].notify()
+			}
+		}
+	}
+
+	return
 }
 
 func (ga *GroupedAllocator) GetAllocator(name string) Allocator[string] {
@@ -101,8 +117,9 @@ type GroupedAllocatorBuilder struct {
 func NewGroupedAllocatorBuilder(name string, limit *Resource) *GroupedAllocatorBuilder {
 	return &GroupedAllocatorBuilder{
 		ga: GroupedAllocator{
-			Allocator: &SharedAllocator{
+			SharedAllocator: SharedAllocator{
 				Allocator: NewFixedSizeAllocator[string](limit),
+				name:      name,
 			},
 			name:     name,
 			children: make(map[string]Allocator[string]),
@@ -116,6 +133,12 @@ func (b *GroupedAllocatorBuilder) AddChild(name string, limit *Resource) *Groupe
 		parent:    &b.ga,
 		name:      name,
 	}
+	return b
+}
+
+func (b *GroupedAllocatorBuilder) AddChildGroup(allocator *GroupedAllocator) *GroupedAllocatorBuilder {
+	allocator.parent = &b.ga
+	b.ga.children[allocator.name] = allocator
 	return b
 }
 
