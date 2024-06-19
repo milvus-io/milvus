@@ -6897,20 +6897,22 @@ class TestCollectionRangeSearch(TestcaseBase):
     """
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("vector_data_type", ct.all_float_vector_types)
-    def test_range_search_default(self, index_type, metric, vector_data_type):
+    @pytest.mark.parametrize("with_growing", [False, True])
+    def test_range_search_default(self, index_type, metric, vector_data_type, with_growing):
         """
         target: verify the range search returns correct results
-        method: 1. create collection, insert 8000 vectors,
+        method: 1. create collection, insert 10k vectors,
                 2. search with topk=1000
                 3. range search from the 30th-330th distance as filter
                 4. verified the range search results is same as the search results in the range
         """
         collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
                                                     vector_data_type=vector_data_type, with_json=False)[0]
-        nb = 2000
-        for i in range(3):
-            data = cf.gen_general_default_list_data(nb=nb, auto_id=True,
-                                                    vector_data_type=vector_data_type, with_json=False)
+        nb = 1000
+        rounds = 10
+        for i in range(rounds):
+            data = cf.gen_general_default_list_data(nb=nb, auto_id=True, vector_data_type=vector_data_type,
+                                                    with_json=False, start=i*nb)
             collection_w.insert(data)
 
         collection_w.flush()
@@ -6918,51 +6920,49 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
         collection_w.load()
 
-        for i in range(2):
-            with_growing = bool(i % 2)
-            if with_growing is True:
-                # add some growing segments
-                for _ in range(2):
-                    data = cf.gen_general_default_list_data(nb=nb, auto_id=True,
-                                                            vector_data_type=vector_data_type, with_json=False)
-                    collection_w.insert(data)
+        if with_growing is True:
+            # add some growing segments
+            for j in range(rounds//2):
+                data = cf.gen_general_default_list_data(nb=nb, auto_id=True, vector_data_type=vector_data_type,
+                                                        with_json=False, start=(rounds+j)*nb)
+                collection_w.insert(data)
 
-            search_params = {"params": {}}
-            nq = 1
-            search_vectors = cf.gen_vectors(nq, ct.default_dim, vector_data_type=vector_data_type)
-            search_res = collection_w.search(search_vectors, default_search_field,
-                                             search_params, limit=1000)[0]
-            assert len(search_res[0].ids) == 1000
-            log.debug(f"search topk=1000 returns {len(search_res[0].ids)}")
-            check_topk = 300
-            check_from = 30
-            ids = search_res[0].ids[check_from:check_from + check_topk]
-            radius = search_res[0].distances[check_from + check_topk]
-            range_filter = search_res[0].distances[check_from]
+        search_params = {"params": {}}
+        nq = 1
+        search_vectors = cf.gen_vectors(nq, ct.default_dim, vector_data_type=vector_data_type)
+        search_res = collection_w.search(search_vectors, default_search_field,
+                                         search_params, limit=1000)[0]
+        assert len(search_res[0].ids) == 1000
+        log.debug(f"search topk=1000 returns {len(search_res[0].ids)}")
+        check_topk = 300
+        check_from = 30
+        ids = search_res[0].ids[check_from:check_from + check_topk]
+        radius = search_res[0].distances[check_from + check_topk]
+        range_filter = search_res[0].distances[check_from]
 
-            # rebuild the collection with test target index
-            collection_w.release()
-            collection_w.indexes[0].drop()
-            _index_params = {"index_type": index_type, "metric_type": metric,
-                             "params": cf.get_index_params_params(index_type)}
-            collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
-            collection_w.load()
+        # rebuild the collection with test target index
+        collection_w.release()
+        collection_w.indexes[0].drop()
+        _index_params = {"index_type": index_type, "metric_type": metric,
+                         "params": cf.get_index_params_params(index_type)}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
+        collection_w.load()
 
-            params = cf.get_search_params_params(index_type)
-            params.update({"radius": radius, "range_filter": range_filter})
-            if index_type == "HNSW":
-                params.update({"ef": check_topk+100})
-            if index_type == "IVF_PQ":
-                params.update({"max_empty_result_buckets": 100})
-            range_search_params = {"params": params}
-            range_res = collection_w.search(search_vectors, default_search_field,
-                                            range_search_params, limit=check_topk)[0]
-            range_ids = range_res[0].ids
-            # assert len(range_ids) == check_topk
-            log.debug(f"range search radius={radius}, range_filter={range_filter}, range results num: {len(range_ids)}")
-            hit_rate = round(len(set(ids).intersection(set(range_ids))) / len(set(ids)), 2)
-            log.debug(f"range search results with growing {bool(i % 2)} hit rate: {hit_rate}")
-            assert hit_rate >= 0.2    # issue #32630 to improve the accuracy
+        params = cf.get_search_params_params(index_type)
+        params.update({"radius": radius, "range_filter": range_filter})
+        if index_type == "HNSW":
+            params.update({"ef": check_topk+100})
+        if index_type == "IVF_PQ":
+            params.update({"max_empty_result_buckets": 100})
+        range_search_params = {"params": params}
+        range_res = collection_w.search(search_vectors, default_search_field,
+                                        range_search_params, limit=check_topk)[0]
+        range_ids = range_res[0].ids
+        # assert len(range_ids) == check_topk
+        log.debug(f"range search radius={radius}, range_filter={range_filter}, range results num: {len(range_ids)}")
+        hit_rate = round(len(set(ids).intersection(set(range_ids))) / len(set(ids)), 2)
+        log.debug(f"{vector_data_type} range search results {index_type} {metric} with_growing {with_growing} hit_rate: {hit_rate}")
+        assert hit_rate >= 0.2    # issue #32630 to improve the accuracy
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_filter", [1000, 1000.0])
