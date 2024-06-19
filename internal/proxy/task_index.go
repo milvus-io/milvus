@@ -370,7 +370,12 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()
 		}
 	}
-
+	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
+		exist := indexparamcheck.CheckVecIndexWithDataTypeExist(indexType, field.DataType)
+		if !exist {
+			return fmt.Errorf("data type %d can't build with this index %s", field.DataType, indexType)
+		}
+	}
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
