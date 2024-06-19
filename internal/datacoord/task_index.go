@@ -117,12 +117,14 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		if partitionKeyField == nil || err != nil {
 			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("buildID", it.buildID), zap.Error(err))
 		} else {
-			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-				FieldID:   partitionKeyField.FieldID,
-				FieldName: partitionKeyField.Name,
-				FieldType: int32(partitionKeyField.DataType),
-				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-			})
+			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+					FieldID:   partitionKeyField.FieldID,
+					FieldName: partitionKeyField.Name,
+					FieldType: int32(partitionKeyField.DataType),
+					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+				})
+			}
 		}
 	}
 
