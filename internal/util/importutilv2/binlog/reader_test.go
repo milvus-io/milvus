@@ -70,7 +70,7 @@ func (suite *ReaderSuite) SetupTest() {
 
 func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.FieldData) []byte {
 	dataType := field.GetDataType()
-	w := storage.NewInsertBinlogWriter(dataType, 1, 1, 1, field.GetFieldID())
+	w := storage.NewInsertBinlogWriter(dataType, 1, 1, 1, field.GetFieldID(), false)
 	assert.NotNil(t, w)
 	defer w.Close()
 
@@ -81,7 +81,7 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		dim = 1
 	}
 
-	evt, err := w.NextInsertEventWriter(int(dim))
+	evt, err := w.NextInsertEventWriter(false, int(dim))
 	assert.NoError(t, err)
 
 	evt.SetEventTimestamp(1, math.MaxInt64)
@@ -94,42 +94,42 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 
 	switch dataType {
 	case schemapb.DataType_Bool:
-		err = evt.AddBoolToPayload(data.(*storage.BoolFieldData).Data)
+		err = evt.AddBoolToPayload(data.(*storage.BoolFieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Int8:
-		err = evt.AddInt8ToPayload(data.(*storage.Int8FieldData).Data)
+		err = evt.AddInt8ToPayload(data.(*storage.Int8FieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Int16:
-		err = evt.AddInt16ToPayload(data.(*storage.Int16FieldData).Data)
+		err = evt.AddInt16ToPayload(data.(*storage.Int16FieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Int32:
-		err = evt.AddInt32ToPayload(data.(*storage.Int32FieldData).Data)
+		err = evt.AddInt32ToPayload(data.(*storage.Int32FieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Int64:
-		err = evt.AddInt64ToPayload(data.(*storage.Int64FieldData).Data)
+		err = evt.AddInt64ToPayload(data.(*storage.Int64FieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Float:
-		err = evt.AddFloatToPayload(data.(*storage.FloatFieldData).Data)
+		err = evt.AddFloatToPayload(data.(*storage.FloatFieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Double:
-		err = evt.AddDoubleToPayload(data.(*storage.DoubleFieldData).Data)
+		err = evt.AddDoubleToPayload(data.(*storage.DoubleFieldData).Data, nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_VarChar:
 		values := data.(*storage.StringFieldData).Data
 		for _, val := range values {
-			err = evt.AddOneStringToPayload(val)
+			err = evt.AddOneStringToPayload(val, true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_JSON:
 		rows := data.(*storage.JSONFieldData).Data
 		for i := 0; i < len(rows); i++ {
-			err = evt.AddOneJSONToPayload(rows[i])
+			err = evt.AddOneJSONToPayload(rows[i], true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_Array:
 		rows := data.(*storage.ArrayFieldData).Data
 		for i := 0; i < len(rows); i++ {
-			err = evt.AddOneArrayToPayload(rows[i])
+			err = evt.AddOneArrayToPayload(rows[i], true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_BinaryVector:

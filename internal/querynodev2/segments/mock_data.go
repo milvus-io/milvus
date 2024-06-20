@@ -632,7 +632,7 @@ func SaveDeltaLog(collectionID int64,
 	for i := int64(0); i < dData.RowCount; i++ {
 		int64PkValue := dData.Pks[i].(*storage.Int64PrimaryKey).Value
 		ts := dData.Tss[i]
-		eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts))
+		eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts), true)
 		sizeTotal += binary.Size(int64PkValue)
 		sizeTotal += binary.Size(ts)
 	}

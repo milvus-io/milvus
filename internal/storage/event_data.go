@@ -46,6 +46,7 @@ type DescriptorEventDataFixPart struct {
 	PartitionID     int64
 	SegmentID       int64
 	FieldID         int64
+	Nullable        bool
 	StartTimestamp  typeutil.Timestamp
 	EndTimestamp    typeutil.Timestamp
 	PayloadDataType schemapb.DataType
@@ -350,6 +351,7 @@ func newDescriptorEventData() *descriptorEventData {
 			StartTimestamp:  0,
 			EndTimestamp:    0,
 			PayloadDataType: -1,
+			Nullable:        false,
 		},
 		PostHeaderLengths: []uint8{},
 		Extras:            make(map[string]interface{}),

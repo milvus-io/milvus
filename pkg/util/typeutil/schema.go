@@ -590,6 +590,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{},
 					},
+					ValidData: fieldData.GetValidData(),
 				}
 			}
 			dstScalar := dst[i].GetScalars()
