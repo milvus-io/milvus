@@ -109,11 +109,20 @@ func (action *SegmentAction) Scope() querypb.DataScope {
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	if action.Type() == ActionTypeGrow {
+		// rpc finished
+		if !action.rpcReturned.Load() {
+			return false
+		}
+
+		// segment found in leader view
 		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
-		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
-		return len(views) > 0 &&
-			lo.Contains(nodeSegmentDist, action.Node()) &&
-			action.rpcReturned.Load()
+		if len(views) == 0 {
+			return false
+		}
+
+		// segment found in dist
+		segmentInTargetNode := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()), meta.WithSegmentID(action.SegmentID()))
+		return len(segmentInTargetNode) > 0
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
 		// loading segment replaces the node ID with the new one,

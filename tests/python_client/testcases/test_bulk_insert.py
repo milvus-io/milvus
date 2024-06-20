@@ -3,6 +3,7 @@ import random
 import time
 import pytest
 from pymilvus import DataType
+from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 import numpy as np
 from pathlib import Path
 from base.client_base import TestcaseBase
@@ -16,11 +17,10 @@ from common.bulk_insert_data import (
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
-    prepare_bulk_insert_csv_files,
     DataField as df,
 )
-
-
+from faker import Faker
+fake = Faker()
 default_vec_only_fields = [df.vec_field]
 default_multi_fields = [
     df.vec_field,
@@ -816,10 +816,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
             )
-        for f in [df.bf16_vec_field, df.fp16_vec_field]:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
         for f in binary_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_binary_index
@@ -961,10 +957,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
-        for f in [df.bf16_vec_field, df.fp16_vec_field]:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
             )
@@ -1112,10 +1104,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
-        for f in [df.bf16_vec_field, df.fp16_vec_field]:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
             )
@@ -1433,6 +1421,372 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
+    def test_with_all_field_json_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format):
+        """
+        collection schema 1: [pk, int64, float64, string float_vector]
+        data file: vectors.npy and uid.npy,
+        Steps:
+        1. create collection
+        2. import data
+        3. verify
+        """
+        self._connect()
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_string_field(name=df.string_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+            cf.gen_sparse_vec_field(name=df.sparse_vec_field),
+        ]
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name=self.bucket_name,
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=BulkFileType.JSON,
+        ) as remote_writer:
+            json_value = [
+                # 1,
+                # 1.0,
+                # "1",
+                # [1, 2, 3],
+                # ["1", "2", "3"],
+                # [1, 2, "3"],
+                {"key": "value"},
+            ]
+            for i in range(entities):
+                row = {
+                    df.pk_field: i,
+                    df.int_field: 1,
+                    df.float_field: 1.0,
+                    df.string_field: "string",
+                    df.json_field: json_value[i%len(json_value)],
+                    df.array_int_field: [1, 2],
+                    df.array_float_field: [1.0, 2.0],
+                    df.array_string_field: ["string1", "string2"],
+                    df.array_bool_field: [True, False],
+                    df.float_vec_field: cf.gen_vectors(1, dim)[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                }
+                if auto_id:
+                    row.pop(df.pk_field)
+                if enable_dynamic_field:
+                    row["name"] = fake.name()
+                    row["address"] = fake.address()
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in sparse_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_sparse_inverted_index
+            )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = ct.default_search_params
+        res, _ = self.collection_wrap.search(
+            search_data,
+            df.float_vec_field,
+            param=search_params,
+            limit=1,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_with_all_field_numpy_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field):
+        """
+        """
+        self._connect()
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_string_field(name=df.string_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+        ]
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name=self.bucket_name,
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=BulkFileType.NUMPY,
+        ) as remote_writer:
+            json_value = [
+                # 1,
+                # 1.0,
+                # "1",
+                # [1, 2, 3],
+                # ["1", "2", "3"],
+                # [1, 2, "3"],
+                {"key": "value"},
+            ]
+            for i in range(entities):
+                row = {
+                    df.pk_field: i,
+                    df.int_field: 1,
+                    df.float_field: 1.0,
+                    df.string_field: "string",
+                    df.json_field: json_value[i%len(json_value)],
+                    df.float_vec_field: cf.gen_vectors(1, dim)[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                }
+                if auto_id:
+                    row.pop(df.pk_field)
+                if enable_dynamic_field:
+                    row["name"] = fake.name()
+                    row["address"] = fake.address()
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in sparse_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_sparse_inverted_index
+            )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = ct.default_search_params
+        res, _ = self.collection_wrap.search(
+            search_data,
+            df.float_vec_field,
+            param=search_params,
+            limit=1,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
+    def test_with_all_field_parquet_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format):
+        """
+        """
+        self._connect()
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_string_field(name=df.string_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+            cf.gen_sparse_vec_field(name=df.sparse_vec_field),
+        ]
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name=self.bucket_name,
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=BulkFileType.JSON,
+        ) as remote_writer:
+            json_value = [
+                # 1,
+                # 1.0,
+                # "1",
+                # [1, 2, 3],
+                # ["1", "2", "3"],
+                # [1, 2, "3"],
+                {"key": "value"},
+            ]
+            for i in range(entities):
+                row = {
+                    df.pk_field: i,
+                    df.int_field: 1,
+                    df.float_field: 1.0,
+                    df.string_field: "string",
+                    df.json_field: json_value[i%len(json_value)],
+                    df.array_int_field: [1, 2],
+                    df.array_float_field: [1.0, 2.0],
+                    df.array_string_field: ["string1", "string2"],
+                    df.array_bool_field: [True, False],
+                    df.float_vec_field: cf.gen_vectors(1, dim)[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                }
+                if auto_id:
+                    row.pop(df.pk_field)
+                if enable_dynamic_field:
+                    row["name"] = fake.name()
+                    row["address"] = fake.address()
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in sparse_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_sparse_inverted_index
+            )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = ct.default_search_params
+        res, _ = self.collection_wrap.search(
+            search_data,
+            df.float_vec_field,
+            param=search_params,
+            limit=1,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
 
 
     @pytest.mark.tags(CaseLabel.L3)
