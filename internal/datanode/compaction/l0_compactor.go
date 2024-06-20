@@ -233,7 +233,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 
 func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
-	allDelta []*storage.DeleteData,
+	allDelta *storage.DeleteData,
 	segmentBfs map[int64]*metacache.BloomFilterSet,
 ) map[int64]*SegmentDeltaWriter {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
@@ -252,9 +252,6 @@ func (t *LevelZeroCompactionTask) splitDelta(
 		startIdx := value.StartIdx
 		pk2SegmentIDs := value.Segment2Hits
 
-		pks := allDelta[value.DeleteDataIdx].Pks
-		tss := allDelta[value.DeleteDataIdx].Tss
-
 		for segmentID, hits := range pk2SegmentIDs {
 			for i, hit := range hits {
 				if hit {
@@ -264,23 +261,21 @@ func (t *LevelZeroCompactionTask) splitDelta(
 						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
 						targetSegBuffer[segmentID] = writer
 					}
-					writer.Write(pks[startIdx+i], tss[startIdx+i])
+					writer.Write(allDelta.Pks[startIdx+i], allDelta.Tss[startIdx+i])
 				}
 			}
 		}
 		return true
 	})
-
 	return targetSegBuffer
 }
 
 type BatchApplyRet = struct {
-	DeleteDataIdx int
-	StartIdx      int
-	Segment2Hits  map[int64][]bool
+	StartIdx     int
+	Segment2Hits map[int64][]bool
 }
 
-func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deleteDatas []*storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -298,32 +293,27 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deleteD
 	retIdx := 0
 	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
 	var futures []*conc.Future[any]
-	for didx, data := range deleteDatas {
-		pks := data.Pks
-		for idx := 0; idx < len(pks); idx += batchSize {
-			startIdx := idx
-			endIdx := startIdx + batchSize
-			if endIdx > len(pks) {
-				endIdx = len(pks)
-			}
-
-			retIdx += 1
-			tmpRetIndex := retIdx
-			deleteDataId := didx
-			future := pool.Submit(func() (any, error) {
-				ret := batchPredict(pks[startIdx:endIdx])
-				retMap.Insert(tmpRetIndex, &BatchApplyRet{
-					DeleteDataIdx: deleteDataId,
-					StartIdx:      startIdx,
-					Segment2Hits:  ret,
-				})
-				return nil, nil
-			})
-			futures = append(futures, future)
+	pks := deltaData.Pks
+	for idx := 0; idx < len(pks); idx += batchSize {
+		startIdx := idx
+		endIdx := startIdx + batchSize
+		if endIdx > len(pks) {
+			endIdx = len(pks)
 		}
+
+		retIdx += 1
+		tmpRetIndex := retIdx
+		future := pool.Submit(func() (any, error) {
+			ret := batchPredict(pks[startIdx:endIdx])
+			retMap.Insert(tmpRetIndex, &BatchApplyRet{
+				StartIdx:     startIdx,
+				Segment2Hits: ret,
+			})
+			return nil, nil
+		})
+		futures = append(futures, future)
 	}
 	conc.AwaitAll(futures...)
-
 	return retMap
 }
 
@@ -333,7 +323,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 
 	results := make([]*datapb.CompactionSegment, 0)
 	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := log.Ctx(t.ctx).With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Int("max conc segment counts", batchSize),
 		zap.Int("total segment counts", len(targetSegments)),
@@ -366,7 +356,10 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 			return nil, err
 		}
 
-		log.Info("L0 compaction finished one batch", zap.Int("batch no.", i), zap.Int("batch segment count", len(batchResults)))
+		log.Info("L0 compaction finished one batch",
+			zap.Int("batch no.", i),
+			zap.Int("total deltaRowCount", int(allDelta.RowCount)),
+			zap.Int("batch segment count", len(batchResults)))
 		results = append(results, batchResults...)
 	}
 
@@ -374,27 +367,24 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 	return results, nil
 }
 
-func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs ...[]string) ([]*storage.DeleteData, error) {
+func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []string) (*storage.DeleteData, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadDelta")
 	defer span.End()
-	allData := make([]*storage.DeleteData, 0, len(deltaLogs))
-	for _, paths := range deltaLogs {
-		blobBytes, err := t.Download(ctx, paths)
-		if err != nil {
-			return nil, err
-		}
-		blobs := make([]*storage.Blob, 0, len(blobBytes))
-		for _, blob := range blobBytes {
-			blobs = append(blobs, &storage.Blob{Value: blob})
-		}
-		_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
-		if err != nil {
-			return nil, err
-		}
 
-		allData = append(allData, dData)
+	blobBytes, err := t.Download(ctx, deltaLogs)
+	if err != nil {
+		return nil, err
 	}
-	return allData, nil
+	blobs := make([]*storage.Blob, 0, len(blobBytes))
+	for _, blob := range blobBytes {
+		blobs = append(blobs, &storage.Blob{Value: blob})
+	}
+	_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
+	if err != nil {
+		return nil, err
+	}
+
+	return dData, nil
 }
 
 func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
