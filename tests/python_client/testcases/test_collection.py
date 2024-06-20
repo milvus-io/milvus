@@ -50,6 +50,7 @@ vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 max_vector_field_num = ct.max_vector_field_num
+SPARSE_FLOAT_VECTOR_data_type = "SPARSE_FLOAT_VECTOR"
 
 
 class TestCollectionParams(TestcaseBase):
@@ -1046,6 +1047,24 @@ class TestCollectionParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields)
         error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_multi_sparse_vectors(self):
+        """
+        target: Test multiple sparse vectors in a collection
+        method: create 2 sparse vectors in a collection
+        expected: successful creation of a collection
+        """
+        # 1. connect
+        self._connect()
+        # 2. create collection with multiple vectors
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector_data_type), cf.gen_float_vec_field(name="tmp", vector_data_type=sparse_vector_data_type)]
+        schema = cf.gen_collection_schema(fields=fields)
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
 
 class TestCollectionOperation(TestcaseBase):
