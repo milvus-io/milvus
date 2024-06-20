@@ -144,6 +144,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gofumpt -l -w cmd/
 	@$(INSTALL_PATH)/gofumpt -l -w pkg/
 	@$(INSTALL_PATH)/gofumpt -l -w client/
+	@$(INSTALL_PATH)/gofumpt -l -w tests/go_client/
 	@$(INSTALL_PATH)/gofumpt -l -w tests/integration/
 	@echo "Running gci fix"
 	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
@@ -159,9 +160,14 @@ lint-fix: getdeps
 #TODO: Check code specifications by golangci-lint
 static-check: getdeps
 	@echo "Running $@ check"
+	@echo "Start check core packages"
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@echo "Start check pkg package"
 	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@echo "Start check client package"
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@echo "Start check go_client e2e package"
+	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 

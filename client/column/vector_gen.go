@@ -48,7 +48,7 @@ func (c *ColumnBinaryVector) Slice(start, end int) Column {
 	return &ColumnBinaryVector{
 		ColumnBase: c.ColumnBase,
 		name:       c.name,
-		dim:		c.dim,
+		dim:        c.dim,
 		values:     c.values[start:end],
 	}
 }
@@ -153,7 +153,7 @@ func (c *ColumnFloatVector) Slice(start, end int) Column {
 	return &ColumnFloatVector{
 		ColumnBase: c.ColumnBase,
 		name:       c.name,
-		dim:		c.dim,
+		dim:        c.dim,
 		values:     c.values[start:end],
 	}
 }
@@ -260,7 +260,7 @@ func (c *ColumnFloat16Vector) Slice(start, end int) Column {
 	return &ColumnFloat16Vector{
 		ColumnBase: c.ColumnBase,
 		name:       c.name,
-		dim:		c.dim,
+		dim:        c.dim,
 		values:     c.values[start:end],
 	}
 }
@@ -365,7 +365,7 @@ func (c *ColumnBFloat16Vector) Slice(start, end int) Column {
 	return &ColumnBFloat16Vector{
 		ColumnBase: c.ColumnBase,
 		name:       c.name,
-		dim:		c.dim,
+		dim:        c.dim,
 		values:     c.values[start:end],
 	}
 }

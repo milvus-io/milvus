@@ -1,10 +1,11 @@
 package helper
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
-	"go.uber.org/zap"
 )
 
 type GetFieldNameOpt func(opt *getFieldNameOpt)
@@ -73,7 +74,7 @@ func GetFieldNameByFieldType(t entity.FieldType, opts ...GetFieldNameOpt) string
 	case entity.FieldTypeVarChar:
 		return common.DefaultVarcharFieldName
 	case entity.FieldTypeJSON:
-		if opt.isDynamic{
+		if opt.isDynamic {
 			return common.DefaultDynamicFieldName
 		}
 		return common.DefaultJSONFieldName
@@ -288,7 +289,6 @@ func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
 			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
 			fields = append(fields, scalarField)
 		}
-
 	}
 	for _, fieldType := range GetAllVectorFieldType() {
 		if fieldType == entity.FieldTypeSparseVector {
@@ -329,7 +329,6 @@ func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Fi
 			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
 			fields = append(fields, scalarField)
 		}
-
 	}
 	vecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeFloatVector)).WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
 	fields = append(fields, vecField)

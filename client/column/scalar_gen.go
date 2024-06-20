@@ -451,8 +451,8 @@ func (c *ColumnInt64) Slice(start, end int) Column {
 	}
 	return &ColumnInt64{
 		ColumnBase: c.ColumnBase,
-		name: c.name,
-		values: c.values[start: end],
+		name:       c.name,
+		values:     c.values[start:end],
 	}
 }
 

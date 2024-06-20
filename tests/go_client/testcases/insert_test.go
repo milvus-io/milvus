@@ -5,15 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/client/v2/index"
-
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -475,13 +474,13 @@ func TestInsertSparseVectorSamePosition(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	//insert data column
+	// insert data column
 	columnOpt := hp.TNewDataOption()
 	data := []column.Column{
 		hp.GenColumnData(1, entity.FieldTypeInt64, *columnOpt),
 		hp.GenColumnData(1, entity.FieldTypeVarChar, *columnOpt),
 	}
-	//invalid sparse vector: position > (maximum of uint32 - 1)
+	// invalid sparse vector: position > (maximum of uint32 - 1)
 	sparseVec, err := entity.NewSliceSparseEmbedding([]uint32{2, 10, 2}, []float32{0.4, 0.5, 0.6})
 	common.CheckErr(t, err, true)
 	data = append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
@@ -607,7 +606,7 @@ func TestInsertSparseRows(t *testing.T) {
 	// BaseRow generate insert rows
 	for i := 0; i < common.DefaultNb; i++ {
 		vec := common.GenSparseVector(500)
-		//log.Info("", zap.Any("SparseVec", vec))
+		// log.Info("", zap.Any("SparseVec", vec))
 		baseRow := hp.BaseRow{
 			Int64:     int64(i + 1),
 			SparseVec: vec,
@@ -657,7 +656,7 @@ func TestInsertRowMismatchFields(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithDim(8), hp.TNewSchemaOption())
 
-	//rows fields < schema fields
+	// rows fields < schema fields
 	rowsLess := make([]interface{}, 0, 10)
 	for i := 1; i < 11; i++ {
 		row := hp.BaseRow{

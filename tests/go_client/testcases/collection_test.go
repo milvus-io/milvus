@@ -5,16 +5,14 @@ import (
 	"testing"
 	"time"
 
-	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
+	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 var prefix = "collection"
@@ -42,7 +40,7 @@ func TestCreateCollection(t *testing.T) {
 	}
 }
 
-//func TestCreateCollection(t *testing.T) {}
+// func TestCreateCollection(t *testing.T) {}
 func TestCreateAutoIdCollectionField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -229,6 +227,7 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 		// verify partitions
 		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
 		require.Len(t, partitions, common.DefaultPartitionNum)
+		common.CheckErr(t, err, true)
 	}
 }
 
@@ -253,6 +252,7 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 		// verify partitions num
 		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
 		require.Len(t, partitions, int(numPartition))
+		common.CheckErr(t, err, true)
 	}
 }
 
@@ -275,6 +275,7 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	require.True(t, has)
 
 	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
+	common.CheckErr(t, err, true)
 	require.True(t, coll.Schema.EnableDynamicField)
 
 	// insert dynamic
@@ -307,7 +308,8 @@ func TestCreateCollectionDynamic(t *testing.T) {
 
 	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
 	log.Info("collection dynamic", zap.Bool("collectionSchema", coll.Schema.EnableDynamicField))
-	//require.True(t, coll.Schema.Fields[0].IsDynamic)
+	common.CheckErr(t, err, true)
+	// require.True(t, coll.Schema.Fields[0].IsDynamic)
 
 	// insert dynamic
 	columnOption := *hp.TNewDataOption()
@@ -627,7 +629,6 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 		{-1, "the specified partitions should be greater than 0 if partition key is used"},
 	}
 	for _, npStruct := range invalidNumPartitionStruct {
-
 		// create collection with num partitions
 		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, npStruct.errMsg)
@@ -910,7 +911,7 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 	common.CheckErr(t, err, false, fmt.Sprintf("maximum vector field's number should be limited to %d", common.MaxVectorFieldNum))
 }
 
-//func TestCreateCollection(t *testing.T) {}
+// func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -938,7 +939,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
 		{schema: nil, errMsg: "duplicated field name"},
-		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"}, // no collection name
+		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},

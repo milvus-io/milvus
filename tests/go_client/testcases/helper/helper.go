@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 func CreateContext(t *testing.T, timeout time.Duration) context.Context {
@@ -22,8 +22,7 @@ func CreateContext(t *testing.T, timeout time.Duration) context.Context {
 	return ctx
 }
 
-//var ArrayFieldType =
-
+// var ArrayFieldType =
 func GetAllArrayElementType() []entity.FieldType {
 	return []entity.FieldType{
 		entity.FieldTypeBool,
@@ -68,7 +67,7 @@ func GetAllFieldsType() []entity.FieldType {
 		entity.FieldTypeFloatVector,
 		entity.FieldTypeFloat16Vector,
 		entity.FieldTypeBFloat16Vector,
-		//entity.FieldTypeSparseVector, max vector fields num is 4
+		// entity.FieldTypeSparseVector, max vector fields num is 4
 	)
 	return allFieldType
 }
@@ -107,12 +106,14 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 // ----------------- prepare data --------------------------
 type CollectionPrepare struct{}
 
-var CollPrepare CollectionPrepare
-var FieldsFact FieldsFactory
+var (
+	CollPrepare CollectionPrepare
+	FieldsFact  FieldsFactory
+)
 
 func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption) (*CollectionPrepare, *entity.Schema) {
-
+	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption,
+) (*CollectionPrepare, *entity.Schema) {
 	fields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpt)
 	schemaOpt.Fields = fields
 	schema := GenSchema(schemaOpt)
@@ -128,7 +129,8 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 }
 
 func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	ip *InsertParams, option *GenDataOption) (*CollectionPrepare, clientv2.InsertResult) {
+	ip *InsertParams, option *GenDataOption,
+) (*CollectionPrepare, clientv2.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
@@ -138,7 +140,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 		if field.IsDynamic {
 			insertOpt.WithColumns(GenDynamicColumnData(option.start, ip.Nb)...)
 		} else {
-			if field.DataType == entity.FieldTypeArray{
+			if field.DataType == entity.FieldTypeArray {
 				option.TWithElementType(field.ElementType)
 			}
 			column := GenColumnData(ip.Nb, field.DataType, *option)
