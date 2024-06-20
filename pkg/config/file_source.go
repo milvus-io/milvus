@@ -181,10 +181,10 @@ func (fs *FileSource) update(configs map[string]string) error {
 		return err
 	}
 	fs.configs = configs
+	fs.Unlock()
 	if fs.manager != nil {
 		fs.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
-	fs.Unlock()
 
 	fs.configRefresher.fireEvents(events...)
 	return nil

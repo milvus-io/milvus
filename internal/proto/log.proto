@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package milvus.proto.log;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/logpb";
+
+import "milvus.proto";
+import "google/protobuf/empty.proto";
+
+//
+// Common
+//
+
+// Message is the basic unit of communication between publisher and consumer.
+message Message {
+    bytes payload = 1; // message body
+    map<string, string> properties = 2; // message properties
+}

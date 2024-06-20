@@ -29,12 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-var CheckPeriod = 1 * time.Second // TODO: dyh, move to config
 
 type DispatcherManager interface {
 	Add(ctx context.Context, vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
@@ -154,7 +153,7 @@ func (c *dispatcherManager) Run() {
 		zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	log.Info("dispatcherManager is running...")
 	ticker1 := time.NewTicker(10 * time.Second)
-	ticker2 := time.NewTicker(CheckPeriod)
+	ticker2 := time.NewTicker(paramtable.Get().MQCfg.MergeCheckInterval.GetAsDuration(time.Second))
 	defer ticker1.Stop()
 	defer ticker2.Stop()
 	for {

@@ -378,6 +378,20 @@ func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	}
 }
 
+// return VectorTypeSize for each dim (byte)
+func VectorTypeSize(dataType schemapb.DataType) float64 {
+	switch dataType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_SparseFloatVector:
+		return 4.0
+	case schemapb.DataType_BinaryVector:
+		return 0.125
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return 2.0
+	default:
+		return 0.0
+	}
+}
+
 func IsSparseFloatVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_SparseFloatVector
 }
@@ -576,6 +590,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{},
 					},
+					ValidData: fieldData.GetValidData(),
 				}
 			}
 			dstScalar := dst[i].GetScalars()
@@ -1085,6 +1100,16 @@ func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) b
 	return fieldSchema.DataType == schemapb.DataType_VarChar || fieldSchema.DataType == schemapb.DataType_String
 }
 
+// HasClusterKey check if a collection schema has ClusterKey field
+func HasClusterKey(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsClusteringKey {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
 func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	primaryFieldID := primaryFieldSchema.FieldID
@@ -1326,6 +1351,10 @@ type ResultWithID interface {
 	GetHasMoreResult() bool
 }
 
+type ResultWithTimestamp interface {
+	GetTimestamps() []int64
+}
+
 // SelectMinPK select the index of the minPK in results T of the cursors.
 func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	var (
@@ -1356,6 +1385,54 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 			if pk < minIntPK {
 				minIntPK = pk
 				sel = i
+			}
+		default:
+			continue
+		}
+	}
+
+	return sel, drainResult
+}
+
+func SelectMinPKWithTimestamp[T interface {
+	ResultWithID
+	ResultWithTimestamp
+}](results []T, cursors []int64) (int, bool) {
+	var (
+		sel                = -1
+		drainResult        = false
+		maxTimestamp int64 = 0
+		minIntPK     int64 = math.MaxInt64
+
+		firstStr = true
+		minStrPK string
+	)
+	for i, cursor := range cursors {
+		timestamps := results[i].GetTimestamps()
+		// if cursor has run out of all results from one result and this result has more matched results
+		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+			drainResult = true
+			continue
+		}
+
+		pkInterface := GetPK(results[i].GetIds(), cursor)
+
+		switch pk := pkInterface.(type) {
+		case string:
+			ts := timestamps[cursor]
+			if firstStr || pk < minStrPK || (pk == minStrPK && ts > maxTimestamp) {
+				firstStr = false
+				minStrPK = pk
+				sel = i
+				maxTimestamp = ts
+			}
+		case int64:
+			ts := timestamps[cursor]
+			if pk < minIntPK || (pk == minIntPK && ts > maxTimestamp) {
+				minIntPK = pk
+				sel = i
+				maxTimestamp = ts
 			}
 		default:
 			continue

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -73,9 +74,10 @@ func TestPerformance_MultiBF(t *testing.T) {
 	capacity := 100000
 	fpr := 0.001
 
-	keys := make([][]byte, 0)
-	for i := 0; i < capacity; i++ {
-		keys = append(keys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
+	testKeySize := 100000
+	testKeys := make([][]byte, 0)
+	for i := 0; i < testKeySize; i++ {
+		testKeys = append(testKeys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
 	}
 
 	bfNum := 100
@@ -83,8 +85,9 @@ func TestPerformance_MultiBF(t *testing.T) {
 	start1 := time.Now()
 	for i := 0; i < bfNum; i++ {
 		bf1 := newBlockedBloomFilter(uint(capacity), fpr)
-		for _, key := range keys {
-			bf1.Add(key)
+		for j := 0; j < capacity; j++ {
+			key := fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))
+			bf1.Add([]byte(key))
 		}
 		bfs1 = append(bfs1, bf1)
 	}
@@ -92,7 +95,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 	log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
 
 	start3 := time.Now()
-	for _, key := range keys {
+	for _, key := range testKeys {
 		locations := Locations(key, bfs1[0].K(), BlockedBF)
 		for i := 0; i < bfNum; i++ {
 			bfs1[i].TestLocations(locations)
@@ -104,7 +107,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 	start1 = time.Now()
 	for i := 0; i < bfNum; i++ {
 		bf2 := newBasicBloomFilter(uint(capacity), fpr)
-		for _, key := range keys {
+		for _, key := range testKeys {
 			bf2.Add(key)
 		}
 		bfs2 = append(bfs2, bf2)
@@ -113,13 +116,103 @@ func TestPerformance_MultiBF(t *testing.T) {
 	log.Info("Basic BF construct cost", zap.Duration("time", time.Since(start1)))
 
 	start3 = time.Now()
-	for _, key := range keys {
+	for _, key := range testKeys {
 		locations := Locations(key, bfs1[0].K(), BasicBF)
 		for i := 0; i < bfNum; i++ {
 			bfs2[i].TestLocations(locations)
 		}
 	}
 	log.Info("Basic BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+}
+
+func TestPerformance_BatchTestLocations(t *testing.T) {
+	capacity := 100000
+	fpr := 0.001
+
+	testKeySize := 100000
+	testKeys := make([][]byte, 0)
+	for i := 0; i < testKeySize; i++ {
+		testKeys = append(testKeys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
+	}
+
+	batchSize := 1000
+
+	bfNum := 100
+	bfs1 := make([]*blockedBloomFilter, 0)
+	start1 := time.Now()
+	for i := 0; i < bfNum; i++ {
+		bf1 := newBlockedBloomFilter(uint(capacity), fpr)
+		for j := 0; j < capacity; j++ {
+			key := fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))
+			bf1.Add([]byte(key))
+		}
+		bfs1 = append(bfs1, bf1)
+	}
+
+	log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
+
+	start3 := time.Now()
+	for _, key := range testKeys {
+		locations := Locations(key, bfs1[0].K(), BlockedBF)
+		for i := 0; i < bfNum; i++ {
+			bfs1[i].TestLocations(locations)
+		}
+	}
+	log.Info("Block BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+
+	start3 = time.Now()
+	for i := 0; i < testKeySize; i += batchSize {
+		endIdx := i + batchSize
+		if endIdx > testKeySize {
+			endIdx = testKeySize
+		}
+		locations := lo.Map(testKeys[i:endIdx], func(key []byte, _ int) []uint64 {
+			return Locations(key, bfs1[0].K(), BlockedBF)
+		})
+		hits := make([]bool, batchSize)
+		for j := 0; j < bfNum; j++ {
+			bfs1[j].BatchTestLocations(locations, hits)
+		}
+	}
+	log.Info("Block BF BatchTestLocation cost", zap.Duration("time", time.Since(start3)))
+
+	bfs2 := make([]*basicBloomFilter, 0)
+	start1 = time.Now()
+	for i := 0; i < bfNum; i++ {
+		bf2 := newBasicBloomFilter(uint(capacity), fpr)
+		for j := 0; j < capacity; j++ {
+			key := fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))
+			bf2.Add([]byte(key))
+		}
+		bfs2 = append(bfs2, bf2)
+	}
+
+	log.Info("Basic BF construct cost", zap.Duration("time", time.Since(start1)))
+
+	start3 = time.Now()
+	for _, key := range testKeys {
+		locations := Locations(key, bfs2[0].K(), BasicBF)
+		for i := 0; i < bfNum; i++ {
+			bfs2[i].TestLocations(locations)
+		}
+	}
+	log.Info("Basic BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+
+	start3 = time.Now()
+	for i := 0; i < testKeySize; i += batchSize {
+		endIdx := i + batchSize
+		if endIdx > testKeySize {
+			endIdx = testKeySize
+		}
+		locations := lo.Map(testKeys[i:endIdx], func(key []byte, _ int) []uint64 {
+			return Locations(key, bfs2[0].K(), BasicBF)
+		})
+		hits := make([]bool, batchSize)
+		for j := 0; j < bfNum; j++ {
+			bfs2[j].BatchTestLocations(locations, hits)
+		}
+	}
+	log.Info("Block BF BatchTestLocation cost", zap.Duration("time", time.Since(start3)))
 }
 
 func TestPerformance_Capacity(t *testing.T) {

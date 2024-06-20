@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 const (
@@ -247,25 +248,17 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 		}
 	case schemapb.DataType_Float16Vector:
 		placeholderType = commonpb.PlaceholderType_Float16Vector
+		data := testutils.GenerateFloat16Vectors(nq, dim)
 		for i := 0; i < nq; i++ {
-			total := dim * 2
-			ret := make([]byte, total)
-			_, err := rand.Read(ret)
-			if err != nil {
-				panic(err)
-			}
-			values = append(values, ret)
+			rowBytes := dim * 2
+			values = append(values, data[rowBytes*i:rowBytes*(i+1)])
 		}
 	case schemapb.DataType_BFloat16Vector:
 		placeholderType = commonpb.PlaceholderType_BFloat16Vector
+		data := testutils.GenerateBFloat16Vectors(nq, dim)
 		for i := 0; i < nq; i++ {
-			total := dim * 2
-			ret := make([]byte, total)
-			_, err := rand.Read(ret)
-			if err != nil {
-				panic(err)
-			}
-			values = append(values, ret)
+			rowBytes := dim * 2
+			values = append(values, data[rowBytes*i:rowBytes*(i+1)])
 		}
 	case schemapb.DataType_SparseFloatVector:
 		// for sparse, all query rows are encoded in a single byte array

@@ -4,11 +4,12 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type hnswChecker struct {
-	floatVectorBaseChecker
+	baseChecker
 }
 
 func (c hnswChecker) StaticCheck(params map[string]string) error {
@@ -32,11 +33,20 @@ func (c hnswChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c hnswChecker) CheckValidDataType(dType schemapb.DataType) error {
-	// TODO(SPARSE) we'll add sparse vector support in HNSW later in cardinal
-	if !typeutil.IsDenseFloatVectorType(dType) {
-		return fmt.Errorf("HNSW only support float vector data type")
+	if !typeutil.IsVectorType(dType) {
+		return fmt.Errorf("can't build hnsw in not vector type.")
 	}
 	return nil
+}
+
+func (c hnswChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
+	if typeutil.IsDenseFloatVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, FloatVectorDefaultMetricType)
+	} else if typeutil.IsSparseFloatVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, SparseFloatVectorDefaultMetricType)
+	} else if typeutil.IsBinaryVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, BinaryVectorDefaultMetricType)
+	}
 }
 
 func newHnswChecker() IndexChecker {

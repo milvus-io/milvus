@@ -93,4 +93,10 @@ func TestHistoricalStat(t *testing.T) {
 		ret := bfs.MayPkExist(lc)
 		assert.True(t, ret)
 	}
+
+	lc := storage.NewBatchLocationsCache(pks)
+	ret := bfs.BatchPkExist(lc)
+	for i := range ret {
+		assert.True(t, ret[i])
+	}
 }

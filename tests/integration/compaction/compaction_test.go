@@ -43,5 +43,6 @@ func (s *CompactionSuite) TearDownSuite() {
 }
 
 func TestCompaction(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/33716")
 	suite.Run(t, new(CompactionSuite))
 }

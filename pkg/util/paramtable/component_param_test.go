@@ -108,6 +108,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.preCreatedTopic.timeticker", "timeticker")
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
+
+		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -307,6 +309,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
 
 		assert.Equal(t, 4, Params.ChannelExclusiveNodeFactor.GetAsInt())
+
+		assert.Equal(t, 200, Params.CollectionObserverInterval.GetAsInt())
+		params.Save("queryCoord.collectionObserverInterval", "100")
+		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
+		params.Reset("queryCoord.collectionObserverInterval")
+
+		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Save("queryCoord.checkExecutedFlagInterval", "200")
+		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Reset("queryCoord.checkExecutedFlagInterval")
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -406,6 +418,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
+
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -429,6 +443,23 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		params.Save("dataCoord.compaction.clustering.enable", "true")
+		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10")
+		assert.Equal(t, int64(10), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10k")
+		assert.Equal(t, int64(10*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
+		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.dropTolerance", "86400")
+		assert.Equal(t, int64(86400), Params.ClusteringCompactionDropTolerance.GetAsInt64())
+		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
+		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -482,6 +513,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 2, Params.SlotCap.GetAsInt())
+		// clustering compaction
+		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
+		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
@@ -499,6 +535,14 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.RootCoordDml.FallbackKeys[0], "dml2")
 
 		assert.Equal(t, "by-dev-dml1", Params.RootCoordDml.GetValue())
+	})
+
+	t.Run("clustering compaction config", func(t *testing.T) {
+		Params := &params.CommonCfg
+		params.Save("common.usePartitionKeyAsClusteringKey", "true")
+		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
+		params.Save("common.useVectorAsClusteringKey", "true")
+		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
 	})
 }
 

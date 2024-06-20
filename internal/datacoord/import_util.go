@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -96,7 +97,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				FileStats:    group,
 			},
 		}
-		segments, err := AssignSegments(task, manager)
+		segments, err := AssignSegments(job, task, manager)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +107,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
+func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, error) {
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -120,7 +121,16 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 		}
 	}
 
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	if isL0Import {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
+	}
+	segmentLevel := datapb.SegmentLevel_L1
+	if isL0Import {
+		segmentLevel = datapb.SegmentLevel_L0
+	}
 
 	// alloc new segments
 	segments := make([]int64, 0)
@@ -128,7 +138,7 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for size > 0 {
-			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel)
+			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -215,7 +225,12 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 		return nil
 	}
 
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	if isL0Import {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
+	}
+
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
 	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
 	if maxSizePerFileGroup > threshold {
@@ -276,11 +291,23 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		log.Warn("global disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
+			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			zap.Int64("totalUsage", totalUsage),
+			zap.Int64("requestedTotal", requestedTotal),
+			zap.Int64("requestSize", requestSize),
+			zap.Float64("totalDiskQuota", totalDiskQuota))
 		return 0, err
 	}
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	colID := job.GetCollectionID()
 	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		log.Warn("collection disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
+			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			zap.Int64("collectionsUsage", collectionsUsage[colID]),
+			zap.Int64("requestedCollection", requestedCollections[colID]),
+			zap.Int64("requestSize", requestSize),
+			zap.Float64("collectionDiskQuota", collectionDiskQuota))
 		return 0, err
 	}
 	return requestSize, nil
@@ -355,6 +382,9 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
+	if job == nil {
+		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
+	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
 		progress := getPendingProgress(jobID, imeta)
@@ -398,7 +428,7 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 		}
 		for _, fileStat := range task.GetFileStats() {
 			progresses = append(progresses, &internalpb.ImportTaskProgress{
-				FileName:     fileStat.GetImportFile().String(),
+				FileName:     fmt.Sprintf("%v", fileStat.GetImportFile().GetPaths()),
 				FileSize:     fileStat.GetFileSize(),
 				Reason:       task.GetReason(),
 				Progress:     progress,

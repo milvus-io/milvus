@@ -103,6 +103,24 @@ func TestStartReleaseData(t *testing.T) {
 	assert.Equal(t, LoadStateOnlyMeta, l.state)
 }
 
+func TestBlockUntilDataLoadedOrReleased(t *testing.T) {
+	l := NewLoadStateLock(LoadStateOnlyMeta)
+	ch := make(chan struct{})
+	go func() {
+		l.BlockUntilDataLoadedOrReleased()
+		close(ch)
+	}()
+	select {
+	case <-ch:
+		t.Errorf("should be blocked")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	g, _ := l.StartLoadData()
+	g.Done(nil)
+	<-ch
+}
+
 func TestStartReleaseAll(t *testing.T) {
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	// Test Release All, nothing to do on only meta.

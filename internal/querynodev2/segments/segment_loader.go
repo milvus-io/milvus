@@ -761,8 +761,8 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	// filter out loaded & loading segments
 	infos := make([]*querypb.SegmentLoadInfo, 0, len(segments))
 	for _, segment := range segments {
-		// Not loaded & loading
-		if len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) == 0 &&
+		// Not loaded & loading & releasing.
+		if !loader.manager.Segment.Exist(segment.GetSegmentID(), segmentType) &&
 			!loader.loadingSegments.Contain(segment.GetSegmentID()) {
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
@@ -1451,7 +1451,7 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Loca
 			return err
 		}
 
-		rowIDs, err := er.GetInt64FromPayload()
+		rowIDs, _, err := er.GetInt64FromPayload()
 		if err != nil {
 			return err
 		}

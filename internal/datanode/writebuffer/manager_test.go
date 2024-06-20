@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -53,6 +54,7 @@ func (s *ManagerSuite) SetupSuite() {
 			},
 		},
 	}
+	initcore.InitMmapManager(paramtable.Get())
 
 	s.channelName = "by-dev-rootcoord-dml_0_100_v0"
 }
@@ -191,6 +193,27 @@ func (s *ManagerSuite) TestRemoveChannel() {
 		s.NotPanics(func() {
 			manager.RemoveChannel(s.channelName)
 		})
+	})
+}
+
+func (s *ManagerSuite) TestDropPartitions() {
+	manager := s.manager
+
+	s.Run("drop_not_exist", func() {
+		s.NotPanics(func() {
+			manager.DropPartitions("not_exist_channel", nil)
+		})
+	})
+
+	s.Run("drop_partitions", func() {
+		wb := NewMockWriteBuffer(s.T())
+		wb.EXPECT().DropPartitions(mock.Anything).Return()
+
+		manager.mut.Lock()
+		manager.buffers[s.channelName] = wb
+		manager.mut.Unlock()
+
+		manager.DropPartitions(s.channelName, []int64{1})
 	})
 }
 

@@ -81,10 +81,18 @@ WriteFieldData(File& file,
                 break;
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
-                // TODO(SPARSE): this is for mmap to write data to disk so that
-                // the file can be mmaped into memory.
-                throw std::runtime_error(
-                    "WriteFieldData for VECTOR_SPARSE_FLOAT not implemented");
+                for (size_t i = 0; i < data->get_num_rows(); ++i) {
+                    auto vec =
+                        static_cast<const knowhere::sparse::SparseRow<float>*>(
+                            data->RawValue(i));
+                    ssize_t written =
+                        file.Write(vec->data(), vec->data_byte_size());
+                    if (written < vec->data_byte_size()) {
+                        break;
+                    }
+                    total_written += written;
+                }
+                break;
             }
             default:
                 PanicInfo(DataTypeInvalid,

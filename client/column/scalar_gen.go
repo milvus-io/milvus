@@ -33,6 +33,21 @@ func (c *ColumnBool) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnBool) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnBool{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnBool) Get(idx int) (interface{}, error) {
 	var r bool // use default value
@@ -118,6 +133,21 @@ func (c *ColumnInt8) Type() entity.FieldType {
 // Len returns column values length
 func (c *ColumnInt8) Len() int {
 	return len(c.values)
+}
+
+func (c *ColumnInt8) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnInt8{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
 }
 
 // Get returns value at index as interface{}.
@@ -207,6 +237,21 @@ func (c *ColumnInt16) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnInt16) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnInt16{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnInt16) Get(idx int) (interface{}, error) {
 	var r int16 // use default value
@@ -292,6 +337,21 @@ func (c *ColumnInt32) Type() entity.FieldType {
 // Len returns column values length
 func (c *ColumnInt32) Len() int {
 	return len(c.values)
+}
+
+func (c *ColumnInt32) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnInt32{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
 }
 
 // Get returns value at index as interface{}.
@@ -381,6 +441,21 @@ func (c *ColumnInt64) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnInt64) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnInt64{
+		ColumnBase: c.ColumnBase,
+		name: c.name,
+		values: c.values[start: end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnInt64) Get(idx int) (interface{}, error) {
 	var r int64 // use default value
@@ -466,6 +541,21 @@ func (c *ColumnFloat) Type() entity.FieldType {
 // Len returns column values length
 func (c *ColumnFloat) Len() int {
 	return len(c.values)
+}
+
+func (c *ColumnFloat) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnFloat{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
 }
 
 // Get returns value at index as interface{}.
@@ -555,6 +645,21 @@ func (c *ColumnDouble) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnDouble) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnDouble{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnDouble) Get(idx int) (interface{}, error) {
 	var r float64 // use default value
@@ -640,6 +745,21 @@ func (c *ColumnString) Type() entity.FieldType {
 // Len returns column values length
 func (c *ColumnString) Len() int {
 	return len(c.values)
+}
+
+func (c *ColumnString) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnString{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		values:     c.values[start:end],
+	}
 }
 
 // Get returns value at index as interface{}.

@@ -51,6 +51,21 @@ func (c *ColumnSparseFloatVector) Len() int {
 	return len(c.vectors)
 }
 
+func (c *ColumnSparseFloatVector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnSparseFloatVector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		vectors:    c.vectors[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnSparseFloatVector) Get(idx int) (interface{}, error) {
 	if idx < 0 || idx >= c.Len() {
@@ -82,7 +97,7 @@ func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
 		for idx := 0; idx < vector.Len(); idx++ {
 			pos, value, _ := vector.Get(idx)
 			binary.LittleEndian.PutUint32(row[idx*8:], pos)
-			binary.LittleEndian.PutUint32(row[pos*8+4:], math.Float32bits(value))
+			binary.LittleEndian.PutUint32(row[idx*8+4:], math.Float32bits(value))
 		}
 		data = append(data, row)
 		if vector.Dim() > dim {

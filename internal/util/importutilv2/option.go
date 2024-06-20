@@ -34,6 +34,7 @@ const (
 	EndTs      = "end_ts"
 	EndTs2     = "endTs"
 	BackupFlag = "backup"
+	L0Import   = "l0_import"
 )
 
 type Options []*commonpb.KeyValuePair
@@ -72,6 +73,14 @@ func ParseTimeRange(options Options) (uint64, uint64, error) {
 func IsBackup(options Options) bool {
 	isBackup, err := funcutil.GetAttrByKeyFromRepeatedKV(BackupFlag, options)
 	if err != nil || strings.ToLower(isBackup) != "true" {
+		return false
+	}
+	return true
+}
+
+func IsL0Import(options Options) bool {
+	isL0Import, err := funcutil.GetAttrByKeyFromRepeatedKV(L0Import, options)
+	if err != nil || strings.ToLower(isL0Import) != "true" {
 		return false
 	}
 	return true

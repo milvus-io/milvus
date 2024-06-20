@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
@@ -32,6 +33,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+func getFieldData[T interface {
+	GetFieldsData() []*schemapb.FieldData
+}](rs T, fieldID int64) (*schemapb.FieldData, bool) {
+	fd, has := lo.Find(rs.GetFieldsData(), func(fd *schemapb.FieldData) bool {
+		return fd.GetFieldId() == fieldID
+	})
+	return fd, has
+}
 
 type ResultSuite struct {
 	suite.Suite
@@ -54,10 +64,12 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 
 	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000}, 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
 	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
@@ -88,10 +100,14 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
 			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
 		suite.NoError(err)
-		suite.Equal(2, len(result.GetFieldsData()))
+		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
-		suite.Equal(Int64Array, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-		suite.InDeltaSlice(FloatVector, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+		intFieldData, has := getFieldData(result, Int64FieldID)
+		suite.Require().True(has)
+		suite.Equal(Int64Array, intFieldData.GetScalars().GetLongData().Data)
+		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+		suite.Require().True(has)
+		suite.InDeltaSlice(FloatVector, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 	})
 
 	suite.Run("test nil results", func() {
@@ -168,11 +184,15 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 				suite.Run(test.description, func() {
 					result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
 						NewMergeParam(test.limit, make([]int64, 0), nil, false))
-					suite.Equal(2, len(result.GetFieldsData()))
+					suite.Equal(3, len(result.GetFieldsData()))
 					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
-					suite.Equal(resultField0[0:test.limit], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+					intFieldData, has := getFieldData(result, Int64FieldID)
+					suite.Require().True(has)
+					suite.Equal(resultField0[0:test.limit], intFieldData.GetScalars().GetLongData().Data)
+					vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+					suite.Require().True(has)
+					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 					suite.NoError(err)
 				})
 			}
@@ -211,10 +231,14 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		suite.Run("test int ID", func() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			suite.Equal([]int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-			suite.InDeltaSlice(resultFloat, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
+			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 			suite.NoError(err)
 		})
 
@@ -238,10 +262,14 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
-			suite.Equal([]int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-			suite.InDeltaSlice(resultFloat, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
+			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 			suite.NoError(err)
 		})
 	})
@@ -259,10 +287,12 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 
 	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000}, 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
 	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
@@ -291,10 +321,14 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
 			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
 		suite.NoError(err)
-		suite.Equal(2, len(result.GetFieldsData()))
+		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
-		suite.Equal(Int64Array, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-		suite.InDeltaSlice(FloatVector, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+		intFieldData, has := getFieldData(result, Int64FieldID)
+		suite.Require().True(has)
+		suite.Equal(Int64Array, intFieldData.GetScalars().GetLongData().GetData())
+		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+		suite.Require().True(has)
+		suite.InDeltaSlice(FloatVector, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 	})
 
 	suite.Run("test nil results", func() {
@@ -389,11 +423,16 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 				suite.Run(test.description, func() {
 					result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
 						NewMergeParam(test.limit, make([]int64, 0), nil, false))
-					suite.Equal(2, len(result.GetFieldsData()))
+					suite.Equal(3, len(result.GetFieldsData()))
 					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
-					suite.Equal(resultField0[0:test.limit], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+
+					intFieldData, has := getFieldData(result, Int64FieldID)
+					suite.Require().True(has)
+					suite.Equal(resultField0[0:test.limit], intFieldData.GetScalars().GetLongData().Data)
+					vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+					suite.Require().True(has)
+					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 					suite.NoError(err)
 				})
 			}
@@ -430,10 +469,15 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 		suite.Run("test int ID", func() {
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			suite.Equal([]int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-			suite.InDeltaSlice(resultFloat, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
+			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 			suite.NoError(err)
 		})
 
@@ -457,10 +501,14 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
-			suite.Equal([]int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-			suite.InDeltaSlice(resultFloat, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
+			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 			suite.NoError(err)
 		})
 	})
@@ -478,12 +526,14 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0}
 
 	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000, 3000}, 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID,
 		schemapb.DataType_Int64, Int64Array[0:3], 1))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID,
 		schemapb.DataType_FloatVector, FloatVector[0:12], Dim))
 
 	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000, 4000}, 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID,
 		schemapb.DataType_Int64, Int64Array[0:3], 1))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID,
@@ -518,13 +568,17 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
 				NewMergeParam(3, make([]int64, 0), nil, true))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			// has more result both, stop reduce when draining one result
 			// here, we can only get best result from 0 to 4 without 6, because result1 has more results
 			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			suite.Equal([]int64{11, 22, 11, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 22, 11, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44},
-				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 		})
 		suite.Run("merge stop unlimited", func() {
 			result1.HasMoreResult = false
@@ -532,13 +586,17 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, true))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			// as result1 and result2 don't have better results neither
 			// we can reduce all available result into the reduced result
 			suite.Equal([]int64{0, 1, 2, 3, 4, 6}, result.GetIds().GetIntId().GetData())
-			suite.Equal([]int64{11, 22, 11, 22, 33, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 22, 11, 22, 33, 33}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44, 11, 22, 33, 44},
-				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 		})
 		suite.Run("merge stop one limited", func() {
 			result1.HasMoreResult = true
@@ -546,12 +604,16 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, true))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			// as result1 may have better results, stop reducing when draining it
 			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			suite.Equal([]int64{11, 22, 11, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			intFieldData, has := getFieldData(result, Int64FieldID)
+			suite.Require().True(has)
+			suite.Equal([]int64{11, 22, 11, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
+			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+			suite.Require().True(has)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44},
-				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 		})
 	})
 
@@ -581,11 +643,15 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
 			NewMergeParam(3, make([]int64, 0), nil, true))
 		suite.NoError(err)
-		suite.Equal(2, len(result.GetFieldsData()))
+		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 2, 4, 6, 7}, result.GetIds().GetIntId().GetData())
-		suite.Equal([]int64{11, 11, 22, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+		intFieldData, has := getFieldData(result, Int64FieldID)
+		suite.Require().True(has)
+		suite.Equal([]int64{11, 11, 22, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
+		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
+		suite.Require().True(has)
 		suite.InDeltaSlice([]float32{1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8, 11, 22, 33, 44},
-			result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 	})
 
 	suite.Run("test stop internal merge for best with early termination", func() {
@@ -599,6 +665,12 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			},
 			FieldsData: fieldDataArray1,
 		}
+		var drainDataArray2 []*schemapb.FieldData
+		drainDataArray2 = append(drainDataArray2, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000}, 1))
+		drainDataArray2 = append(drainDataArray2, genFieldData(Int64FieldName, Int64FieldID,
+			schemapb.DataType_Int64, Int64Array[0:1], 1))
+		drainDataArray2 = append(drainDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID,
+			schemapb.DataType_FloatVector, FloatVector[0:4], Dim))
 		result2 := &internalpb.RetrieveResults{
 			Ids: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{
@@ -607,7 +679,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 					},
 				},
 			},
-			FieldsData: fieldDataArray2,
+			FieldsData: drainDataArray2,
 		}
 		suite.Run("test drain one result without more results", func() {
 			result1.HasMoreResult = false
@@ -615,7 +687,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
 				NewMergeParam(3, make([]int64, 0), nil, true))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 2, 4, 7}, result.GetIds().GetIntId().GetData())
 		})
 		suite.Run("test drain one result with more results", func() {
@@ -624,7 +696,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
 				NewMergeParam(3, make([]int64, 0), nil, true))
 			suite.NoError(err)
-			suite.Equal(2, len(result.GetFieldsData()))
+			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 2}, result.GetIds().GetIntId().GetData())
 		})
 	})

@@ -77,6 +77,7 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
          *rb_reader) {
         AssertInfo(maybe_batch.ok(), "get batch record success");
         auto array = maybe_batch.ValueOrDie()->column(column_index);
+        // to read
         field_data_->FillFieldData(array);
     }
     AssertInfo(field_data_->IsFull(), "field data hasn't been filled done");

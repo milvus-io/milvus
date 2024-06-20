@@ -37,6 +37,7 @@ func TestResizePools(t *testing.T) {
 		pt.Reset(pt.QueryNodeCfg.MaxReadConcurrency.Key)
 		pt.Reset(pt.QueryNodeCfg.CGOPoolSizeRatio.Key)
 		pt.Reset(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key)
+		pt.Reset(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key)
 	}()
 
 	t.Run("SQPool", func(t *testing.T) {
@@ -101,6 +102,27 @@ func TestResizePools(t *testing.T) {
 			HasUpdated: true,
 		})
 		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+	})
+
+	t.Run("BfApplyPool", func(t *testing.T) {
+		expectedCap := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
+
+		ResizeBFApplyPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetBFApplyPool().Cap())
+
+		pt.Save(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key, strconv.FormatFloat(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsFloat()*2, 'f', 10, 64))
+		ResizeBFApplyPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetBFApplyPool().Cap())
+
+		pt.Save(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key, "0")
+		ResizeBFApplyPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetBFApplyPool().Cap())
 	})
 
 	t.Run("error_pool", func(*testing.T) {

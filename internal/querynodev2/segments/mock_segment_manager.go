@@ -99,6 +99,49 @@ func (_c *MockSegmentManager_Empty_Call) RunAndReturn(run func() bool) *MockSegm
 	return _c
 }
 
+// Exist provides a mock function with given fields: segmentID, typ
+func (_m *MockSegmentManager) Exist(segmentID int64, typ commonpb.SegmentState) bool {
+	ret := _m.Called(segmentID, typ)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64, commonpb.SegmentState) bool); ok {
+		r0 = rf(segmentID, typ)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegmentManager_Exist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exist'
+type MockSegmentManager_Exist_Call struct {
+	*mock.Call
+}
+
+// Exist is a helper method to define mock.On call
+//   - segmentID int64
+//   - typ commonpb.SegmentState
+func (_e *MockSegmentManager_Expecter) Exist(segmentID interface{}, typ interface{}) *MockSegmentManager_Exist_Call {
+	return &MockSegmentManager_Exist_Call{Call: _e.mock.On("Exist", segmentID, typ)}
+}
+
+func (_c *MockSegmentManager_Exist_Call) Run(run func(segmentID int64, typ commonpb.SegmentState)) *MockSegmentManager_Exist_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(commonpb.SegmentState))
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_Exist_Call) Return(_a0 bool) *MockSegmentManager_Exist_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegmentManager_Exist_Call) RunAndReturn(run func(int64, commonpb.SegmentState) bool) *MockSegmentManager_Exist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Get provides a mock function with given fields: segmentID
 func (_m *MockSegmentManager) Get(segmentID int64) Segment {
 	ret := _m.Called(segmentID)

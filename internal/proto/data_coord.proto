@@ -110,7 +110,7 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
-  rpc Compaction(CompactionPlan) returns (common.Status) {}
+  rpc CompactionV2(CompactionPlan) returns (common.Status) {}
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
   rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
 
@@ -129,6 +129,8 @@ service DataNode {
   rpc DropImport(DropImportRequest) returns(common.Status) {}
 
   rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
+
+  rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -267,6 +269,7 @@ message VchannelInfo {
   repeated int64 indexed_segmentIds = 10;
   repeated SegmentInfo indexed_segments = 11;
   repeated int64 level_zero_segment_ids = 12;
+  map<int64, int64> partition_stats_versions = 13;
 }
 
 message WatchDmChannelsRequest {
@@ -323,6 +326,12 @@ message SegmentInfo {
   // so segments with Legacy level shall be treated as L1 segment
   SegmentLevel level = 20;
   int64 storage_version = 21;
+
+  int64 partition_stats_version = 22;
+  // use in major compaction, if compaction fail, should revert segment level to last value
+  SegmentLevel last_level = 23;
+  // use in major compaction, if compaction fail, should revert partition stats version to last value 
+  int64 last_partition_stats_version = 24;
 }
 
 message SegmentStartPosition {
@@ -490,6 +499,7 @@ enum CompactionType {
   MinorCompaction = 5;
   MajorCompaction = 6;
   Level0DeleteCompaction = 7;
+  ClusteringCompaction = 8;
 }
 
 message CompactionStateRequest {
@@ -544,6 +554,12 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   schema.CollectionSchema schema = 10;
+  int64 clustering_key_field = 11;
+  int64 max_segment_rows = 12;
+  int64 prefer_segment_rows = 13;
+  string analyze_result_path = 14;
+  repeated int64 analyze_segment_ids = 15;
+  int32 state = 16;
 }
 
 message CompactionSegment {
@@ -558,7 +574,7 @@ message CompactionSegment {
 
 message CompactionPlanResult {
   int64 planID = 1;
-  common.CompactionState state = 2;
+  CompactionTaskState state = 2;
   repeated CompactionSegment segments = 3;
   string channel = 4;
   CompactionType type = 5;
@@ -773,6 +789,7 @@ message ImportSegmentInfo {
   int64 imported_rows = 2;
   repeated FieldBinlog binlogs = 3;
   repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
 }
 
 message QueryImportResponse {
@@ -891,4 +908,22 @@ message CompactionTask{
   msg.MsgPosition pos = 17;
   int64 nodeID = 18;
   schema.CollectionSchema schema = 19;
+  schema.FieldSchema clustering_key_field = 20;
+  int64 max_segment_rows = 21;
+  int64 prefer_segment_rows = 22;
+  int64 analyzeTaskID = 23;
+  int64 analyzeVersion = 24;
+}
+
+message PartitionStatsInfo {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  string vChannel = 3;
+  int64 version = 4;
+  repeated int64 segmentIDs = 5;
+  int64 analyzeTaskID = 6;
+}
+
+message DropCompactionPlanRequest {
+  int64 planID = 1;
 }

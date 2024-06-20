@@ -44,6 +44,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// DropPartitions mark segments as Dropped of the partition
+	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
 	// If there are any non-empty segment buffer, returns the earliest buffer start position.
 	// Otherwise, returns latest buffered checkpoint.
@@ -222,6 +224,13 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 	return wb.sealSegments(ctx, segmentIDs)
 }
 
+func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	wb.dropPartitions(partitionIDs)
+}
+
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
 	wb.flushTimestamp.Store(flushTs)
 }
@@ -328,6 +337,14 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 	return nil
 }
 
+func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
+	// mark segment dropped if partition was dropped
+	segIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithPartitionIDs(partitionIDs))
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Dropped),
+		metacache.WithSegmentIDs(segIDs...),
+	)
+}
+
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
 	log := log.Ctx(ctx)
 	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
@@ -387,7 +404,7 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		return nil, nil, nil, nil
@@ -425,6 +442,32 @@ func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	}
 
 	return ok && ts > uint64(minTs)
+}
+
+func (id *inData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits []bool) []bool {
+	if len(pks) == 0 {
+		return nil
+	}
+
+	pkType := pks[0].Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.intPKTs[pks[i].GetValue().(int64)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	case schemapb.DataType_VarChar:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	}
+
+	return hits
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
@@ -561,10 +604,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	}
 
 	actions := []metacache.SegmentAction{}
-	if insert != nil {
-		batchSize = int64(insert.GetRowNum())
-		totalMemSize += float64(insert.GetMemorySize())
+
+	for _, chunk := range insert {
+		batchSize = int64(chunk.GetRowNum())
+		totalMemSize += float64(chunk.GetMemorySize())
 	}
+
 	if delta != nil {
 		totalMemSize += float64(delta.Size())
 	}
@@ -588,6 +633,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
 		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
 		pack.WithFlush()
+	}
+
+	if segmentInfo.State() == commonpb.SegmentState_Dropped {
+		pack.WithDrop()
 	}
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)

@@ -110,14 +110,15 @@ func WithSegment2LeaderView(segmentID int64, isGrowing bool) LeaderViewFilter {
 }
 
 type LeaderView struct {
-	ID               int64
-	CollectionID     int64
-	Channel          string
-	Version          int64
-	Segments         map[int64]*querypb.SegmentDist
-	GrowingSegments  map[int64]*Segment
-	TargetVersion    int64
-	NumOfGrowingRows int64
+	ID                     int64
+	CollectionID           int64
+	Channel                string
+	Version                int64
+	Segments               map[int64]*querypb.SegmentDist
+	GrowingSegments        map[int64]*Segment
+	TargetVersion          int64
+	NumOfGrowingRows       int64
+	PartitionStatsVersions map[int64]int64
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -132,14 +133,15 @@ func (view *LeaderView) Clone() *LeaderView {
 	}
 
 	return &LeaderView{
-		ID:               view.ID,
-		CollectionID:     view.CollectionID,
-		Channel:          view.Channel,
-		Version:          view.Version,
-		Segments:         segments,
-		GrowingSegments:  growings,
-		TargetVersion:    view.TargetVersion,
-		NumOfGrowingRows: view.NumOfGrowingRows,
+		ID:                     view.ID,
+		CollectionID:           view.CollectionID,
+		Channel:                view.Channel,
+		Version:                view.Version,
+		Segments:               segments,
+		GrowingSegments:        growings,
+		TargetVersion:          view.TargetVersion,
+		NumOfGrowingRows:       view.NumOfGrowingRows,
+		PartitionStatsVersions: view.PartitionStatsVersions,
 	}
 }
 

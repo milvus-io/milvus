@@ -183,7 +183,7 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
-// set the logPath of segement in meta empty, to save space
+// set the logPath of segment in meta empty, to save space
 // if segment has logPath, make it empty
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	if segment, ok := s.segments[segmentID]; ok {
@@ -291,6 +291,13 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 		}
 	}
 	return false
+}
+
+// SetLevel sets level for segment
+func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
+	}
 }
 
 // Clone deep clone the segment info and return a new instance
@@ -447,6 +454,13 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
+	}
+}
+
+// SetLevel is the option to set level for segment info
+func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.Level = level
 	}
 }
 

@@ -24,6 +24,7 @@
 #include "index/BitmapIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
+#include "index/InvertedIndexTantivy.h"
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
@@ -37,6 +38,7 @@ enum class InternalIndexType {
     BITMAP,
     STLSORT,
     MARISA,
+    INVERTED,
 };
 
 /*
@@ -125,6 +127,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
+        if (field_type_ == proto::schema::DataType::Array) {
+            return false;
+        }
         return internal_index_->HasRawData();
     }
 
@@ -136,10 +141,20 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
  private:
     InternalIndexType
+    SelectBuildTypeForPrimitiveType(
+        const std::vector<FieldDataPtr>& field_datas);
+
+    InternalIndexType
+    SelectBuildTypeForArrayType(const std::vector<FieldDataPtr>& field_datas);
+
+    InternalIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 
     InternalIndexType
     SelectIndexBuildType(size_t n, const T* values);
+
+    BinarySet
+    SerializeIndexType();
 
     void
     DeserializeIndexType(const BinarySet& binary_set);
@@ -147,18 +162,20 @@ class HybridScalarIndex : public ScalarIndex<T> {
     void
     BuildInternal(const std::vector<FieldDataPtr>& field_datas);
 
-    void
-    LoadInternal(const BinarySet& binary_set, const Config& config);
-
     std::shared_ptr<ScalarIndex<T>>
     GetInternalIndex();
+
+    std::string
+    GetRemoteIndexTypeFile(const std::vector<std::string>& files);
 
  public:
     bool is_built_{false};
     int32_t bitmap_index_cardinality_limit_;
+    proto::schema::DataType field_type_;
     InternalIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_{nullptr};
+    storage::FileManagerContext file_manager_context_;
+    std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
     std::shared_ptr<milvus_storage::Space> space_{nullptr};
 };
 

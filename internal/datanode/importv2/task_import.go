@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ImportTask struct {
@@ -78,27 +77,8 @@ func NewImportTask(req *datapb.ImportRequest,
 		syncMgr:      syncMgr,
 		cm:           cm,
 	}
-	task.initMetaCaches(req)
+	task.metaCaches = NewMetaCache(req)
 	return task
-}
-
-func (t *ImportTask) initMetaCaches(req *datapb.ImportRequest) {
-	metaCaches := make(map[string]metacache.MetaCache)
-	schema := typeutil.AppendSystemFields(req.GetSchema())
-	for _, channel := range req.GetVchannels() {
-		info := &datapb.ChannelWatchInfo{
-			Vchan: &datapb.VchannelInfo{
-				CollectionID: req.GetCollectionID(),
-				ChannelName:  channel,
-			},
-			Schema: schema,
-		}
-		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
-		})
-		metaCaches[channel] = metaCache
-	}
-	t.metaCaches = metaCaches
 }
 
 func (t *ImportTask) GetType() TaskType {
@@ -210,7 +190,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, task Task) error {
 		return err
 	}
 	for _, syncTask := range syncTasks {
-		segmentInfo, err := NewImportSegmentInfo(syncTask, iTask)
+		segmentInfo, err := NewImportSegmentInfo(syncTask, iTask.metaCaches)
 		if err != nil {
 			return err
 		}
@@ -224,7 +204,6 @@ func (t *ImportTask) sync(task *ImportTask, hashedData HashedData) ([]*conc.Futu
 	log.Info("start to sync import data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
-	segmentImportedSizes := make(map[int64]int)
 	for channelIdx, datas := range hashedData {
 		channel := task.GetVchannels()[channelIdx]
 		for partitionIdx, data := range datas {
@@ -232,13 +211,12 @@ func (t *ImportTask) sync(task *ImportTask, hashedData HashedData) ([]*conc.Futu
 				continue
 			}
 			partitionID := task.GetPartitionIDs()[partitionIdx]
-			size := data.GetMemorySize()
-			segmentID := PickSegment(task, segmentImportedSizes, channel, partitionID, size)
-			syncTask, err := NewSyncTask(task.ctx, task, segmentID, partitionID, channel, data)
+			segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
+			syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
+				segmentID, partitionID, task.GetCollectionID(), channel, data, nil)
 			if err != nil {
 				return nil, nil, err
 			}
-			segmentImportedSizes[segmentID] += size
 			future := t.syncMgr.SyncData(task.ctx, syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)

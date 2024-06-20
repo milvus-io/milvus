@@ -34,6 +34,25 @@ func (c *ColumnBinaryVector) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnBinaryVector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnBinaryVector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		dim:		c.dim,
+		values:     c.values[start:end],
+	}
+}
+
 // Dim returns vector dimension
 func (c *ColumnBinaryVector) Dim() int {
 	return c.dim
@@ -118,6 +137,25 @@ func (c *ColumnFloatVector) Type() entity.FieldType {
 // Len returns column data length
 func (c *ColumnFloatVector) Len() int {
 	return len(c.values)
+}
+
+func (c *ColumnFloatVector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnFloatVector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		dim:		c.dim,
+		values:     c.values[start:end],
+	}
 }
 
 // Dim returns vector dimension
@@ -208,6 +246,25 @@ func (c *ColumnFloat16Vector) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnFloat16Vector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnFloat16Vector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		dim:		c.dim,
+		values:     c.values[start:end],
+	}
+}
+
 // Dim returns vector dimension
 func (c *ColumnFloat16Vector) Dim() int {
 	return c.dim
@@ -244,7 +301,7 @@ func (c *ColumnFloat16Vector) FieldData() *schemapb.FieldData {
 		FieldName: c.name,
 	}
 
-	data := make([]byte, 0, len(c.values)*c.dim)
+	data := make([]byte, 0, len(c.values)*c.dim*2)
 
 	for _, vector := range c.values {
 		data = append(data, vector...)
@@ -294,6 +351,25 @@ func (c *ColumnBFloat16Vector) Len() int {
 	return len(c.values)
 }
 
+func (c *ColumnBFloat16Vector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnBFloat16Vector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		dim:		c.dim,
+		values:     c.values[start:end],
+	}
+}
+
 // Dim returns vector dimension
 func (c *ColumnBFloat16Vector) Dim() int {
 	return c.dim
@@ -330,7 +406,7 @@ func (c *ColumnBFloat16Vector) FieldData() *schemapb.FieldData {
 		FieldName: c.name,
 	}
 
-	data := make([]byte, 0, len(c.values)*c.dim)
+	data := make([]byte, 0, len(c.values)*c.dim*2)
 
 	for _, vector := range c.values {
 		data = append(data, vector...)

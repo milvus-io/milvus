@@ -171,7 +171,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}
@@ -244,6 +244,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	})
 
 	s.Run("with_delta_data", func() {
+		s.metacache.EXPECT().RemoveSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
@@ -298,7 +299,7 @@ func (s *SyncTaskSuite) TestCompactToNull() {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}

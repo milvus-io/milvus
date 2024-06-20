@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -50,11 +49,9 @@ func (t *mixCompactionTask) processPipelining() bool {
 func (t *mixCompactionTask) processMetaSaved() bool {
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 	if err == nil {
-		t.resetSegmentCompacting()
-		UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-		log.Info("handleCompactionResult: success to handle merge compaction result")
+		return t.processCompleted()
 	}
-	return err == nil
+	return false
 }
 
 func (t *mixCompactionTask) processExecuting() bool {
@@ -67,7 +64,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		return false
 	}
 	switch result.GetState() {
-	case commonpb.CompactionState_Executing:
+	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err == nil {
@@ -75,13 +72,15 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 		}
 		return false
-	case commonpb.CompactionState_Completed:
+	case datapb.CompactionTaskState_completed:
 		t.result = result
-		result := t.result
 		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
 			log.Info("illegal compaction results")
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
-			return err == nil
+			if err != nil {
+				return false
+			}
+			return t.processFailed()
 		}
 		saveSuccess := t.saveSegmentMeta()
 		if !saveSuccess {
@@ -91,6 +90,12 @@ func (t *mixCompactionTask) processExecuting() bool {
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
 		if err == nil {
 			return t.processMetaSaved()
+		}
+		return false
+	case datapb.CompactionTaskState_failed:
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		if err != nil {
+			log.Warn("fail to updateAndSaveTaskMeta")
 		}
 		return false
 	}
@@ -160,10 +165,16 @@ func (t *mixCompactionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
+	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	})
+	if err == nil {
+		t.resetSegmentCompacting()
+		UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
+		log.Info("handleCompactionResult: success to handle merge compaction result")
 	}
-	return true
+
+	return err == nil
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
@@ -206,8 +217,14 @@ func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compa
 }
 
 func (t *mixCompactionTask) processFailed() bool {
-	t.resetSegmentCompacting()
-	return true
+	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	})
+	if err == nil {
+		t.resetSegmentCompacting()
+	}
+
+	return err == nil
 }
 
 func (t *mixCompactionTask) checkTimeout() bool {

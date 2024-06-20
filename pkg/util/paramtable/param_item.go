@@ -100,8 +100,9 @@ func (pi *ParamItem) GetAsStrings() []string {
 			return strings
 		}
 	}
-	realStrs := getAsStrings(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, realStrs)
+	val := pi.GetValue()
+	realStrs := getAsStrings(val)
+	pi.manager.CASCachedValue(pi.Key, val, realStrs)
 	return realStrs
 }
 
@@ -111,8 +112,9 @@ func (pi *ParamItem) GetAsBool() bool {
 			return boolVal
 		}
 	}
-	boolVal := getAsBool(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, boolVal)
+	val := pi.GetValue()
+	boolVal := getAsBool(val)
+	pi.manager.CASCachedValue(pi.Key, val, boolVal)
 	return boolVal
 }
 
@@ -122,8 +124,9 @@ func (pi *ParamItem) GetAsInt() int {
 			return intVal
 		}
 	}
-	intVal := getAsInt(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, intVal)
+	val := pi.GetValue()
+	intVal := getAsInt(val)
+	pi.manager.CASCachedValue(pi.Key, val, intVal)
 	return intVal
 }
 
@@ -133,8 +136,9 @@ func (pi *ParamItem) GetAsInt32() int32 {
 			return int32Val
 		}
 	}
-	int32Val := int32(getAsInt64(pi.GetValue()))
-	pi.manager.SetCachedValue(pi.Key, int32Val)
+	val := pi.GetValue()
+	int32Val := int32(getAsInt64(val))
+	pi.manager.CASCachedValue(pi.Key, val, int32Val)
 	return int32Val
 }
 
@@ -144,8 +148,9 @@ func (pi *ParamItem) GetAsUint() uint {
 			return uintVal
 		}
 	}
-	uintVal := uint(getAsUint64(pi.GetValue()))
-	pi.manager.SetCachedValue(pi.Key, uintVal)
+	val := pi.GetValue()
+	uintVal := uint(getAsUint64(val))
+	pi.manager.CASCachedValue(pi.Key, val, uintVal)
 	return uintVal
 }
 
@@ -155,8 +160,9 @@ func (pi *ParamItem) GetAsUint32() uint32 {
 			return uint32Val
 		}
 	}
-	uint32Val := uint32(getAsUint64(pi.GetValue()))
-	pi.manager.SetCachedValue(pi.Key, uint32Val)
+	val := pi.GetValue()
+	uint32Val := uint32(getAsUint64(val))
+	pi.manager.CASCachedValue(pi.Key, val, uint32Val)
 	return uint32Val
 }
 
@@ -166,8 +172,9 @@ func (pi *ParamItem) GetAsUint64() uint64 {
 			return uint64Val
 		}
 	}
-	uint64Val := getAsUint64(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, uint64Val)
+	val := pi.GetValue()
+	uint64Val := getAsUint64(val)
+	pi.manager.CASCachedValue(pi.Key, val, uint64Val)
 	return uint64Val
 }
 
@@ -177,8 +184,9 @@ func (pi *ParamItem) GetAsUint16() uint16 {
 			return uint16Val
 		}
 	}
-	uint16Val := uint16(getAsUint64(pi.GetValue()))
-	pi.manager.SetCachedValue(pi.Key, uint16Val)
+	val := pi.GetValue()
+	uint16Val := uint16(getAsUint64(val))
+	pi.manager.CASCachedValue(pi.Key, val, uint16Val)
 	return uint16Val
 }
 
@@ -188,8 +196,9 @@ func (pi *ParamItem) GetAsInt64() int64 {
 			return int64Val
 		}
 	}
-	int64Val := getAsInt64(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, int64Val)
+	val := pi.GetValue()
+	int64Val := getAsInt64(val)
+	pi.manager.CASCachedValue(pi.Key, val, int64Val)
 	return int64Val
 }
 
@@ -199,8 +208,9 @@ func (pi *ParamItem) GetAsFloat() float64 {
 			return floatVal
 		}
 	}
-	floatVal := getAsFloat(pi.GetValue())
-	pi.manager.SetCachedValue(pi.Key, floatVal)
+	val := pi.GetValue()
+	floatVal := getAsFloat(val)
+	pi.manager.CASCachedValue(pi.Key, val, floatVal)
 	return floatVal
 }
 
@@ -210,8 +220,9 @@ func (pi *ParamItem) GetAsDuration(unit time.Duration) time.Duration {
 			return durationVal
 		}
 	}
-	durationVal := getAsDuration(pi.GetValue(), unit)
-	pi.manager.SetCachedValue(pi.Key, durationVal)
+	val := pi.GetValue()
+	durationVal := getAsDuration(val, unit)
+	pi.manager.CASCachedValue(pi.Key, val, durationVal)
 	return durationVal
 }
 

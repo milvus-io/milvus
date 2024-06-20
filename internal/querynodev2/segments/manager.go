@@ -183,6 +183,7 @@ func NewManager() *Manager {
 		}
 		return int64(segment.ResourceUsageEstimate().DiskSize)
 	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
+		log := log.Ctx(ctx)
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
 		if segment == nil {
@@ -212,13 +213,15 @@ func NewManager() *Manager {
 		}
 		return segment, nil
 	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
-		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
+		log := log.Ctx(ctx)
+		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
 		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
 		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
 		defer cacheEvictRecord.Finish(nil)
 		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
+		log := log.Ctx(ctx)
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
 		if segment == nil {
 			// the segment has been released, just ignore it
@@ -280,6 +283,10 @@ type SegmentManager interface {
 	Remove(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int)
 	Clear(ctx context.Context)
+
+	// Deprecated: quick fix critical issue: #30857
+	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
+	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -293,14 +300,18 @@ type segmentManager struct {
 
 	// releaseCallback is the callback function when a segment is released.
 	releaseCallback func(s Segment)
+
+	growingOnReleasingSegments typeutil.UniqueSet
+	sealedOnReleasingSegments  typeutil.UniqueSet
 }
 
 func NewSegmentManager() *segmentManager {
-	mgr := &segmentManager{
-		growingSegments: make(map[int64]Segment),
-		sealedSegments:  make(map[int64]Segment),
+	return &segmentManager{
+		growingSegments:            make(map[int64]Segment),
+		sealedSegments:             make(map[int64]Segment),
+		growingOnReleasingSegments: typeutil.NewUniqueSet(),
+		sealedOnReleasingSegments:  typeutil.NewUniqueSet(),
 	}
-	return mgr
 }
 
 func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, segments ...Segment) {
@@ -351,7 +362,7 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 	if len(replacedSegment) > 0 {
 		go func() {
 			for _, segment := range replacedSegment {
-				mgr.remove(ctx, segment)
+				mgr.release(ctx, segment)
 			}
 		}()
 	}
@@ -369,6 +380,29 @@ func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilt
 		return true
 	}, filters...)
 	return updated
+}
+
+// Deprecated:
+// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
+func (mgr *segmentManager) Exist(segmentID typeutil.UniqueID, typ SegmentType) bool {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+	switch typ {
+	case SegmentTypeGrowing:
+		if _, ok := mgr.growingSegments[segmentID]; ok {
+			return true
+		} else if mgr.growingOnReleasingSegments.Contain(segmentID) {
+			return true
+		}
+	case SegmentTypeSealed:
+		if _, ok := mgr.sealedSegments[segmentID]; ok {
+			return true
+		} else if mgr.sealedOnReleasingSegments.Contain(segmentID) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (mgr *segmentManager) Get(segmentID typeutil.UniqueID) Segment {
@@ -636,11 +670,11 @@ func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.Unique
 	mgr.mu.Unlock()
 
 	if growing != nil {
-		mgr.remove(ctx, growing)
+		mgr.release(ctx, growing)
 	}
 
 	if sealed != nil {
-		mgr.remove(ctx, sealed)
+		mgr.release(ctx, sealed)
 	}
 
 	return removeGrowing, removeSealed
@@ -652,6 +686,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
+			mgr.growingOnReleasingSegments.Insert(segmentID)
 			return s
 		}
 
@@ -659,6 +694,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
+			mgr.sealedOnReleasingSegments.Insert(segmentID)
 			return s
 		}
 	default:
@@ -691,26 +727,34 @@ func (mgr *segmentManager) RemoveBy(ctx context.Context, filters ...SegmentFilte
 	mgr.mu.Unlock()
 
 	for _, s := range removeSegments {
-		mgr.remove(ctx, s)
+		mgr.release(ctx, s)
 	}
-
 	return removeGrowing, removeSealed
 }
 
 func (mgr *segmentManager) Clear(ctx context.Context) {
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
 
-	for id, segment := range mgr.growingSegments {
-		delete(mgr.growingSegments, id)
-		mgr.remove(ctx, segment)
+	for id := range mgr.growingSegments {
+		mgr.growingOnReleasingSegments.Insert(id)
 	}
+	growingWaitForRelease := mgr.growingSegments
+	mgr.growingSegments = make(map[int64]Segment)
 
-	for id, segment := range mgr.sealedSegments {
-		delete(mgr.sealedSegments, id)
-		mgr.remove(ctx, segment)
+	for id := range mgr.sealedSegments {
+		mgr.sealedOnReleasingSegments.Insert(id)
 	}
+	sealedWaitForRelease := mgr.sealedSegments
+	mgr.sealedSegments = make(map[int64]Segment)
 	mgr.updateMetric()
+	mgr.mu.Unlock()
+
+	for _, segment := range growingWaitForRelease {
+		mgr.release(ctx, segment)
+	}
+	for _, segment := range sealedWaitForRelease {
+		mgr.release(ctx, segment)
+	}
 }
 
 // registerReleaseCallback registers the callback function when a segment is released.
@@ -738,7 +782,7 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func (mgr *segmentManager) remove(ctx context.Context, segment Segment) bool {
+func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 	if mgr.releaseCallback != nil {
 		mgr.releaseCallback(segment)
 		log.Ctx(ctx).Info("remove segment from cache", zap.Int64("segmentID", segment.ID()))
@@ -754,5 +798,13 @@ func (mgr *segmentManager) remove(ctx context.Context, segment Segment) bool {
 		segment.Level().String(),
 	).Dec()
 
-	return true
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	switch segment.Type() {
+	case SegmentTypeGrowing:
+		mgr.growingOnReleasingSegments.Remove(segment.ID())
+	case SegmentTypeSealed:
+		mgr.sealedOnReleasingSegments.Remove(segment.ID())
+	}
 }

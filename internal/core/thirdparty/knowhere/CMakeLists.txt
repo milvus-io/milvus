@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION 74997917 )
+set( KNOWHERE_VERSION 5654078 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")

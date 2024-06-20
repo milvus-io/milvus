@@ -32,10 +32,12 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
-      config_(std::make_unique<VecIndexConfig>(segment_max_row_count,
-                                               field_index_meta,
-                                               segcore_config,
-                                               SegmentType::Growing)) {
+      config_(std::make_unique<VecIndexConfig>(
+          segment_max_row_count,
+          field_index_meta,
+          segcore_config,
+          SegmentType::Growing,
+          IsSparseFloatVectorDataType(field_meta.get_data_type()))) {
     recreate_index();
 }
 
@@ -63,13 +65,13 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
+        const auto& chunk_data = source->get_chunk_data(chunk_id);
         auto indexing = std::make_unique<index::VectorMemIndex<float>>(
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
             knowhere::metric::L2,
             knowhere::Version::GetCurrentVersion().VersionNumber());
-        auto dataset = knowhere::GenDataSet(
-            source->get_size_per_chunk(), dim, chunk.data());
+        auto dataset =
+            knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk_data);
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
@@ -295,16 +297,18 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
     AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
+        auto chunk_data = source->get_chunk_data(chunk_id);
         // build index for chunk
         // TODO
         if constexpr (std::is_same_v<T, std::string>) {
             auto indexing = index::CreateStringIndexSort();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
+            indexing->Build(vec_base->get_size_per_chunk(),
+                            static_cast<const T*>(chunk_data));
             data_[chunk_id] = std::move(indexing);
         } else {
             auto indexing = index::CreateScalarIndexSort<T>();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
+            indexing->Build(vec_base->get_size_per_chunk(),
+                            static_cast<const T*>(chunk_data));
             data_[chunk_id] = std::move(indexing);
         }
     }

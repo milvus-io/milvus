@@ -119,6 +119,10 @@ mq:
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
   mqBufSize: 16 # MQ client consumer buffer length
+  dispatcher:
+    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    targetBufSize: 16 # the lenth of channel buffer for targe
+    maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -181,7 +185,7 @@ natsmq:
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  maxPartitionNum: 1024 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
@@ -281,6 +285,8 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
+  collectionObserverInterval: 200
+  checkExecutedFlagInterval: 100
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -313,8 +319,6 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
-    # used for zilliz-cloud ; please ignore it for open source.
-    knowhereScoreConsistency: false
     chunkRows: 128 # The number of vectors in a chunk.
     interimIndex:
       enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.
@@ -322,6 +326,7 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+    knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -329,15 +334,18 @@ queryNode:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable.
+    # options: async, sync, disable. 
     # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
     warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
+    growingMmapEnabled: false # Enable mmap for growing segment
+    fixedFileSizeForMmapAlloc: 4 #MB, fixed file size for mmap chunk manager to store chunk data
+    maxDiskUsagePercentageForMmapAlloc: 20 # max percentage of disk usage in memory mapping
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
@@ -448,6 +456,30 @@ dataCoord:
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
+    clustering:
+      enable: true
+      autoEnable: false
+      triggerInterval: 600
+      stateCheckInterval: 10
+      gcInterval: 600
+      minInterval: 3600
+      maxInterval: 259200
+      newDataRatioThreshold: 0.2
+      newDataSizeThreshold: 512m
+      timeout: 7200
+      dropTolerance: 86400
+      # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
+      # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
+      # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
+      preferSegmentSize: 512m       
+      maxSegmentSize: 1024m
+      maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
+      maxCentroidsNum: 10240
+      minCentroidsNum: 16
+      minClusterSizeRatio: 0.01
+      maxClusterSizeRatio: 10
+      maxClusterSize: 5g
+
     levelzero:
       forceTrigger:
         minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
@@ -456,11 +488,11 @@ dataCoord:
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   enableGarbageCollection: true
   gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 3600
+    interval: 3600 # meta-based gc scanning interval in seconds
+    missingTolerance: 86400 # orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)
+    dropTolerance: 10800 # meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
-    scanInterval: 168 # garbage collection scan residue interval in hours
+    scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
@@ -534,6 +566,9 @@ dataNode:
     clientMaxRecvSize: 536870912
   slot:
     slotCap: 2 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
+
+  clusteringCompaction:
+    memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.
 
 # Configures the system log output.
 log:
@@ -615,6 +650,8 @@ common:
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
+  usePartitionKeyAsClusteringKey: false
+  useVectorAsClusteringKey: false
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

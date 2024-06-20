@@ -265,7 +265,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
-func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) CompactionV2(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if c.ch != nil {
 		c.ch <- struct{}{}
 		if c.compactionResp != nil {
@@ -321,6 +321,10 @@ func (c *mockDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImp
 
 func (c *mockDataNodeClient) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
 	return &datapb.QuerySlotResponse{Status: merr.Success()}, nil
+}
+
+func (c *mockDataNodeClient) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
 }
 
 func (c *mockDataNodeClient) Stop() error {
@@ -607,16 +611,6 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 
 type mockCompactionTrigger struct {
 	methods map[string]interface{}
-}
-
-// triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction() error {
-	if f, ok := t.methods["triggerCompaction"]; ok {
-		if ff, ok := f.(func() error); ok {
-			return ff()
-		}
-	}
-	panic("not implemented")
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment

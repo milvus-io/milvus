@@ -40,7 +40,7 @@ func (c baseChecker) CheckValidDataType(dType schemapb.DataType) error {
 	return nil
 }
 
-func (c baseChecker) SetDefaultMetricTypeIfNotExist(m map[string]string) {}
+func (c baseChecker) SetDefaultMetricTypeIfNotExist(m map[string]string, dType schemapb.DataType) {}
 
 func (c baseChecker) StaticCheck(params map[string]string) error {
 	return errors.New("unsupported index type")

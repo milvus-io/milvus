@@ -491,17 +491,14 @@ GetIndexTypes<std::string>() {
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypesV2() {
-    return std::vector<std::string>{"sort",
-                                    milvus::index::INVERTED_INDEX_TYPE,
-                                    milvus::index::BITMAP_INDEX_TYPE};
+    return std::vector<std::string>{"sort", milvus::index::INVERTED_INDEX_TYPE};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypesV2<std::string>() {
     return std::vector<std::string>{"marisa",
-                                    milvus::index::INVERTED_INDEX_TYPE,
-                                    milvus::index::BITMAP_INDEX_TYPE};
+                                    milvus::index::INVERTED_INDEX_TYPE};
 }
 
 }  // namespace

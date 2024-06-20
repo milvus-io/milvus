@@ -20,7 +20,6 @@ set(MILVUS_TEST_FILES
         test_bf.cpp
         test_bf_sparse.cpp
         test_binary.cpp
-        test_bitmap.cpp
         test_bool_index.cpp
         test_common.cpp
         test_concurrent_vector.cpp
@@ -33,6 +32,7 @@ set(MILVUS_TEST_FILES
         test_growing_index.cpp
         test_indexing.cpp
         test_hybrid_index.cpp
+        test_array_bitmap_index.cpp
         test_index_c_api.cpp
         test_index_wrapper.cpp
         test_init.cpp
@@ -67,7 +67,16 @@ set(MILVUS_TEST_FILES
         test_group_by.cpp
         test_regex_query_util.cpp
         test_regex_query.cpp
+        test_futures.cpp
+        test_array_inverted_index.cpp
+        test_chunk_vector.cpp
         )
+
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set(MILVUS_TEST_FILES
+        ${MILVUS_TEST_FILES}
+        test_kmeans_clustering.cpp)
+endif()
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
@@ -121,6 +130,7 @@ if (LINUX)
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
+            milvus_clustering
             milvus_common
             )
     install(TARGETS index_builder_test DESTINATION unittest)
@@ -135,6 +145,7 @@ target_link_libraries(all_tests
         milvus_segcore
         milvus_storage
         milvus_indexbuilder
+        milvus_clustering
         pthread
         milvus_common
         milvus_exec

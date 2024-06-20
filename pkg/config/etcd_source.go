@@ -180,10 +180,10 @@ func (es *EtcdSource) update(configs map[string]string) error {
 		return err
 	}
 	es.currentConfigs = configs
+	es.Unlock()
 	if es.manager != nil {
 		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
-	es.Unlock()
 
 	es.configRefresher.fireEvents(events...)
 	return nil

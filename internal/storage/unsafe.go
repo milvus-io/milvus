@@ -59,3 +59,9 @@ func UnsafeReadFloat64(buf []byte, idx int) float64 {
 	ptr := unsafe.Pointer(&(buf[idx]))
 	return *((*float64)(ptr))
 }
+
+/* #nosec G103 */
+func UnsafeReadBool(buf []byte, idx int) bool {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*bool)(ptr))
+}

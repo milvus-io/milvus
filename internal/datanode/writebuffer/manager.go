@@ -31,6 +31,7 @@ type BufferManager interface {
 	RemoveChannel(channel string)
 	// DropChannel remove write buffer and perform drop.
 	DropChannel(channel string)
+	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
 	// GetCheckpoint returns checkpoint for provided channel.
@@ -258,4 +259,17 @@ func (m *bufferManager) DropChannel(channel string) {
 	}
 
 	buf.Close(true)
+}
+
+func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
+	m.mut.RLock()
+	buf, ok := m.buffers[channel]
+	m.mut.RUnlock()
+
+	if !ok {
+		log.Warn("failed to drop partition, channel not maintained in manager", zap.String("channel", channel), zap.Int64s("partitionIDs", partitionIDs))
+		return
+	}
+
+	buf.DropPartitions(partitionIDs)
 }

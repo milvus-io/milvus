@@ -84,6 +84,7 @@ type Segment interface {
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(lc *storage.LocationsCache) bool
+	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)

@@ -195,7 +195,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		data = byteArr
 		c.readPosition += int(readCount)
-	case schemapb.DataType_BinaryVector:
+	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
@@ -230,12 +230,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 			data = lo.Map(data64, func(f float64, _ int) float32 {
 				return float32(f)
 			})
-		}
-		c.readPosition += int(readCount)
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		data, err = ReadN[byte](c.reader, c.order, readCount)
-		if err != nil {
-			return nil, err
 		}
 		c.readPosition += int(readCount)
 	default:

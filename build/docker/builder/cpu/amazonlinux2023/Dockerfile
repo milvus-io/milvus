@@ -44,9 +44,9 @@ RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr
 RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest --only-downloads
 
 RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
-    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-1.el9.`uname -m`.rpm &&\
+    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-2.el9.`uname -m`.rpm &&\
     wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/c/ccache-4.5.1-2.el9.`uname -m`.rpm &&\
-    rpm -i hiredis-1.0.2-1.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
+    rpm -i hiredis-1.0.2-2.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
     rm -rf /tmp/ccache
 
 

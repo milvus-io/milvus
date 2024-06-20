@@ -32,69 +32,52 @@ import (
 )
 
 // this file contains proxy management restful API handler
-
-const (
-	mgrRouteGcPause  = `/management/datacoord/garbage_collection/pause`
-	mgrRouteGcResume = `/management/datacoord/garbage_collection/resume`
-
-	mgrSuspendQueryCoordBalance = `/management/querycoord/balance/suspend`
-	mgrResumeQueryCoordBalance  = `/management/querycoord/balance/resume`
-	mgrTransferSegment          = `/management/querycoord/transfer/segment`
-	mgrTransferChannel          = `/management/querycoord/transfer/channel`
-
-	mgrSuspendQueryNode           = `/management/querycoord/node/suspend`
-	mgrResumeQueryNode            = `/management/querycoord/node/resume`
-	mgrListQueryNode              = `/management/querycoord/node/list`
-	mgrGetQueryNodeDistribution   = `/management/querycoord/distribution/get`
-	mgrCheckQueryNodeDistribution = `/management/querycoord/distribution/check`
-)
-
 var mgrRouteRegisterOnce sync.Once
 
 func RegisterMgrRoute(proxy *Proxy) {
 	mgrRouteRegisterOnce.Do(func() {
 		management.Register(&management.Handler{
-			Path:        mgrRouteGcPause,
+			Path:        management.RouteGcPause,
 			HandlerFunc: proxy.PauseDatacoordGC,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrRouteGcResume,
+			Path:        management.RouteGcResume,
 			HandlerFunc: proxy.ResumeDatacoordGC,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrListQueryNode,
+			Path:        management.RouteListQueryNode,
 			HandlerFunc: proxy.ListQueryNode,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrGetQueryNodeDistribution,
+			Path:        management.RouteGetQueryNodeDistribution,
 			HandlerFunc: proxy.GetQueryNodeDistribution,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrSuspendQueryCoordBalance,
+			Path:        management.RouteSuspendQueryCoordBalance,
 			HandlerFunc: proxy.SuspendQueryCoordBalance,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrResumeQueryCoordBalance,
+			Path:        management.RouteResumeQueryCoordBalance,
 			HandlerFunc: proxy.ResumeQueryCoordBalance,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrSuspendQueryNode,
+			Path:        management.RouteSuspendQueryNode,
 			HandlerFunc: proxy.SuspendQueryNode,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrResumeQueryNode,
+			Path:        management.RouteResumeQueryNode,
 			HandlerFunc: proxy.ResumeQueryNode,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrTransferSegment,
+			Path:        management.RouteTransferSegment,
 			HandlerFunc: proxy.TransferSegment,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrTransferChannel,
+			Path:        management.RouteTransferChannel,
 			HandlerFunc: proxy.TransferChannel,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrCheckQueryNodeDistribution,
+			Path:        management.RouteCheckQueryNodeDistribution,
 			HandlerFunc: proxy.CheckQueryNodeDistribution,
 		})
 	})

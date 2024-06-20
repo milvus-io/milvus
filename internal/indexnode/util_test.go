@@ -17,6 +17,7 @@
 package indexnode
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -38,4 +39,20 @@ func (s *utilSuite) Test_mapToKVPairs() {
 
 func Test_utilSuite(t *testing.T) {
 	suite.Run(t, new(utilSuite))
+}
+
+func generateFloats(num int) []float32 {
+	data := make([]float32, num)
+	for i := 0; i < num; i++ {
+		data[i] = rand.Float32()
+	}
+	return data
+}
+
+func generateLongs(num int) []int64 {
+	data := make([]int64, num)
+	for i := 0; i < num; i++ {
+		data[i] = rand.Int63()
+	}
+	return data
 }
