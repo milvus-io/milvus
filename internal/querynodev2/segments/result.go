@@ -260,6 +260,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		loopEnd    int
 	)
 
+	// validRetrieveResults := []*internalpb.RetrieveResults{}
 	validRetrieveResults := []*TimestampedRetrieveResult[*internalpb.RetrieveResults]{}
 	hasMoreResult := false
 	for _, r := range retrieveResults {
@@ -371,8 +372,6 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	)
 
 	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}
-	selectedOffsets := make([][]int64, 0, len(retrieveResults))
-	selectedIndexes := make([][]int64, 0, len(retrieveResults))
 	hasMoreResult := false
 	for _, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
@@ -385,8 +384,6 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			return nil, err
 		}
 		validRetrieveResults = append(validRetrieveResults, tr)
-		selectedOffsets = append(selectedOffsets, make([]int64, 0, len(r.GetOffset())))
-		selectedIndexes = append(selectedIndexes, make([]int64, 0, len(r.GetOffset())))
 		loopEnd += size
 		hasMoreResult = r.GetHasMoreResult() || hasMoreResult
 	}
@@ -402,8 +399,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		limit = int(param.limit)
 	}
 
+	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].Result.GetFieldsData()))
+	idTsMap := make(map[interface{}]int64)
 	cursors := make([]int64, len(validRetrieveResults))
-	idTsMap := make(map[any]int64)
 
 	var availableCount int
 	var retSize int64
@@ -416,19 +414,18 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-		if _, ok := idTsMap[pk]; !ok {
+		if currentTs, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			selectedOffsets[sel] = append(selectedOffsets[sel], validRetrieveResults[sel].Result.GetOffset()[cursors[sel]])
-			selectedIndexes[sel] = append(selectedIndexes[sel], cursors[sel])
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
 			availableCount++
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
-			if ts != 0 && ts > idTsMap[pk] {
+			if ts != 0 && ts > currentTs {
 				idTsMap[pk] = ts
-				selectedOffsets[sel][len(selectedOffsets[sel])-1] = validRetrieveResults[sel].Result.GetOffset()[cursors[sel]]
-				selectedIndexes[sel][len(selectedIndexes[sel])-1] = cursors[sel]
+				typeutil.DeleteFieldData(ret.FieldsData)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			}
 		}
 
@@ -444,10 +441,6 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		log.Ctx(ctx).Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(ret), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
-	}
-
 	return ret, nil
 }
 
@@ -459,6 +452,10 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 	mergedResult, err := MergeInternalRetrieveResult(ctx, retrieveResults, param)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), param.outputFieldsId, param.schema); err != nil {
+		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
 	}
 
 	return mergedResult, nil
