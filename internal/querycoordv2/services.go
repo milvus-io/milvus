@@ -876,9 +876,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		return &milvuspb.GetReplicasResponse{
-			Replicas: make([]*milvuspb.ReplicaInfo, 0),
-		}, nil
+		return resp, nil
 	}
 
 	for _, replica := range replicas {
