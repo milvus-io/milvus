@@ -86,6 +86,7 @@ func (dl *DeleteLog) Parse(val string) error {
 		if err != nil {
 			return err
 		}
+		return nil
 	}
 
 	dl.Ts = v.GetUint64("ts")
