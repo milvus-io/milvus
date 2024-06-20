@@ -27,6 +27,28 @@ enum class IndexConfigLevel {
     SYSTEM_ASSIGN = 3
 };
 
+class SearchParamsGenerator {
+ public:
+    SearchParamsGenerator(const int64_t nlist,
+                          const int64_t search_granularity,
+                          const int64_t n_rows);
+    inline knowhere::Json
+    GetSearchConfig(const SearchInfo& searchInfo);
+
+ private:
+    int64_t nlist_;
+    int64_t min_nprobe_;
+    int64_t slots_num_;
+    int64_t search_granularity_;
+    float slot_offest_;
+    int64_t n_rows_;
+    const std::vector<float> slots_factor{0.01, 0.02, 0.05, 0.1};
+
+ private:
+    inline int64_t
+    GetNprobe(uint64_t topk, uint64_t search_level = 1);
+};
+
 // this is the config used for generating growing index or the temp sealed index
 // when the segment is sealed before the index is built.
 class VecIndexConfig {
@@ -77,6 +99,6 @@ class VecIndexConfig {
 
     knowhere::Json build_params_;
 
-    knowhere::Json search_params_;
+    SearchParamsGenerator search_params_generater_;
 };
 }  // namespace milvus::segcore

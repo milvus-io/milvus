@@ -179,7 +179,7 @@ TEST_P(BinlogIndexTest, Accuracy) {
 
     auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
     segcore_config.set_enable_interim_segment_index(true);
-    segcore_config.set_nprobe(32);
+    segcore_config.set_search_granularity(10);
     // 1. load field data, and build binlog index for binlog data
     auto field_data_info = FieldDataInfo{
         vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
@@ -270,7 +270,7 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
-    SegcoreSetEnableTempSegmentIndex(false);
+    SegcoreSetEnableInterimSegmentIndex(false);
 
     auto field_data_info = FieldDataInfo{
         vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
@@ -330,7 +330,7 @@ TEST_P(BinlogIndexTest, LoadBinlogWithoutIndexMeta) {
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
-    SegcoreSetEnableTempSegmentIndex(true);
+    SegcoreSetEnableInterimSegmentIndex(true);
 
     auto field_data_info = FieldDataInfo{
         vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};

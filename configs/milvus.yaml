@@ -323,7 +323,10 @@ queryNode:
     interimIndex:
       enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.
       nlist: 128 # temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
-      nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
+      searchGranularity: 5
+      # interim index will generate search parameters based on topk. 
+      # The larger the search granularity, the slower the search parameters change based on topk.
+      # searchGranularity should be in [1, nlist]
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic

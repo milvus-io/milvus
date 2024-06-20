@@ -13,6 +13,49 @@
 #include "log/Log.h"
 
 namespace milvus::segcore {
+namespace {
+static constexpr int64_t kMinNprobe = 1;
+static constexpr int64_t kDefaultNprobe = 16;
+}  // namespace
+
+SearchParamsGenerator::SearchParamsGenerator(const int64_t nlist,
+                                             const int64_t search_granularity,
+                                             const int64_t n_rows)
+    : nlist_(nlist), search_granularity_(search_granularity), n_rows_(n_rows) {
+    min_nprobe_ = std::min(kMinNprobe, nlist_);
+    slots_num_ = slots_factor.size() + search_granularity_;
+    slot_offest_ = float(nlist - min_nprobe_) / float(slots_num_);
+}
+
+int64_t
+SearchParamsGenerator::GetNprobe(uint64_t topk, uint64_t search_level) {
+    uint64_t slot_id = 0;
+    float key = float(topk) / float(n_rows_);
+    for (; slot_id < slots_factor.size(); slot_id++) {
+        if (key < slot_id) {
+            break;
+        }
+    }
+    slot_id += (search_level - 1) % search_granularity_;
+    return int(slot_id * slot_offest_) + min_nprobe_;
+}
+
+knowhere::Json
+SearchParamsGenerator::GetSearchConfig(const SearchInfo& search_info) {
+    knowhere::Json search_params;
+    if (search_info.group_by_field_id_.has_value()) {
+        // use default nprobe for iterator
+        search_params[knowhere::indexparam::NPROBE] =
+            std::to_string(kDefaultNprobe);
+    } else if (!search_info.search_params_.contains(RADIUS)) {
+        uint64_t topk = search_info.topk_;
+        search_params[knowhere::indexparam::NPROBE] =
+            std::to_string(GetNprobe(topk));
+    } else {
+    }
+    return search_params;
+}
+
 VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                const FieldIndexMeta& index_meta_,
                                const SegcoreConfig& config,
@@ -20,7 +63,10 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                const bool is_sparse)
     : max_index_row_count_(max_index_row_cout),
       config_(config),
-      is_sparse_(is_sparse) {
+      is_sparse_(is_sparse),
+      search_params_generater_(config.get_nlist(),
+                               config.get_search_granularity(),
+                               max_index_row_cout) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
     // Currently for dense vector index, if the segment is growing, we use IVFCC
@@ -49,8 +95,6 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::to_string(config_.get_nlist());
     build_params_[knowhere::indexparam::SSIZE] = std::to_string(
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
-    search_params_[knowhere::indexparam::NPROBE] =
-        std::to_string(config_.get_nprobe());
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.
     LOG_INFO(
@@ -94,7 +138,8 @@ SearchInfo
 VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
     SearchInfo searchParam(searchInfo);
     searchParam.metric_type_ = metric_type_;
-    searchParam.search_params_ = search_params_;
+    searchParam.search_params_ =
+        search_params_generater_.GetSearchConfig(searchInfo);
     for (auto& key : maintain_params) {
         if (searchInfo.search_params_.contains(key)) {
             searchParam.search_params_[key] = searchInfo.search_params_[key];

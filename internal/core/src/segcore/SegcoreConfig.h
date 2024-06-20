@@ -48,19 +48,19 @@ class SegcoreConfig {
         return nlist_;
     }
 
-    int64_t
-    get_nprobe() const {
-        return nprobe_;
-    }
-
     void
     set_nlist(int64_t nlist) {
         nlist_ = nlist;
     }
 
     void
-    set_nprobe(int64_t nprobe) {
-        nprobe_ = nprobe;
+    set_search_granularity(int64_t search_granularity) {
+        search_granularity_ = search_granularity;
+    }
+
+    int64_t
+    get_search_granularity() const {
+        return search_granularity_;
     }
 
     void
@@ -78,6 +78,7 @@ class SegcoreConfig {
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;
+    inline static int64_t search_granularity_ = 5;
 };
 
 }  // namespace milvus::segcore
