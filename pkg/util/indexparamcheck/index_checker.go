@@ -23,6 +23,6 @@ import (
 type IndexChecker interface {
 	CheckTrain(map[string]string) error
 	CheckValidDataType(dType schemapb.DataType) error
-	SetDefaultMetricTypeIfNotExist(map[string]string)
+	SetDefaultMetricTypeIfNotExist(map[string]string, schemapb.DataType)
 	StaticCheck(map[string]string) error
 }

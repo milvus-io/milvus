@@ -667,8 +667,8 @@ class TestPartitionOperations(TestcaseBase):
         self.partition_wrap.init_partition(
             collection_w.collection, p_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: err_msg})
-
+            check_items={ct.err_code: 999, ct.err_msg: err_msg}
+          
         # TODO: Try to verify load collection with a large number of partitions. #11651
 
     @pytest.mark.tags(CaseLabel.L0)

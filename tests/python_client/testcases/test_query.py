@@ -3713,6 +3713,37 @@ class TestQueryCount(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: res}]})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_counts_expression_sparse_vectors(self, index):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data)
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        collection_w.load()
+        collection_w.query(expr=default_expr, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: ct.default_nb}]})
+        expr = "int64 > 50 && int64 < 100 && float < 75"
+        collection_w.query(expr=expr, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: 24}]})
+        batch_size = 100
+        collection_w.query_iterator(batch_size=batch_size, expr=default_expr,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
+                                                 "batch_size": batch_size})
+
 
 class TestQueryIterator(TestcaseBase):
     """

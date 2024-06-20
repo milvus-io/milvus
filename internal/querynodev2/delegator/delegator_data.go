@@ -304,8 +304,9 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 			retIdx += 1
 			tmpRetIndex := retIdx
 			deleteDataId := didx
+			partitionID := data.PartitionID
 			future := pool.Submit(func() (any, error) {
-				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(partitionID))
 				retMap.Insert(tmpRetIndex, &BatchApplyRet{
 					DeleteDataIdx: deleteDataId,
 					StartIdx:      startIdx,

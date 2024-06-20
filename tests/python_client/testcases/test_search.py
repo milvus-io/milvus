@@ -6380,6 +6380,35 @@ class TestSearchPagination(TestcaseBase):
                                    default_limit, offset=offset)[0]
         assert res1[0].ids == res2[0].ids
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [1, 5, 20])
+    def test_search_sparse_with_pagination(self, offset):
+        """
+        target: test search sparse with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        # 1. create a collection
+        auto_id = False
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(
+                prefix, True,  auto_id=auto_id, vector_data_type=ct.sparse_vector)[0:4]
+        # 2. search with offset+limit
+        search_param = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}, "offset": offset}
+        search_vectors = cf.gen_default_list_sparse_data()[-1][-2:]
+        search_res = collection_w.search(search_vectors, ct.default_sparse_vec_field_name,
+                                         search_param, default_limit)[0]
+        # 3. search
+        _search_param = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
+        res = collection_w.search(search_vectors[:default_nq], ct.default_sparse_vec_field_name, _search_param,
+                                  default_limit + offset)[0]
+        assert len(search_res[0].ids) == len(res[0].ids[offset:])
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(
+            res[0].distances[offset:], key=numpy.float32)
+
 
 class TestSearchPaginationInvalid(TestcaseBase):
     """ Test case of search pagination """
@@ -8345,6 +8374,33 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
                                          "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_sparse(self):
+        """
+        target: test sparse index normal range search
+        method: create connection, collection, insert and range search
+        expected: range search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=5000,
+                                                    with_json=True,
+                                                    vector_data_type=ct.sparse_vector)[0]
+        range_filter = random.uniform(0.5, 1)
+        radius = random.uniform(0, 0.5)
+
+        # 2. range search
+        range_search_params = {"metric_type": "IP",
+                               "params": {"radius": radius, "range_filter": range_filter}}
+        d = cf.gen_default_list_sparse_data(nb=1)
+        search_res = collection_w.search(d[-1][-1:], ct.default_sparse_vec_field_name,
+                                         range_search_params, default_limit,
+                                         default_search_exp)[0]
+
+        # 3. check search results
+        for hits in search_res:
+            for distance in hits.distances:
+                assert range_filter >= distance > radius
 
 
 class TestCollectionLoadOperation(TestcaseBase):
@@ -10656,6 +10712,53 @@ class TestSearchGroupBy(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": nq, "limit": limit})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_sparse_vectors_group_by(self, index):
+        """
+        target: test search group by works on a collection with sparse vector
+        method: 1. create a collection
+                2. create index
+                3. grouping search
+        verify: search successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        nb = 5000
+        data = cf.gen_default_list_sparse_data(nb=nb)
+        # update float fields
+        _data = [random.randint(1, 100) for _ in range(nb)]
+        str_data = [str(i) for i in _data]
+        data[2] = str_data
+        collection_w.insert(data)
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        collection_w.load()
+
+        nq = 2
+        limit = 20
+        search_params = ct.default_sparse_search_params
+
+        search_vectors = cf.gen_default_list_sparse_data(nb=nq)[-1][-2:]
+        # verify the results are same if gourp by pk
+        res = collection_w.search(data=search_vectors, anns_field=ct.default_sparse_vec_field_name,
+                            param=search_params, limit=limit,
+                            group_by_field="varchar",
+                            output_fields=["varchar"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq, "limit": limit})
+
+        hit = res[0]
+        set_varchar = set()
+        for item in hit:
+            a = list(item.fields.values())
+            set_varchar.add(a[0])
+        # groupy by is in effect, then there are no duplicate varchar values
+        assert len(hit) == len(set_varchar)
+
 
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
@@ -12534,6 +12637,64 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         for i in range(nq):
             assert is_sorted_descend(res[i].distances)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_search_sparse_normal(self):
+        """
+        target: test hybrid search after loading sparse vectors
+        method: Test hybrid search after loading sparse vectors
+        expected: hybrid search successfully with limit(topK)
+        """
+        nb, auto_id, dim, enable_dynamic_field = 20000, False, 768, False
+        # 1. init collection
+        collection_w, insert_vectors, _, insert_ids = self.init_collection_general(prefix, True, nb=nb,
+                                                    multiple_dim_array=[dim, dim*2], with_json=False,
+                                                    vector_data_type="SPARSE_FLOAT_VECTOR")[0:4]
+        # 2. extract vector field name
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        # 3. prepare search params
+        req_list = []
+        search_res_dict_array = []
+        k = 60
+
+        for i in range(len(vector_name_list)):
+            # vector = cf.gen_sparse_vectors(1, dim)
+            vector = insert_vectors[0][i+3][-1:]
+            search_res_dict = {}
+            search_param = {
+                "data": vector,
+                "anns_field": vector_name_list[i],
+                "param": {"metric_type": "IP", "offset": 0},
+                "limit": default_limit,
+                "expr": "int64 > 0"}
+            req = AnnSearchRequest(**search_param)
+            req_list.append(req)
+            # search for get the base line of hybrid_search
+            search_res = collection_w.search(vector, vector_name_list[i],
+                                             default_search_params, default_limit,
+                                             default_search_exp,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": 1,
+                                                          "ids": insert_ids,
+                                                          # "limit": default_limit
+                                             }
+                                             )[0]
+            ids = search_res[0].ids
+            for j in range(len(ids)):
+                search_res_dict[ids[j]] = 1/(j + k +1)
+            search_res_dict_array.append(search_res_dict)
+        # 4. calculate hybrid search base line for RRFRanker
+        ids_answer, score_answer = cf.get_hybrid_search_base_results_rrf(search_res_dict_array)
+        # 5. hybrid search
+        hybrid_res = collection_w.hybrid_search(req_list, RRFRanker(k), default_limit,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": 1,
+                                                             "ids": insert_ids,
+                                                             "limit": default_limit})[0]
+        # 6. compare results through the re-calculated distances
+        for i in range(len(score_answer[:default_limit])):
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
+
 
 class TestSparseSearch(TestcaseBase):
     """ Add some test cases for the sparse vector """
@@ -12550,7 +12711,7 @@ class TestSparseSearch(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema(auto_id=False)
         collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data()
+        data = cf.gen_default_list_sparse_data(nb=10000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
@@ -12562,6 +12723,12 @@ class TestSparseSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit})
+        expr = "int64 < 100 "
+        collection_w.search(data[-1][-1:], ct.default_sparse_vec_field_name,
+                            ct.default_sparse_search_params, default_limit,
+                            expr,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
@@ -12624,3 +12791,83 @@ class TestSparseSearch(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in [0, 1, 10, 100]'
         res = collection_w.query(term_expr)
         assert len(res) == 4
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("ratio", [0.01, 0.1, 0.5, 0.9])
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_search_sparse_ratio(self, ratio, index):
+        """
+        target: create a sparse index by adjusting the ratio parameter.
+        method: create a sparse index by adjusting the ratio parameter.
+        expected: search successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data(nb=10000)
+        collection_w.insert(data)
+        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
+        collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
+        collection_w.load()
+        assert collection_w.has_index(index_name=index) == True
+        search_params = {"metric_type": "IP", "params": {"drop_ratio_search": ratio}}
+        collection_w.search(data[-1][-1:], ct.default_sparse_vec_field_name,
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_sparse_vector_search_output_field(self, index):
+        """
+        target: create sparse vectors and search
+        method: create sparse vectors and search
+        expected: normal search
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data(nb=10000)
+        collection_w.insert(data)
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+
+        collection_w.load()
+        d = cf.gen_default_list_sparse_data(nb=1)
+        collection_w.search(d[-1][-1:], ct.default_sparse_vec_field_name,
+                            ct.default_sparse_search_params, 5,
+                            output_fields=["float", "sparse_vector"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "output_fields": ["float", "sparse_vector"]
+                                          })
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_sparse_vector_search_iterator(self, index):
+        """
+        target: create sparse vectors and search iterator
+        method: create sparse vectors and search iterator
+        expected: normal search
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data(nb=10000)
+        collection_w.insert(data)
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+
+        collection_w.load()
+        batch_size = 10
+        collection_w.search_iterator(data[-1][-1:], ct.default_sparse_vec_field_name,
+                                     ct.default_sparse_search_params, batch_size,
+                                     check_task=CheckTasks.check_search_iterator,
+                                     check_items={"batch_size": batch_size})

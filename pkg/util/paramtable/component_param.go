@@ -988,7 +988,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.MaxPartitionNum = ParamItem{
 		Key:          "rootCoord.maxPartitionNum",
 		Version:      "2.0.0",
-		DefaultValue: "4096",
+		DefaultValue: "1024",
 		Doc:          "Maximum number of partitions in a collection",
 		Export:       true,
 	}
@@ -2118,10 +2118,13 @@ type queryNodeConfig struct {
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
-	CacheEnabled     ParamItem `refreshable:"false"`
-	CacheMemoryLimit ParamItem `refreshable:"false"`
-	MmapDirPath      ParamItem `refreshable:"false"`
-	MmapEnabled      ParamItem `refreshable:"false"`
+	CacheEnabled                        ParamItem `refreshable:"false"`
+	CacheMemoryLimit                    ParamItem `refreshable:"false"`
+	MmapDirPath                         ParamItem `refreshable:"false"`
+	MmapEnabled                         ParamItem `refreshable:"false"`
+	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
+	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
+	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
 
 	LazyLoadEnabled                      ParamItem `refreshable:"false"`
 	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
@@ -2375,6 +2378,38 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.GrowingMmapEnabled = ParamItem{
+		Key:          "queryNode.mmap.growingMmapEnabled",
+		Version:      "2.4.4",
+		DefaultValue: "false",
+		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
+		Doc:          "Enable mmap for using in growing raw data",
+		Export:       true,
+		Formatter: func(v string) string {
+			mmapEnabled := p.MmapEnabled.GetAsBool()
+			return strconv.FormatBool(mmapEnabled && getAsBool(v))
+		},
+	}
+	p.GrowingMmapEnabled.Init(base.mgr)
+
+	p.FixedFileSizeForMmapManager = ParamItem{
+		Key:          "queryNode.mmap.fixedFileSizeForMmapAlloc",
+		Version:      "2.4.0",
+		DefaultValue: "64",
+		Doc:          "tmp file size for mmap chunk manager",
+		Export:       true,
+	}
+	p.FixedFileSizeForMmapManager.Init(base.mgr)
+
+	p.MaxMmapDiskPercentageForMmapManager = ParamItem{
+		Key:          "querynode.mmap.maxDiskUsagePercentageForMmapAlloc",
+		Version:      "2.4.0",
+		DefaultValue: "20",
+		Doc:          "disk percentage used in mmap chunk manager",
+		Export:       true,
+	}
+	p.MaxMmapDiskPercentageForMmapManager.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyload.enabled",
@@ -3415,7 +3450,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.interval",
 		Version:      "2.0.0",
 		DefaultValue: "3600",
-		Doc:          "gc interval in seconds",
+		Doc:          "meta-based gc scanning interval in seconds",
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
@@ -3424,7 +3459,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.scanInterval",
 		Version:      "2.4.0",
 		DefaultValue: "168", // hours, default 7 * 24 hours
-		Doc:          "garbage collection scan residue interval in hours",
+		Doc:          "orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours",
 		Export:       true,
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
@@ -3434,7 +3469,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "86400",
-		Doc:          "file meta missing tolerance duration in seconds, default to 24hr(1d)",
+		Doc:          "orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
@@ -3443,7 +3478,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "10800",
-		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
+		Doc:          "meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)

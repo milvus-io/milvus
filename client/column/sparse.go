@@ -51,6 +51,21 @@ func (c *ColumnSparseFloatVector) Len() int {
 	return len(c.vectors)
 }
 
+func (c *ColumnSparseFloatVector) Slice(start, end int) Column {
+	l := c.Len()
+	if start > l {
+		start = l
+	}
+	if end == -1 || end > l {
+		end = l
+	}
+	return &ColumnSparseFloatVector{
+		ColumnBase: c.ColumnBase,
+		name:       c.name,
+		vectors:    c.vectors[start:end],
+	}
+}
+
 // Get returns value at index as interface{}.
 func (c *ColumnSparseFloatVector) Get(idx int) (interface{}, error) {
 	if idx < 0 || idx >= c.Len() {

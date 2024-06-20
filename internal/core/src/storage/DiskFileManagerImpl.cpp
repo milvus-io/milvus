@@ -414,7 +414,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(
         field_data->FillFieldData(col_data);
         dim = field_data->get_dim();
         auto data_size =
-            field_data->get_num_rows() * index_meta_.dim * sizeof(DataType);
+            field_data->get_num_rows() * milvus::GetVecRowSize<DataType>(dim);
         local_chunk_manager->Write(local_data_path,
                                    write_offset,
                                    const_cast<void*>(field_data->Data()),
@@ -490,10 +490,9 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
             if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
                 dim = std::max(
                     dim,
-                    (uint32_t)(
-                        std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
-                            field_data)
-                            ->Dim()));
+                    (uint32_t)(std::dynamic_pointer_cast<
+                                   FieldData<SparseFloatVector>>(field_data)
+                                   ->Dim()));
                 auto sparse_rows =
                     static_cast<const knowhere::sparse::SparseRow<float>*>(
                         field_data->Data());
@@ -517,8 +516,8 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
                            "inconsistent dim value in multi binlogs!");
                 dim = field_data->get_dim();
 
-                auto data_size =
-                    field_data->get_num_rows() * dim * sizeof(DataType);
+                auto data_size = field_data->get_num_rows() *
+                                 milvus::GetVecRowSize<DataType>(dim);
                 local_chunk_manager->Write(
                     local_data_path,
                     write_offset,

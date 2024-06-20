@@ -48,7 +48,7 @@
 #include "query/SearchOnSealed.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
-#include "storage/ChunkCacheSingleton.h"
+#include "storage/MmapManager.h"
 
 namespace milvus::segcore {
 
@@ -151,9 +151,9 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
                id_);
     auto field_info = it->second;
 
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path);
+        auto column = cc->Read(data_path, mmap_descriptor_);
     }
 }
 
@@ -819,8 +819,10 @@ SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
 }
 
 std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
-    const storage::ChunkCachePtr& cc, const std::string& data_path) {
-    auto column = cc->Read(data_path);
+    const storage::ChunkCachePtr& cc,
+    const std::string& data_path,
+    const storage::MmapChunkDescriptor& descriptor) {
+    auto column = cc->Read(data_path, descriptor);
     cc->Prefetch(data_path);
     return {data_path, column};
 }
@@ -864,7 +866,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     }
 
     // If index doesn't have raw data, get vector from chunk cache.
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
 
     // group by data_path
     auto id_to_data_path =
@@ -885,7 +887,8 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     futures.reserve(path_to_column.size());
     for (const auto& iter : path_to_column) {
         const auto& data_path = iter.first;
-        futures.emplace_back(pool.Submit(ReadFromChunkCache, cc, data_path));
+        futures.emplace_back(
+            pool.Submit(ReadFromChunkCache, cc, data_path, mmap_descriptor_));
     }
 
     for (int i = 0; i < futures.size(); ++i) {
@@ -1029,10 +1032,15 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       id_(segment_id),
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve) {
+    mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptorValue>(
+        new storage::MmapChunkDescriptorValue(
+            {segment_id, SegmentType::Sealed}));
+    auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+    mcm->Register(mmap_descriptor_);
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }
@@ -1041,6 +1049,10 @@ SegmentSealedImpl::~SegmentSealedImpl() {
         for (const auto& binlog : iter.second.insert_files) {
             cc->Remove(binlog);
         }
+    }
+    if (mmap_descriptor_ != nullptr) {
+        auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+        mm->UnRegister(mmap_descriptor_);
     }
 }
 
@@ -1161,7 +1173,7 @@ SegmentSealedImpl::ClearData() {
         variable_fields_avg_size_.clear();
         stats_.mem_size = 0;
     }
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }
@@ -1549,17 +1561,20 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
-    const auto& timestamps_data = insert_record_.timestamps_.get_chunk(0);
-    AssertInfo(timestamps_data.size() == get_row_count(),
+    auto timestamps_data =
+        (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
+    auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
+
+    AssertInfo(timestamps_data_size == get_row_count(),
                fmt::format("Timestamp size not equal to row count: {}, {}",
-                           timestamps_data.size(),
+                           timestamps_data_size,
                            get_row_count()));
     auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
 
     // range == (size_, size_) and size_ is this->timestamps_.size().
     // it means these data are all useful, we don't need to update bitset_chunk.
     // It can be thought of as an OR operation with another bitmask that is all 0s, but it is not necessary to do so.
-    if (range.first == range.second && range.first == timestamps_data.size()) {
+    if (range.first == range.second && range.first == timestamps_data_size) {
         // just skip
         return;
     }
@@ -1570,7 +1585,7 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
         return;
     }
     auto mask = TimestampIndex::GenerateBitset(
-        timestamp, range, timestamps_data.data(), timestamps_data.size());
+        timestamp, range, timestamps_data, timestamps_data_size);
     bitset_chunk |= mask;
 }
 
@@ -1674,7 +1689,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 }
 void
 SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
     }

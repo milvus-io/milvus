@@ -274,7 +274,7 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
@@ -360,7 +360,7 @@ IndexFactory::CreateVectorIndex(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_FLOAT16: {

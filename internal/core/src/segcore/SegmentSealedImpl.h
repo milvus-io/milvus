@@ -279,6 +279,8 @@ class SegmentSealedImpl : public SegmentSealed {
     generate_interim_index(const FieldId field_id);
 
  private:
+    // mmap descriptor, used in chunk cache
+    storage::MmapChunkDescriptor mmap_descriptor_ = nullptr;
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;

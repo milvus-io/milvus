@@ -185,7 +185,7 @@ natsmq:
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  maxPartitionNum: 1024 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
@@ -343,6 +343,9 @@ queryNode:
     warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
+    growingMmapEnabled: false # Enable mmap for growing segment
+    fixedFileSizeForMmapAlloc: 4 #MB, fixed file size for mmap chunk manager to store chunk data
+    maxDiskUsagePercentageForMmapAlloc: 20 # max percentage of disk usage in memory mapping
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
@@ -485,11 +488,11 @@ dataCoord:
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   enableGarbageCollection: true
   gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 3600
+    interval: 3600 # meta-based gc scanning interval in seconds
+    missingTolerance: 86400 # orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)
+    dropTolerance: 10800 # meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
-    scanInterval: 168 # garbage collection scan residue interval in hours
+    scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance

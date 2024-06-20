@@ -46,6 +46,8 @@ struct DescriptorEventDataFixPart {
     int64_t partition_id;
     int64_t segment_id;
     int64_t field_id;
+    //(todo:smellthemoon) set nullable false temporarily, will change it
+    bool nullable = false;
     Timestamp start_timestamp;
     Timestamp end_timestamp;
     milvus::proto::schema::DataType data_type;
