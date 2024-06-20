@@ -38,23 +38,19 @@ class ChunkCacheTest : public testing::Test {
     TearDown() override {
         mcm->UnRegister(descriptor);
     }
-    const char* local_storage_path = "/tmp/test_chunk_cache/local";
     const char* file_name = "chunk_cache_test/insert_log/2/101/1000000";
     milvus::storage::MmapChunkManagerPtr mcm;
     milvus::segcore::SegcoreConfig config;
-    milvus::storage::MmapChunkDescriptor descriptor =
-        std::shared_ptr<milvus::storage::MmapChunkDescriptorValue>(
-            new milvus::storage::MmapChunkDescriptorValue(
-                {111, SegmentType::Sealed}));
+    milvus::storage::MmapChunkDescriptorPtr descriptor =
+        std::shared_ptr<milvus::storage::MmapChunkDescriptor>(
+            new milvus::storage::MmapChunkDescriptor(
+                {101, SegmentType::Sealed}));
 };
 
 TEST_F(ChunkCacheTest, Read) {
     auto N = 10000;
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-
-    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
-        local_storage_path);
 
     auto schema = std::make_shared<milvus::Schema>();
     auto fake_id = schema->AddDebugField(
@@ -87,8 +83,6 @@ TEST_F(ChunkCacheTest, Read) {
 
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
     const auto& column = cc->Read(file_name, descriptor);
-    std::cout << "column->ByteSize() :" << column->ByteSize() << " "
-              << dim * N * 4 << std::endl;
     Assert(column->ByteSize() == dim * N * 4);
 
     auto actual = (float*)column->Data();
@@ -105,9 +99,6 @@ TEST_F(ChunkCacheTest, TestMultithreads) {
     auto N = 1000;
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-
-    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
-        local_storage_path);
 
     auto schema = std::make_shared<milvus::Schema>();
     auto fake_id = schema->AddDebugField(
@@ -143,7 +134,6 @@ TEST_F(ChunkCacheTest, TestMultithreads) {
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
     auto executor = [&](int thread_id) {
-        std::cout << "thread id" << thread_id << " read data" << std::endl;
         const auto& column = cc->Read(file_name, descriptor);
         Assert(column->ByteSize() == dim * N * 4);
 

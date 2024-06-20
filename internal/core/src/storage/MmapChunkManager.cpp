@@ -217,43 +217,53 @@ MmapChunkManager::~MmapChunkManager() {
 }
 
 void
-MmapChunkManager::Register(const MmapChunkDescriptor key) {
-    if (HasKey(key)) {
-        LOG_WARN("key has exist in growing mmap manager");
+MmapChunkManager::Register(const MmapChunkDescriptorPtr descriptor) {
+    if (HasRegister(descriptor)) {
+        LOG_WARN("descriptor has exist in MmapChunkManager");
         return;
     }
+    AssertInfo(
+        descriptor->segment_type == SegmentType::Growing ||
+            descriptor->segment_type == SegmentType::Sealed,
+        "only register for growing or sealed segment in MmapChunkManager");
     std::unique_lock<std::shared_mutex> lck(mtx_);
-    blocks_table_.emplace(key, std::vector<MmapBlockPtr>());
+    blocks_table_.emplace(*descriptor.get(), std::vector<MmapBlockPtr>());
     return;
 }
 
 void
-MmapChunkManager::UnRegister(const MmapChunkDescriptor key) {
+MmapChunkManager::UnRegister(const MmapChunkDescriptorPtr descriptor) {
     std::unique_lock<std::shared_mutex> lck(mtx_);
-    if (blocks_table_.find(key) != blocks_table_.end()) {
-        auto& blocks = blocks_table_[key];
+    MmapChunkDescriptor blocks_table_key = *descriptor.get();
+    if (blocks_table_.find(blocks_table_key) != blocks_table_.end()) {
+        auto& blocks = blocks_table_[blocks_table_key];
         for (auto i = 0; i < blocks.size(); i++) {
             blocks_handler_->Deallocate(std::move(blocks[i]));
         }
-        blocks_table_.erase(key);
+        blocks_table_.erase(blocks_table_key);
     }
 }
 
 bool
-MmapChunkManager::HasKey(const MmapChunkDescriptor key) {
+MmapChunkManager::HasRegister(const MmapChunkDescriptorPtr descriptor) {
     std::shared_lock<std::shared_mutex> lck(mtx_);
-    return (blocks_table_.find(key) != blocks_table_.end());
+    return (blocks_table_.find(*descriptor.get()) != blocks_table_.end());
 }
 
 void*
-MmapChunkManager::Allocate(const MmapChunkDescriptor key, const uint64_t size) {
-    AssertInfo(HasKey(key), "key {} has not been register.", key->segment_id);
+MmapChunkManager::Allocate(const MmapChunkDescriptorPtr descriptor,
+                           const uint64_t size) {
+    AssertInfo(HasRegister(descriptor),
+               "descriptor {} has not been register.",
+               descriptor->segment_id);
     std::unique_lock<std::shared_mutex> lck(mtx_);
+    auto blocks_table_key = *descriptor.get();
     if (size < blocks_handler_->GetFixFileSize()) {
         // find a place to fit in
-        for (auto block_id = 0; block_id < blocks_table_[key].size();
+        for (auto block_id = 0;
+             block_id < blocks_table_[blocks_table_key].size();
              block_id++) {
-            auto addr = blocks_table_[key][block_id]->Get(size);
+            auto addr = blocks_table_[blocks_table_key][block_id]->Get(size);
             if (addr != nullptr) {
                 return addr;
             }
@@ -263,14 +273,14 @@ MmapChunkManager::Allocate(const MmapChunkDescriptor key, const uint64_t size) {
         AssertInfo(new_block != nullptr, "new mmap_block can't be nullptr");
         auto addr = new_block->Get(size);
         AssertInfo(addr != nullptr, "fail to allocate from mmap block.");
-        blocks_table_[key].emplace_back(std::move(new_block));
+        blocks_table_[blocks_table_key].emplace_back(std::move(new_block));
         return addr;
     } else {
         auto new_block = blocks_handler_->AllocateLargeBlock(size);
         AssertInfo(new_block != nullptr, "new mmap_block can't be nullptr");
         auto addr = new_block->Get(size);
         AssertInfo(addr != nullptr, "fail to allocate from mmap block.");
-        blocks_table_[key].emplace_back(std::move(new_block));
+        blocks_table_[blocks_table_key].emplace_back(std::move(new_block));
         return addr;
     }
 }

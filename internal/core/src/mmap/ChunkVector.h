@@ -56,7 +56,8 @@ template <typename Type,
           bool IsMmap = false>
 class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
  public:
-    ThreadSafeChunkVector(storage::MmapChunkDescriptor descriptor = nullptr) {
+    ThreadSafeChunkVector(
+        storage::MmapChunkDescriptorPtr descriptor = nullptr) {
         mmap_descriptor_ = descriptor;
     }
 
@@ -181,13 +182,13 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
 
  private:
     mutable std::shared_mutex mutex_;
-    storage::MmapChunkDescriptor mmap_descriptor_ = nullptr;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     std::deque<ChunkImpl> vec_;
 };
 
 template <typename Type>
 ChunkVectorPtr<Type>
-SelectChunkVectorPtr(storage::MmapChunkDescriptor& mmap_descriptor) {
+SelectChunkVectorPtr(storage::MmapChunkDescriptorPtr& mmap_descriptor) {
     if constexpr (!IsVariableType<Type>) {
         if (mmap_descriptor != nullptr) {
             return std::make_unique<

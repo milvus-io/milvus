@@ -21,7 +21,7 @@
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
-                 const MmapChunkDescriptor& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor) {
     {
         std::shared_lock lck(mutex_);
         auto it = columns_.find(filepath);
@@ -75,7 +75,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const FieldDataPtr& field_data,
-                 const MmapChunkDescriptor& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor) {
     auto dim = field_data->get_dim();
     auto data_type = field_data->get_data_type();
 
