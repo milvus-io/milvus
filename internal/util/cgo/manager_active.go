@@ -1,14 +1,12 @@
 package cgo
 
 import (
-	"math"
 	"reflect"
 	"sync"
 
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -24,22 +22,13 @@ var (
 )
 
 // initCGO initializes the cgo caller and future manager.
-// Please call this function before using any cgo utilities.
 func initCGO() {
 	initOnce.Do(func() {
 		nodeID := paramtable.GetStringNodeID()
-		chSize := int64(math.Ceil(float64(hardware.GetCPUNum()) * paramtable.Get().QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
-		if chSize <= 0 {
-			chSize = 1
-		}
-		caller = &cgoCaller{
-			// TODO: temporary solution, need to find a better way to set the pool size.
-			ch:     make(chan struct{}, chSize),
-			nodeID: nodeID,
-		}
+		initCaller(nodeID)
+		initExecutor()
 		futureManager = newActiveFutureManager(nodeID)
 		futureManager.Run()
-		initExecutor()
 	})
 }
 

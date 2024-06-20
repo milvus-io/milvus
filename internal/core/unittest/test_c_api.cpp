@@ -86,6 +86,31 @@ CRetrieve(CSegmentInterface c_segment,
     return status;
 }
 
+CStatus
+CRetrieveByOffsets(CSegmentInterface c_segment,
+                   CRetrievePlan c_plan,
+                   int64_t* offsets,
+                   int64_t len,
+                   CRetrieveResult** result) {
+    auto future = AsyncRetrieveByOffsets({}, c_segment, c_plan, offsets, len);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [retrieveResult, status] = futurePtr->leakyGet();
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CRetrieveResult*>(retrieveResult);
+    return status;
+}
+
 const char*
 get_float16_schema_config() {
     static std::string conf = R"(name: "float16-collection"
@@ -1350,8 +1375,16 @@ TEST(CApiTest, RetrieveTestWithExpr) {
         segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
+    // Test Retrieve by offsets.
+    int64_t offsets[] = {0, 1, 2};
+    CRetrieveResult* retrieve_by_offsets_result = nullptr;
+    res = CRetrieveByOffsets(
+        segment, plan.get(), offsets, 3, &retrieve_by_offsets_result);
+    ASSERT_EQ(res.error_code, Success);
+
     DeleteRetrievePlan(plan.release());
     DeleteRetrieveResult(retrieve_result);
+    DeleteRetrieveResult(retrieve_by_offsets_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }

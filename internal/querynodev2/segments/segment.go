@@ -587,6 +587,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(searchReq.mvccTimestamp),
 			))
 		},
+		cgo.WithName("search"),
 	)
 	defer future.Release()
 	result, err := future.BlockAndLeakyGet()
@@ -636,6 +637,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 				C.bool(plan.ignoreNonPk),
 			))
 		},
+		cgo.WithName("retrieve"),
 	)
 	defer future.Release()
 	result, err := future.BlockAndLeakyGet()
@@ -703,7 +705,9 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 				(*C.int64_t)(unsafe.Pointer(&offsets[0])),
 				C.int64_t(len(offsets)),
 			))
-		})
+		},
+		cgo.WithName("retrieve-by-offsets"),
+	)
 	defer future.Release()
 	result, err := future.BlockAndLeakyGet()
 	if err != nil {

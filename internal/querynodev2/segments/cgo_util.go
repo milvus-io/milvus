@@ -62,17 +62,6 @@ func UnmarshalCProto(cRes *C.CProto, msg proto.Message) error {
 	return proto.Unmarshal(blob, msg)
 }
 
-// HandleCProto deal with the result proto returned from CGO
-func HandleCProto(cRes *C.CProto, msg proto.Message) error {
-	// Standalone CProto is protobuf created by C side,
-	// Passed from c side
-	// memory is managed manually
-	lease, blob := cgoconverter.UnsafeGoBytes(&cRes.proto_blob, int(cRes.proto_size))
-	defer cgoconverter.Release(lease)
-
-	return proto.Unmarshal(blob, msg)
-}
-
 // CopyCProtoBlob returns the copy of C memory
 func CopyCProtoBlob(cProto *C.CProto) []byte {
 	blob := C.GoBytes(cProto.proto_blob, C.int32_t(cProto.proto_size))

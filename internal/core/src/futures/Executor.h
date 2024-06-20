@@ -19,9 +19,9 @@
 namespace milvus::futures {
 
 namespace ExecutePriority {
-const int LOW = 0;
+const int LOW = 2;
 const int NORMAL = 1;
-const int HIGH = 2;
+const int HIGH = 0;
 }  // namespace ExecutePriority
 
 folly::CPUThreadPoolExecutor*
