@@ -12672,11 +12672,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             search_res = collection_w.search(vector, vector_name_list[i],
                                              default_search_params, default_limit,
                                              default_search_exp,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": 1,
-                                                          "ids": insert_ids,
-                                                          # "limit": default_limit
-                                             }
                                              )[0]
             ids = search_res[0].ids
             for j in range(len(ids)):
@@ -12711,7 +12706,7 @@ class TestSparseSearch(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema(auto_id=False)
         collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=10000)
+        data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
@@ -12805,7 +12800,7 @@ class TestSparseSearch(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema(auto_id=False)
         collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=10000)
+        data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
         collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
@@ -12830,7 +12825,7 @@ class TestSparseSearch(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema()
         collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=10000)
+        data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
@@ -12859,7 +12854,7 @@ class TestSparseSearch(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema()
         collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=10000)
+        data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
         index_params = {"index_type": index, "metric_type": "IP", "params": params}

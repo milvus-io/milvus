@@ -1060,7 +1060,7 @@ class TestCollectionParams(TestcaseBase):
         # 2. create collection with multiple vectors
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector_data_type), cf.gen_float_vec_field(name="tmp", vector_data_type=sparse_vector_data_type)]
+                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector), cf.gen_float_vec_field(name="vec_sparse", vector_data_type=ct.sparse_vector)]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
