@@ -529,6 +529,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 		if channelCount == 0 {
 			continue
 		}
+		nodeID := nodeAssign.NodeID
 
 		var (
 			succeededChannels = make([]RWChannel, 0, channelCount)
@@ -548,7 +549,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				err := m.Notify(ctx, nodeAssign.NodeID, tmpWatchInfo)
+				err := m.Notify(ctx, nodeID, tmpWatchInfo)
 				return innerCh, err
 			})
 			futures = append(futures, future)
@@ -591,6 +592,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 			continue
 		}
 
+		nodeID := nodeAssign.NodeID
 		futures := make([]*conc.Future[any], 0, len(nodeAssign.Channels))
 
 		chNames := lo.Keys(nodeAssign.Channels)
@@ -603,7 +605,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 			innerCh := ch
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				successful, got := m.Check(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
+				successful, got := m.Check(ctx, nodeID, innerCh.GetWatchInfo())
 				if got {
 					return poolResult{
 						successful: successful,
