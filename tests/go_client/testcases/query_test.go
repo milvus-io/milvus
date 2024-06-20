@@ -159,9 +159,13 @@ func TestQueryWithoutExpr(t *testing.T) {
 	common.CheckErr(t, err, false, "empty expression should be used with limit")
 }
 
-// test query empty output fields: []string{}, []string{""}
-// test query with not existed field
-func TestQueryEmptyOutputFields(t *testing.T) {
+// test query empty output fields: []string{} -> default pk
+// test query empty output fields: []string{""} -> error
+// test query with not existed field ["aa"]: error or as dynamic field
+// test query with part not existed field ["aa", "$meat"]: error or as dynamic field
+// test query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
+func TestQueryOutputFields(t *testing.T) {
+	t.Skip("verify TODO")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -189,29 +193,52 @@ func TestQueryEmptyOutputFields(t *testing.T) {
 			common.CheckErr(t, err1, false, "not exist")
 		}
 
-		// query with empty not existed field -> output field as dynamic or error
+		// query with not existed field -> output field as dynamic or error
 		fakeName := "aaa"
-		res, err2 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName}))
+		res2, err2 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName}))
 		if enableDynamic {
 			common.CheckErr(t, err2, true)
-			for _, c := range res.Fields {
+			for _, c := range res2.Fields {
 				log.Debug("data", zap.String("name", c.Name()), zap.Any("type", c.Type()), zap.Any("data", c.FieldData()))
 			}
-			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName}, res.Fields)
+			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName}, res2.Fields)
 			dynamicColumn := hp.MergeColumnsToDynamic(10, hp.GenDynamicColumnData(0, 10), common.DefaultDynamicFieldName)
 			expColumns := []column.Column{
 				hp.GenColumnData(10, entity.FieldTypeInt64, *hp.TNewDataOption()),
 				column.NewColumnDynamic(dynamicColumn, fakeName),
 			}
-			common.CheckQueryResult(t, expColumns, res.Fields)
+			common.CheckQueryResult(t, expColumns, res2.Fields)
 		} else {
 			common.CheckErr(t, err2, false, fmt.Sprintf("%s not exist", fakeName))
 		}
+
+		// query with part not existed field ["aa", "$meat"]: error or as dynamic field
+		res3, err3 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName, common.DefaultDynamicFieldName}))
+		if enableDynamic{
+			common.CheckErr(t, err3, true)
+			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName, common.DefaultDynamicFieldName}, res3.Fields)
+		} else {
+			common.CheckErr(t, err3, false, "not exist")
+		}
+
+		// query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
+		res4, err4 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*", common.DefaultDynamicFieldName}))
+		if enableDynamic{
+			common.CheckErr(t, err4, true)
+			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName}, res4.Fields)
+		} else {
+			common.CheckErr(t, err4, false, "$meta not exist")
+		}
+
+		res5, err5 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(
+			[]string{common.DefaultFloatVecFieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName}))
+		common.CheckErr(t, err5, true)
+		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, res5.Fields)
 	}
 }
 
 // test query output all fields and verify data
-func TestOutputAllFieldsColumn(t *testing.T) {
+func TestQueryOutputAllFieldsColumn(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/33848")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -267,7 +294,7 @@ func TestOutputAllFieldsColumn(t *testing.T) {
 }
 
 // test query output all fields
-func TestOutputAllFieldsRows(t *testing.T) {
+func TestQueryOutputAllFieldsRows(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/33459")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
