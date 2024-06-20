@@ -115,14 +115,16 @@ class ColumnBase {
                int dim,
                const DataType& data_type,
                storage::MmapChunkManagerPtr mcm,
-               storage::MmapChunkDescriptorPtr descriptor)
+               storage::MmapChunkDescriptorPtr descriptor,
+               bool nullable)
         : mcm_(mcm),
           mmap_descriptor_(descriptor),
           type_size_(GetDataTypeSize(data_type, dim)),
           num_rows_(0),
-          size_(0),
+          data_size_(0),
           data_cap_size_(reserve),
-          mapping_type_(MAP_WITH_MANAGER) {
+          mapping_type_(MAP_WITH_MANAGER),
+          nullable(nullable){
         AssertInfo((mcm != nullptr) && descriptor != nullptr,
                    "use wrong mmap chunk manager and mmap chunk descriptor to "
                    "create column.");
@@ -133,7 +135,7 @@ class ColumnBase {
         AssertInfo(data_ != nullptr,
                    "fail to create with mmap manager: map_size = {}",
                    mapped_size);
-        if (field_meta.is_nullable()) {
+        if (nullable) {
             nullable = true;
             valid_data_cap_size_ = (reserve + 7) / 8;
             mapped_size += valid_data_cap_size_;
@@ -199,7 +201,7 @@ class ColumnBase {
                          : GetDataTypeSize(data_type, dim)),
           num_rows_(
               IsSparseFloatVectorDataType(data_type) ? 1 : (size / type_size_)),
-          size_(size),
+          data_size_(size),
           data_cap_size_(size),
           nullable(nullable),
           mapping_type_(MappingType::MAP_WITH_FILE) {
@@ -285,6 +287,7 @@ class ColumnBase {
     const char*
     MmappedData() const {
         return data_;
+    }
 
     const uint8_t*
     ValidData() const {
@@ -472,7 +475,7 @@ class ColumnBase {
                        new_size + padding_);
 
             if (valid_data_ != nullptr) {
-                std::memcpy(valid_data, valid_data_, valid_size_);
+                std::memcpy(valid_data, valid_data_, valid_data_size_);
                 if (munmap(valid_data_, valid_data_cap_size_ + padding_)) {
                     auto err = errno;
                     size_t mapped_size = new_size + padding_;
@@ -586,8 +589,9 @@ class Column : public ColumnBase {
            int dim,
            const DataType& data_type,
            storage::MmapChunkManagerPtr mcm,
-           storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+           storage::MmapChunkDescriptorPtr descriptor,
+           bool nullable)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor,nullable) {
     }
 
     Column(Column&& column) noexcept : ColumnBase(std::move(column)) {
@@ -618,7 +622,7 @@ class SparseFloatColumn : public ColumnBase {
                       size_t size,
                       int dim,
                       const DataType& data_type)
-        : ColumnBase(file, size, dim, data_type) {
+        : ColumnBase(file, size, dim, data_type,false) {
     }
     // mmap with mmap manager
     SparseFloatColumn(size_t reserve,
@@ -626,7 +630,7 @@ class SparseFloatColumn : public ColumnBase {
                       const DataType& data_type,
                       storage::MmapChunkManagerPtr mcm,
                       storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor,false) {
     }
 
     SparseFloatColumn(SparseFloatColumn&& column) noexcept
@@ -697,7 +701,7 @@ class SparseFloatColumn : public ColumnBase {
         num_rows_ = indices.size();
         // so that indices[num_rows_] - indices[num_rows_ - 1] is the size of
         // the last row.
-        indices.push_back(size_);
+        indices.push_back(data_size_+valid_data_size_);
         for (size_t i = 0; i < num_rows_; i++) {
             auto vec_size = indices[i + 1] - indices[i];
             AssertInfo(
@@ -737,8 +741,9 @@ class VariableColumn : public ColumnBase {
                    int dim,
                    const DataType& data_type,
                    storage::MmapChunkManagerPtr mcm,
-                   storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+                   storage::MmapChunkDescriptorPtr descriptor,
+                   bool nullable)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor,nullable) {
     }
 
     VariableColumn(VariableColumn&& column) noexcept
@@ -864,8 +869,9 @@ class ArrayColumn : public ColumnBase {
                 int dim,
                 const DataType& data_type,
                 storage::MmapChunkManagerPtr mcm,
-                storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+                storage::MmapChunkDescriptorPtr descriptor,
+                bool nullable)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor,nullable) {
     }
 
     ArrayColumn(ArrayColumn&& column) noexcept

@@ -56,11 +56,11 @@ class Schema {
     }
 
     FieldId
-    AddDebugArrayField(const std::string& name, DataType element_type) {
+    AddDebugArrayField(const std::string& name, DataType element_type, bool nullable) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         this->AddField(
-            FieldName(name), field_id, DataType::ARRAY, element_type);
+            FieldName(name), field_id, DataType::ARRAY, element_type,nullable);
         return field_id;
     }
 

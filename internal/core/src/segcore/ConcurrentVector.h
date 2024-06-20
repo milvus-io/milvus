@@ -237,6 +237,42 @@ class ConcurrentVectorImpl : public VectorBase {
             element_offset, static_cast<const Type*>(source), element_count);
     }
 
+    void
+    set_data(ssize_t element_offset,
+             const Type* source,
+             ssize_t element_count) {
+        auto chunk_id = element_offset / size_per_chunk_;
+        auto chunk_offset = element_offset % size_per_chunk_;
+        ssize_t source_offset = 0;
+        // first partition:
+        if (chunk_offset + element_count <= size_per_chunk_) {
+            // only first
+            fill_chunk(
+                chunk_id, chunk_offset, element_count, source, source_offset);
+            return;
+        }
+
+        auto first_size = size_per_chunk_ - chunk_offset;
+        fill_chunk(chunk_id, chunk_offset, first_size, source, source_offset);
+
+        source_offset += size_per_chunk_ - chunk_offset;
+        element_count -= first_size;
+        ++chunk_id;
+
+        // the middle
+        while (element_count >= size_per_chunk_) {
+            fill_chunk(chunk_id, 0, size_per_chunk_, source, source_offset);
+            source_offset += size_per_chunk_;
+            element_count -= size_per_chunk_;
+            ++chunk_id;
+        }
+
+        // the final
+        if (element_count > 0) {
+            fill_chunk(chunk_id, 0, element_count, source, source_offset);
+        }
+    }
+
     const void*
     get_chunk_data(ssize_t chunk_index) const override {
         return (const void*)chunks_ptr_->get_chunk_data(chunk_index);
@@ -474,8 +510,11 @@ class ConcurrentValidDataVector : public ConcurrentVectorImpl<bool, true> {
         if (element_count == 0) {
             return;
         }
-        this->grow_to_at_least(element_offset + element_count);
-        this->set_data(element_offset, source, element_count);
+        chunks_ptr_->emplace_to_at_least(
+            upper_div(element_offset + element_count, size_per_chunk_),
+            elements_per_row_ * size_per_chunk_);
+        set_data(
+            element_offset, static_cast<const bool*>(source), element_count);
     }
 };
 
