@@ -22,11 +22,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
-	"strings"
-
-	"github.com/samber/lo"
-	"github.com/valyala/fastjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -704,101 +699,6 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	return partitionID, segmentID, data, err
 }
 
-type DeleteLog struct {
-	Pk     PrimaryKey `json:"pk"`
-	Ts     uint64     `json:"ts"`
-	PkType int64      `json:"pkType"`
-}
-
-func NewDeleteLog(pk PrimaryKey, ts Timestamp) *DeleteLog {
-	pkType := pk.Type()
-
-	return &DeleteLog{
-		Pk:     pk,
-		Ts:     ts,
-		PkType: int64(pkType),
-	}
-}
-
-func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
-	var messageMap map[string]*json.RawMessage
-	var err error
-	if err = json.Unmarshal(data, &messageMap); err != nil {
-		return err
-	}
-
-	if err = json.Unmarshal(*messageMap["pkType"], &dl.PkType); err != nil {
-		return err
-	}
-
-	switch schemapb.DataType(dl.PkType) {
-	case schemapb.DataType_Int64:
-		dl.Pk = &Int64PrimaryKey{}
-	case schemapb.DataType_VarChar:
-		dl.Pk = &VarCharPrimaryKey{}
-	}
-
-	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {
-		return err
-	}
-
-	if err = json.Unmarshal(*messageMap["ts"], &dl.Ts); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
-// timestamp represents the time when this instance was deleted
-type DeleteData struct {
-	Pks      []PrimaryKey // primary keys
-	Tss      []Timestamp  // timestamps
-	RowCount int64
-	memSize  int64
-}
-
-func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
-	return &DeleteData{
-		Pks:      pks,
-		Tss:      tss,
-		RowCount: int64(len(pks)),
-		memSize:  lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
-	}
-}
-
-// Append append 1 pk&ts pair to DeleteData
-func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
-	data.Pks = append(data.Pks, pk)
-	data.Tss = append(data.Tss, ts)
-	data.RowCount++
-	data.memSize += pk.Size() + int64(8)
-}
-
-// Append append 1 pk&ts pair to DeleteData
-func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
-	data.Pks = append(data.Pks, pks...)
-	data.Tss = append(data.Tss, tss...)
-	data.RowCount += int64(len(pks))
-	data.memSize += lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
-}
-
-func (data *DeleteData) Merge(other *DeleteData) {
-	data.Pks = append(data.Pks, other.Pks...)
-	data.Tss = append(data.Tss, other.Tss...)
-	data.RowCount += other.RowCount
-	data.memSize += other.Size()
-
-	other.Pks = nil
-	other.Tss = nil
-	other.RowCount = 0
-	other.memSize = 0
-}
-
-func (data *DeleteData) Size() int64 {
-	return data.memSize
-}
-
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct{}
 
@@ -898,8 +798,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			return err
 		}
 		defer rr.Release()
-
-		var p fastjson.Parser
 		deleteLog := &DeleteLog{}
 
 		for rr.Next() {
@@ -909,38 +807,10 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			for i := 0; i < column.Len(); i++ {
 				strVal := column.ValueStr(i)
 
-				v, err := p.Parse(strVal)
+				err := deleteLog.Parse(strVal)
 				if err != nil {
-					// compatible with versions that only support int64 type primary keys
-					// compatible with fmt.Sprintf("%d,%d", pk, ts)
-					// compatible error info (unmarshal err invalid character ',' after top-level value)
-					splits := strings.Split(strVal, ",")
-					if len(splits) != 2 {
-						return fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
-					}
-					pk, err := strconv.ParseInt(splits[0], 10, 64)
-					if err != nil {
-						return err
-					}
-					deleteLog.Pk = &Int64PrimaryKey{
-						Value: pk,
-					}
-					deleteLog.PkType = int64(schemapb.DataType_Int64)
-					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
-					if err != nil {
-						return err
-					}
-				} else {
-					deleteLog.Ts = v.GetUint64("ts")
-					deleteLog.PkType = v.GetInt64("pkType")
-					switch deleteLog.PkType {
-					case int64(schemapb.DataType_Int64):
-						deleteLog.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
-					case int64(schemapb.DataType_VarChar):
-						deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
-					}
+					return err
 				}
-
 				result.Append(deleteLog.Pk, deleteLog.Ts)
 			}
 		}
