@@ -203,7 +203,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         4. create a collection with max partitions + 1
         5. verify the error raised
         """
-        max_partition = 4096
+        max_partition = 1024
         self._connect()
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         int64_field = cf.gen_int64_field()

@@ -56,11 +56,7 @@ impl IndexReaderWrapper {
     fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
         let hits = searcher.search(q, &VecCollector).unwrap();
-        let mut ret = Vec::with_capacity(hits.len());
-        for address in hits {
-            ret.push(address);
-        }
-        ret
+        hits
     }
 
     pub fn term_query_i64(&self, term: i64) -> Vec<u32> {
