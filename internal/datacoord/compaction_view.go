@@ -88,6 +88,9 @@ type SegmentView struct {
 	BinlogCount   int
 	StatslogCount int
 	DeltalogCount int
+
+	// row count
+	DeltaRowCount int
 }
 
 func (s *SegmentView) Clone() *SegmentView {
@@ -104,6 +107,7 @@ func (s *SegmentView) Clone() *SegmentView {
 		BinlogCount:   s.BinlogCount,
 		StatslogCount: s.StatslogCount,
 		DeltalogCount: s.DeltalogCount,
+		DeltaRowCount: s.DeltaRowCount,
 	}
 }
 
@@ -126,6 +130,7 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 
 			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
 			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
+			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
 
 			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
 			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
@@ -147,13 +152,13 @@ func (v *SegmentView) Equal(other *SegmentView) bool {
 }
 
 func (v *SegmentView) String() string {
-	return fmt.Sprintf("ID=%d, label=<%s>, state=%s, level=%s, binlogSize=%.2f, binlogCount=%d, deltaSize=%.2f, deltaCount=%d, expireSize=%.2f",
-		v.ID, v.label, v.State.String(), v.Level.String(), v.Size, v.BinlogCount, v.DeltaSize, v.DeltalogCount, v.ExpireSize)
+	return fmt.Sprintf("ID=%d, label=<%s>, state=%s, level=%s, binlogSize=%.2f, binlogCount=%d, deltaSize=%.2f, deltalogCount=%d, deltaRowCount=%d, expireSize=%.2f",
+		v.ID, v.label, v.State.String(), v.Level.String(), v.Size, v.BinlogCount, v.DeltaSize, v.DeltalogCount, v.DeltaRowCount, v.ExpireSize)
 }
 
 func (v *SegmentView) LevelZeroString() string {
-	return fmt.Sprintf("<ID=%d, level=%s, deltaSize=%.2f, deltaCount=%d>",
-		v.ID, v.Level.String(), v.DeltaSize, v.DeltalogCount)
+	return fmt.Sprintf("<ID=%d, level=%s, deltaSize=%.2f, deltaLogCount=%d, deltaRowCount=%d>",
+		v.ID, v.Level.String(), v.DeltaSize, v.DeltalogCount, v.DeltaRowCount)
 }
 
 func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
@@ -164,9 +169,19 @@ func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
 	return num
 }
 
-func GetBinlogSizeAsBytes(deltaBinlogs []*datapb.FieldBinlog) float64 {
+func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int {
+	var num int
+	for _, fbinlog := range fieldBinlogs {
+		for _, binlog := range fbinlog.GetBinlogs() {
+			num += int(binlog.GetEntriesNum())
+		}
+	}
+	return num
+}
+
+func GetBinlogSizeAsBytes(fieldBinlogs []*datapb.FieldBinlog) float64 {
 	var deltaSize float64
-	for _, deltaLogs := range deltaBinlogs {
+	for _, deltaLogs := range fieldBinlogs {
 		for _, l := range deltaLogs.GetBinlogs() {
 			deltaSize += float64(l.GetMemorySize())
 		}
