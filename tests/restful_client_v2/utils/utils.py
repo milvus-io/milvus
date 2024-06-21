@@ -4,7 +4,7 @@ import random
 import string
 from faker import Faker
 import numpy as np
-import jax.numpy as jnp
+from ml_dtypes import bfloat16
 from sklearn import preprocessing
 import base64
 import requests
@@ -191,7 +191,7 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+        bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
         bf16_vectors.append(bytes(bf16_vector))
 
     return raw_vectors, bf16_vectors
