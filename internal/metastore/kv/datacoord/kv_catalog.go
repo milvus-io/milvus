@@ -218,24 +218,21 @@ func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, d
 		if len(segmentInfo.Binlogs) == 0 {
 			segmentInfo.Binlogs = insertLogs[segmentInfo.ID]
 		}
-		err = binlog.CompressFieldBinlogs(segmentInfo.Binlogs)
-		if err != nil {
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Binlogs); err != nil {
 			return err
 		}
 
 		if len(segmentInfo.Deltalogs) == 0 {
 			segmentInfo.Deltalogs = deltaLogs[segmentInfo.ID]
 		}
-		err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs)
-		if err != nil {
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs); err != nil {
 			return err
 		}
 
 		if len(segmentInfo.Statslogs) == 0 {
 			segmentInfo.Statslogs = statsLogs[segmentInfo.ID]
 		}
-		err = binlog.CompressFieldBinlogs(segmentInfo.Statslogs)
-		if err != nil {
+		if err = binlog.CompressFieldBinlogs(segmentInfo.Statslogs); err != nil {
 			return err
 		}
 	}
