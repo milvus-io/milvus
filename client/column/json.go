@@ -134,7 +134,7 @@ func (c *ColumnJSONBytes) AppendValue(i interface{}) error {
 			}
 			v = bs
 		default:
-			return fmt.Errorf("expect json compatible type([]byte, struct[}, map], got %T)", i)
+			return fmt.Errorf("expect json compatible type([]byte, struct, map), got %T", i)
 		}
 	}
 	c.values = append(c.values, v)

@@ -31,6 +31,7 @@ const (
 	spAnnsField     = `anns_field`
 	spTopK          = `topk`
 	spOffset        = `offset`
+	spLimit         = `limit`
 	spParams        = `params`
 	spMetricsType   = `metric_type`
 	spRoundDecimal  = `round_decimal`
@@ -197,15 +198,12 @@ type QueryOption interface {
 }
 
 type queryOption struct {
-	collectionName string
-	partitionNames []string
-
-	limit                      int
-	offset                     int
+	collectionName             string
+	partitionNames             []string
+	queryParams                map[string]string
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
-	ignoreGrowing              bool
 	expr                       string
 }
 
@@ -216,6 +214,7 @@ func (opt *queryOption) Request() *milvuspb.QueryRequest {
 		OutputFields:   opt.outputFields,
 
 		Expr:             opt.expr,
+		QueryParams:      entity.MapKvPairs(opt.queryParams),
 		ConsistencyLevel: opt.consistencyLevel.CommonConsistencyLevel(),
 	}
 }
@@ -226,7 +225,18 @@ func (opt *queryOption) WithFilter(expr string) *queryOption {
 }
 
 func (opt *queryOption) WithOffset(offset int) *queryOption {
-	opt.offset = offset
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spOffset] = strconv.Itoa(offset)
+	return opt
+}
+
+func (opt *queryOption) WithLimit(limit int) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spLimit] = strconv.Itoa(limit)
 	return opt
 }
 
