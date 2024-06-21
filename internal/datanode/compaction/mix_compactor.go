@@ -193,7 +193,7 @@ func (t *mixCompactionTask) merge(
 			unflushedRowCount++
 			remainingRowCount++
 
-			if (unflushedRowCount+1)%100 == 0 && writer.IsFull() {
+			if (unflushedRowCount+1)%100 == 0 && writer.FlushAndIsFull() {
 				serWriteStart := time.Now()
 				kvs, partialBinlogs, err := serializeWrite(ctx, t.Allocator, writer)
 				if err != nil {
@@ -214,7 +214,7 @@ func (t *mixCompactionTask) merge(
 		}
 	}
 
-	if !writer.IsEmpty() {
+	if !writer.FlushAndIsEmpty() {
 		serWriteStart := time.Now()
 		kvs, partialBinlogs, err := serializeWrite(ctx, t.Allocator, writer)
 		if err != nil {
