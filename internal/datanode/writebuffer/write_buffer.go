@@ -55,7 +55,7 @@ type WriteBuffer interface {
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
 	// Close is the method to close and sink current buffer data.
-	Close(drop bool)
+	Close(ctx context.Context, drop bool)
 }
 
 type checkpointCandidate struct {
@@ -631,7 +631,7 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 	return uint(sizeLimit / int64(wb.estSizePerRecord))
 }
 
-func (wb *writeBufferBase) Close(drop bool) {
+func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	log := wb.logger
 	// sink all data and call Drop for meta writer
 	wb.mut.Lock()
@@ -642,7 +642,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 
 	var futures []*conc.Future[struct{}]
 	for id := range wb.buffers {
-		syncTask, err := wb.getSyncTask(context.Background(), id)
+		syncTask, err := wb.getSyncTask(ctx, id)
 		if err != nil {
 			// TODO
 			continue
@@ -654,7 +654,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 			t.WithDrop()
 		}
 
-		f := wb.syncMgr.SyncData(context.Background(), syncTask, func(err error) error {
+		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if err != nil {
 				return err
 			}
@@ -672,7 +672,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 		// TODO change to remove channel in the future
 		panic(err)
 	}
-	err = wb.metaWriter.DropChannel(wb.channelName)
+	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
 	if err != nil {
 		log.Error("failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future

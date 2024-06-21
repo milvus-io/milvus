@@ -196,6 +196,8 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 }
 
 func (s *SyncTaskSuiteV2) TestRunNormal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
@@ -229,7 +231,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
@@ -243,7 +245,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 }

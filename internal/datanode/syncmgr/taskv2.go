@@ -65,7 +65,7 @@ func (t *SyncTaskV2) handleError(err error) {
 	}
 }
 
-func (t *SyncTaskV2) Run() error {
+func (t *SyncTaskV2) Run(ctx context.Context) error {
 	log := t.getLogger()
 	var err error
 
