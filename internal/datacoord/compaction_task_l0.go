@@ -250,7 +250,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			//!info.isCompacting &&
 			!info.GetIsImporting() &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			info.GetDmlPosition().GetTimestamp() < t.GetPos().GetTimestamp()
+			info.GetStartPosition().GetTimestamp() < t.GetPos().GetTimestamp()
 	}))
 
 	if len(sealedSegments) == 0 {
