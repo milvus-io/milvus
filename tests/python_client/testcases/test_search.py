@@ -6925,7 +6925,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     def test_range_search_default(self, index_type, metric, vector_data_type):
         """
         target: verify the range search returns correct results
