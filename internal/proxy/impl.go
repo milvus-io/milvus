@@ -1858,7 +1858,9 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	log.Debug(
 		rpcDone(method),
-		zap.Any("request", request))
+		zap.Any("request", request),
+		zap.Int64("loadProgress", loadProgress),
+		zap.Int64("refreshProgress", refreshProgress))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.GetLoadingProgressResponse{
