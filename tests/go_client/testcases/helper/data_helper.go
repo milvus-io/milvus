@@ -409,17 +409,7 @@ func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *
 		}
 		values = append(values, bs)
 	}
-	jsonColumn := column.NewColumnJSONBytes(columnName, values)
-
-	var jsonData []string
-	for i := 0; i < jsonColumn.Len(); i++ {
-		line, err := jsonColumn.GetAsString(i)
-		if err != nil {
-			log.Error("MergeColumnsToDynamic", zap.Error(err))
-		}
-		jsonData = append(jsonData, line)
-	}
-	jsonColumn.WithIsDynamic(true)
+	jsonColumn := column.NewColumnJSONBytes(columnName, values).WithIsDynamic(true)
 
 	return jsonColumn
 }

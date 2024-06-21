@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 				}
 			}
 			if !contains {
-				t.FailNow()
+				t.Fatalf("CheckErr failed, actualErr doesn contains any expErrorMsg, please check test cases!")
 			}
 		}
 	}
@@ -62,9 +63,11 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeJSON:
 		log.Debug("data", zap.String("name", columnA.Name()), zap.Any("type", columnA.Type()), zap.Any("data", columnA.FieldData()))
 		log.Debug("data", zap.String("name", columnB.Name()), zap.Any("type", columnB.Type()), zap.Any("data", columnB.FieldData()))
-		if columnA.FieldData().IsDynamic {
+		require.Equal(t, reflect.TypeOf(columnA), reflect.TypeOf(columnB))
+		switch columnA.(type) {
+		case *column.ColumnDynamic:
 			require.ElementsMatch(t, columnA.(*column.ColumnDynamic).Data(), columnB.(*column.ColumnDynamic).Data())
-		} else {
+		case *column.ColumnJSONBytes:
 			require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
 		}
 	case entity.FieldTypeFloatVector:
@@ -80,10 +83,12 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeArray:
 		EqualArrayColumn(t, columnA, columnB)
 	default:
-		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{entity.FieldTypeBool,
+		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{
+			entity.FieldTypeBool,
 			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32,
 			entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString,
-			entity.FieldTypeVarChar, entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector}))
+			entity.FieldTypeVarChar, entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
+		}))
 	}
 }
 
@@ -110,8 +115,10 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	case *column.ColumnVarCharArray:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarCharArray).Data(), columnB.(*column.ColumnVarCharArray).Data())
 	default:
-		log.Info("Support array element type is:", zap.Any("FieldType", []entity.FieldType{entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
-			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar}))
+		log.Info("Support array element type is:", zap.Any("FieldType", []entity.FieldType{
+			entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
+			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar,
+		}))
 	}
 }
 
@@ -137,6 +144,7 @@ func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.
 	for _, actualColumn := range actualColumns {
 		actualFields = append(actualFields, actualColumn.Name())
 	}
+	log.Debug("CheckOutputFields", zap.Any("expFields", expFields), zap.Any("actualFields", actualFields))
 	require.ElementsMatchf(t, expFields, actualFields, fmt.Sprintf("Expected search output fields: %v, actual: %v", expFields, actualFields))
 }
 
@@ -150,7 +158,7 @@ func CheckSearchResult(t *testing.T, actualSearchResults []clientv2.ResultSet, e
 }
 
 // CheckQueryResult check query result, column name, type and field
-func CheckQueryResult(t *testing.T, expColumns []column.Column,  actualColumns []column.Column) {
+func CheckQueryResult(t *testing.T, expColumns []column.Column, actualColumns []column.Column) {
 	require.Equal(t, len(actualColumns), len(expColumns),
 		"The len of actual columns %d should greater or equal to the expected columns %d", len(actualColumns), len(expColumns))
 	for _, expColumn := range expColumns {
@@ -161,7 +169,7 @@ func CheckQueryResult(t *testing.T, expColumns []column.Column,  actualColumns [
 				EqualColumn(t, expColumn, actualColumn)
 			}
 		}
-		if !exist{
+		if !exist {
 			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
 		}
 	}
