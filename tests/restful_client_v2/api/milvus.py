@@ -88,17 +88,7 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
             f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}")
 
 
-class SingletonMeta(type):
-    _instances = {}
-
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            instance = super().__call__(*args, **kwargs)
-            cls._instances[cls] = instance
-        return cls._instances[cls]
-
-
-class Requests(metaclass=SingletonMeta):
+class Requests():
     uuid = str(uuid.uuid1())
     api_key = None
 
@@ -114,8 +104,8 @@ class Requests(metaclass=SingletonMeta):
         }
 
     @classmethod
-    def update_uuid(cls):
-        cls.uuid = str(uuid.uuid1())
+    def update_uuid(cls, _uuid):
+        cls.uuid = _uuid
 
     @classmethod
     def update_headers(cls):

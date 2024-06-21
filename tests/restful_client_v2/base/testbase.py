@@ -56,19 +56,28 @@ class TestBase(Base):
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
+        _uuid = str(uuid.uuid1())
         self.req = Requests()
-        self.req.update_uuid()
+        self.req.update_uuid(_uuid)
         self.endpoint = f"{endpoint}"
         self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
         self.vector_client = VectorClient(self.endpoint, self.api_key)
+        self.vector_client.update_uuid(_uuid)
         self.collection_client = CollectionClient(self.endpoint, self.api_key)
+        self.collection_client.update_uuid(_uuid)
         self.partition_client = PartitionClient(self.endpoint, self.api_key)
+        self.partition_client.update_uuid(_uuid)
         self.index_client = IndexClient(self.endpoint, self.api_key)
+        self.index_client.update_uuid(_uuid)
         self.alias_client = AliasClient(self.endpoint, self.api_key)
+        self.alias_client.update_uuid(_uuid)
         self.user_client = UserClient(self.endpoint, self.api_key)
+        self.user_client.update_uuid(_uuid)
         self.role_client = RoleClient(self.endpoint, self.api_key)
+        self.role_client.update_uuid(_uuid)
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
+        self.import_job_client.update_uuid(_uuid)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         if token is None:
             self.vector_client.api_key = None
