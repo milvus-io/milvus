@@ -4,12 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	clientv2 "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-	"go.uber.org/zap"
 )
 
 func TestSearch(t *testing.T) {

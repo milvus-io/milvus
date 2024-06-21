@@ -79,7 +79,7 @@ func GenDynamicRow(index int) Dynamic {
 	return dynamic
 }
 
-func GenJsonRow(index int) *JSONStruct {
+func GenJSONRow(index int) *JSONStruct {
 	var jsonStruct JSONStruct
 	_bool := &BoolStruct{
 		Bool: index%2 == 0,
@@ -130,7 +130,7 @@ func GenInt64VarcharSparseRows(nb int, enableDynamicField bool, autoID bool, opt
 	// BaseRow generate insert rows
 	for i := start; i < start+nb; i++ {
 		vec := common.GenSparseVector(2)
-		//log.Info("", zap.Any("SparseVec", vec))
+		// log.Info("", zap.Any("SparseVec", vec))
 		baseRow := BaseRow{
 			Varchar:   strconv.Itoa(i + 1),
 			SparseVec: vec,
@@ -166,7 +166,7 @@ func GenAllFieldsRows(nb int, enableDynamicField bool, option GenDataOption) []i
 			Float:      float32(i + 1),
 			Double:     float64(i + 1),
 			Varchar:    strconv.Itoa(i + 1),
-			JSON:       GenJsonRow(i + 1),
+			JSON:       GenJSONRow(i + 1),
 			FloatVec:   common.GenFloatVector(dim),
 			Fp16Vec:    common.GenFloat16Vector(dim),
 			Bf16Vec:    common.GenBFloat16Vector(dim),

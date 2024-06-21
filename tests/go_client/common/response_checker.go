@@ -5,14 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/stretchr/testify/require"
-
 	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2/column"
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...string) {
@@ -71,10 +70,12 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeArray:
 		log.Info("TODO support column element type")
 	default:
-		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{entity.FieldTypeBool,
+		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{
+			entity.FieldTypeBool,
 			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32, entity.FieldTypeInt64,
 			entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString, entity.FieldTypeVarChar,
-			entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector}))
+			entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
+		}))
 	}
 }
 

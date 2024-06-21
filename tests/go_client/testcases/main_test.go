@@ -10,14 +10,15 @@ import (
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
-
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
-var addr = flag.String("addr", "localhost:19530", "server host and port")
-var defaultCfg clientv2.ClientConfig
+var (
+	addr       = flag.String("addr", "localhost:19530", "server host and port")
+	defaultCfg clientv2.ClientConfig
+)
 
 // teardown
 func teardown() {

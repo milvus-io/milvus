@@ -6,15 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
-
 	"go.uber.org/zap"
-
 	"google.golang.org/grpc"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
@@ -116,7 +114,7 @@ func (mc *MilvusClient) ListCollections(ctx context.Context, option clientv2.Lis
 	return collectionNames, err
 }
 
-//DescribeCollection Describe collection
+// DescribeCollection Describe collection
 func (mc *MilvusClient) DescribeCollection(ctx context.Context, option clientv2.DescribeCollectionOption, callOptions ...grpc.CallOption) (*entity.Collection, error) {
 	collection, err := mc.mClient.DescribeCollection(ctx, option, callOptions...)
 	return collection, err
@@ -197,7 +195,7 @@ func (mc *MilvusClient) DropIndex(ctx context.Context, option clientv2.DropIndex
 // Insert insert data
 func (mc *MilvusClient) Insert(ctx context.Context, option clientv2.InsertOption, callOptions ...grpc.CallOption) (clientv2.InsertResult, error) {
 	insertRes, err := mc.mClient.Insert(ctx, option, callOptions...)
-	if err == nil{
+	if err == nil {
 		log.Info("Insert", zap.Any("result", insertRes))
 	}
 	return insertRes, err

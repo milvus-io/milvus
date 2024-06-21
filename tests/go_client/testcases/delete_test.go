@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-	"github.com/stretchr/testify/require"
 )
 
 func TestDelete(t *testing.T) {
@@ -408,6 +408,7 @@ func TestDeletePartitionName(t *testing.T) {
 	// query and verify
 	resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithOutputFields([]string{common.QueryCountFieldName}).
 		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
 	count, _ := resQuery.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb*2), count)
 
@@ -443,7 +444,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 	exprLimits := []exprCount{
 		{expr: fmt.Sprintf("%s >= 1000 || %s > 2000", common.DefaultInt64FieldName, common.DefaultInt64FieldName), count: 2000},
 
-		//json and dynamic field filter expr: == < in bool/ list/ int
+		// json and dynamic field filter expr: == < in bool/ list/ int
 		{expr: fmt.Sprintf("%s['number'] < 100 and %s['number'] != 0", common.DefaultJSONFieldName, common.DefaultJSONFieldName), count: 50},
 		{expr: fmt.Sprintf("%s < 100", common.DefaultDynamicNumberField), count: 100},
 		{expr: fmt.Sprintf("%s == false", common.DefaultDynamicBoolField), count: 2000},
@@ -496,7 +497,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 		resDe, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
 		common.CheckErr(t, err, true)
 		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
-		//require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
+		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
 
 		resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, true)
@@ -555,4 +556,3 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb-1, resQuery.ResultCount)
 }
-
