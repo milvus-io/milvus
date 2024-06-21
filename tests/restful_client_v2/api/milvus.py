@@ -8,17 +8,75 @@ from minio.error import S3Error
 from minio.commonconfig import CopySource
 from tenacity import retry, retry_if_exception_type, stop_after_attempt
 from requests.exceptions import ConnectionError
+import urllib.parse
+
+ENABLE_LOG_SAVE = False
 
 
-def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):
-    if len(data) > 2000:
-        data = data[:1000] + "..." + data[-1000:]
+def simplify_list(lst):
+    if len(lst) > 20:
+        return [lst[0], '...', lst[-1]]
+    return lst
+
+
+def simplify_dict(d):
+    if d is None:
+        d = {}
+    if len(d) > 20:
+        keys = list(d.keys())
+        d = {keys[0]: d[keys[0]], '...': '...', keys[-1]: d[keys[-1]]}
+    simplified = {}
+    for k, v in d.items():
+        if isinstance(v, list):
+            simplified[k] = simplify_list([simplify_dict(item) if isinstance(item, dict) else simplify_list(
+                item) if isinstance(item, list) else item for item in v])
+        elif isinstance(v, dict):
+            simplified[k] = simplify_dict(v)
+        else:
+            simplified[k] = v
+    return simplified
+
+
+def build_curl_command(method, url, headers, data=None, params=None):
+    if isinstance(params, dict):
+        query_string = urllib.parse.urlencode(params)
+        url = f"{url}?{query_string}"
+    curl_cmd = [f"curl -X {method} '{url}'"]
+
+    for key, value in headers.items():
+        curl_cmd.append(f" -H '{key}: {value}'")
+
+    if data:
+        # process_and_simplify(data)
+        data = json.dumps(data, indent=4)
+        curl_cmd.append(f" -d '{data}'")
+
+    return " \\\n".join(curl_cmd)
+
+
+def logger_request_response(response, url, tt, headers, data, str_data, str_response, method, params=None):
+    # save data to jsonl file
+
+    data_dict = json.loads(data) if data else {}
+    data_dict_simple = simplify_dict(data_dict)
+    if ENABLE_LOG_SAVE:
+        with open('request_response.jsonl', 'a') as f:
+            f.write(json.dumps({
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "params": params,
+                "data": data_dict_simple,
+                "response": response.json()
+            }) + "\n")
+    data = json.dumps(data_dict_simple, indent=4)
     try:
         if response.status_code == 200:
             if ('code' in response.json() and response.json()["code"] == 0) or (
                     'Code' in response.json() and response.json()["Code"] == 0):
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {str_data}, \nresponse: {str_response}")
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {str_response}")
+
             else:
                 logger.debug(
                     f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
@@ -30,21 +88,41 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
             f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}")
 
 
-class Requests:
+class SingletonMeta(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        return cls._instances[cls]
+
+
+class Requests(metaclass=SingletonMeta):
+    uuid = str(uuid.uuid1())
+    api_key = None
+
     def __init__(self, url=None, api_key=None):
         self.url = url
         self.api_key = api_key
+        if self.uuid is None:
+            self.uuid = str(uuid.uuid1())
         self.headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'RequestId': self.uuid
         }
 
-    def update_headers(self):
+    @classmethod
+    def update_uuid(cls):
+        cls.uuid = str(uuid.uuid1())
+
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -59,7 +137,7 @@ class Requests:
         response = requests.post(url, headers=headers, data=data, params=params)
         tt = time.time() - t0
         str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
-        logger_request_response(response, url, tt, headers, data, str_data, str_response, "post")
+        logger_request_response(response, url, tt, headers, data, str_data, str_response, "post", params=params)
         return response
 
     @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
@@ -74,7 +152,7 @@ class Requests:
             response = requests.get(url, headers=headers, params=params, data=data)
         tt = time.time() - t0
         str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
-        logger_request_response(response, url, tt, headers, data, str_data, str_response, "get")
+        logger_request_response(response, url, tt, headers, data, str_data, str_response, "get", params=params)
         return response
 
     @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
@@ -111,12 +189,13 @@ class VectorClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
+            'Authorization': f'Bearer {cls.api_key}',
             'Accept-Type-Allow-Int64': "true",
-            'RequestId': str(uuid.uuid1())
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -195,8 +274,6 @@ class VectorClient(Requests):
 
         return response.json()
 
-
-
     def vector_query(self, payload, db_name="default", timeout=5):
         time.sleep(1)
         url = f'{self.endpoint}/v2/vectordb/entities/query'
@@ -269,13 +346,14 @@ class CollectionClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self, headers=None):
+    @classmethod
+    def update_headers(cls, headers=None):
         if headers is not None:
             return headers
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -415,11 +493,12 @@ class PartitionClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -530,11 +609,12 @@ class UserClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -594,11 +674,12 @@ class RoleClient(Requests):
         self.headers = self.update_headers()
         self.role_names = []
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -653,11 +734,12 @@ class IndexClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -714,11 +796,12 @@ class AliasClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 
@@ -765,11 +848,12 @@ class ImportJobClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    def update_headers(self):
+    @classmethod
+    def update_headers(cls):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
         }
         return headers
 

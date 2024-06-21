@@ -2,10 +2,11 @@ import json
 import sys
 import pytest
 import time
+import uuid
 from pymilvus import connections, db
 from utils.util_log import test_log as logger
 from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
-                        UserClient, RoleClient, ImportJobClient, StorageClient)
+                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
 from utils.utils import get_data_by_payload
 
 
@@ -35,7 +36,7 @@ class Base:
 
 
 class TestBase(Base):
-
+    req = None
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
@@ -49,8 +50,14 @@ class TestBase(Base):
             except Exception as e:
                 logger.error(e)
 
+    # def setup_method(self):
+    #     self.req = Requests()
+    #     self.req.uuid = str(uuid.uuid1())
+
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
+        self.req = Requests()
+        self.req.update_uuid()
         self.endpoint = f"{endpoint}"
         self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
