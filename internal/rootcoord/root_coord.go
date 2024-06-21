@@ -867,7 +867,6 @@ func (c *Core) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfDatabases.Inc()
 	log.Ctx(ctx).Info("done to create database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()),
 		zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
@@ -912,7 +911,6 @@ func (c *Core) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseReques
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfDatabases.Dec()
 	metrics.CleanupRootCoordDBMetrics(in.GetDbName())
 	log.Ctx(ctx).Info("done to drop database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()),

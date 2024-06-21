@@ -141,6 +141,7 @@ func (mt *MetaTable) reload() error {
 
 	metrics.RootCoordNumOfCollections.Reset()
 	metrics.RootCoordNumOfPartitions.Reset()
+	metrics.RootCoordNumOfDatabases.Set(0)
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -186,6 +187,7 @@ func (mt *MetaTable) reload() error {
 			}
 		}
 
+		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
 		log.Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
@@ -257,7 +259,11 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	return mt.createDatabasePrivate(ctx, db, ts)
+	if err := mt.createDatabasePrivate(ctx, db, ts); err != nil {
+		return err
+	}
+	metrics.RootCoordNumOfDatabases.Inc()
+	return nil
 }
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
@@ -273,8 +279,8 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
 	mt.dbName2Meta[dbName] = db
-	log.Ctx(ctx).Info("create database", zap.String("db", dbName), zap.Uint64("ts", ts))
 
+	log.Ctx(ctx).Info("create database", zap.String("db", dbName), zap.Uint64("ts", ts))
 	return nil
 }
 
@@ -324,8 +330,9 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
 	delete(mt.dbName2Meta, dbName)
-	log.Ctx(ctx).Info("drop database", zap.String("db", dbName), zap.Uint64("ts", ts))
 
+	metrics.RootCoordNumOfDatabases.Dec()
+	log.Ctx(ctx).Info("drop database", zap.String("db", dbName), zap.Uint64("ts", ts))
 	return nil
 }
 
