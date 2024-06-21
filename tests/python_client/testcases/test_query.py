@@ -2275,6 +2275,41 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, output_fields=["*"], check_items=CheckTasks.check_query_results,
                            check_task={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_growing", [True])
+    def test_query_to_get_latest_entity_with_dup_ids(self, with_growing):
+        """
+        target: test query to get latest entity with duplicate primary keys
+        method: 1.create collection and insert dup primary key = 0
+                2.query with expr=dup_id
+        expected: return the latest entity; verify the result is same as dedup entities
+        """
+        collection_w = self.init_collection_general(prefix, dim=16, is_flush=False, insert_data=False, is_index=False,
+                                                    vector_data_type=ct.float_type, with_json=False)[0]
+        nb = 50
+        rounds = 10
+        for i in range(rounds):
+            df = cf.gen_default_dataframe_data(dim=16, nb=nb, start=i * nb, with_json=False)
+            df[ct.default_int64_field_name] = i
+            collection_w.insert(df)
+            # re-insert the last piece of data in df to refresh the timestamp
+            last_piece = df.iloc[-1:]
+            collection_w.insert(last_piece)
+
+        if not with_growing:
+            collection_w.flush()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_index)
+        collection_w.load()
+        # verify the result returns the latest entity if there are duplicate primary keys
+        expr = f'{ct.default_int64_field_name} == 0'
+        res = collection_w.query(expr=expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == 1 and res[0][ct.default_float_field_name] == (nb - 1) * 1.0
+
+        # verify the result is same as dedup entities
+        expr = f'{ct.default_int64_field_name} >= 0'
+        res = collection_w.query(expr=expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == rounds
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self):
         """
