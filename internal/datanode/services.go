@@ -214,6 +214,10 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Success(), nil
 	}
 
+	if req.GetBeginLogID() == 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("the beginLogID is invalid")), nil
+	}
+
 	/*
 		spanCtx := trace.SpanContextFromContext(ctx)
 
@@ -227,7 +231,6 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		task = compaction.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			node.chunkManager,
 			req,
 		)
@@ -235,14 +238,15 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			req,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
+		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("pre-allocated segmentID range is invalid")), nil
+		}
 		task = compaction.NewClusteringCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.allocator,
 			req,
 		)
 	default:

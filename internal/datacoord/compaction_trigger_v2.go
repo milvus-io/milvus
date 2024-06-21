@@ -251,6 +251,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
+		return
 	}
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
@@ -271,6 +272,12 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
+	resultSegmentNum := totalRows / preferSegmentRows * 2
+	start, end, err := m.allocator.allocN(resultSegmentNum)
+	if err != nil {
+		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()))
+		return
+	}
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
@@ -285,6 +292,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		Schema:             collection.Schema,
 		ClusteringKeyField: view.(*ClusteringSegmentsView).clusteringKeyField,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:     []int64{start, end}, // pre-allocated result segments range
 		MaxSegmentRows:     maxSegmentRows,
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
@@ -297,6 +305,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
+		return
 	}
 	log.Info("Finish to submit a clustering compaction task",
 		zap.Int64("taskID", taskID),

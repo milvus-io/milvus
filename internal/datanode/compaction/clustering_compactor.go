@@ -35,7 +35,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -58,8 +58,9 @@ import (
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	binlogIO  io.BinlogIO
-	allocator allocator.Allocator
+	binlogIO   io.BinlogIO
+	logIDAlloc allocator.Interface
+	segIDAlloc allocator.Interface
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -118,15 +119,17 @@ type SpillSignal struct {
 func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+	logIDAlloc := allocator.NewStaticAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	segIDAlloc := allocator.NewStaticAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
 	return &clusteringCompactionTask{
 		ctx:                ctx,
 		cancel:             cancel,
 		binlogIO:           binlogIO,
-		allocator:          alloc,
+		logIDAlloc:         logIDAlloc,
+		segIDAlloc:         segIDAlloc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
@@ -282,7 +285,9 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(buffer)
+		if err = t.refreshBufferWriter(buffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
 			scalarToClusterBufferMap[key] = buffer
@@ -331,7 +336,9 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(clusterBuffer)
+		if err = t.refreshBufferWriter(clusterBuffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
@@ -718,7 +725,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	for _, fieldBinlog := range buffer.flushedBinlogs {
 		insertLogs = append(insertLogs, fieldBinlog)
 	}
-	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, buffer.writer, buffer.flushedRowNum.Load())
+	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.logIDAlloc, buffer.writer, buffer.flushedRowNum.Load())
 	if err != nil {
 		return err
 	}
@@ -739,7 +746,9 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	}
 	buffer.uploadedSegmentStats[buffer.writer.GetSegmentID()] = segmentStats
 	// refresh
-	t.refreshBufferWriter(buffer)
+	if err = t.refreshBufferWriter(buffer); err != nil {
+		return err
+	}
 	buffer.flushedRowNum.Store(0)
 	buffer.flushedBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0)
 	for _, binlog := range seg.InsertLogs {
@@ -756,7 +765,7 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 	}
 
 	future := t.flushPool.Submit(func() (any, error) {
-		kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, buffer.writer)
+		kvs, partialBinlogs, err := serializeWrite(ctx, t.logIDAlloc, buffer.writer)
 		if err != nil {
 			log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
 			return typeutil.NewPair(kvs, partialBinlogs), err
@@ -1015,7 +1024,7 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 }
 
 func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) error {
-	segmentID, err := t.allocator.AllocOne()
+	segmentID, err := t.segIDAlloc.AllocOne()
 	if err != nil {
 		return err
 	}
