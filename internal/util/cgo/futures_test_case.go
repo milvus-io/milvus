@@ -16,8 +16,6 @@ import (
 	"context"
 	"time"
 	"unsafe"
-
-	"go.uber.org/atomic"
 )
 
 const (
@@ -26,8 +24,6 @@ const (
 	caseNoThrowFollyException   int = 2
 	caseNoThrowSegcoreException int = 3
 )
-
-var unreleasedCnt = atomic.NewInt32(0)
 
 type testCase struct {
 	interval time.Duration
@@ -39,12 +35,7 @@ func createFutureWithTestCase(ctx context.Context, testCase testCase) Future {
 	f := func() CFuturePtr {
 		return (CFuturePtr)(C.future_create_test_case(C.int(testCase.interval.Milliseconds()), C.int(testCase.loopCnt), C.int(testCase.caseNo)))
 	}
-	future := Async(ctx, f,
-		WithName("createFutureWithTestCase"),
-		WithReleaser(func() {
-			unreleasedCnt.Dec()
-		}))
-	unreleasedCnt.Inc()
+	future := Async(ctx, f, WithName("createFutureWithTestCase"))
 	return future
 }
 

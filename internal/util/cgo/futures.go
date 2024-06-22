@@ -75,6 +75,8 @@ type (
 
 // Async is a helper function to call a C async function that returns a future.
 func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
+	initCGO()
+
 	options := getDefaultOpt()
 	// apply options.
 	for _, opt := range opts {

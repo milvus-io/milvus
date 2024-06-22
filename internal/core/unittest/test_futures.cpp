@@ -206,5 +206,6 @@ TEST(Futures, Future) {
 
         ASSERT_EQ(r, nullptr);
         ASSERT_EQ(s.error_code, milvus::FollyCancel);
+        free((char*)(s.error_msg));
     }
 }

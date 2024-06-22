@@ -18,7 +18,7 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	InitCGO()
+	initCGO()
 	exitCode := m.Run()
 	if exitCode > 0 {
 		os.Exit(exitCode)
@@ -47,10 +47,6 @@ func TestFutureWithSuccessCase(t *testing.T) {
 
 	_, err = future.BlockAndLeakyGet()
 	assert.ErrorIs(t, err, ErrConsumed)
-
-	assert.Eventually(t, func() bool {
-		return unreleasedCnt.Load() == 0
-	}, time.Second, time.Millisecond*100)
 }
 
 func TestFutureWithCaseNoInterrupt(t *testing.T) {
@@ -186,10 +182,6 @@ func TestFutures(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 	assert.Nil(t, result)
 	runtime.GC()
-
-	assert.Eventually(t, func() bool {
-		return unreleasedCnt.Load() == 0
-	}, time.Second, time.Millisecond*100)
 }
 
 func TestConcurrent(t *testing.T) {
@@ -259,8 +251,14 @@ func TestConcurrent(t *testing.T) {
 			})
 			defer future.Release()
 			result, err := future.BlockAndLeakyGet()
-			assert.NoError(t, err)
-			assert.Equal(t, 0, getCInt(result))
+			if err == nil {
+				assert.Equal(t, 0, getCInt(result))
+			} else {
+				// the future may be queued and not started,
+				// so the underlying task may be throw a cancel exception if it's not started.
+				assert.ErrorIs(t, err, merr.ErrSegcoreFollyCancel)
+				assert.True(t, errors.Is(err, context.DeadlineExceeded))
+			}
 			freeCInt(result)
 		}()
 	}
@@ -271,8 +269,4 @@ func TestConcurrent(t *testing.T) {
 		return stat.ActiveCount == 0
 	}, 5*time.Second, 100*time.Millisecond)
 	runtime.GC()
-
-	assert.Eventually(t, func() bool {
-		return unreleasedCnt.Load() == 0
-	}, time.Second, time.Millisecond*100)
 }

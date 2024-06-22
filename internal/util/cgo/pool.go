@@ -1,13 +1,27 @@
 package cgo
 
 import (
+	"math"
 	"runtime"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var caller *cgoCaller
+
+func initCaller(nodeID string) {
+	chSize := int64(math.Ceil(float64(hardware.GetCPUNum()) * paramtable.Get().QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
+	if chSize <= 0 {
+		chSize = 1
+	}
+	caller = &cgoCaller{
+		ch:     make(chan struct{}, chSize),
+		nodeID: nodeID,
+	}
+}
 
 // getCGOCaller returns the cgoCaller instance.
 func getCGOCaller() *cgoCaller {

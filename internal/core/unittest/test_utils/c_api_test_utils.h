@@ -28,6 +28,7 @@
 #include "segcore/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
+#include "futures/Future.h"
 #include "DataGen.h"
 #include "PbHelper.h"
 #include "c_api_test_utils.h"
@@ -147,8 +148,24 @@ CSearch(CSegmentInterface c_segment,
         CPlaceholderGroup c_placeholder_group,
         uint64_t timestamp,
         CSearchResult* result) {
-    return Search(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, result);
+    auto future =
+        AsyncSearch({}, c_segment, c_plan, c_placeholder_group, timestamp);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [searchResult, status] = futurePtr->leakyGet();
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CSearchResult>(searchResult);
+    return status;
 }
 
 }  // namespace

@@ -16,30 +16,14 @@
 namespace milvus::futures {
 
 const int kNumPriority = 3;
-const int kMaxQueueSizeFactor = 16;
 
-folly::Executor::KeepAlive<>
+folly::CPUThreadPoolExecutor*
 getGlobalCPUExecutor() {
-    static ExecutorSingleton singleton;
-    return singleton.GetCPUExecutor();
-}
-
-folly::Executor::KeepAlive<>
-ExecutorSingleton::GetCPUExecutor() {
-    // TODO: fix the executor with a non-block way.
-    std::call_once(cpu_executor_once_, [this]() {
-        int num_threads = milvus::CPU_NUM;
-        auto num_priority = kNumPriority;
-        auto max_queue_size = num_threads * kMaxQueueSizeFactor;
-        cpu_executor_ = std::make_unique<folly::CPUThreadPoolExecutor>(
-            num_threads,
-            std::make_unique<folly::PriorityLifoSemMPMCQueue<
-                folly::CPUThreadPoolExecutor::CPUTask,
-                folly::QueueBehaviorIfFull::BLOCK>>(num_priority,
-                                                    max_queue_size),
-            std::make_shared<folly::NamedThreadFactory>("MILVUS_CPU_"));
-    });
-    return folly::getKeepAliveToken(cpu_executor_.get());
+    static folly::CPUThreadPoolExecutor executor(
+        std::thread::hardware_concurrency(),
+        folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
+        std::make_shared<folly::NamedThreadFactory>("MILVUS_FUTURE_CPU_"));
+    return &executor;
 }
 
 };  // namespace milvus::futures
