@@ -76,11 +76,11 @@ func TestManager(t *testing.T) {
 		c.(*dispatcherManager).tryMerge()
 		assert.Equal(t, 1, c.Num())
 
-		info := &target{
-			vchannel: "mock_vchannel_2",
-			pos:      nil,
-			ch:       nil,
-		}
+		info := newTargetWithChan(
+			"mock_vchannel_2",
+			nil,
+			nil,
+		)
 		c.(*dispatcherManager).split(info)
 		assert.Equal(t, 2, c.Num())
 	})

@@ -73,16 +73,16 @@ func TestDispatcher(t *testing.T) {
 			"mock_subName_0", mqwrapper.SubscriptionPositionEarliest, nil, nil)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
-		d.AddTarget(&target{
-			vchannel: "mock_vchannel_0",
-			pos:      nil,
-			ch:       output,
-		})
-		d.AddTarget(&target{
-			vchannel: "mock_vchannel_1",
-			pos:      nil,
-			ch:       nil,
-		})
+		d.AddTarget(newTargetWithChan(
+			"mock_vchannel_0",
+			nil,
+			output,
+		))
+		d.AddTarget(newTargetWithChan(
+			"mock_vchannel_1",
+			nil,
+			nil,
+		))
 		num := d.TargetNum()
 		assert.Equal(t, 2, num)
 
@@ -106,11 +106,11 @@ func TestDispatcher(t *testing.T) {
 	t.Run("test concurrent send and close", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			output := make(chan *msgstream.MsgPack, 1024)
-			target := &target{
-				vchannel: "mock_vchannel_0",
-				pos:      nil,
-				ch:       output,
-			}
+			target := newTargetWithChan(
+				"mock_vchannel_0",
+				nil,
+				output,
+			)
 			assert.Equal(t, cap(output), cap(target.ch))
 			wg := &sync.WaitGroup{}
 			for j := 0; j < 100; j++ {

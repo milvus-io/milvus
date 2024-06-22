@@ -19,6 +19,7 @@ package msgdispatcher
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -29,36 +30,58 @@ type target struct {
 	ch       chan *MsgPack
 	pos      *Pos
 
-	closeMu   sync.Mutex
 	closeOnce sync.Once
-	closed    bool
+	closed    atomic.Bool
+	sendCnt   int64
+	cntLock   *sync.Mutex
+	cntCond   *sync.Cond
 }
 
 func newTarget(vchannel string, pos *Pos) *target {
+	ch := make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt())
+	return newTargetWithChan(vchannel, pos, ch)
+}
+
+func newTargetWithChan(vchannel string, pos *Pos, packChan chan *MsgPack) *target {
 	t := &target{
 		vchannel: vchannel,
-		ch:       make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
+		ch:       packChan,
 		pos:      pos,
 	}
-	t.closed = false
+	t.cntLock = &sync.Mutex{}
+	t.cntCond = sync.NewCond(t.cntLock)
+	t.closed.Store(false)
 	return t
 }
 
 func (t *target) close() {
-	t.closeMu.Lock()
-	defer t.closeMu.Unlock()
 	t.closeOnce.Do(func() {
-		t.closed = true
-		close(t.ch)
+		t.closed.Store(true)
+		// not block the close method
+		go func() {
+			t.cntLock.Lock()
+			for t.sendCnt > 0 {
+				t.cntCond.Wait()
+			}
+			t.cntLock.Unlock()
+			close(t.ch)
+		}()
 	})
 }
 
 func (t *target) send(pack *MsgPack) error {
-	t.closeMu.Lock()
-	defer t.closeMu.Unlock()
-	if t.closed {
+	if t.closed.Load() {
 		return nil
 	}
+	t.cntLock.Lock()
+	t.sendCnt++
+	t.cntLock.Unlock()
+	defer func() {
+		t.cntLock.Lock()
+		t.sendCnt--
+		t.cntLock.Unlock()
+		t.cntCond.Signal()
+	}()
 	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	select {
 	case <-time.After(maxTolerantLag):
