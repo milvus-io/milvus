@@ -57,6 +57,7 @@ type Executor struct {
 
 	executingTasks   *typeutil.ConcurrentSet[string] // task index
 	executingTaskNum atomic.Int32
+	executedFlag     chan struct{}
 }
 
 func NewExecutor(meta *meta.Meta,
@@ -76,6 +77,7 @@ func NewExecutor(meta *meta.Meta,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
+		executedFlag:   make(chan struct{}, 1),
 	}
 }
 
@@ -122,12 +124,21 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	return true
 }
 
+func (ex *Executor) GetExecutedFlag() <-chan struct{} {
+	return ex.executedFlag
+}
+
 func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
 		log.Info("execute action done, remove it",
 			zap.Int64("taskID", task.ID()),
 			zap.Int("step", step),
 			zap.Error(task.Err()))
+	} else {
+		select {
+		case ex.executedFlag <- struct{}{}:
+		default:
+		}
 	}
 
 	ex.executingTasks.Remove(task.Index())

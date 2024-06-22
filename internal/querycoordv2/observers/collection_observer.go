@@ -91,7 +91,7 @@ func (ob *CollectionObserver) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	ob.cancel = cancel
 
-	const observePeriod = time.Second
+	observePeriod := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
 	ob.wg.Add(1)
 	go func() {
 		defer ob.wg.Done()

@@ -443,6 +443,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
+	suite.assertExecutedFlagChan(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
@@ -1334,6 +1335,17 @@ func (suite *TaskSuite) TestNoExecutor() {
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {
+	flagChan := suite.scheduler.GetExecutedFlag(targetNode)
+	if flagChan != nil {
+		select {
+		case <-flagChan:
+		default:
+			suite.FailNow("task not executed")
+		}
+	}
 }
 
 func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
