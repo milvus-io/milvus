@@ -43,9 +43,8 @@ concurrency:
 
 jobs:
   Build:
-    name: Build and test AMD64 Ubuntu 20.04
+    name: Build and test AMD64 Ubuntu 22.04
     runs-on: ubuntu-latest
-    timeout-minutes: 180
     steps:
       - name: 'Setup $HOME'
         # hot fix
@@ -93,7 +92,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
-          os: 'ubuntu20.04'
+          os: 'ubuntu22.04'
           kind: 'cpp'
       - name: Build
         run: |
@@ -130,7 +129,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
-          os: 'ubuntu20.04'
+          os: 'ubuntu22.04'
           kind: 'cpp'
       - name: Start Service
         shell: bash
@@ -176,7 +175,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
-          os: 'ubuntu20.04'
+          os: 'ubuntu22.04'
           kind: 'go'
       - name: Start Service
         shell: bash
@@ -221,7 +220,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
-          os: 'ubuntu20.04'
+          os: 'ubuntu22.04'
           kind: 'go'
       - name: Start Service
         shell: bash
