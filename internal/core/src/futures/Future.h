@@ -16,7 +16,6 @@
 #include <folly/CancellationToken.h>
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
-
 #include "future_c_types.h"
 #include "LeakyResult.h"
 #include "Ready.h"
@@ -56,6 +55,8 @@ class IFuture {
     releaseLeakedFuture(IFuture* future) {
         delete future;
     }
+
+    virtual ~IFuture() = default;
 };
 
 /// @brief a class that represents a cancellation token
@@ -176,6 +177,7 @@ class Future : public IFuture {
             CancellationToken(cancellation_source_.getToken());
         auto runner = [fn = std::forward<Fn>(fn),
                        cancellation_token = std::move(cancellation_token)]() {
+            cancellation_token.throwIfCancelled();
             return fn(cancellation_token);
         };
 
