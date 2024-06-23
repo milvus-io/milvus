@@ -28,6 +28,15 @@
 
 namespace milvus::index {
 
+enum class ScalarIndexType {
+    NONE = 0,
+    BITMAP,
+    STLSORT,
+    MARISA,
+    INVERTED,
+    HYBRID,
+};
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
@@ -44,6 +53,9 @@ class ScalarIndex : public IndexBase {
     };
 
  public:
+    virtual ScalarIndexType
+    GetIndexType() const = 0;
+
     virtual void
     Build(size_t n, const T* values) = 0;
 

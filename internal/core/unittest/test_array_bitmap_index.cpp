@@ -277,18 +277,28 @@ class ArrayBitmapIndexTest : public testing::Test {
  public:
     void
     TestInFunc() {
-        // boost::container::vector<T> test_data;
-        // std::unordered_set<T> s;
-        // size_t nq = 10;
-        // for (size_t i = 0; i < nq; i++) {
-        //     test_data.push_back(data_[i]);
-        //     s.insert(data_[i]);
-        // }
-        // auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
-        // auto bitset = index_ptr->In(test_data.size(), test_data.data());
-        // for (size_t i = 0; i < bitset.size(); i++) {
-        //     ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
-        // }
+        boost::container::vector<T> test_data;
+        std::unordered_set<T> s;
+        size_t nq = 10;
+        for (size_t i = 0; i < nq; i++) {
+            test_data.push_back(data_[i]);
+            s.insert(data_[i]);
+        }
+        auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+        auto bitset = index_ptr->In(test_data.size(), test_data.data());
+        for (size_t i = 0; i < bitset.size(); i++) {
+            auto ref = [&]() -> bool {
+                milvus::Array array = data_[i];
+                for (size_t j = 0; j < array.length(); ++j) {
+                    auto val = array.template get_data<T>(j);
+                    if (s.find(val) != s.end()) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            ASSERT_EQ(bitset[i], ref());
+        }
     }
 
  private:
