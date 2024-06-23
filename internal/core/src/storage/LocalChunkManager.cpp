@@ -49,8 +49,7 @@ LocalChunkManager::Size(const std::string& filepath) {
     boost::filesystem::path absPath(filepath);
 
     if (!Exist(filepath)) {
-        throw SegcoreError(PathNotExist,
-                           "invalid local path:" + absPath.string());
+        PanicInfo(PathNotExist, "invalid local path:" + absPath.string());
     }
     boost::system::error_code err;
     int64_t size = boost::filesystem::file_size(absPath, err);
@@ -86,7 +85,7 @@ LocalChunkManager::Read(const std::string& filepath,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << filepath << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileOpenFailed, err_msg.str());
+        PanicInfo(FileOpenFailed, err_msg.str());
     }
 
     infile.seekg(offset, std::ios::beg);
@@ -95,7 +94,7 @@ LocalChunkManager::Read(const std::string& filepath,
             std::stringstream err_msg;
             err_msg << "Error: read local file '" << filepath << " failed, "
                     << strerror(errno);
-            throw SegcoreError(FileReadFailed, err_msg.str());
+            PanicInfo(FileReadFailed, err_msg.str());
         }
     }
     return infile.gcount();
@@ -116,13 +115,13 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileOpenFailed, err_msg.str());
+        PanicInfo(FileOpenFailed, err_msg.str());
     }
     if (!outfile.write(reinterpret_cast<char*>(buf), size)) {
         std::stringstream err_msg;
         err_msg << "Error: write local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileWriteFailed, err_msg.str());
+        PanicInfo(FileWriteFailed, err_msg.str());
     }
 }
 
@@ -144,7 +143,7 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileOpenFailed, err_msg.str());
+        PanicInfo(FileOpenFailed, err_msg.str());
     }
 
     outfile.seekp(offset, std::ios::beg);
@@ -152,14 +151,14 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: write local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileWriteFailed, err_msg.str());
+        PanicInfo(FileWriteFailed, err_msg.str());
     }
 }
 
 std::vector<std::string>
 LocalChunkManager::ListWithPrefix(const std::string& filepath) {
-    throw SegcoreError(NotImplemented,
-                       GetName() + "::ListWithPrefix" + " not implement now");
+    PanicInfo(NotImplemented,
+              GetName() + "::ListWithPrefix" + " not implement now");
 }
 
 bool
@@ -175,7 +174,7 @@ LocalChunkManager::CreateFile(const std::string& filepath) {
         std::stringstream err_msg;
         err_msg << "Error: create new local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        throw SegcoreError(FileCreateFailed, err_msg.str());
+        PanicInfo(FileCreateFailed, err_msg.str());
     }
     file.close();
     return true;
@@ -196,12 +195,12 @@ void
 LocalChunkManager::CreateDir(const std::string& dir) {
     bool isExist = DirExist(dir);
     if (isExist) {
-        throw SegcoreError(PathAlreadyExist, "dir:" + dir + " already exists");
+        PanicInfo(PathAlreadyExist, "dir:" + dir + " already exists");
     }
     boost::filesystem::path dirPath(dir);
     auto create_success = boost::filesystem::create_directories(dirPath);
     if (!create_success) {
-        throw SegcoreError(FileCreateFailed, "create dir failed" + dir);
+        PanicInfo(FileCreateFailed, "create dir failed" + dir);
     }
 }
 
@@ -220,7 +219,7 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     bool is_dir = boost::filesystem::is_directory(dirPath);
     if (!is_dir) {
-        throw SegcoreError(PathNotExist, "dir:" + dir + " not exists");
+        PanicInfo(PathNotExist, "dir:" + dir + " not exists");
     }
 
     using boost::filesystem::directory_entry;

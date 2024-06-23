@@ -70,9 +70,8 @@ class IndexFactory {
             case DataType::VECTOR_SPARSE_FLOAT:
                 return std::make_unique<VecIndexCreator>(type, config, context);
             default:
-                throw SegcoreError(
-                    DataTypeInvalid,
-                    fmt::format("invalid type is {}", invalid_dtype_msg));
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("invalid type is {}", invalid_dtype_msg));
         }
     }
 
@@ -107,7 +106,7 @@ class IndexFactory {
                 return std::make_unique<VecIndexCreator>(
                     type, field_name, dim, config, file_manager_context, space);
             default:
-                throw std::invalid_argument(invalid_dtype_msg);
+                PanicInfo(ErrorCode::DataTypeInvalid, invalid_dtype_msg);
         }
     }
 };

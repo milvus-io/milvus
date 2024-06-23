@@ -457,15 +457,24 @@ class SparseFloatColumn : public ColumnBase {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
     }
 
+    // This is used to advice mmap prefetch, we don't currently support mmap for
+    // sparse float vector thus not implemented for now.
+    size_t
+    ByteSize() const override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "ByteSize not supported for sparse float column");
+    }
+
     size_t
     Capacity() const override {
-        throw std::runtime_error(
-            "Capacity not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Capacity not supported for sparse float column");
     }
 
     SpanBase
     Span() const override {
-        throw std::runtime_error("Span not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Span not supported for sparse float column");
     }
 
     void
@@ -481,8 +490,8 @@ class SparseFloatColumn : public ColumnBase {
 
     void
     Append(const char* data, size_t size) override {
-        throw std::runtime_error(
-            "Append not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Append not supported for sparse float column");
     }
 
     int64_t
