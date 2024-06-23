@@ -36,10 +36,6 @@ func (wb *bfWriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	split := func(pks []storage.PrimaryKey, pkTss []uint64, segments []*metacache.SegmentInfo) {
 		lc := storage.NewBatchLocationsCache(pks)
 		for _, segment := range segments {
-			if segment.CompactTo() != 0 {
-				continue
-			}
-
 			hits := segment.GetBloomFilterSet().BatchPkExist(lc)
 			var deletePks []storage.PrimaryKey
 			var deleteTss []typeutil.Timestamp
@@ -130,6 +126,5 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 
 	_ = wb.triggerSync()
 
-	wb.cleanupCompactedSegments()
 	return nil
 }

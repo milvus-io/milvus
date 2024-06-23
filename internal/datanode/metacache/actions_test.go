@@ -89,11 +89,6 @@ func (s *SegmentActionSuite) TestActions() {
 	action = UpdateNumOfRows(numOfRows)
 	action(info)
 	s.Equal(numOfRows, info.NumOfRows())
-
-	compactTo := int64(1002)
-	action = CompactTo(compactTo)
-	action(info)
-	s.Equal(compactTo, info.CompactTo())
 }
 
 func (s *SegmentActionSuite) TestMergeActions() {
