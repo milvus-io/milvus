@@ -60,6 +60,7 @@ class IndexFactory {
             case DataType::DOUBLE:
             case DataType::VARCHAR:
             case DataType::STRING:
+            case DataType::ARRAY:
                 return CreateScalarIndex(type, config, context);
 
             case DataType::VECTOR_FLOAT:

@@ -97,6 +97,24 @@ void tantivy_index_add_bools(void *ptr, const bool *array, uintptr_t len);
 
 void tantivy_index_add_keyword(void *ptr, const char *s);
 
+void tantivy_index_add_multi_int8s(void *ptr, const int8_t *array, uintptr_t len);
+
+void tantivy_index_add_multi_int16s(void *ptr, const int16_t *array, uintptr_t len);
+
+void tantivy_index_add_multi_int32s(void *ptr, const int32_t *array, uintptr_t len);
+
+void tantivy_index_add_multi_int64s(void *ptr, const int64_t *array, uintptr_t len);
+
+void tantivy_index_add_multi_f32s(void *ptr, const float *array, uintptr_t len);
+
+void tantivy_index_add_multi_f64s(void *ptr, const double *array, uintptr_t len);
+
+void tantivy_index_add_multi_bools(void *ptr, const bool *array, uintptr_t len);
+
+void tantivy_index_add_multi_keywords(void *ptr, const char *const *array, uintptr_t len);
+
 bool tantivy_index_exist(const char *path);
+
+void print_vector_of_strings(const char *const *ptr, uintptr_t len);
 
 } // extern "C"
