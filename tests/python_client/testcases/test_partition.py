@@ -1136,8 +1136,9 @@ class TestPartitionOperations(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Upsert don't support autoid == true"}
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_partition_upsert_same_pk_in_different_partitions(self):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_partition_upsert_same_pk_in_different_partitions(self, is_flush):
         """
         target: test upsert same pk in different partitions
         method: 1. create 2 partitions
@@ -1163,6 +1164,8 @@ class TestPartitionOperations(TestcaseBase):
         partition_2.upsert(upsert_data)
 
         # load
+        if is_flush:
+            collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
 

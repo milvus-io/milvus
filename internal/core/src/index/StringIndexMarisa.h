@@ -57,6 +57,11 @@ class StringIndexMarisa : public StringIndex {
         return str_ids_.size();
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::MARISA;
+    }
+
     void
     Build(size_t n, const std::string* values) override;
 

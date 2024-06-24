@@ -59,9 +59,6 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 		hits := make([]bool, len(pks))
 
 		for _, segment := range partitionSegments {
-			if segment.CompactTo() != 0 {
-				continue
-			}
 			hits = segment.GetBloomFilterSet().BatchPkExistWithHits(lc, hits)
 		}
 
@@ -188,7 +185,6 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	wb.cleanupCompactedSegments()
 	return nil
 }
 

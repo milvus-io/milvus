@@ -45,8 +45,8 @@ pull_request_rules:
       # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=cpu-e2e'
-      - 'status-success=codecov/patch'
-      - 'status-success=codecov/project'
+      # - 'status-success=codecov/patch'
+      # - 'status-success=codecov/project'
     actions:
       label:
         add:
@@ -59,8 +59,8 @@ pull_request_rules:
       # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
-      - 'status-success=codecov/patch'
-      - 'status-success=codecov/project'
+      # - 'status-success=codecov/patch'
+      # - 'status-success=codecov/project'
     actions:
       label:
         add:

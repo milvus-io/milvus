@@ -292,7 +292,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 
 	for segID, info := range c.segmentInfos {
 		if info.partitionID != partitionID ||
-			(info.Level() == datapb.SegmentLevel_L0 && info.State() == commonpb.SegmentState_Growing) {
+			info.State() == commonpb.SegmentState_Growing {
 			continue
 		}
 		if _, ok := allSegments[segID]; !ok {

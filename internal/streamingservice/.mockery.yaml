@@ -1,0 +1,28 @@
+quiet: False
+with-expecter: True
+filename: "mock_{{.InterfaceName}}.go"
+dir: "internal/mocks/{{trimPrefix .PackagePath \"github.com/milvus-io/milvus/internal\" | dir }}/mock_{{.PackageName}}"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "mock_{{.PackageName}}"
+packages:
+  github.com/milvus-io/milvus/internal/util/streamingutil/message:
+    interfaces:
+      MessageID:
+      ImmutableMessage:
+      MutableMessage:
+      RProperties:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal:
+    interfaces:
+      OpenerBuilder:
+      Opener:
+      Scanner:
+      WAL:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/walimpls:
+    interfaces:
+      OpenerBuilderImpls:
+      OpenerImpls:
+      ScannerImpls:
+      WALImpls:
+      Interceptor:
+      InterceptorWithReady:
+      InterceptorBuilder:

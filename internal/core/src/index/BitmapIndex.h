@@ -69,6 +69,11 @@ class BitmapIndex : public ScalarIndex<T> {
         return total_num_rows_;
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::BITMAP;
+    }
+
     void
     Build(size_t n, const T* values) override;
 

@@ -24,7 +24,6 @@ import (
 	"io"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -249,25 +248,8 @@ func NewDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog]
 			}
 			a := r.Column(fid).(*array.String)
 			strVal := a.Value(i)
-			if err = json.Unmarshal([]byte(strVal), v[i]); err != nil {
-				// compatible with versions that only support int64 type primary keys
-				// compatible with fmt.Sprintf("%d,%d", pk, ts)
-				// compatible error info (unmarshal err invalid character ',' after top-level value)
-				splits := strings.Split(strVal, ",")
-				if len(splits) != 2 {
-					return fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
-				}
-				pk, err := strconv.ParseInt(splits[0], 10, 64)
-				if err != nil {
-					return err
-				}
-				v[i].Pk = &Int64PrimaryKey{
-					Value: pk,
-				}
-				v[i].Ts, err = strconv.ParseUint(splits[1], 10, 64)
-				if err != nil {
-					return err
-				}
+			if err := v[i].Parse(strVal); err != nil {
+				return err
 			}
 		}
 		return nil
