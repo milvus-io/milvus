@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -102,7 +101,7 @@ func (t *L0PreImportTask) Cancel() {
 func (t *L0PreImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
 	return &L0PreImportTask{
-		PreImportTask: proto.Clone(t.PreImportTask).(*datapb.PreImportTask),
+		PreImportTask: typeutil.Clone(t.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
 		partitionIDs:  t.GetPartitionIDs(),
