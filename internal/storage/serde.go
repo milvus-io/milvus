@@ -28,6 +28,8 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v12/parquet"
+	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -768,7 +770,12 @@ func (sfw *singleFieldRecordWriter) Close() {
 
 func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer) (*singleFieldRecordWriter, error) {
 	schema := arrow.NewSchema([]arrow.Field{field}, nil)
-	fw, err := pqarrow.NewFileWriter(schema, writer, nil, pqarrow.DefaultWriterProps())
+	fw, err := pqarrow.NewFileWriter(schema, writer,
+		parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3),
+			parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
+		pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
