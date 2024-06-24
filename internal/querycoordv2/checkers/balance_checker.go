@@ -43,12 +43,12 @@ type BalanceChecker struct {
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
-	targetMgr                            *meta.TargetManager
+	targetMgr                            meta.TargetManagerInterface
 	getBalancerFunc                      GetBalancerFunc
 }
 
 func NewBalanceChecker(meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	getBalancerFunc GetBalancerFunc,
