@@ -72,13 +72,15 @@ class FieldMeta {
               FieldId id,
               DataType type,
               int64_t dim,
-              std::optional<knowhere::MetricType> metric_type)
+              std::optional<knowhere::MetricType> metric_type,
+              bool nullable)
         : name_(name),
           id_(id),
           type_(type),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
+          vector_info_(VectorInfo{dim, std::move(metric_type)}),
+          nullable_(nullable) {
         Assert(IsVectorDataType(type_));
-        nullable_ = false;
+        Assert(!nullable);
     }
 
     int64_t

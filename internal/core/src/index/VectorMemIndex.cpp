@@ -259,7 +259,7 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+            // todo: support nullable index
             auto new_field_data = milvus::storage::CreateFieldData(
                 DataType::INT8, false, 1, total_len);
             for (auto i = 0; i < slice_num; ++i) {
@@ -358,7 +358,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 std::string prefix = item[NAME];
                 int slice_num = item[SLICE_NUM];
                 auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+                // todo: support nullable index
                 auto new_field_data = milvus::storage::CreateFieldData(
                     DataType::INT8, false, 1, total_len);
 
@@ -462,6 +462,7 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
         }
         auto total_num_rows = data->num_rows();
         auto col_data = data->GetColumnByName(field_name);
+        // todo: support nullable index
         auto field_data =
             storage::CreateFieldData(field_type, false, dim, total_num_rows);
         field_data->FillFieldData(col_data);

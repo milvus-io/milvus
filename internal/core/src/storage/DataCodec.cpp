@@ -31,7 +31,10 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
     DescriptorEvent descriptor_event(reader);
     DataType data_type =
         DataType(descriptor_event.event_data.fix_part.data_type);
-    bool nullable = descriptor_event.event_data.fix_part.nullable;
+    auto& extras = descriptor_event.event_data.extras;
+    bool nullable = (extras.find(NULLABLE) != extras.end())
+                        ? std::any_cast<bool>(extras[NULLABLE])
+                        : false;
     auto descriptor_fix_part = descriptor_event.event_data.fix_part;
     FieldDataMeta data_meta{descriptor_fix_part.collection_id,
                             descriptor_fix_part.partition_id,

@@ -60,10 +60,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                 dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
             }
             if (!index_map.count("metric_type")) {
-                schema->AddField(name, field_id, data_type, dim, std::nullopt);
+                schema->AddField(
+                    name, field_id, data_type, dim, std::nullopt, false);
             } else {
                 auto metric_type = index_map.at("metric_type");
-                schema->AddField(name, field_id, data_type, dim, metric_type);
+                schema->AddField(
+                    name, field_id, data_type, dim, metric_type, false);
             }
         } else if (IsStringDataType(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());

@@ -269,7 +269,7 @@ auto
 PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     std::vector<NativeType> data =
         PrepareRawFieldData<NativeType>(opt_field_data_range);
-    auto field_data = storage::CreateFieldData(DT, 1, kEntityCnt);
+    auto field_data = storage::CreateFieldData(DT, false, 1, kEntityCnt);
     field_data->FillFieldData(data.data(), kEntityCnt);
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(kOptVecFieldDataMeta);

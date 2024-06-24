@@ -60,7 +60,6 @@ InsertData::serialize_to_remote_file() {
     des_fix_part.field_id = field_data_meta_->field_id;
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;
-    des_fix_part.nullable = field_data_->IsNullable();
     des_fix_part.data_type = milvus::proto::schema::DataType(data_type);
     for (auto i = int8_t(EventType::DescriptorEvent);
          i < int8_t(EventType::EventTypeEnd);
@@ -70,7 +69,7 @@ InsertData::serialize_to_remote_file() {
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] =
         std::to_string(field_data_->Size());
-    //(todo:smellthemoon) set nullable
+    des_event_data.extras[NULLABLE] = field_data_->IsNullable();
 
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp

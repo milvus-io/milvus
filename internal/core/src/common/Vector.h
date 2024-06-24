@@ -65,7 +65,7 @@ class ColumnVector final : public BaseVector {
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
         : BaseVector(data_type, length, null_count) {
-        //todo(smellthemoon): use false temporarily
+        //todo: support null expr
         values_ = InitScalarFieldData(data_type, false, length);
     }
 

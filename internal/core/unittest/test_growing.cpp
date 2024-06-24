@@ -488,11 +488,11 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(double_result->valid_data_size(), num_inserted);
         EXPECT_EQ(varchar_result->valid_data_size(), num_inserted);
         EXPECT_EQ(json_result->valid_data_size(), num_inserted);
-        EXPECT_EQ(int_array_result->valid_data_size(), 1);
-        EXPECT_EQ(long_array_result->valid_data_size(), 1);
-        EXPECT_EQ(bool_array_result->valid_data_size(), 1);
-        EXPECT_EQ(string_array_result->valid_data_size(), 1);
-        EXPECT_EQ(double_array_result->valid_data_size(), 1);
-        EXPECT_EQ(float_array_result->valid_data_size(), 1);
+        EXPECT_EQ(int_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(long_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(bool_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(string_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(double_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(float_array_result->valid_data_size(), num_inserted);
     }
 }

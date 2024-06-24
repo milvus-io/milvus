@@ -125,7 +125,7 @@ class FieldData<BFloat16Vector> : public FieldDataImpl<bfloat16, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : FieldDataImpl<bfloat16, false>::FieldDataImpl(
-              dim, data_type, buffered_num_rows) {
+              dim,data_type, false,buffered_num_rows) {
     }
 };
 
