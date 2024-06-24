@@ -1521,32 +1521,27 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		IndexSize:     0,
 	}
 
-	t.Run("enqueue varchar", func(t *testing.T) {
-		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
-		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
-				return merr.Success(), nil
-			}).Once()
-		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
-		assert.NoError(t, err)
-		ib.enqueue(buildID)
-		waitTaskDoneFunc(ib)
-		resetMetaFunc()
-	})
-
-	t.Run("enqueue string", func(t *testing.T) {
-		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_String
-		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
-				return merr.Success(), nil
-			}).Once()
-		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
-		assert.NoError(t, err)
-		ib.enqueue(buildID)
-		waitTaskDoneFunc(ib)
-		resetMetaFunc()
+	t.Run("enqueue valid data types", func(t *testing.T) {
+		for _, dataType := range []schemapb.DataType{
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_String,
+			schemapb.DataType_VarChar,
+		} {
+			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+					return merr.Success(), nil
+				}).Once()
+			err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
+			assert.NoError(t, err)
+			ib.enqueue(buildID)
+			waitTaskDoneFunc(ib)
+			resetMetaFunc()
+		}
 	})
 
 	// should still be able to build vec index when opt field is not set
@@ -1564,14 +1559,10 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		resetMetaFunc()
 	})
 
-	t.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR", func(t *testing.T) {
+	t.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR or int", func(t *testing.T) {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_Bool,
-			schemapb.DataType_Int8,
-			schemapb.DataType_Int16,
-			schemapb.DataType_Int32,
-			schemapb.DataType_Int64,
 			schemapb.DataType_Float,
 			schemapb.DataType_Double,
 			schemapb.DataType_Array,

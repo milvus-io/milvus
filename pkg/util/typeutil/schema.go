@@ -1082,7 +1082,7 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 }
 
 func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
-	return fieldSchema.DataType == schemapb.DataType_VarChar || fieldSchema.DataType == schemapb.DataType_String
+	return IsIntegerType(fieldSchema.DataType) || IsStringType(fieldSchema.DataType)
 }
 
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
