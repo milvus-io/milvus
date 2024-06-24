@@ -115,7 +115,7 @@ type MockTask_HandleError_Call struct {
 }
 
 // HandleError is a helper method to define mock.On call
-//  - _a0 error
+//   - _a0 error
 func (_e *MockTask_Expecter) HandleError(_a0 interface{}) *MockTask_HandleError_Call {
 	return &MockTask_HandleError_Call{Call: _e.mock.On("HandleError", _a0)}
 }
