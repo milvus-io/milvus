@@ -249,7 +249,7 @@ AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-            // todo:smellthemoon: use false here temporarily
+            // todo: support nullable index
             auto new_field_data =
                 storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
@@ -288,7 +288,7 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-            // todo:smellthemoon: use false here temporarily
+            // todo: support nullable index
             auto new_field_data =
                 storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 

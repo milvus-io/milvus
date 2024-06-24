@@ -56,11 +56,13 @@ class Schema {
     }
 
     FieldId
-    AddDebugArrayField(const std::string& name, DataType element_type, bool nullable) {
+    AddDebugArrayField(const std::string& name,
+                       DataType element_type,
+                       bool nullable) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         this->AddField(
-            FieldName(name), field_id, DataType::ARRAY, element_type,nullable);
+            FieldName(name), field_id, DataType::ARRAY, element_type, nullable);
         return field_id;
     }
 
@@ -72,8 +74,8 @@ class Schema {
                   std::optional<knowhere::MetricType> metric_type) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        auto field_meta =
-            FieldMeta(FieldName(name), field_id, data_type, dim, metric_type);
+        auto field_meta = FieldMeta(
+            FieldName(name), field_id, data_type, dim, metric_type, false);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -117,8 +119,10 @@ class Schema {
              const FieldId id,
              DataType data_type,
              int64_t dim,
-             std::optional<knowhere::MetricType> metric_type) {
-        auto field_meta = FieldMeta(name, id, data_type, dim, metric_type);
+             std::optional<knowhere::MetricType> metric_type,
+             bool nullable) {
+        auto field_meta =
+            FieldMeta(name, id, data_type, dim, metric_type, false);
         this->AddField(std::move(field_meta));
     }
 

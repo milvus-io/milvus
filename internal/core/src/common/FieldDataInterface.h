@@ -25,6 +25,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "Types.h"
 #include "arrow/api.h"
 #include "arrow/array/array_binary.h"
 #include "common/FieldMeta.h"
@@ -144,6 +145,10 @@ class FieldDataImpl : public FieldDataBase {
           dim_(is_type_entire_row ? 1 : dim) {
         field_data_.resize(num_rows_ * dim_);
         if (nullable) {
+            if (IsVectorDataType(data_type)){
+                PanicInfo(NotImplemented,
+                  "vector type not support null");
+            }
             valid_data_ =
                 std::shared_ptr<uint8_t[]>(new uint8_t[(num_rows_ + 7) / 8]);
         }
@@ -455,10 +460,9 @@ class FieldDataSparseVectorImpl
     : public FieldDataImpl<knowhere::sparse::SparseRow<float>, true> {
  public:
     explicit FieldDataSparseVectorImpl(DataType data_type,
-                                       bool nullable,
                                        int64_t total_num_rows = 0)
         : FieldDataImpl<knowhere::sparse::SparseRow<float>, true>(
-              /*dim=*/1, data_type, nullable, total_num_rows),
+              /*dim=*/1, data_type, false, total_num_rows),
           vec_dim_(0) {
         AssertInfo(data_type == DataType::VECTOR_SPARSE_FLOAT,
                    "invalid data type for sparse vector");
@@ -544,7 +548,7 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
     }
 
     int64_t
-    Size() const {
+    DataSize() const override  {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
             data_size += field_data_[offset].byte_size();
@@ -554,7 +558,7 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
     }
 
     int64_t
-    Size(ssize_t offset) const {
+    DataSize(ssize_t offset) const override {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < length(),

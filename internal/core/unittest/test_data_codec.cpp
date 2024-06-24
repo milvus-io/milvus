@@ -760,7 +760,7 @@ TEST(storage, InsertDataStringArrayNullable) {
     FixedVector<Array> new_data(data.size());
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] = *static_cast<const Array*>(new_payload->RawValue(i));
-        ASSERT_EQ(new_payload->DataSize(i), expected_data[i].byte_size());
+        ASSERT_EQ(new_payload->DataSize(i), data[i].byte_size());
         ASSERT_TRUE(expected_data[i].operator==(new_data[i]));
     }
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);

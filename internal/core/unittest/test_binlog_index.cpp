@@ -72,7 +72,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             schema->AddDebugField("fakevec", data_type, data_d, metric_type);
         auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
         schema->set_primary_field_id(i64_fid);
-        vec_field_data = storage::CreateFieldData(data_type, data_d, false);
+        vec_field_data = storage::CreateFieldData(data_type, false, data_d);
 
         if (data_type == DataType::VECTOR_FLOAT) {
             auto vec_data = GenRandomFloatVecData(data_n, data_d);

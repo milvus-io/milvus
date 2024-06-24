@@ -87,7 +87,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
             col_data->type()->id() == arrow::Type::NA ? true : false;
         // will support build scalar index when nullable in the future just skip it
         // now, not support to build index in nullable field_data
-        // todo(smellthemoon)
+        // todo: support nullable index
         AssertInfo(!nullable,
                    "not support to build index in nullable field_data");
         auto field_data = storage::CreateFieldData(

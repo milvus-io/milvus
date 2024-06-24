@@ -581,7 +581,7 @@ TEST(Query, FillSegment) {
     {
         auto field = proto.add_fields();
         field->set_name("the_value");
-        field->set_nullable(false);
+        field->set_nullable(true);
         field->set_fieldid(102);
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
