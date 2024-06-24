@@ -215,6 +215,24 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Status(err), nil
 	}
 
+	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+		// when replica number or resource groups is not set, use database level config
+		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
+		if err != nil {
+			log.Warn("failed to get data base level load info", zap.Error(err))
+		}
+
+		if req.GetReplicaNumber() <= 0 {
+			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
+			req.ReplicaNumber = int32(replicas)
+		}
+
+		if len(req.GetResourceGroups()) == 0 {
+			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
+			req.ResourceGroups = rgs
+		}
+	}
+
 	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
 		msg := "failed to load collection"
 		log.Warn(msg, zap.Error(err))
@@ -314,6 +332,24 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 			log.Warn("failed to refresh partitions", zap.Error(err))
 		}
 		return merr.Status(err), nil
+	}
+
+	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+		// when replica number or resource groups is not set, use database level config
+		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
+		if err != nil {
+			log.Warn("failed to get data base level load info", zap.Error(err))
+		}
+
+		if req.GetReplicaNumber() <= 0 {
+			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
+			req.ReplicaNumber = int32(replicas)
+		}
+
+		if len(req.GetResourceGroups()) == 0 {
+			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
+			req.ResourceGroups = rgs
+		}
 	}
 
 	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
@@ -840,9 +876,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		return &milvuspb.GetReplicasResponse{
-			Replicas: make([]*milvuspb.ReplicaInfo, 0),
-		}, nil
+		return resp, nil
 	}
 
 	for _, replica := range replicas {

@@ -200,6 +200,83 @@ test_32717() {
     }
 }
 
+std::set<uint32_t>
+to_set(const RustArrayWrapper& w) {
+    std::set<uint32_t> s(w.array_.array, w.array_.array + w.array_.len);
+    return s;
+}
+
+template <typename T>
+std::map<T, std::set<uint32_t>>
+build_inverted_index(const std::vector<std::vector<T>>& vec_of_array) {
+    std::map<T, std::set<uint32_t>> inverted_index;
+    for (uint32_t i = 0; i < vec_of_array.size(); i++) {
+        for (const auto& term : vec_of_array[i]) {
+            inverted_index[term].insert(i);
+        }
+    }
+    return inverted_index;
+}
+
+void
+test_array_int() {
+    using T = int64_t;
+
+    auto path = "/tmp/inverted-index/test-binding/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+    auto w = TantivyIndexWrapper("test_field_name", guess_data_type<T>(), path);
+
+    std::vector<std::vector<T>> vec_of_array{
+        {10, 40, 50},
+        {20, 50},
+        {10, 50, 60},
+    };
+
+    for (const auto& arr : vec_of_array) {
+        w.add_multi_data(arr.data(), arr.size());
+    }
+    w.finish();
+
+    assert(w.count() == vec_of_array.size());
+
+    auto inverted_index = build_inverted_index(vec_of_array);
+    for (const auto& [term, posting_list] : inverted_index) {
+        auto hits = to_set(w.term_query(term));
+        assert(posting_list == hits);
+    }
+}
+
+void
+test_array_string() {
+    using T = std::string;
+
+    auto path = "/tmp/inverted-index/test-binding/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+    auto w =
+        TantivyIndexWrapper("test_field_name", TantivyDataType::Keyword, path);
+
+    std::vector<std::vector<T>> vec_of_array{
+        {"10", "40", "50"},
+        {"20", "50"},
+        {"10", "50", "60"},
+    };
+
+    for (const auto& arr : vec_of_array) {
+        w.add_multi_data(arr.data(), arr.size());
+    }
+    w.finish();
+
+    assert(w.count() == vec_of_array.size());
+
+    auto inverted_index = build_inverted_index(vec_of_array);
+    for (const auto& [term, posting_list] : inverted_index) {
+        auto hits = to_set(w.term_query(term));
+        assert(posting_list == hits);
+    }
+}
+
 int
 main(int argc, char* argv[]) {
     test_32717();
@@ -215,6 +292,9 @@ main(int argc, char* argv[]) {
     run<bool>();
 
     run<std::string>();
+
+    test_array_int();
+    test_array_string();
 
     return 0;
 }

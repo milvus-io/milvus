@@ -150,6 +150,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 				if view.dmlPos.Timestamp < test.prepEarliestT {
 					view.DeltalogCount = test.prepCountEach
 					view.DeltaSize = test.prepSizeEach
+					view.DeltaRowCount = 1
 				}
 			}
 			log.Info("LevelZeroSegmentsView", zap.String("view", s.v.String()))

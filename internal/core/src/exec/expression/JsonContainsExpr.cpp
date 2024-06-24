@@ -23,7 +23,14 @@ namespace exec {
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     switch (expr_->column_.data_type_) {
-        case DataType::ARRAY:
+        case DataType::ARRAY: {
+            if (is_index_mode_) {
+                result = EvalArrayContainsForIndexSegment();
+            } else {
+                result = EvalJsonContainsForDataSegment();
+            }
+            break;
+        }
         case DataType::JSON: {
             if (is_index_mode_) {
                 PanicInfo(
@@ -94,7 +101,6 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
                     return ExecJsonContainsWithDiffType();
                 }
             }
-            break;
         }
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
             if (IsArrayDataType(data_type)) {
@@ -145,7 +151,6 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
                     return ExecJsonContainsAllWithDiffType();
                 }
             }
-            break;
         }
         default:
             PanicInfo(ExprInvalid,
@@ -746,6 +751,93 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment() {
+    switch (expr_->column_.element_type_) {
+        case DataType::BOOL: {
+            return ExecArrayContainsForIndexSegmentImpl<bool>();
+        }
+        case DataType::INT8: {
+            return ExecArrayContainsForIndexSegmentImpl<int8_t>();
+        }
+        case DataType::INT16: {
+            return ExecArrayContainsForIndexSegmentImpl<int16_t>();
+        }
+        case DataType::INT32: {
+            return ExecArrayContainsForIndexSegmentImpl<int32_t>();
+        }
+        case DataType::INT64: {
+            return ExecArrayContainsForIndexSegmentImpl<int64_t>();
+        }
+        case DataType::FLOAT: {
+            return ExecArrayContainsForIndexSegmentImpl<float>();
+        }
+        case DataType::DOUBLE: {
+            return ExecArrayContainsForIndexSegmentImpl<double>();
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            return ExecArrayContainsForIndexSegmentImpl<std::string>();
+        }
+        default:
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type for "
+                                  "ExecArrayContainsForIndexSegmentImpl: {}",
+                                  expr_->column_.element_type_));
+    }
+}
+
+template <typename ExprValueType>
+VectorPtr
+PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
+    typedef std::conditional_t<std::is_same_v<ExprValueType, std::string_view>,
+                               std::string,
+                               ExprValueType>
+        GetType;
+    using Index = index::ScalarIndex<GetType>;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    std::unordered_set<GetType> elements;
+    for (auto const& element : expr_->vals_) {
+        elements.insert(GetValueFromProto<GetType>(element));
+    }
+    boost::container::vector<GetType> elems(elements.begin(), elements.end());
+    auto execute_sub_batch =
+        [this](Index* index_ptr,
+               const boost::container::vector<GetType>& vals) {
+            switch (expr_->op_) {
+                case proto::plan::JSONContainsExpr_JSONOp_Contains:
+                case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
+                    return index_ptr->In(vals.size(), vals.data());
+                }
+                case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+                    TargetBitmap result(index_ptr->Count());
+                    result.set();
+                    for (size_t i = 0; i < vals.size(); i++) {
+                        auto sub = index_ptr->In(1, &vals[i]);
+                        result &= sub;
+                    }
+                    return result;
+                }
+                default:
+                    PanicInfo(
+                        ExprInvalid,
+                        "unsupported array contains type {}",
+                        proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+            }
+        };
+    auto res = ProcessIndexChunks<GetType>(execute_sub_batch, elems);
+    AssertInfo(res.size() == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
+    return std::make_shared<ColumnVector>(std::move(res));
 }
 
 }  //namespace exec

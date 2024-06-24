@@ -50,6 +50,29 @@ const (
 	NextTargetFirst
 )
 
+type TargetManagerInterface interface {
+	UpdateCollectionCurrentTarget(collectionID int64) bool
+	UpdateCollectionNextTarget(collectionID int64) error
+	PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
+	PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
+	RemoveCollection(collectionID int64)
+	RemovePartition(collectionID int64, partitionIDs ...int64)
+	GetGrowingSegmentsByCollection(collectionID int64, scope TargetScope) typeutil.UniqueSet
+	GetGrowingSegmentsByChannel(collectionID int64, channelName string, scope TargetScope) typeutil.UniqueSet
+	GetSealedSegmentsByCollection(collectionID int64, scope TargetScope) map[int64]*datapb.SegmentInfo
+	GetSealedSegmentsByChannel(collectionID int64, channelName string, scope TargetScope) map[int64]*datapb.SegmentInfo
+	GetDroppedSegmentsByChannel(collectionID int64, channelName string, scope TargetScope) []int64
+	GetSealedSegmentsByPartition(collectionID int64, partitionID int64, scope TargetScope) map[int64]*datapb.SegmentInfo
+	GetDmChannelsByCollection(collectionID int64, scope TargetScope) map[string]*DmChannel
+	GetDmChannel(collectionID int64, channel string, scope TargetScope) *DmChannel
+	GetSealedSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo
+	GetCollectionTargetVersion(collectionID int64, scope TargetScope) int64
+	IsCurrentTargetExist(collectionID int64) bool
+	IsNextTargetExist(collectionID int64) bool
+	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
+	Recover(catalog metastore.QueryCoordCatalog) error
+}
+
 type TargetManager struct {
 	rwMutex sync.RWMutex
 	broker  Broker

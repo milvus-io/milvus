@@ -240,7 +240,7 @@ func (t *levelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 
 func (t *levelZeroCompactionTask) splitDelta(
 	ctx context.Context,
-	allDelta []*storage.DeleteData,
+	allDelta *storage.DeleteData,
 	targetSegIDs []int64,
 ) (map[int64]*SegmentDeltaWriter, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
@@ -291,12 +291,11 @@ func (t *levelZeroCompactionTask) splitDelta(
 }
 
 type BatchApplyRet = struct {
-	DeleteDataIdx int
-	StartIdx      int
-	Segment2Hits  map[int64][]bool
+	StartIdx     int
+	Segment2Hits map[int64][]bool
 }
 
-func (t *levelZeroCompactionTask) applyBFInParallel(ctx context.Context, deleteDatas []*storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+func (t *levelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -315,42 +314,37 @@ func (t *levelZeroCompactionTask) applyBFInParallel(ctx context.Context, deleteD
 	retIdx := 0
 	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
 	var futures []*conc.Future[any]
-	for didx, data := range deleteDatas {
-		pks := data.Pks
-		for idx := 0; idx < len(pks); idx += batchSize {
-			startIdx := idx
-			endIdx := startIdx + batchSize
-			if endIdx > len(pks) {
-				endIdx = len(pks)
-			}
-
-			retIdx += 1
-			tmpRetIndex := retIdx
-			deleteDataId := didx
-			future := pool.Submit(func() (any, error) {
-				ret := batchPredict(pks[startIdx:endIdx])
-				retMap.Insert(tmpRetIndex, &BatchApplyRet{
-					DeleteDataIdx: deleteDataId,
-					StartIdx:      startIdx,
-					Segment2Hits:  ret,
-				})
-				return nil, nil
-			})
-			futures = append(futures, future)
+	pks := deltaData.Pks
+	for idx := 0; idx < len(pks); idx += batchSize {
+		startIdx := idx
+		endIdx := startIdx + batchSize
+		if endIdx > len(pks) {
+			endIdx = len(pks)
 		}
+
+		retIdx += 1
+		tmpRetIndex := retIdx
+		future := pool.Submit(func() (any, error) {
+			ret := batchPredict(pks[startIdx:endIdx])
+			retMap.Insert(tmpRetIndex, &BatchApplyRet{
+				StartIdx:     startIdx,
+				Segment2Hits: ret,
+			})
+			return nil, nil
+		})
+		futures = append(futures, future)
 	}
 	conc.AwaitAll(futures...)
-
 	return retMap
 }
 
 func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
-	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
 	results := make([]*datapb.CompactionSegment, 0)
 	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := log.Ctx(t.ctx).With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Int("max conc segment counts", batchSize),
 		zap.Int("total segment counts", len(targetSegments)),
@@ -385,6 +379,7 @@ func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 
 		log.Info("L0 compaction finished one batch",
 			zap.Int("batch no.", i),
+			zap.Int("total deltaRowCount", int(allDelta.RowCount)),
 			zap.Int("batch segment count", len(batchResults)),
 			zap.Duration("batch elapse", time.Since(batchStart)),
 		)
@@ -395,25 +390,22 @@ func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 	return results, nil
 }
 
-func (t *levelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs ...[]string) ([]*storage.DeleteData, error) {
-	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadDelta")
+func (t *levelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []string) (*storage.DeleteData, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadDelta")
 	defer span.End()
-	allData := make([]*storage.DeleteData, 0, len(deltaLogs))
-	for _, paths := range deltaLogs {
-		blobBytes, err := t.Download(ctx, paths)
-		if err != nil {
-			return nil, err
-		}
-		blobs := make([]*storage.Blob, 0, len(blobBytes))
-		for _, blob := range blobBytes {
-			blobs = append(blobs, &storage.Blob{Value: blob})
-		}
-		_, _, dData, err := storage.NewDeleteCodec().DeserializeWithSerialized(blobs)
-		if err != nil {
-			return nil, err
-		}
 
-		allData = append(allData, dData)
+	blobBytes, err := t.Download(ctx, deltaLogs)
+	if err != nil {
+		return nil, err
 	}
-	return allData, nil
+	blobs := make([]*storage.Blob, 0, len(blobBytes))
+	for _, blob := range blobBytes {
+		blobs = append(blobs, &storage.Blob{Value: blob})
+	}
+	_, _, dData, err := storage.NewDeleteCodec().DeserializeWithSerialized(blobs)
+	if err != nil {
+		return nil, err
+	}
+
+	return dData, nil
 }
