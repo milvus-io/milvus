@@ -312,7 +312,12 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		if err != nil {
 			return err
 		}
-		return verifyLengthPerRow(strArr, maxLength)
+
+		if i, ok := verifyLengthPerRow(strArr, maxLength); !ok {
+			return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth VarChar %s exceeds max length (%d)",
+				len(strArr[i]), i, fieldSchema.GetName(), i, maxLength)
+		}
+		return nil
 	}
 
 	return nil
@@ -518,24 +523,24 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		if err != nil {
 			return err
 		}
-		for _, row := range data.GetData() {
-			if err := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); err != nil {
-				return err
+		for rowCnt, row := range data.GetData() {
+			if i, ok := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); !ok {
+				return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth %s %s[%d] exceeds max length (%d)",
+					len(row.GetStringData().GetData()[i]), rowCnt, fieldSchema.GetDataType().String(), fieldSchema.GetName(), i, maxLength)
 			}
 		}
 	}
 	return v.checkArrayElement(data, fieldSchema)
 }
 
-func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
+func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) (int, bool) {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
-			msg := fmt.Sprintf("the length (%d) of %dth string exceeds max length (%d)", len(s), i, maxLength)
-			return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+			return i, false
 		}
 	}
 
-	return nil
+	return 0, true
 }
 
 func verifyCapacityPerRow(arrayArray []*schemapb.ScalarField, maxCapacity int64, elementType schemapb.DataType) error {

@@ -19,15 +19,23 @@ import (
 func Test_verifyLengthPerRow(t *testing.T) {
 	maxLength := 16
 
-	assert.NoError(t, verifyLengthPerRow[string](nil, int64(maxLength)))
+	_, ok := verifyLengthPerRow[string](nil, int64(maxLength))
+	assert.True(t, ok)
 
-	assert.NoError(t, verifyLengthPerRow([]string{"111111", "22222"}, int64(maxLength)))
+	_, ok = verifyLengthPerRow[string]([]string{"111111", "22222"}, int64(maxLength))
+	assert.True(t, ok)
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111111111111111"}, int64(maxLength)))
+	row, ok := verifyLengthPerRow[string]([]string{strings.Repeat("1", 20)}, int64(maxLength))
+	assert.False(t, ok)
+	assert.Equal(t, 0, row)
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111111111111111", "222"}, int64(maxLength)))
+	row, ok = verifyLengthPerRow[string]([]string{strings.Repeat("1", 20), "222"}, int64(maxLength))
+	assert.False(t, ok)
+	assert.Equal(t, 0, row)
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111", "22222222222222222"}, int64(maxLength)))
+	row, ok = verifyLengthPerRow[string]([]string{"11111", strings.Repeat("2", 20)}, int64(maxLength))
+	assert.False(t, ok)
+	assert.Equal(t, 1, row)
 }
 
 func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
