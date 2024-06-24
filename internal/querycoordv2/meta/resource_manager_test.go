@@ -18,11 +18,13 @@ package meta
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -590,4 +592,30 @@ func (suite *ResourceManagerSuite) TestIncomingNode() {
 	nodes, err := suite.manager.GetNodes(DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Len(nodes, 1)
+}
+
+func (suite *ResourceManagerSuite) TestUnassignFail() {
+	// suite.man
+	mockKV := mocks.NewMetaKv(suite.T())
+	mockKV.EXPECT().MultiSave(mock.Anything).Return(nil).Once()
+
+	store := querycoord.NewCatalog(mockKV)
+	suite.manager = NewResourceManager(store, session.NewNodeManager())
+
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": newResourceGroupConfig(20, 30),
+	})
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.manager.HandleNodeUp(1)
+
+	mockKV.EXPECT().MultiSave(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
+
+	suite.Panics(func() {
+		suite.manager.HandleNodeDown(1)
+	})
 }
