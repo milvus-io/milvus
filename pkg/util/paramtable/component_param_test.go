@@ -543,6 +543,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
 		params.Save("common.useVectorAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
+		params.Save("common.enableVectorClusteringKey", "true")
+		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
 }
 
