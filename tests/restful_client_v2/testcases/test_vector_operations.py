@@ -239,6 +239,287 @@ class TestInsertVector(TestBase):
         assert len(rsp['data']) == 50
 
     @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_insert_entities_with_all_vector_datatype_0(self, nb, dim, insert_round, auto_id,
+                                                        is_partition_key, enable_dynamic_schema):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "float_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "float16_vector", "dataType": "Float16Vector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "bfloat16_vector", "dataType": "BFloat16Vector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "book_vector", "indexName": "book_vector", "metricType": "L2",
+                 "params": {"index_type": "FLAT"}},
+                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": "L2",
+                 "params": {"index_type": "IVF_FLAT", "nlist": 128}},
+                {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "L2",
+                 "params": {"index_type": "IVF_SQ8", "nlist": "128"}},
+                {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector", "metricType": "L2",
+                 "params": {"index_type": "IVF_PQ", "nlist": 128, "m": 16, "nbits": 8}},
+            ]
+        }
+
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "book_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
+                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "book_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
+                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        c = Collection(name)
+        res = c.query(
+            expr="user_id > 0",
+            limit=1,
+            output_fields=["*"],
+        )
+        logger.info(f"res: {res}")
+        # query data to make sure the data is inserted
+        rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == 50
+
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_insert_entities_with_all_vector_datatype_1(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "float_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "float16_vector", "dataType": "Float16Vector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "bfloat16_vector", "dataType": "BFloat16Vector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": "L2",
+                 "params": {"index_type": "HNSW", "M": 32, "efConstruction": 360}},
+                {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "L2",
+                 "params": {"index_type": "SCANN", "nlist": "128"}},
+                {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector", "metricType": "L2",
+                 "params": {"index_type": "DISKANN"}},
+            ]
+        }
+
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
+                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                        "float16_vector": gen_vector(datatype="Float16Vector", dim=dim),
+                        "bfloat16_vector": gen_vector(datatype="BFloat16Vector", dim=dim),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        c = Collection(name)
+        res = c.query(
+            expr="user_id > 0",
+            limit=1,
+            output_fields=["*"],
+        )
+        logger.info(f"res: {res}")
+        # query data to make sure the data is inserted
+        rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == 50
+
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_insert_entities_with_all_vector_datatype_2(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "binary_vector_0", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "binary_vector_1", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "sparse_float_vector_0", "dataType": "SparseFloatVector"},
+                    {"fieldName": "sparse_float_vector_1", "dataType": "SparseFloatVector"},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "binary_vector_0", "indexName": "binary_vector_0_index", "metricType": "HAMMING",
+                 "params": {"index_type": "BIN_FLAT"}},
+                {"fieldName": "binary_vector_1", "indexName": "binary_vector_1_index", "metricType": "HAMMING",
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}},
+                {"fieldName": "sparse_float_vector_0", "indexName": "sparse_float_vector_0_index", "metricType": "IP",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"}},
+                {"fieldName": "sparse_float_vector_1", "indexName": "sparse_float_vector_1_index", "metricType": "IP",
+                 "params": {"index_type": "SPARSE_WAND", "drop_ratio_build": "0.2"}}
+            ]
+        }
+
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 0
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "binary_vector_0": gen_vector(datatype="BinaryVector", dim=dim),
+                        "binary_vector_1": gen_vector(datatype="BinaryVector", dim=dim),
+                        "sparse_float_vector_0": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="dok"),
+                        "sparse_float_vector_1": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="dok"),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "binary_vector_0": gen_vector(datatype="BinaryVector", dim=dim),
+                        "binary_vector_1": gen_vector(datatype="BinaryVector", dim=dim),
+                        "sparse_float_vector_0": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="dok"),
+                        "sparse_float_vector_1": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format="dok"),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 0
+            assert rsp['data']['insertCount'] == nb
+        c = Collection(name)
+        res = c.query(
+            expr="user_id > 0",
+            limit=1,
+            output_fields=["*"],
+        )
+        logger.info(f"res: {res}")
+        # query data to make sure the data is inserted
+        rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == 50
+
+    @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
     @pytest.mark.parametrize("enable_dynamic_schema", [True, False])
