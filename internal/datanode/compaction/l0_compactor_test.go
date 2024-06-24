@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestLevelZeroCompactionTaskSuite(t *testing.T) {
@@ -502,6 +501,12 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	for segID, writer := range deltaWriters {
 		gotBytes, _, err := writer.Finish()
 		s.NoError(err)
+
+		expectedSegPK := map[int64][]int64{
+			100: {1, 3},
+			101: {3},
+			102: {3},
+		}
 
 		_, _, gotData, err := storage.NewDeleteCodec().Deserialize([]*storage.Blob{{Value: gotBytes}})
 		s.NoError(err)
