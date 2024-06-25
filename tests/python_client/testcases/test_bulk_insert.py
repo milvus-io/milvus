@@ -2111,3 +2111,63 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 empty_partition_num += 1
             num_entities += p.num_entities
         assert num_entities == entities * file_nums
+
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.parametrize("enable_dynamic_field", [True])
+    @pytest.mark.parametrize("enable_partition_key", [True])
+    @pytest.mark.parametrize("include_meta", [True])
+    def test_bulk_insert_with_mismatch_array_schema(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta):
+        """
+        """
+        if enable_dynamic_field is False and include_meta is True:
+            pytest.skip("include_meta only works with enable_dynamic_field")
+        float_vec_field_dim = dim
+        binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
+        bf16_vec_field_dim = dim+random.randint(-16, 32)
+        fp16_vec_field_dim = dim+random.randint(-16, 32)
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, max_capacity=20),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, max_capacity=20),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_capacity=20, max_length=100),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, max_capacity=20),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
+        ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+
+        files = prepare_bulk_insert_parquet_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            rows=entities,
+            dim=dim,
+            data_fields=data_fields,
+            enable_dynamic_field=enable_dynamic_field,
+            force=True,
+            schema=schema,
+            array_length=50  # mismatch with schema
+        )
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        # import data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+        assert not success
