@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	predicates "github.com/milvus-io/milvus/internal/kv/predicates"
+	predicates "github.com/milvus-io/milvus/pkg/kv/predicates"
 	mock "github.com/stretchr/testify/mock"
 )
 

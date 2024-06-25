@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -34,7 +35,7 @@ import (
 // Consumer consumes from pulsar
 type Consumer struct {
 	c          pulsar.Consumer
-	msgChannel chan mqwrapper.Message
+	msgChannel chan common.Message
 	hasSeek    bool
 	AtLatest   bool
 	closeCh    chan struct{}
@@ -49,10 +50,10 @@ func (pc *Consumer) Subscription() string {
 }
 
 // Chan returns a message channel
-func (pc *Consumer) Chan() <-chan mqwrapper.Message {
+func (pc *Consumer) Chan() <-chan common.Message {
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
-			pc.msgChannel = make(chan mqwrapper.Message, 256)
+			pc.msgChannel = make(chan common.Message, 256)
 			// this part handles msgstream expectation when the consumer is not seeked
 			// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
 			// yet, our message stream is to setting to the very start point of the topic
@@ -97,7 +98,7 @@ func (pc *Consumer) Chan() <-chan mqwrapper.Message {
 
 // Seek seek consume position to the pointed messageID,
 // the pointed messageID will be consumed after the seek in pulsar
-func (pc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
+func (pc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	messageID := id.(*pulsarID).messageID
 	err := pc.c.Seek(messageID)
 	if err == nil {
@@ -109,7 +110,7 @@ func (pc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 }
 
 // Ack the consumption of a single message
-func (pc *Consumer) Ack(message mqwrapper.Message) {
+func (pc *Consumer) Ack(message common.Message) {
 	pm := message.(*pulsarMessage)
 	pc.c.Ack(pm.msg)
 }
@@ -151,7 +152,7 @@ func (pc *Consumer) Close() {
 	})
 }
 
-func (pc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
+func (pc *Consumer) GetLatestMsgID() (common.MessageID, error) {
 	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
 	return &pulsarID{messageID: msgID}, err
 }

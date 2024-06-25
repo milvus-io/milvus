@@ -27,9 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -46,7 +46,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 	var err error
 	var input <-chan *msgstream.MsgPack
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
-		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, mqwrapper.SubscriptionPositionUnknown)
+		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, common.SubscriptionPositionUnknown)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +55,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
 			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
 	} else {
-		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, mqwrapper.SubscriptionPositionEarliest)
+		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, common.SubscriptionPositionEarliest)
 		if err != nil {
 			return nil, err
 		}

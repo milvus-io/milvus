@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -45,7 +46,7 @@ func benchmarkProduceAndConsume(b *testing.B, mqClient mqwrapper.Client, cases [
 
 	go func() {
 		defer wg.Done()
-		p, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+		p, err := mqClient.CreateProducer(common.ProducerOptions{
 			Topic: topic,
 		})
 		assert.NoError(b, err)
@@ -57,7 +58,7 @@ func benchmarkProduceAndConsume(b *testing.B, mqClient mqwrapper.Client, cases [
 		c, _ := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 			Topic:                       topic,
 			SubscriptionName:            topic,
-			SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+			SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 			BufSize:                     1024,
 		})
 		defer c.Close()
@@ -77,7 +78,7 @@ func benchmarkMQConsume(b *testing.B, c mqwrapper.Consumer, cases [][]byte) {
 
 func benchmarkMQProduce(b *testing.B, p mqwrapper.Producer, cases [][]byte) {
 	for _, c := range cases {
-		p.Send(context.Background(), &mqwrapper.ProducerMessage{
+		p.Send(context.Background(), &common.ProducerMessage{
 			Payload: c,
 		})
 	}

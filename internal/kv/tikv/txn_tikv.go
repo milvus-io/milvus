@@ -32,8 +32,8 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
