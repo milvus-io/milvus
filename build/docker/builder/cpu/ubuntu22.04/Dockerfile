@@ -23,7 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 # upgrade gcc to 12
 RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
     && unlink gcc && ln -s gcc-12 gcc \
-    && unlink g++ && ln -s g++-12 g++
+    && unlink g++ && ln -s g++-12 g++ \
+    && unlink gcov && ln -s gcov-12 gcov
 
 RUN pip3 install conan==1.61.0
 
