@@ -68,7 +68,10 @@ PhyCompareFilterExpr::GetChunkData<std::string>(FieldId field_id,
             };
         }
     }
-    if (segment_->type() == SegmentType::Growing) {
+    if (segment_->type() == SegmentType::Growing &&
+        !storage::MmapManager::GetInstance()
+             .GetMmapConfig()
+             .growing_enable_mmap) {
         auto chunk_data =
             segment_->chunk_data<std::string>(field_id, chunk_id).data();
         return [chunk_data](int i) -> const number { return chunk_data[i]; };

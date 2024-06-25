@@ -343,6 +343,9 @@ queryNode:
     warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
+    growingMmapEnabled: false # Enable mmap for growing segment
+    fixedFileSizeForMmapAlloc: 4 #MB, fixed file size for mmap chunk manager to store chunk data
+    maxDiskUsagePercentageForMmapAlloc: 20 # max percentage of disk usage in memory mapping
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
