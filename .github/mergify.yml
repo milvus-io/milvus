@@ -40,10 +40,13 @@ pull_request_rules:
           - base=sql_beta
           - base=master
           - base~=^2(\.\d+){1,2}$
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=UT for Cpp'
+      - 'status-success=UT for Go'
+      - 'status-success=Integration Test'
+      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker Amazonlinux 2023'
+      # - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
@@ -51,13 +54,16 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-  - name: Test passed for code changed -2.2.*
+  - name: Test passed for code changed -2.*.*
     conditions:
       - base~=^2(\.\d+){2}$
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=UT for Cpp'
+      - 'status-success=UT for Go'
+      - 'status-success=Integration Test'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker CentOS 7'
+      # - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
@@ -110,10 +116,10 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker Amazonlinux 2023'
+      # - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=UT for Go'
       - or:
           - -files~=^(?!pkg\/.*_test\.go).*$
@@ -126,10 +132,9 @@ pull_request_rules:
   - name: Test passed for go unittest code changed -2.2.*
     conditions:
       - base~=^2\.2\.\d+$
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker CentOS 7'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
@@ -255,10 +260,13 @@ pull_request_rules:
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
       - title~=\[skip e2e\]
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=UT for Cpp'
+      - 'status-success=UT for Go'
+      - 'status-success=Integration Test'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker Amazonlinux 2023'
+      # - 'status-success=Code Checker Amazonlinux 2023'
       - *source_code_files
     actions:
       label:
@@ -269,10 +277,12 @@ pull_request_rules:
     conditions:
       - base~=^2\.2\.\d+$
       - title~=\[skip e2e\]
-      - 'status-success=Code Checker AMD64 Ubuntu 20.04'
+      # - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=UT for Cpp'
+      - 'status-success=UT for Go'
+      - 'status-success=Integration Test'
       # - 'status-success=Code Checker MacOS 12'
-      - 'status-success=Code Checker CentOS 7'
       - *source_code_files
     actions:
       label:
@@ -302,10 +312,13 @@ pull_request_rules:
           - base~=^2(\.\d+){1,2}$
       - *source_code_files
       - or:
-          - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
-          - 'status-success!=Build and test AMD64 Ubuntu 20.04'
+          # - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
+          - 'status-success!=Build and test AMD64 Ubuntu 22.04'
+          - 'status-success!=UT for Cpp'
+          - 'status-success!=UT for Go'
+          - 'status-success!=Integration Test'
           # - 'status-success!=Code Checker MacOS 12'
-          - 'status-success!=Code Checker Amazonlinux 2023'
+          # - 'status-success!=Code Checker Amazonlinux 2023'
     actions:
       label:
         remove:
@@ -317,10 +330,13 @@ pull_request_rules:
       - base~=^2\.2\.\d+$
       - *source_code_files
       - or:
-          - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
+          # - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
+          - 'status-success!=UT for Cpp'
+          - 'status-success!=UT for Go'
+          - 'status-success!=Integration Test'
           # - 'status-success!=Code Checker MacOS 12'
-          - 'status-success!=Code Checker CentOS 7'
+          # - 'status-success!=Code Checker CentOS 7'
     actions:
       label:
         remove:
@@ -360,7 +376,7 @@ pull_request_rules:
           - base~=^2(\.\d+){1,2}$
           - base=sql_beta
       - or:
-          - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
           - 'check-failure=Build and test AMD64 Ubuntu 20.04'
     actions:
       comment:
@@ -371,7 +387,7 @@ pull_request_rules:
     conditions:
       - base~=^2\.2\.\d+$
       - or:
-          - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
           - 'check-failure=Build and test AMD64 Ubuntu 20.04'
     actions:
       comment:

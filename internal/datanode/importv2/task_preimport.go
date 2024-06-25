@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type PreImportTask struct {
@@ -108,7 +108,7 @@ func (p *PreImportTask) Cancel() {
 func (p *PreImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(p.ctx)
 	return &PreImportTask{
-		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+		PreImportTask: typeutil.Clone(p.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
 		partitionIDs:  p.GetPartitionIDs(),

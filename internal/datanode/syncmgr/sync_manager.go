@@ -105,19 +105,19 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 		t.WithAllocator(mgr.allocator)
 	}
 
-	return mgr.safeSubmitTask(task, callbacks...)
+	return mgr.safeSubmitTask(ctx, task, callbacks...)
 }
 
 // safeSubmitTask submits task to SyncManager
-func (mgr *syncManager) safeSubmitTask(task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
 	key := task.SegmentID()
-	return mgr.submit(key, task, callbacks...)
+	return mgr.submit(ctx, key, task, callbacks...)
 }
 
-func (mgr *syncManager) submit(key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
 		if err == nil {
 			return nil
@@ -127,5 +127,5 @@ func (mgr *syncManager) submit(key int64, task Task, callbacks ...func(error) er
 	}
 	callbacks = append([]func(error) error{handler}, callbacks...)
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
-	return mgr.Submit(key, task, callbacks...)
+	return mgr.Submit(ctx, key, task, callbacks...)
 }

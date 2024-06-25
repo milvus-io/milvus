@@ -240,7 +240,6 @@ func (s *ManagerSuite) TestMemoryCheck() {
 		}
 		return int64(float64(memoryLimit) * 0.6)
 	})
-	//.Return(int64(float64(memoryLimit) * 0.6))
 	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
 		select {
 		case signal <- struct{}{}:

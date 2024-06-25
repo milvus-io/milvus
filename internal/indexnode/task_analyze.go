@@ -74,10 +74,6 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 
 	log.Info("Begin to build analyze task")
-	if err != nil {
-		log.Warn("create analyze info failed", zap.Error(err))
-		return err
-	}
 
 	storageConfig := &clusteringpb.StorageConfig{
 		Address:          at.req.GetStorageConfig().GetAddress(),
@@ -103,19 +99,11 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		numRows := stats.GetNumRows()
 		numRowsMap[segID] = numRows
 		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
-		if err != nil {
-			log.Warn("append segment num rows failed", zap.Error(err))
-			return err
-		}
 		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
 				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
 			insertFiles = append(insertFiles, path)
-			if err != nil {
-				log.Warn("append insert binlog path failed", zap.Error(err))
-				return err
-			}
 		}
 		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
 	}

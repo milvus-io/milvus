@@ -17,6 +17,7 @@
 package syncmgr
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -164,6 +165,8 @@ func (s *SyncTaskSuite) getSuiteSyncTask() *SyncTask {
 }
 
 func (s *SyncTaskSuite) TestRunNormal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
@@ -198,7 +201,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
@@ -216,7 +219,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 			Value: []byte("test_data"),
 		}
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
@@ -239,7 +242,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 			Value: []byte("test_data"),
 		}
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
@@ -259,12 +262,14 @@ func (s *SyncTaskSuite) TestRunNormal() {
 			Value: []byte("test_data"),
 		}
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 }
 
 func (s *SyncTaskSuite) TestRunL0Segment() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
@@ -287,19 +292,21 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 		})
 		task.WithFlush()
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 }
 
 func (s *SyncTaskSuite) TestRunError() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.Run("segment_not_found", func() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
 		handler := func(_ error) { flag = true }
 		task := s.getSuiteSyncTask().WithFailureCallback(handler)
 
-		err := task.Run()
+		err := task.Run(ctx)
 
 		s.Error(err)
 		s.True(flag)
@@ -318,7 +325,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		task := s.getSuiteSyncTask()
 		task.allocator = mockAllocator
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.Error(err)
 	})
 
@@ -334,7 +341,7 @@ func (s *SyncTaskSuite) TestRunError() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.Error(err)
 	})
 
@@ -352,7 +359,7 @@ func (s *SyncTaskSuite) TestRunError() {
 
 		task.WithWriteRetryOptions(retry.Attempts(1))
 
-		err := task.Run()
+		err := task.Run(ctx)
 
 		s.Error(err)
 		s.True(flag)

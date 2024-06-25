@@ -242,7 +242,7 @@ func (m *bufferManager) RemoveChannel(channel string) {
 		return
 	}
 
-	buf.Close(false)
+	buf.Close(context.Background(), false)
 }
 
 // DropChannel removes channel WriteBuffer and process `DropChannel`
@@ -258,7 +258,7 @@ func (m *bufferManager) DropChannel(channel string) {
 		return
 	}
 
-	buf.Close(true)
+	buf.Close(context.Background(), true)
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
