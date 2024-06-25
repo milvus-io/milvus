@@ -333,7 +333,19 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	return nil
 }
 
+func (it *indexBuildTask) parseParams() {
+	if it.req.GetField() == nil || it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
+		it.req.Field = &schemapb.FieldSchema{
+			FieldID:  it.req.GetFieldID(),
+			Name:     it.req.GetFieldName(),
+			DataType: it.req.GetFieldType(),
+		}
+	}
+}
+
 func (it *indexBuildTask) Prepare(ctx context.Context) error {
+	it.parseParams()
+
 	it.queueDur = it.tr.RecordSpan()
 	log.Ctx(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID),
 		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
@@ -518,14 +530,6 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	}
 
 	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	field := it.req.GetField()
-	if field == nil || field.GetDataType() == schemapb.DataType_None {
-		field = &schemapb.FieldSchema{
-			FieldID:  it.fieldID,
-			Name:     it.fieldName,
-			DataType: it.fieldType,
-		}
-	}
 	buildIndexParams := &indexcgopb.BuildIndexInfo{
 		ClusterID:           it.ClusterID,
 		BuildID:             it.BuildID,
@@ -538,7 +542,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		Dim:                 it.req.GetDim(),
 		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
 		InsertFiles:         it.req.GetDataPaths(),
-		FieldSchema:         field,
+		FieldSchema:         it.req.GetField(),
 		StorageConfig:       storageConfig,
 		IndexParams:         mapToKVPairs(it.newIndexParams),
 		TypeParams:          mapToKVPairs(it.newTypeParams),
