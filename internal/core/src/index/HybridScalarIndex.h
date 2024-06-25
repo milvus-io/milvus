@@ -33,14 +33,6 @@
 namespace milvus {
 namespace index {
 
-enum class InternalIndexType {
-    NONE = 0,
-    BITMAP,
-    STLSORT,
-    MARISA,
-    INVERTED,
-};
-
 /*
 * @brief Implementation of hybrid index  
 * @details This index only for scalar type.
@@ -75,6 +67,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     int64_t
     Count() override {
         return internal_index_->Count();
+    }
+
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::HYBRID;
     }
 
     void
@@ -140,17 +137,17 @@ class HybridScalarIndex : public ScalarIndex<T> {
     UploadV2(const Config& config = {}) override;
 
  private:
-    InternalIndexType
+    ScalarIndexType
     SelectBuildTypeForPrimitiveType(
         const std::vector<FieldDataPtr>& field_datas);
 
-    InternalIndexType
+    ScalarIndexType
     SelectBuildTypeForArrayType(const std::vector<FieldDataPtr>& field_datas);
 
-    InternalIndexType
+    ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 
-    InternalIndexType
+    ScalarIndexType
     SelectIndexBuildType(size_t n, const T* values);
 
     BinarySet
@@ -172,7 +169,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
     bool is_built_{false};
     int32_t bitmap_index_cardinality_limit_;
     proto::schema::DataType field_type_;
-    InternalIndexType internal_index_type_;
+    ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
     std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};

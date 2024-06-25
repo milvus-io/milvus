@@ -266,15 +266,18 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
                  field_id.get());
+        bool use_mmap = false;
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
+            use_mmap = true;
         }
-        LOG_INFO("segment {} loads field {} done",
+        LOG_INFO("segment {} loads field {} mmap {} done",
                  this->get_segment_id(),
-                 field_id.get());
+                 field_id.get(),
+                 use_mmap);
     }
 }
 

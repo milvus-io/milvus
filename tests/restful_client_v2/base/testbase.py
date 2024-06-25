@@ -2,10 +2,11 @@ import json
 import sys
 import pytest
 import time
+import uuid
 from pymilvus import connections, db
 from utils.util_log import test_log as logger
 from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
-                        UserClient, RoleClient, ImportJobClient, StorageClient)
+                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
 from utils.utils import get_data_by_payload
 
 
@@ -35,7 +36,7 @@ class Base:
 
 
 class TestBase(Base):
-
+    req = None
     def teardown_method(self):
         self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
@@ -49,19 +50,34 @@ class TestBase(Base):
             except Exception as e:
                 logger.error(e)
 
+    # def setup_method(self):
+    #     self.req = Requests()
+    #     self.req.uuid = str(uuid.uuid1())
+
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
+        _uuid = str(uuid.uuid1())
+        self.req = Requests()
+        self.req.update_uuid(_uuid)
         self.endpoint = f"{endpoint}"
         self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
         self.vector_client = VectorClient(self.endpoint, self.api_key)
+        self.vector_client.update_uuid(_uuid)
         self.collection_client = CollectionClient(self.endpoint, self.api_key)
+        self.collection_client.update_uuid(_uuid)
         self.partition_client = PartitionClient(self.endpoint, self.api_key)
+        self.partition_client.update_uuid(_uuid)
         self.index_client = IndexClient(self.endpoint, self.api_key)
+        self.index_client.update_uuid(_uuid)
         self.alias_client = AliasClient(self.endpoint, self.api_key)
+        self.alias_client.update_uuid(_uuid)
         self.user_client = UserClient(self.endpoint, self.api_key)
+        self.user_client.update_uuid(_uuid)
         self.role_client = RoleClient(self.endpoint, self.api_key)
+        self.role_client.update_uuid(_uuid)
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
+        self.import_job_client.update_uuid(_uuid)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         if token is None:
             self.vector_client.api_key = None

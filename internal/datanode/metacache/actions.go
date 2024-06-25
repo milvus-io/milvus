@@ -121,12 +121,6 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	})
 }
 
-func WithCompacted() SegmentFilter {
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.compactTo != 0
-	})
-}
-
 func WithNoSyncingTask() SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.syncingTasks == 0
@@ -162,12 +156,6 @@ func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bfs.Roll(newStats...)
-	}
-}
-
-func CompactTo(compactTo int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.compactTo = compactTo
 	}
 }
 

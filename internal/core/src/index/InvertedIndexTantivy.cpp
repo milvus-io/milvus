@@ -290,8 +290,8 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
             apply_hits(bitset, array, true);
         } break;
         default:
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
     }
 
     return bitset;

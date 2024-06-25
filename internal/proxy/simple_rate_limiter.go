@@ -92,7 +92,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	}
 
 	// 2. check database level rate limits
-	if ret == nil && dbID != util.InvalidDBID {
+	if dbID != util.InvalidDBID {
 		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
 		ret = dbRateLimiters.Check(rt, n)
 		if ret != nil {

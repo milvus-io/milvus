@@ -58,6 +58,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return data_.size();
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::STLSORT;
+    }
+
     void
     Build(size_t n, const T* values) override;
 

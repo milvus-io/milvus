@@ -8,6 +8,9 @@ run:
     - scripts
     - internal/core
     - cmake_build
+    - mmap
+    - data
+    - ci
   skip-files:
     - partial_search_test.go
 
@@ -41,6 +44,9 @@ linters-settings:
       - default
       - prefix(github.com/milvus-io)
     custom-order: true
+  govet:
+    enable: # add extra linters
+      - nilness 
   gofumpt:
     lang-version: "1.18"
     module-path: github.com/milvus-io

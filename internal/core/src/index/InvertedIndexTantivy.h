@@ -70,6 +70,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                   "BuildWithDataset should be deprecated");
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::INVERTED;
+    }
+    
     void
     Build(const Config& config = {}) override;
 

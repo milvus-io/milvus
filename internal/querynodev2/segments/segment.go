@@ -17,8 +17,9 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_segcore milvus_futures
 
+#include "futures/future_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
@@ -53,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/cgo"
 	typeutil_internal "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -565,34 +567,39 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer s.ptrLock.RUnlock()
 
 	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
 
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
 	log = log.With(zap.Bool("withIndex", hasIndex))
 	log.Debug("search segment...")
 
-	var searchResult SearchResult
-	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(traceCtx.ctx,
-			s.ptr,
-			searchReq.plan.cSearchPlan,
-			searchReq.cPlaceholderGroup,
-			C.uint64_t(searchReq.mvccTimestamp),
-			&searchResult.cSearchResult,
-		)
-		runtime.KeepAlive(traceCtx)
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return nil, nil
-	}).Await()
-	if err := HandleCStatus(ctx, &status, "Search failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.segmentType.String())); err != nil {
+	tr := timerecord.NewTimeRecorder("cgoSearch")
+
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSearch(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				searchReq.cPlaceholderGroup,
+				C.uint64_t(searchReq.mvccTimestamp),
+			))
+		},
+		cgo.WithName("search"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("Search failed")
 		return nil, err
 	}
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("search segment done")
-	return &searchResult, nil
+	return &SearchResult{
+		cSearchResult: (C.CSearchResult)(result),
+	}, nil
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
@@ -612,68 +619,64 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	log.Debug("begin to retrieve")
 
 	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(plan)
 
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	var retrieveResult RetrieveResult
-	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		ts := C.uint64_t(plan.Timestamp)
-		tr := timerecord.NewTimeRecorder("cgoRetrieve")
-		status = C.Retrieve(traceCtx.ctx,
-			s.ptr,
-			plan.cRetrievePlan,
-			ts,
-			&retrieveResult.cRetrieveResult,
-			C.int64_t(maxLimitSize),
-			C.bool(plan.ignoreNonPk))
-		runtime.KeepAlive(traceCtx)
+	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "Retrieve failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.segmentType.String())); err != nil {
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncRetrieve(
+				traceCtx.ctx,
+				s.ptr,
+				plan.cRetrievePlan,
+				C.uint64_t(plan.Timestamp),
+				C.int64_t(maxLimitSize),
+				C.bool(plan.ignoreNonPk),
+			))
+		},
+		cgo.WithName("retrieve"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("Retrieve failed")
 		return nil, err
 	}
+	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "partial-segcore-results-deserialization")
 	defer span.End()
 
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+	retrieveResult := new(segcorepb.RetrieveResults)
+	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+		log.Warn("unmarshal retrieve result failed", zap.Error(err))
 		return nil, err
 	}
 
 	log.Debug("retrieve segment done",
-		zap.Int("resultNum", len(result.Offset)),
+		zap.Int("resultNum", len(retrieveResult.Offset)),
 	)
-
 	// Sort was done by the segcore.
 	// sort.Sort(&byPK{result})
-	return result, nil
+	return retrieveResult, nil
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
+	if len(offsets) == 0 {
+		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
+	}
+
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
-
-	if s.ptr == nil {
-		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-
-	if len(offsets) == 0 {
-		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
-	}
 
 	fields := []zap.Field{
 		zap.Int64("collectionID", s.Collection()),
@@ -686,40 +689,49 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 
 	log := log.Ctx(ctx).With(fields...)
 	log.Debug("begin to retrieve by offsets")
-
-	traceCtx := ParseCTraceContext(ctx)
-
-	var retrieveResult RetrieveResult
-	var status C.CStatus
-
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	status = C.RetrieveByOffsets(traceCtx.ctx,
-		s.ptr,
-		plan.cRetrievePlan,
-		&retrieveResult.cRetrieveResult,
-		(*C.int64_t)(unsafe.Pointer(&offsets[0])),
-		C.int64_t(len(offsets)))
-	runtime.KeepAlive(traceCtx)
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(plan)
+	defer runtime.KeepAlive(offsets)
+
+	future := cgo.Async(
+		ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncRetrieveByOffsets(
+				traceCtx.ctx,
+				s.ptr,
+				plan.cRetrievePlan,
+				(*C.int64_t)(unsafe.Pointer(&offsets[0])),
+				C.int64_t(len(offsets)),
+			))
+		},
+		cgo.WithName("retrieve-by-offsets"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		log.Warn("RetrieveByOffsets failed")
+		return nil, err
+	}
+	defer C.DeleteRetrieveResult((*C.CRetrieveResult)(result))
 
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Debug("cgo retrieve by offsets done", zap.Duration("timeTaken", tr.ElapseSpan()))
-
-	if err := HandleCStatus(ctx, &status, "RetrieveByOffsets failed", fields...); err != nil {
-		return nil, err
-	}
 
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "reduced-segcore-results-deserialization")
 	defer span.End()
 
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+	retrieveResult := new(segcorepb.RetrieveResults)
+	if err := UnmarshalCProto((*C.CRetrieveResult)(result), retrieveResult); err != nil {
+		log.Warn("unmarshal retrieve by offsets result failed", zap.Error(err))
 		return nil, err
 	}
 
-	log.Debug("retrieve by segment offsets done")
-
-	return result, nil
+	log.Debug("retrieve by segment offsets done",
+		zap.Int("resultNum", len(retrieveResult.Offset)),
+	)
+	return retrieveResult, nil
 }
 
 func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {

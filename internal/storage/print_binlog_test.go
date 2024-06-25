@@ -441,10 +441,10 @@ func TestPrintDDFiles(t *testing.T) {
 	dropPartitionString, err := proto.Marshal(&dropPartitionReq)
 	assert.NoError(t, err)
 	ddRequests := []string{
-		string(createCollString[:]),
-		string(dropCollString[:]),
-		string(createPartitionString[:]),
-		string(dropPartitionString[:]),
+		string(createCollString),
+		string(dropCollString),
+		string(createPartitionString),
+		string(dropPartitionString),
 	}
 	eventTypeCodes := []EventTypeCode{
 		CreateCollectionEventType,

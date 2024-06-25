@@ -80,8 +80,7 @@ BitmapIndex<T>::Build(size_t n, const T* data) {
         return;
     }
     if (n == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "BitmapIndex can not build null values");
+        PanicInfo(DataIsEmpty, "BitmapIndex can not build null values");
     }
 
     T* p = const_cast<T*>(data);
@@ -151,8 +150,7 @@ BitmapIndex<T>::BuildWithFieldData(
         total_num_rows += field_data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "scalar bitmap index can not build null values");
+        PanicInfo(DataIsEmpty, "scalar bitmap index can not build null values");
     }
     total_num_rows_ = total_num_rows;
 
@@ -590,8 +588,8 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
             break;
         }
         default: {
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
         }
     }
 
@@ -660,8 +658,8 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
             break;
         }
         default: {
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
         }
     }
 
@@ -825,11 +823,10 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
             }
         }
     }
-    throw SegcoreError(
-        UnexpectedError,
-        fmt::format(
-            "scalar bitmap index can not lookup target value of index {}",
-            idx));
+    PanicInfo(UnexpectedError,
+              fmt::format(
+                  "scalar bitmap index can not lookup target value of index {}",
+                  idx));
 }
 
 template <typename T>
@@ -867,11 +864,10 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                throw SegcoreError(
-                    OpTypeInvalid,
-                    fmt::format("Invalid OperatorType for "
-                                "checking scalar index optimization: {}",
-                                op));
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType for "
+                                      "checking scalar index optimization: {}",
+                                      op));
         }
         return should_skip;
     };
