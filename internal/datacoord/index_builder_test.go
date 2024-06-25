@@ -675,7 +675,30 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), handler)
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
@@ -741,6 +764,30 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
+
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	ib := &indexBuilder{
 		ctx: context.Background(),
 		tasks: map[int64]indexTaskState{
@@ -749,6 +796,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		meta:                      createMetaTable(ec),
 		chunkManager:              chunkManager,
 		indexEngineVersionManager: newIndexEngineVersionManager(),
+		handler:                   handler,
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {
@@ -1414,9 +1462,32 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
 	}
 
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), nil)
+	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), handler)
 
 	t.Run("success to get opt field on startup", func(t *testing.T) {
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
@@ -1450,32 +1521,27 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		IndexSize:     0,
 	}
 
-	t.Run("enqueue varchar", func(t *testing.T) {
-		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
-		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
-				return merr.Success(), nil
-			}).Once()
-		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
-		assert.NoError(t, err)
-		ib.enqueue(buildID)
-		waitTaskDoneFunc(ib)
-		resetMetaFunc()
-	})
-
-	t.Run("enqueue string", func(t *testing.T) {
-		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_String
-		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
-				return merr.Success(), nil
-			}).Once()
-		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
-		assert.NoError(t, err)
-		ib.enqueue(buildID)
-		waitTaskDoneFunc(ib)
-		resetMetaFunc()
+	t.Run("enqueue valid data types", func(t *testing.T) {
+		for _, dataType := range []schemapb.DataType{
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_String,
+			schemapb.DataType_VarChar,
+		} {
+			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+					return merr.Success(), nil
+				}).Once()
+			err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
+			assert.NoError(t, err)
+			ib.enqueue(buildID)
+			waitTaskDoneFunc(ib)
+			resetMetaFunc()
+		}
 	})
 
 	// should still be able to build vec index when opt field is not set
@@ -1493,14 +1559,10 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		resetMetaFunc()
 	})
 
-	t.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR", func(t *testing.T) {
+	t.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR or int", func(t *testing.T) {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_Bool,
-			schemapb.DataType_Int8,
-			schemapb.DataType_Int16,
-			schemapb.DataType_Int32,
-			schemapb.DataType_Int64,
 			schemapb.DataType_Float,
 			schemapb.DataType_Double,
 			schemapb.DataType_Array,

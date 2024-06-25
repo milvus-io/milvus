@@ -122,3 +122,77 @@ pub extern "C" fn tantivy_index_add_keyword(ptr: *mut c_void, s: *const c_char) 
     let c_str = unsafe { CStr::from_ptr(s) };
     unsafe { (*real).add_keyword(c_str.to_str().unwrap()) }
 }
+
+// --------------------------------------------- array ------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_int8s(ptr: *mut c_void, array: *const i8, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = slice::from_raw_parts(array, len);
+        (*real).add_multi_i8s(arr)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_int16s(ptr: *mut c_void, array: *const i16, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = slice::from_raw_parts(array, len) ;
+        (*real).add_multi_i16s(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_int32s(ptr: *mut c_void, array: *const i32, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr =  slice::from_raw_parts(array, len) ;
+        (*real).add_multi_i32s(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_int64s(ptr: *mut c_void, array: *const i64, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr =  slice::from_raw_parts(array, len) ;
+        (*real).add_multi_i64s(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_f32s(ptr: *mut c_void, array: *const f32, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr =  slice::from_raw_parts(array, len) ;
+        (*real).add_multi_f32s(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_f64s(ptr: *mut c_void, array: *const f64, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr =  slice::from_raw_parts(array, len) ;
+        (*real).add_multi_f64s(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_bools(ptr: *mut c_void, array: *const bool, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr =  slice::from_raw_parts(array, len) ;
+        (*real).add_multi_bools(arr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_multi_keywords(ptr: *mut c_void, array: *const *const c_char, len: usize) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = slice::from_raw_parts(array, len);
+        (*real).add_multi_keywords(arr)
+    }
+}
