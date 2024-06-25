@@ -21,7 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
-	config "github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -190,17 +190,21 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		return
 	}
 	info := &config.EtcdInfo{
-		UseEmbed:        etcdConfig.UseEmbedEtcd.GetAsBool(),
-		EnableAuth:      etcdConfig.EtcdEnableAuth.GetAsBool(),
-		UserName:        etcdConfig.EtcdAuthUserName.GetValue(),
-		PassWord:        etcdConfig.EtcdAuthPassword.GetValue(),
-		UseSSL:          etcdConfig.EtcdUseSSL.GetAsBool(),
-		Endpoints:       etcdConfig.Endpoints.GetAsStrings(),
-		CertFile:        etcdConfig.EtcdTLSCert.GetValue(),
-		KeyFile:         etcdConfig.EtcdTLSKey.GetValue(),
-		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
-		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
-		KeyPrefix:       etcdConfig.RootPath.GetValue(),
+		EtcdCfg: etcd.EtcdCfg{
+			UseEmbed:           etcdConfig.UseEmbedEtcd.GetAsBool(),
+			EnableAuth:         etcdConfig.EtcdEnableAuth.GetAsBool(),
+			UserName:           etcdConfig.EtcdAuthUserName.GetValue(),
+			PassWord:           etcdConfig.EtcdAuthPassword.GetValue(),
+			UseSSL:             etcdConfig.EtcdUseSSL.GetAsBool(),
+			Endpoints:          etcdConfig.Endpoints.GetAsStrings(),
+			CertFile:           etcdConfig.EtcdTLSCert.GetValue(),
+			KeyFile:            etcdConfig.EtcdTLSKey.GetValue(),
+			CaCertFile:         etcdConfig.EtcdTLSCACert.GetValue(),
+			MinVersion:         etcdConfig.EtcdTLSMinVersion.GetValue(),
+			KeyPrefix:          etcdConfig.RootPath.GetValue(),
+			MaxRPCSendMsgBytes: etcdConfig.MaxRPCSendMsgBytes.GetAsInt(),
+			MaxRPCRecvMsgBytes: etcdConfig.MaxRPCRecvMsgBytes.GetAsInt(),
+		},
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}
 

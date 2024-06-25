@@ -32,9 +32,9 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 var Params = paramtable.Get()
@@ -54,7 +54,7 @@ type EtcdKVSuite struct {
 }
 
 func (s *EtcdKVSuite) SetupSuite() {
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -706,7 +706,7 @@ func TestEtcdKV(t *testing.T) {
 }
 
 func Test_WalkWithPagination(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -832,7 +832,7 @@ func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 }
 
 func TestHas(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -870,7 +870,7 @@ func TestHas(t *testing.T) {
 }
 
 func TestHasPrefix(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 func TestConfigFromEnv(t *testing.T) {
@@ -59,8 +61,10 @@ func TestConfigFromRemote(t *testing.T) {
 	mgr, _ := Init(WithEnvSource(formatKey),
 		WithFilesSource(&FileInfo{[]string{"../../configs/milvus.yaml"}, -1}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
-			KeyPrefix:       "test",
+			EtcdCfg: etcd.EtcdCfg{
+				Endpoints: []string{cfg.ACUrls[0].Host},
+				KeyPrefix: "test",
+			},
 			RefreshInterval: 10 * time.Millisecond,
 		}))
 	ctx := context.Background()

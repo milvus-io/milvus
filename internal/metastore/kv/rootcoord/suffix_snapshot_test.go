@@ -30,8 +30,8 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -278,7 +278,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -333,7 +333,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -413,7 +413,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/remove-expired-test-%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -588,7 +588,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -680,7 +680,7 @@ func Test_SuffixSnapshotMultiSaveAndRemove(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -756,7 +756,7 @@ func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/loadWithPrefix-test-%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

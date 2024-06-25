@@ -93,7 +93,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 // init initializes QueryNode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().QueryNodeGrpcServerCfg
 
 	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
@@ -103,17 +102,8 @@ func (s *Server) init() error {
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port.GetAsInt()))
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
 		return err

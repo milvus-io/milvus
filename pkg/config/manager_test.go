@@ -28,6 +28,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 func TestAllConfigFromManager(t *testing.T) {
@@ -142,8 +144,10 @@ func TestOnEvent(t *testing.T) {
 			RefreshInterval: 10 * time.Millisecond,
 		}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
-			KeyPrefix:       "test",
+			EtcdCfg: etcd.EtcdCfg{
+				Endpoints: []string{cfg.ACUrls[0].Host},
+				KeyPrefix: "test",
+			},
 			RefreshInterval: 10 * time.Millisecond,
 		}))
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
@@ -212,8 +216,10 @@ func TestCachedConfig(t *testing.T) {
 			RefreshInterval: 10 * time.Millisecond,
 		}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
-			KeyPrefix:       "test",
+			EtcdCfg: etcd.EtcdCfg{
+				Endpoints: []string{cfg.ACUrls[0].Host},
+				KeyPrefix: "test",
+			},
 			RefreshInterval: 10 * time.Millisecond,
 		}))
 	// test get cached value from file

@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type etcdBasedBackend struct {
@@ -20,17 +21,8 @@ func (b etcdBasedBackend) CleanWithPrefix(prefix string) error {
 }
 
 func newEtcdBasedBackend(cfg *configs.MilvusConfig) (*etcdBasedBackend, error) {
-	etcdCli, err := etcd.CreateEtcdClient(
-		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
-		cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
-		cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
-		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(cfg.EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		return nil, err
 	}

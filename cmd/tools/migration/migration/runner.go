@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type Runner struct {
@@ -68,17 +69,8 @@ func (r *Runner) WatchSessions() {
 }
 
 func (r *Runner) initEtcdCli() {
-	cli, err := etcd.CreateEtcdClient(
-		r.cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		r.cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
-		r.cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
-		r.cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
-		r.cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		r.cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(r.cfg.EtcdCfg)
+	cli, err := etcd.CreateEtcdClient(etcdConfig)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }

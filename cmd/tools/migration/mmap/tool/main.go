@@ -64,18 +64,8 @@ func prepareTsoAllocator() tso.Allocator {
 		kvPath = paramtable.Get().TiKVCfg.KvRootPath.GetValue()
 		tsoKV = tsoutil.NewTSOTiKVBase(tikvCli, kvPath, "gid")
 	} else {
-		etcdConfig := &paramtable.Get().EtcdCfg
-		etcdCli, err := etcd.CreateEtcdClient(
-			etcdConfig.UseEmbedEtcd.GetAsBool(),
-			etcdConfig.EtcdEnableAuth.GetAsBool(),
-			etcdConfig.EtcdAuthUserName.GetValue(),
-			etcdConfig.EtcdAuthPassword.GetValue(),
-			etcdConfig.EtcdUseSSL.GetAsBool(),
-			etcdConfig.Endpoints.GetAsStrings(),
-			etcdConfig.EtcdTLSCert.GetValue(),
-			etcdConfig.EtcdTLSKey.GetValue(),
-			etcdConfig.EtcdTLSCACert.GetValue(),
-			etcdConfig.EtcdTLSMinVersion.GetValue())
+		etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+		etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 		if err != nil {
 			panic(err)
 		}
@@ -98,18 +88,9 @@ func metaKVCreator() (kv.MetaKv, error) {
 		return kv_tikv.NewTiKV(tikvCli, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(),
 			kv_tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 	}
-	etcdConfig := &paramtable.Get().EtcdCfg
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		panic(err)
 	}

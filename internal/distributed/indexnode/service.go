@@ -142,7 +142,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 // init initializes IndexNode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	var err error
 	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
@@ -168,17 +167,8 @@ func (s *Server) init() error {
 		return err
 	}
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
 		return err

@@ -36,9 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
@@ -160,7 +160,7 @@ func TestRun(t *testing.T) {
 		// Need to reset global etcd to follow new path
 		kvfactory.CloseEtcdClient()
 
-		etcdCli, err := etcd.GetEtcdClient(
+		etcdCli, err := testutils.GetEtcdClient(
 			etcdConfig.UseEmbedEtcd.GetAsBool(),
 			etcdConfig.EtcdUseSSL.GetAsBool(),
 			etcdConfig.Endpoints.GetAsStrings(),

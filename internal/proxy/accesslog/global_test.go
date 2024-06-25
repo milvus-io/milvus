@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestMain(m *testing.M) {
@@ -94,7 +94,7 @@ func TestAccessLogger_DynamicEnable(t *testing.T) {
 	ok := _globalL.Write(accessInfo)
 	assert.False(t, ok)
 
-	etcdCli, _ := etcd.GetEtcdClient(
+	etcdCli, _ := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

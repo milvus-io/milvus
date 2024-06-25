@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type HandlersSuite struct {
@@ -72,7 +72,7 @@ func (suite *HandlersSuite) SetupTest() {
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
 	// init etcd
-	suite.etcd, err = etcd.GetEtcdClient(
+	suite.etcd, err = testutils.GetEtcdClient(
 		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		suite.params.EtcdCfg.Endpoints.GetAsStrings(),

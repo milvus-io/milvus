@@ -50,8 +50,8 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -153,7 +153,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	}
 	// setup etcd client
 	etcdConfig := &paramtable.Get().EtcdCfg
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
 		etcdConfig.EtcdUseSSL.GetAsBool(),
 		etcdConfig.Endpoints.GetAsStrings(),

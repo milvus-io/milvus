@@ -453,7 +453,6 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy init service's parameter table done")
 	HTTPParams := &paramtable.Get().HTTPCfg
@@ -473,17 +472,8 @@ func (s *Server) init() error {
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		log.Debug("Proxy connect to etcd failed", zap.Error(err))
 		return err

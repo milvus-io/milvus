@@ -37,9 +37,9 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type CollectionObserverSuite struct {
@@ -170,7 +170,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.idAllocator = RandomIncrementIDAllocator()
 	log.Debug("create embedded etcd KV...")
 	config := GenerateEtcdConfig()
-	client, err := etcd.GetEtcdClient(
+	client, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

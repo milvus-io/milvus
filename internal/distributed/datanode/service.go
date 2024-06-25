@@ -227,7 +227,6 @@ func (s *Server) Stop() (err error) {
 
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	ctx := context.Background()
 	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
@@ -235,17 +234,8 @@ func (s *Server) init() error {
 		log.Warn("DataNode found available port during init", zap.Int("port", Params.Port.GetAsInt()))
 	}
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		log.Error("failed to connect to etcd", zap.Error(err))
 		return err

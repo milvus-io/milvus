@@ -52,6 +52,12 @@ func TestServiceParam(t *testing.T) {
 		assert.NotEmpty(t, Params.EtcdTLSMinVersion.GetValue())
 		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion.GetValue())
 
+		assert.Equal(t, 2097152, Params.MaxRPCSendMsgBytes.GetAsInt())
+		t.Logf("maxRpcSendMsgBytes = %d", Params.MaxRPCSendMsgBytes.GetAsInt())
+
+		assert.Equal(t, 2147483647, Params.MaxRPCRecvMsgBytes.GetAsInt())
+		t.Logf("maxRpcRecvMsgBytes = %d", Params.MaxRPCRecvMsgBytes.GetAsInt())
+
 		// test UseEmbedEtcd
 		t.Setenv("etcd.use.embed", "true")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)

@@ -59,8 +59,10 @@ func (s *EtcdSourceSuite) TearDownSuite() {
 
 func (s *EtcdSourceSuite) TestNewSource() {
 	source, err := NewEtcdSource(&EtcdInfo{
-		Endpoints:       s.endpoints,
-		KeyPrefix:       "by-dev",
+		EtcdCfg: etcd.EtcdCfg{
+			Endpoints: s.endpoints,
+			KeyPrefix: "by-dev",
+		},
 		RefreshInterval: time.Second,
 	})
 	s.NoError(err)
@@ -70,8 +72,10 @@ func (s *EtcdSourceSuite) TestNewSource() {
 
 func (s *EtcdSourceSuite) TestUpdateOptions() {
 	source, err := NewEtcdSource(&EtcdInfo{
-		Endpoints:       s.endpoints,
-		KeyPrefix:       "test_update_options_1",
+		EtcdCfg: etcd.EtcdCfg{
+			Endpoints: s.endpoints,
+			KeyPrefix: "test_update_options_1",
+		},
 		RefreshInterval: time.Second,
 	})
 	s.Require().NoError(err)
@@ -88,8 +92,10 @@ func (s *EtcdSourceSuite) TestUpdateOptions() {
 
 	source.UpdateOptions(Options{
 		EtcdInfo: &EtcdInfo{
-			Endpoints:       s.endpoints,
-			KeyPrefix:       "test_update_options_2",
+			EtcdCfg: etcd.EtcdCfg{
+				Endpoints: s.endpoints,
+				KeyPrefix: "test_update_options_2",
+			},
 			RefreshInterval: time.Millisecond * 100,
 		},
 	})

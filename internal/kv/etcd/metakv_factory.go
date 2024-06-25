@@ -53,17 +53,8 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 		}
 		return watchKv, err
 	}
-	client, err := etcd.CreateEtcdClient(
-		etcdCfg.UseEmbedEtcd.GetAsBool(),
-		etcdCfg.EtcdEnableAuth.GetAsBool(),
-		etcdCfg.EtcdAuthUserName.GetValue(),
-		etcdCfg.EtcdAuthPassword.GetValue(),
-		etcdCfg.EtcdUseSSL.GetAsBool(),
-		etcdCfg.Endpoints.GetAsStrings(),
-		etcdCfg.EtcdTLSCert.GetValue(),
-		etcdCfg.EtcdTLSKey.GetValue(),
-		etcdCfg.EtcdTLSCACert.GetValue(),
-		etcdCfg.EtcdTLSMinVersion.GetValue())
+
+	client, err := etcd.CreateEtcdClient(paramtable.GetEtcdCfg(etcdCfg))
 	if err != nil {
 		return nil, err
 	}
