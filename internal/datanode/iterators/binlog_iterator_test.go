@@ -52,7 +52,7 @@ func (s *InsertBinlogIteratorSuite) TestBinlogIterator() {
 
 	values := [][]byte{}
 	for _, b := range blobs {
-		values = append(values, b.Value[:])
+		values = append(values, b.Value)
 	}
 	s.Run("invalid blobs", func() {
 		iter, err := NewInsertBinlogIterator([][]byte{}, Int64Field, schemapb.DataType_Int64, nil)

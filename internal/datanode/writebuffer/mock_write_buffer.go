@@ -69,9 +69,9 @@ func (_c *MockWriteBuffer_BufferData_Call) RunAndReturn(run func([]*msgstream.In
 	return _c
 }
 
-// Close provides a mock function with given fields: drop
-func (_m *MockWriteBuffer) Close(drop bool) {
-	_m.Called(drop)
+// Close provides a mock function with given fields: ctx, drop
+func (_m *MockWriteBuffer) Close(ctx context.Context, drop bool) {
+	_m.Called(ctx, drop)
 }
 
 // MockWriteBuffer_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
@@ -80,14 +80,15 @@ type MockWriteBuffer_Close_Call struct {
 }
 
 // Close is a helper method to define mock.On call
+//   - ctx context.Context
 //   - drop bool
-func (_e *MockWriteBuffer_Expecter) Close(drop interface{}) *MockWriteBuffer_Close_Call {
-	return &MockWriteBuffer_Close_Call{Call: _e.mock.On("Close", drop)}
+func (_e *MockWriteBuffer_Expecter) Close(ctx interface{}, drop interface{}) *MockWriteBuffer_Close_Call {
+	return &MockWriteBuffer_Close_Call{Call: _e.mock.On("Close", ctx, drop)}
 }
 
-func (_c *MockWriteBuffer_Close_Call) Run(run func(drop bool)) *MockWriteBuffer_Close_Call {
+func (_c *MockWriteBuffer_Close_Call) Run(run func(ctx context.Context, drop bool)) *MockWriteBuffer_Close_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(bool))
+		run(args[0].(context.Context), args[1].(bool))
 	})
 	return _c
 }
@@ -97,7 +98,7 @@ func (_c *MockWriteBuffer_Close_Call) Return() *MockWriteBuffer_Close_Call {
 	return _c
 }
 
-func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(bool)) *MockWriteBuffer_Close_Call {
+func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(context.Context, bool)) *MockWriteBuffer_Close_Call {
 	_c.Call.Return(run)
 	return _c
 }
