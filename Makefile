@@ -110,6 +110,7 @@ tools/bin/revive: tools/check/go.mod
 	$(GO) build -pgo=$(PGO_PATH)/default.pgo -o ../bin/revive github.com/mgechev/revive
 
 cppcheck:
+	$(shell git config --global --add safe.directory '*')
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
 
