@@ -152,7 +152,7 @@ func (s *IndexSuite) TestDescribeIndex() {
 				IndexDescriptions: []*milvuspb.IndexDescription{
 					{IndexName: indexName, Params: []*commonpb.KeyValuePair{
 						{Key: index.IndexTypeKey, Value: string(index.HNSW)},
-					}},
+					}, TotalRows: 10000, IndexedRows: 4000, PendingIndexRows: 10000},
 				},
 			}, nil
 		}).Once()
@@ -160,6 +160,9 @@ func (s *IndexSuite) TestDescribeIndex() {
 		index, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.NoError(err)
 		s.Equal(indexName, index.Name())
+		s.Equal("10000", index.Params()["total_rows"])
+		s.Equal("4000", index.Params()["indexed_rows"])
+		s.Equal("10000", index.Params()["pending_index_rows"])
 	})
 
 	s.Run("no_index_found", func() {

@@ -19,6 +19,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -141,7 +142,13 @@ func (c *Client) DescribeIndex(ctx context.Context, opt DescribeIndexOption, cal
 		}
 		for _, idxDef := range resp.GetIndexDescriptions() {
 			if idxDef.GetIndexName() == req.GetIndexName() {
-				idx = index.NewGenericIndex(idxDef.GetIndexName(), entity.KvPairsMap(idxDef.GetParams()))
+				params := entity.KvPairsMap(idxDef.GetParams())
+				params["total_rows"] = strconv.FormatInt(idxDef.GetTotalRows(), 10)
+				params["indexed_rows"] = strconv.FormatInt(idxDef.GetIndexedRows(), 10)
+				params["pending_index_rows"] = strconv.FormatInt(idxDef.GetPendingIndexRows(), 10)
+				params["state"] = idxDef.GetState().String()
+
+				idx = index.NewGenericIndex(idxDef.GetIndexName(), params)
 			}
 		}
 		return nil
