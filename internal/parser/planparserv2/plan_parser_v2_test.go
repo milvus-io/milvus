@@ -1,9 +1,12 @@
 package planparserv2
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -163,7 +166,7 @@ func TestExpr_Like(t *testing.T) {
 	}
 
 	// TODO: enable these after regex-match is supported.
-	//unsupported := []string{
+	// unsupported := []string{
 	//	`VarCharField like "not_%_supported"`,
 	//	`JSONField["A"] like "not_%_supported"`,
 	//	`$meta["A"] like "not_%_supported"`,
@@ -382,7 +385,7 @@ func TestExpr_Combinations(t *testing.T) {
 		`(Int64Field / 7 != 8) or (Int64Field % 10 == 9)`,
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
-		`A > 50 or B < 40`,
+		`A > 50 OR B < 40`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -476,33 +479,33 @@ func TestExpr_Invalid(t *testing.T) {
 		`StringField % VarCharField`,
 		`StringField * 2`,
 		`2 / StringField`,
-		//`JSONField / 2 == 1`,
+		// `JSONField / 2 == 1`,
 		`2 % JSONField == 1`,
 		`2 % Int64Field == 1`,
 		`ArrayField / 2 == 1`,
 		`2 / ArrayField == 1`,
 		// ----------------------- ==/!= -------------------------
-		//`not_in_schema != 1`, // maybe in json
+		// `not_in_schema != 1`, // maybe in json
 		//`1 == not_in_schema`, // maybe in json
 		`true == "str"`,
 		`"str" != false`,
 		`VarCharField != FloatField`,
 		`FloatField == VarCharField`,
 		// ---------------------- relational --------------------
-		//`not_in_schema < 1`, // maybe in json
+		// `not_in_schema < 1`, // maybe in json
 		//`1 <= not_in_schema`, // maybe in json
 		`true <= "str"`,
 		`"str" >= false`,
 		`VarCharField < FloatField`,
 		`FloatField > VarCharField`,
-		//`JSONField > 1`,
+		// `JSONField > 1`,
 		//`1 < JSONField`,
 		`ArrayField > 2`,
 		`2 < ArrayField`,
 		// ------------------------ like ------------------------
 		`(VarCharField % 2) like "prefix%"`,
 		`FloatField like "prefix%"`,
-		//`value like "prefix%"`, // maybe in json
+		// `value like "prefix%"`, // maybe in json
 		// ------------------------ term ------------------------
 		//`not_in_schema in [1, 2, 3]`, // maybe in json
 		`1 in [1, 2, 3]`,
@@ -515,7 +518,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`FloatField in [5, 6.0, true]`,
 		`1 in A`,
 		// ----------------------- range -------------------------
-		//`1 < not_in_schema < 2`, // maybe in json
+		// `1 < not_in_schema < 2`, // maybe in json
 		`1 < 3 < 2`,
 		`1 < (Int8Field + Int16Field) < 2`,
 		`(invalid_lower) < Int32Field < 2`,
@@ -560,7 +563,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`Int64Field < 100 or false`, // maybe this can be optimized.
 		`!BoolField`,
 		// -------------------- array ----------------------
-		//`A == [1, 2, 3]`,
+		// `A == [1, 2, 3]`,
 		`Int64Field == [1, 2, 3]`,
 		`Int64Field > [1, 2, 3]`,
 		`Int64Field + [1, 2, 3] == 10`,
@@ -1225,4 +1228,169 @@ func Test_ArrayLength(t *testing.T) {
 		})
 		assert.Error(t, err, expr)
 	}
+}
+
+func BenchmarkMarshalGVInt(b *testing.B) {
+	data := make([]int64, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		data = append(data, int64(i))
+	}
+	values := lo.Map(data, func(id int64, _ int) *planpb.GenericValue {
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_Int64Val{
+				Int64Val: id,
+			},
+		}
+	})
+	pn := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{},
+							Values:     values,
+							// IsoValues:  isoValues,
+							// Isomorphic: true,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(b.N),
+			},
+		},
+	}
+
+	var bs []byte
+	var err error
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bs, err = proto.Marshal(pn)
+	}
+	assert.NoError(b, err)
+	assert.NotNil(b, bs)
+}
+
+func BenchmarkMarshalGVsInt(b *testing.B) {
+	data := make([]int64, 0, b.N)
+
+	for i := 0; i < 1000; i++ {
+		data = append(data, int64(i))
+	}
+	isoValues := &planpb.GenericValues{
+		Val: &planpb.GenericValues_Int64Vals{
+			Int64Vals: &schemapb.LongArray{
+				Data: data,
+			},
+		},
+	}
+
+	pn := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{},
+							IsoValues:  isoValues,
+							Isomorphic: true,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(b.N),
+			},
+		},
+	}
+
+	var bs []byte
+	var err error
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bs, err = proto.Marshal(pn)
+	}
+	assert.NoError(b, err)
+	assert.NotNil(b, bs)
+}
+
+func BenchmarkMarshalGVStr(b *testing.B) {
+	data := make([]string, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		data = append(data, strconv.Itoa(i))
+	}
+	values := lo.Map(data, func(id string, _ int) *planpb.GenericValue {
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_StringVal{
+				StringVal: id,
+			},
+		}
+	})
+	pn := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{},
+							Values:     values,
+							// IsoValues:  isoValues,
+							// Isomorphic: true,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(b.N),
+			},
+		},
+	}
+
+	var bs []byte
+	var err error
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bs, err = proto.Marshal(pn)
+	}
+	assert.NoError(b, err)
+	assert.NotNil(b, bs)
+}
+
+func BenchmarkMarshalGVsStr(b *testing.B) {
+	data := make([]string, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		data = append(data, strconv.Itoa(i))
+	}
+
+	isoValues := &planpb.GenericValues{
+		Val: &planpb.GenericValues_StringVals{
+			StringVals: &schemapb.StringArray{
+				Data: data,
+			},
+		},
+	}
+	pn := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{},
+							IsoValues:  isoValues,
+							Isomorphic: true,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(b.N),
+			},
+		},
+	}
+
+	var bs []byte
+	var err error
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bs, err = proto.Marshal(pn)
+	}
+	assert.NoError(b, err)
+	assert.NotNil(b, bs)
 }
