@@ -24,6 +24,10 @@ type walImpl struct {
 	c client.Client
 }
 
+func (w *walImpl) WALName() string {
+	return walName
+}
+
 // Append appends a message to the wal.
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 	id, err := w.p.Send(&common.ProducerMessage{

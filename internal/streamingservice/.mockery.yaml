@@ -16,3 +16,10 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/internal/proto/streamingpb:
+    interfaces:
+      StreamingNodeHandlerService_ConsumeServer:
+      StreamingNodeHandlerService_ProduceServer:
+  github.com/milvus-io/milvus/internal/streamingnode/server/walmanager:
+    interfaces:
+      Manager:
