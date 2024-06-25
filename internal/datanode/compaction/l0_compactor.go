@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datanode
+package compaction
 
 import (
 	"context"
 	"fmt"
 	"math"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -43,8 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type levelZeroCompactionTask struct {
-	compactor
+type LevelZeroCompactionTask struct {
 	io.BinlogIO
 
 	allocator allocator.Allocator
@@ -60,16 +60,16 @@ type levelZeroCompactionTask struct {
 	tr   *timerecord.TimeRecorder
 }
 
-func newLevelZeroCompactionTask(
+func NewLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
 	metaCache metacache.MetaCache,
 	syncmgr syncmgr.SyncManager,
 	plan *datapb.CompactionPlan,
-) *levelZeroCompactionTask {
+) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
-	return &levelZeroCompactionTask{
+	return &LevelZeroCompactionTask{
 		ctx:    ctx,
 		cancel: cancel,
 
@@ -83,31 +83,31 @@ func newLevelZeroCompactionTask(
 	}
 }
 
-func (t *levelZeroCompactionTask) complete() {
+func (t *LevelZeroCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *levelZeroCompactionTask) stop() {
+func (t *LevelZeroCompactionTask) Stop() {
 	t.cancel()
 	<-t.done
 }
 
-func (t *levelZeroCompactionTask) getPlanID() UniqueID {
+func (t *LevelZeroCompactionTask) GetPlanID() int64 {
 	return t.plan.GetPlanID()
 }
 
-func (t *levelZeroCompactionTask) getChannelName() string {
+func (t *LevelZeroCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *levelZeroCompactionTask) getCollection() int64 {
+func (t *LevelZeroCompactionTask) GetCollection() int64 {
 	return t.metacache.Collection()
 }
 
 // Do nothing for levelzero compaction
-func (t *levelZeroCompactionTask) injectDone() {}
+func (t *LevelZeroCompactionTask) InjectDone() {}
 
-func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
+func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
 	log := log.Ctx(t.ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
@@ -115,7 +115,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
-		return nil, errContext
+		return nil, ctx.Err()
 	}
 
 	l0Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
@@ -130,7 +130,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 	})
 	if len(targetSegIDs) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
-		return nil, errIllegalCompactionPlan
+		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
 	err := binlog.DecompressCompactionBinlogs(l0Segments)
 	if err != nil {
@@ -140,7 +140,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 
 	var (
 		totalSize      int64
-		totalDeltalogs = make(map[UniqueID][]string)
+		totalDeltalogs = make(map[int64][]string)
 	)
 	for _, s := range l0Segments {
 		paths := []string{}
@@ -187,7 +187,7 @@ func getMaxBatchSize(totalSize int64) int {
 	return max
 }
 
-func (t *levelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact serializeUpload")
 	defer span.End()
 	allBlobs := make(map[string][]byte)
@@ -237,7 +237,7 @@ func (t *levelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 	return results, nil
 }
 
-func (t *levelZeroCompactionTask) splitDelta(
+func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
 	allDelta *storage.DeleteData,
 	targetSegIDs []int64,
@@ -265,7 +265,7 @@ func (t *levelZeroCompactionTask) splitDelta(
 					writer, ok := targetSegBuffer[segmentID]
 					if !ok {
 						segment := allSeg[segmentID]
-						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), t.getCollection())
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), t.GetCollection())
 						targetSegBuffer[segmentID] = writer
 					}
 					writer.Write(allDelta.Pks[startIdx+i], allDelta.Tss[startIdx+i])
@@ -282,7 +282,7 @@ type BatchApplyRet = struct {
 	Segment2Hits map[int64][]bool
 }
 
-func (t *levelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -325,7 +325,7 @@ func (t *levelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaDa
 	return retMap
 }
 
-func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
@@ -370,7 +370,7 @@ func (t *levelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 	return results, nil
 }
 
-func (t *levelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []string) (*storage.DeleteData, error) {
+func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []string) (*storage.DeleteData, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadDelta")
 	defer span.End()
 

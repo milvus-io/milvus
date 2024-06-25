@@ -1337,7 +1337,8 @@ func (_c *MockDataNodeClient_WatchDmChannels_Call) RunAndReturn(run func(context
 func NewMockDataNodeClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockDataNodeClient {
+},
+) *MockDataNodeClient {
 	mock := &MockDataNodeClient{}
 	mock.Mock.Test(t)
 
