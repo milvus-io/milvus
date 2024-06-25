@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -391,8 +391,8 @@ func TestSearchInvalidVectors(t *testing.T) {
 
 	type invalidVectorsStruct struct {
 		fieldName string
-		vectors []entity.Vector
-		errMsg  string
+		vectors   []entity.Vector
+		errMsg    string
 	}
 
 	invalidVectors := []invalidVectorsStruct{
@@ -400,7 +400,7 @@ func TestSearchInvalidVectors(t *testing.T) {
 		{fieldName: common.DefaultFloatVecFieldName, vectors: hp.GenSearchVectors(common.DefaultNq, 64, entity.FieldTypeFloatVector), errMsg: "vector dimension mismatch"},
 		{fieldName: common.DefaultFloat16VecFieldName, vectors: hp.GenSearchVectors(common.DefaultNq, 64, entity.FieldTypeFloat16Vector), errMsg: "vector dimension mismatch"},
 
-		//vector type not match
+		// vector type not match
 		{fieldName: common.DefaultFloatVecFieldName, vectors: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector), errMsg: "vector type must be the same"},
 		{fieldName: common.DefaultBFloat16VecFieldName, vectors: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloat16Vector), errMsg: "vector type must be the same"},
 
@@ -439,7 +439,7 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 		// dim not match
 		{vectors: hp.GenSearchVectors(common.DefaultNq, 64, entity.FieldTypeFloatVector), errNil: true, errMsg: "vector dimension mismatch"},
 
-		//vector type not match
+		// vector type not match
 		{vectors: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector), errNil: true, errMsg: "vector type must be the same"},
 
 		// empty vectors
@@ -789,7 +789,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 	searchRes, errSearchEmpty := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 		WithFilter(fmt.Sprintf("array_contains (%s, 1000000)", common.DefaultInt32ArrayField)).WithOutputFields(allArrayFields))
 	common.CheckErr(t, errSearchEmpty, true)
-	common.CheckSearchResult(t, searchRes, 0, 0)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, 0)
 }
 
 // test search with field not existed expr: if dynamic
@@ -814,7 +814,7 @@ func TestSearchNotExistedExpr(t *testing.T) {
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName))
 		if isDynamic {
 			common.CheckErr(t, errSearch, true)
-			common.CheckSearchResult(t, res, 0, 0)
+			common.CheckSearchResult(t, res, 1, 0)
 		} else {
 			common.CheckErr(t, errSearch, false, "not exist")
 		}
@@ -861,10 +861,12 @@ func TestSearchMultiVectors(t *testing.T) {
 			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}))
 		common.CheckErr(t, errSearch, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit*2)
-		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName,
-			common.DefaultBinaryVecFieldName, common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultDynamicFieldName}, resSearch[0].Fields)
+		common.CheckOutputFields(t, []string{
+			common.DefaultInt64FieldName, common.DefaultFloatVecFieldName,
+			common.DefaultBinaryVecFieldName, common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultDynamicFieldName,
+		}, resSearch[0].Fields)
 
-		//pagination search
+		// pagination search
 		resPage, errPage := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}).WithOffset(10))
 
@@ -873,8 +875,10 @@ func TestSearchMultiVectors(t *testing.T) {
 		for i := 0; i < common.DefaultNq; i++ {
 			require.Equal(t, resSearch[i].IDs.(*column.ColumnInt64).Data()[10:], resPage[i].IDs.(*column.ColumnInt64).Data())
 		}
-		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName,
-			common.DefaultBinaryVecFieldName, common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultDynamicFieldName}, resPage[0].Fields)
+		common.CheckOutputFields(t, []string{
+			common.DefaultInt64FieldName, common.DefaultFloatVecFieldName,
+			common.DefaultBinaryVecFieldName, common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultDynamicFieldName,
+		}, resPage[0].Fields)
 
 		// TODO range search
 		// TODO iterator search
@@ -923,7 +927,6 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
-
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(true))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))

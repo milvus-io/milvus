@@ -214,7 +214,7 @@ func TestQueryOutputFields(t *testing.T) {
 
 		// query with part not existed field ["aa", "$meat"]: error or as dynamic field
 		res3, err3 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName, common.DefaultDynamicFieldName}))
-		if enableDynamic{
+		if enableDynamic {
 			common.CheckErr(t, err3, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName, common.DefaultDynamicFieldName}, res3.Fields)
 		} else {
@@ -223,7 +223,7 @@ func TestQueryOutputFields(t *testing.T) {
 
 		// query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
 		res4, err4 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*", common.DefaultDynamicFieldName}))
-		if enableDynamic{
+		if enableDynamic {
 			common.CheckErr(t, err4, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName}, res4.Fields)
 		} else {

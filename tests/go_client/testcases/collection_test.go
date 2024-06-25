@@ -911,7 +911,7 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 	common.CheckErr(t, err, false, fmt.Sprintf("maximum vector field's number should be limited to %d", common.MaxVectorFieldNum))
 }
 
-//func TestCreateCollection(t *testing.T) {}
+// func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
