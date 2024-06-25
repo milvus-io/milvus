@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -104,11 +103,15 @@ func (t *L0ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 
 func (t *L0ImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
+	infos := make(map[int64]*datapb.ImportSegmentInfo)
+	for id, info := range t.segmentsInfo {
+		infos[id] = typeutil.Clone(info)
+	}
 	return &L0ImportTask{
-		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
 		ctx:          ctx,
 		cancel:       cancel,
-		segmentsInfo: t.segmentsInfo,
+		segmentsInfo: infos,
 		req:          t.req,
 		metaCaches:   t.metaCaches,
 	}
