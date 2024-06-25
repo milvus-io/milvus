@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -159,24 +158,29 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 }
 
 func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {
-	var values []*planpb.GenericValue
+	var isoValues *planpb.GenericValues
+	var limit int64
 	switch ids.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
-		values = lo.Map(ids.GetIntId().GetData(), func(id int64, _ int) *planpb.GenericValue {
-			return &planpb.GenericValue{
-				Val: &planpb.GenericValue_Int64Val{
-					Int64Val: id,
+		data := ids.GetIntId().GetData()
+		isoValues = &planpb.GenericValues{
+			Val: &planpb.GenericValues_Int64Vals{
+				Int64Vals: &schemapb.LongArray{
+					Data: data,
 				},
-			}
-		})
+			},
+		}
+		limit = int64(len(data))
 	case *schemapb.IDs_StrId:
-		values = lo.Map(ids.GetStrId().GetData(), func(id string, _ int) *planpb.GenericValue {
-			return &planpb.GenericValue{
-				Val: &planpb.GenericValue_StringVal{
-					StringVal: id,
+		data := ids.GetStrId().GetData()
+		isoValues = &planpb.GenericValues{
+			Val: &planpb.GenericValues_StringVals{
+				StringVals: &schemapb.StringArray{
+					Data: data,
 				},
-			}
-		})
+			},
+		}
+		limit = int64(len(data))
 	}
 
 	return &planpb.PlanNode{
@@ -192,12 +196,13 @@ func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb
 								IsAutoID:       pkField.GetAutoID(),
 								IsPartitionKey: pkField.GetIsPartitionKey(),
 							},
-							Values: values,
+							IsoValues:  isoValues,
+							Isomorphic: true,
 						},
 					},
 				},
 				IsCount: false,
-				Limit:   int64(len(values)),
+				Limit:   limit,
 			},
 		},
 	}

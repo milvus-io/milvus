@@ -150,8 +150,12 @@ PhyTermFilterExpr::InitPkCacheOffset() {
                 return;
             }
             auto dst_ids = id_array->mutable_int_id();
-            for (const auto& id : expr_->vals_) {
-                dst_ids->add_data(GetValueFromProto<int64_t>(id));
+            if (expr_->isomorphic_) {
+                dst_ids->CopyFrom(expr_->iso_vals_.int64_vals());
+            } else {
+                for (const auto& id : expr_->vals_) {
+                    dst_ids->add_data(GetValueFromProto<int64_t>(id));
+                }
             }
             break;
         }
@@ -160,8 +164,12 @@ PhyTermFilterExpr::InitPkCacheOffset() {
                 return;
             }
             auto dst_ids = id_array->mutable_str_id();
-            for (const auto& id : expr_->vals_) {
-                dst_ids->add_data(GetValueFromProto<std::string>(id));
+            if (expr_->isomorphic_) {
+                dst_ids->CopyFrom(expr_->iso_vals_.string_vals());
+            } else{
+                for (const auto& id : expr_->vals_) {
+                    dst_ids->add_data(GetValueFromProto<std::string>(id));
+                }
             }
             break;
         }

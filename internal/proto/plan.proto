@@ -48,6 +48,16 @@ message GenericValue {
   };
 }
 
+message GenericValues {
+  oneof val {
+    schema.BoolArray bool_vals = 1;
+    schema.LongArray int64_vals = 2;
+    schema.DoubleArray double_vals = 3;
+    schema.StringArray string_vals = 4;
+    schema.ArrayArray array_vals = 5;
+  };
+}
+
 message Array {
   repeated GenericValue array = 1;
   bool same_type = 2;
@@ -110,6 +120,8 @@ message TermExpr {
   ColumnInfo column_info = 1;
   repeated GenericValue values = 2;
   bool is_in_field = 3;
+  GenericValues iso_values = 4;
+  bool isomorphic = 5;
 }
 
 message JSONContainsExpr {

@@ -431,7 +431,21 @@ class TermFilterExpr : public ITypeFilterExpr {
         : ITypeFilterExpr(),
           column_(column),
           vals_(vals),
-          is_in_field_(is_in_field) {
+          is_in_field_(is_in_field),
+          isomorphic_(false) {
+    }
+
+    explicit TermFilterExpr(const ColumnInfo& column,
+                            const std::vector<proto::plan::GenericValue>& vals,
+                            bool is_in_field,
+                            const proto::plan::GenericValues& iso_vals,
+                            bool isomorphic)
+        : ITypeFilterExpr(),
+          column_(column),
+          vals_(vals),
+          is_in_field_(is_in_field),
+          iso_vals_(iso_vals), 
+          isomorphic_(isomorphic){
     }
 
     std::string
@@ -462,6 +476,8 @@ class TermFilterExpr : public ITypeFilterExpr {
     const ColumnInfo column_;
     const std::vector<proto::plan::GenericValue> vals_;
     const bool is_in_field_;
+    const bool isomorphic_;
+    const proto::plan::GenericValues iso_vals_; 
 };
 
 class LogicalBinaryExpr : public ITypeFilterExpr {

@@ -571,7 +571,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
         values.emplace_back(expr_pb.values(i));
     }
     return std::make_shared<expr::TermFilterExpr>(
-        columnInfo, values, expr_pb.is_in_field());
+        columnInfo, values, expr_pb.is_in_field(), expr_pb.iso_values(), expr_pb.isomorphic());
 }
 
 ExprPtr
