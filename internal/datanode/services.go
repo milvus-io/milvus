@@ -22,7 +22,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 
 	"go.uber.org/zap"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"

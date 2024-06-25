@@ -87,8 +87,8 @@ func (_c *MockDataNode_CheckChannelOperationProgress_Call) RunAndReturn(run func
 	return _c
 }
 
-// Compaction provides a mock function with given fields: _a0, _a1
-func (_m *MockDataNode) Compaction(_a0 context.Context, _a1 *datapb.CompactionPlan) (*commonpb.Status, error) {
+// CompactionV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) CompactionV2(_a0 context.Context, _a1 *datapb.CompactionPlan) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
@@ -113,31 +113,31 @@ func (_m *MockDataNode) Compaction(_a0 context.Context, _a1 *datapb.CompactionPl
 	return r0, r1
 }
 
-// MockDataNode_Compaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Compaction'
-type MockDataNode_Compaction_Call struct {
+// MockDataNode_CompactionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompactionV2'
+type MockDataNode_CompactionV2_Call struct {
 	*mock.Call
 }
 
-// Compaction is a helper method to define mock.On call
+// CompactionV2 is a helper method to define mock.On call
 //  - _a0 context.Context
 //  - _a1 *datapb.CompactionPlan
-func (_e *MockDataNode_Expecter) Compaction(_a0 interface{}, _a1 interface{}) *MockDataNode_Compaction_Call {
-	return &MockDataNode_Compaction_Call{Call: _e.mock.On("Compaction", _a0, _a1)}
+func (_e *MockDataNode_Expecter) CompactionV2(_a0 interface{}, _a1 interface{}) *MockDataNode_CompactionV2_Call {
+	return &MockDataNode_CompactionV2_Call{Call: _e.mock.On("CompactionV2", _a0, _a1)}
 }
 
-func (_c *MockDataNode_Compaction_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionPlan)) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) Run(run func(_a0 context.Context, _a1 *datapb.CompactionPlan)) *MockDataNode_CompactionV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.CompactionPlan))
 	})
 	return _c
 }
 
-func (_c *MockDataNode_Compaction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_CompactionV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataNode_Compaction_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan) (*commonpb.Status, error)) *MockDataNode_Compaction_Call {
+func (_c *MockDataNode_CompactionV2_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan) (*commonpb.Status, error)) *MockDataNode_CompactionV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

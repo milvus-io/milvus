@@ -18,7 +18,6 @@ package compaction
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/pkg/common"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
