@@ -84,7 +84,12 @@ func updateCollectionProperties(coll *model.Collection, updatedProps []*commonpb
 	}
 
 	for _, prop := range updatedProps {
-		props[prop.Key] = prop.Value
+		if len(prop.Value) == 0 {
+			// unset property whe set property's value to ""
+			delete(props, prop.Key)
+		} else {
+			props[prop.Key] = prop.Value
+		}
 	}
 
 	propKV := make([]*commonpb.KeyValuePair, 0)
