@@ -2381,7 +2381,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
-		Version:      "2.4.4",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
 		Doc:          "Enable mmap for using in growing raw data",
@@ -2395,7 +2395,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.FixedFileSizeForMmapManager = ParamItem{
 		Key:          "queryNode.mmap.fixedFileSizeForMmapAlloc",
-		Version:      "2.4.0",
+		Version:      "2.4.6",
 		DefaultValue: "64",
 		Doc:          "tmp file size for mmap chunk manager",
 		Export:       true,
@@ -2404,7 +2404,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.MaxMmapDiskPercentageForMmapManager = ParamItem{
 		Key:          "querynode.mmap.maxDiskUsagePercentageForMmapAlloc",
-		Version:      "2.4.0",
+		Version:      "2.4.6",
 		DefaultValue: "20",
 		Doc:          "disk percentage used in mmap chunk manager",
 		Export:       true,
