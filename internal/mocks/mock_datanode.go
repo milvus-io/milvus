@@ -1552,7 +1552,8 @@ func (_c *MockDataNode_WatchDmChannels_Call) RunAndReturn(run func(context.Conte
 func NewMockDataNode(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockDataNode {
+},
+) *MockDataNode {
 	mock := &MockDataNode{}
 	mock.Mock.Test(t)
 

@@ -867,7 +867,8 @@ func (_c *MockSessionManager_SyncSegments_Call) RunAndReturn(run func(int64, *da
 func NewMockSessionManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockSessionManager {
+},
+) *MockSessionManager {
 	mock := &MockSessionManager{}
 	mock.Mock.Test(t)
 

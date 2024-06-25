@@ -27,9 +27,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -236,11 +238,11 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
-	var task compactor
+	var task compaction.Compactor
+	binlogIO := io.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
-		task = newLevelZeroCompactionTask(
+		task = compaction.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.allocator,
@@ -249,8 +251,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
-		task = newCompactionTask(
+		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			ds.metacache,
@@ -314,16 +315,19 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		log.Warn("failed to sync segments", zap.Error(err))
 		return merr.Status(err), nil
 	}
+
 	err := binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), req.GetCompactedTo(), req.GetStatsLogs())
 	if err != nil {
 		log.Warn("failed to DecompressBinLog", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetStatsLogs())
+
+	pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetStatsLogs())
 	if err != nil {
-		log.Warn("failed to load segment statslog", zap.Error(err))
+		log.Warn("failed to load segment stats log", zap.Error(err))
 		return merr.Status(err), nil
 	}
+
 	bfs := metacache.NewBloomFilterSet(pks...)
 	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
 	node.compactionExecutor.injectDone(req.GetPlanID())
