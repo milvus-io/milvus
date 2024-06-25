@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   ubuntu:
-    name: Code Checker AMD64 Ubuntu 20.04
+    name: Code Checker AMD64 Ubuntu 22.04
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -54,10 +54,10 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
-          os: 'ubuntu20.04'
+          os: 'ubuntu22.04'
       - name: Code Check
         env:
-          OS_NAME: 'ubuntu20.04'
+          OS_NAME: 'ubuntu22.04'
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
 
@@ -84,7 +84,7 @@ jobs:
           os: 'amazonlinux2023'
       - name: Code Check
         run: |
-          sed -i 's/ubuntu20.04/amazonlinux2023/g' .env
+          sed -i 's/ubuntu22.04/amazonlinux2023/g' .env
           ./build/builder.sh /bin/bash -c "make install"
 
   rockylinux:
@@ -110,5 +110,5 @@ jobs:
           os: 'rockylinux8'
       - name: Code Check
         run: |
-          sed -i 's/ubuntu20.04/rockylinux8/g' .env
+          sed -i 's/ubuntu22.04/rockylinux8/g' .env
           ./build/builder.sh /bin/bash -c "make install"

@@ -212,7 +212,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
 			// todo reassign node ID
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 			return nil
 		}
 		return err
@@ -232,7 +232,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 			return segment.GetSegmentID()
 		})
 
-		_, metricMutation, err := t.meta.CompleteCompactionMutation(t.GetPlan(), t.result)
+		_, metricMutation, err := t.meta.CompleteCompactionMutation(t.CompactionTask, t.result)
 		if err != nil {
 			return err
 		}
@@ -336,9 +336,11 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 }
 
 func (t *clusteringCompactionTask) resetSegmentCompacting() {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
+	var segmentIDs []UniqueID
+	for _, binLogs := range t.GetPlan().GetSegmentBinlogs() {
+		segmentIDs = append(segmentIDs, binLogs.GetSegmentID())
 	}
+	t.meta.SetSegmentsCompacting(segmentIDs, false)
 }
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
@@ -414,7 +416,7 @@ func (t *clusteringCompactionTask) doCompact() error {
 	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
 		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return err
 	}
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))

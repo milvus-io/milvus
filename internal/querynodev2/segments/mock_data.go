@@ -465,7 +465,7 @@ func SaveBinLog(ctx context.Context,
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		key := path.Join(chunkManager.RootPath(), "stats-log", k)
-		kvs[key] = blob.Value[:]
+		kvs[key] = blob.Value
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
@@ -653,7 +653,7 @@ func SaveDeltaLog(collectionID int64,
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	// keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	keyPath := path.Join(cm.RootPath(), "delta-log", key)
-	kvs[keyPath] = blob.Value[:]
+	kvs[keyPath] = blob.Value
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
 		Binlogs: []*datapb.Binlog{{
