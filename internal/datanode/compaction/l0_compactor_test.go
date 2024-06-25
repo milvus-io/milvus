@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datanode
+package compaction
 
 import (
 	"context"
@@ -32,10 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestLevelZeroCompactionTaskSuite(t *testing.T) {
+	paramtable.Init()
 	suite.Run(t, new(LevelZeroCompactionTaskSuite))
 }
 
@@ -45,7 +48,7 @@ type LevelZeroCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
 	mockMeta     *metacache.MockMetaCache
-	task         *levelZeroCompactionTask
+	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
 	dBlob []byte
@@ -56,7 +59,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	s.mockMeta = metacache.NewMockMetaCache(s.T())
 	// plan of the task is unset
-	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -220,9 +223,9 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.mockMeta.EXPECT().Collection().Return(1)
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
-	s.Require().Equal(plan.GetPlanID(), s.task.getPlanID())
-	s.Require().Equal(plan.GetChannel(), s.task.getChannelName())
-	s.Require().EqualValues(1, s.task.getCollection())
+	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
+	s.Require().Equal(plan.GetChannel(), s.task.GetChannelName())
+	s.Require().EqualValues(1, s.task.GetCollection())
 
 	l0Segments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L0
@@ -234,7 +237,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		}
 		return 0, false
 	})
-	totalDeltalogs := make(map[UniqueID][]string)
+	totalDeltalogs := make(map[int64][]string)
 
 	for _, s := range l0Segments {
 		paths := []string{}
@@ -324,7 +327,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		return 0, false
 	})
 
-	totalDeltalogs := make(map[UniqueID][]string)
+	totalDeltalogs := make(map[int64][]string)
 	for _, s := range l0Segments {
 		paths := []string{}
 		for _, d := range s.GetDeltalogs() {

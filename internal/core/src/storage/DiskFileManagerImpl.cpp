@@ -23,6 +23,7 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -569,7 +570,7 @@ using DataTypeToOffsetMap =
     std::unordered_map<DataTypeNativeOrVoid<T>, int64_t>;
 
 template <DataType T>
-void
+bool
 WriteOptFieldIvfDataImpl(
     const int64_t field_id,
     const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
@@ -587,6 +588,12 @@ WriteOptFieldIvfDataImpl(
             mp[val].push_back(offset++);
         }
     }
+
+    // Do not write to disk if there is only one value
+    if (mp.size() == 1) {
+        return false;
+    }
+
     local_chunk_manager->Write(local_data_path,
                                write_offset,
                                const_cast<int64_t*>(&field_id),
@@ -612,6 +619,7 @@ WriteOptFieldIvfDataImpl(
                                    data_size);
         write_offset += data_size;
     }
+    return true;
 }
 
 #define GENERATE_OPT_FIELD_IVF_IMPL(DT)               \
@@ -630,32 +638,23 @@ WriteOptFieldIvfData(
     uint64_t& write_offset) {
     switch (dt) {
         case DataType::BOOL:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::BOOL);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::BOOL);
         case DataType::INT8:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT8);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT8);
         case DataType::INT16:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT16);
         case DataType::INT32:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT32);
         case DataType::INT64:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::INT64);
         case DataType::FLOAT:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::FLOAT);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::FLOAT);
         case DataType::DOUBLE:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::DOUBLE);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::DOUBLE);
         case DataType::STRING:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::STRING);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::STRING);
         case DataType::VARCHAR:
-            GENERATE_OPT_FIELD_IVF_IMPL(DataType::VARCHAR);
-            break;
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::VARCHAR);
         default:
             LOG_WARN("Unsupported data type in optional scalar field: ", dt);
             return false;
@@ -693,7 +692,7 @@ WriteOptFieldsIvfMeta(
 std::string
 DiskFileManagerImpl::CacheOptFieldToDisk(
     std::shared_ptr<milvus_storage::Space> space, OptFieldT& fields_map) {
-    uint32_t num_of_fields = fields_map.size();
+    const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
     } else if (num_of_fields > 1) {
@@ -719,6 +718,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
     WriteOptFieldsIvfMeta(
         local_chunk_manager, local_data_path, num_of_fields, write_offset);
 
+    std::unordered_set<int64_t> actual_field_ids;
     auto reader = space->ScanData();
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_name = std::get<0>(tup);
@@ -745,12 +745,23 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
             field_data->FillFieldData(col_data);
             field_datas.emplace_back(field_data);
         }
-        if (!WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
+        if (WriteOptFieldIvfData(field_type,
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
+            actual_field_ids.insert(field_id);
+        }
+    }
+
+    if (actual_field_ids.size() != num_of_fields) {
+        write_offset = 0;
+        WriteOptFieldsIvfMeta(local_chunk_manager,
+                              local_data_path,
+                              actual_field_ids.size(),
+                              write_offset);
+        if (actual_field_ids.empty()) {
             return "";
         }
     }
@@ -759,7 +770,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
 
 std::string
 DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
-    uint32_t num_of_fields = fields_map.size();
+    const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
     } else if (num_of_fields > 1) {
@@ -793,6 +804,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
 
     auto parallel_degree =
         uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
         auto& field_paths = std::get<2>(tup);
@@ -814,15 +826,27 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
         if (batch_files.size() > 0) {
             FetchRawData();
         }
-        if (!WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
+        if (WriteOptFieldIvfData(field_type,
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
+            actual_field_ids.insert(field_id);
+        }
+    }
+
+    if (actual_field_ids.size() != num_of_fields) {
+        write_offset = 0;
+        WriteOptFieldsIvfMeta(local_chunk_manager,
+                              local_data_path,
+                              actual_field_ids.size(),
+                              write_offset);
+        if (actual_field_ids.empty()) {
             return "";
         }
     }
+
     return local_data_path;
 }
 

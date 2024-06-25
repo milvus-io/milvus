@@ -28,6 +28,8 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v12/parquet"
+	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -748,18 +750,17 @@ var _ RecordWriter = (*singleFieldRecordWriter)(nil)
 type singleFieldRecordWriter struct {
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
+	schema  *arrow.Schema
 
-	grouped bool
+	numRows int
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
-	if !sfw.grouped {
-		sfw.grouped = true
-		sfw.fw.NewRowGroup()
-	}
-	// TODO: adding row group support by calling fw.NewRowGroup()
+	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
-	return sfw.fw.WriteColumnData(a)
+	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
+	defer rec.Release()
+	return sfw.fw.WriteBuffered(rec)
 }
 
 func (sfw *singleFieldRecordWriter) Close() {
@@ -768,13 +769,19 @@ func (sfw *singleFieldRecordWriter) Close() {
 
 func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer) (*singleFieldRecordWriter, error) {
 	schema := arrow.NewSchema([]arrow.Field{field}, nil)
-	fw, err := pqarrow.NewFileWriter(schema, writer, nil, pqarrow.DefaultWriterProps())
+	fw, err := pqarrow.NewFileWriter(schema, writer,
+		parquet.NewWriterProperties(
+			parquet.WithMaxRowGroupLength(math.MaxInt64), // No additional grouping for now.
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3)),
+		pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
 	return &singleFieldRecordWriter{
 		fw:      fw,
 		fieldId: fieldId,
+		schema:  schema,
 	}, nil
 }
 
@@ -789,15 +796,18 @@ type SerializeWriter[T any] struct {
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
+	if sw.pos == 0 {
+		return nil
+	}
 	buf := sw.buffer[:sw.pos]
 	r, size, err := sw.serializer(buf)
 	if err != nil {
 		return err
 	}
+	defer r.Release()
 	if err := sw.rw.Write(r); err != nil {
 		return err
 	}
-	r.Release()
 	sw.pos = 0
 	sw.writtenMemorySize += size
 	return nil
@@ -822,8 +832,11 @@ func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
 }
 
 func (sw *SerializeWriter[T]) Close() error {
+	if err := sw.Flush(); err != nil {
+		return err
+	}
 	sw.rw.Close()
-	return sw.Flush()
+	return nil
 }
 
 func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], batchSize int) *SerializeWriter[T] {
@@ -880,7 +893,7 @@ type BinlogStreamWriter struct {
 	memorySize int // To be updated on the fly
 
 	buf bytes.Buffer
-	rw  RecordWriter
+	rw  *singleFieldRecordWriter
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -915,8 +928,10 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		return nil, err
 	}
 	return &Blob{
-		Key:   strconv.Itoa(int(bsw.fieldSchema.FieldID)),
-		Value: b.Bytes(),
+		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
+		Value:      b.Bytes(),
+		RowNum:     int64(bsw.rw.numRows),
+		MemorySize: int64(bsw.memorySize),
 	}, nil
 }
 
@@ -1005,6 +1020,7 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				if !ok {
 					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
+				writers[fid].memorySize += int(typeEntry.sizeof(e))
 				memorySize += typeEntry.sizeof(e)
 			}
 		}
