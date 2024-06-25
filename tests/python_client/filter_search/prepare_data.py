@@ -33,10 +33,10 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition
         FieldSchema(name="scalar_5_linear", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_5_linear")),
         FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768)
     ]
-    schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
-    logger.info(schema)
-    collection = Collection(name=collection_name, schema=schema)
-    index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
+    schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True, num_partitions=1)
+    collection = Collection(name=collection_name, schema=schema, num_partitions=1)
+    logger.info(f"collection {collection_name} created: {collection.describe()}")
+    index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
 
     batch_files = glob.glob("/root/dataset/laion_with_scalar_medium_10m/train*.parquet")
@@ -87,8 +87,8 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
-    parser.add_argument("--host", type=str, default="10.255.136.47")
-    parser.add_argument("--minio_host", type=str, default="10.255.117.95")
+    parser.add_argument("--host", type=str, default="10.104.18.39")
+    parser.add_argument("--minio_host", type=str, default="10.104.18.174")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
     args = parser.parse_args()
