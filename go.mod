@@ -65,6 +65,7 @@ require (
 require github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70
 
 require (
+	github.com/cockroachdb/redact v1.1.3
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
@@ -102,7 +103,6 @@ require (
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
-	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/confluentinc/confluent-kafka-go v1.9.1 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
