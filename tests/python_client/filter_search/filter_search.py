@@ -78,10 +78,16 @@ class MilvusUser(HttpUser):
     def on_stop(self):
         filter = f"{self.environment.parsed_options.filter_field}-eq-{self.environment.parsed_options.filter_value}"
         # this is a good place to clean up/release any user-specific test data
+        self.recall_list = sorted(self.recall_list)
         print(f"current recall is {self.recall}, "
               f"avg recall is {sum(self.recall_list) / len(self.recall_list)}, "
               f"max recall is {max(self.recall_list)}, "
-              f"min recall is {min(self.recall_list)}")
+              f"min recall is {min(self.recall_list)}, "
+              f"50th percentile is {self.recall_list[int(len(self.recall_list) * 0.5)]}, "
+              f"90th percentile is {self.recall_list[int(len(self.recall_list) * 0.9)]}"
+              f"95th percentile is {self.recall_list[int(len(self.recall_list) * 0.95)]}"
+              f"99th percentile is {self.recall_list[int(len(self.recall_list) * 0.99)]}"
+              )
         data = {"ts": self.ts_list, "recall": self.recall_list}
         df = pd.DataFrame(data)
         df.to_parquet(f"/tmp/ci_logs/recall-of-{filter}-{uuid.uuid4()}.parquet", index=False)
