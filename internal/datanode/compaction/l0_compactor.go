@@ -261,9 +261,9 @@ func (t *LevelZeroCompactionTask) splitDelta(
 		startIdx := value.StartIdx
 		pk2SegmentIDs := value.Segment2Hits
 
-		pks := allDelta[value.DeleteDataIdx].Pks
-		tss := allDelta[value.DeleteDataIdx].Tss
-		serialized := allDelta[value.DeleteDataIdx].Serialized
+		pks := allDelta.Pks
+		tss := allDelta.Tss
+		serialized := allDelta.Serialized
 
 		for segmentID, hits := range pk2SegmentIDs {
 			for i, hit := range hits {
