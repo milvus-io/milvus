@@ -67,6 +67,8 @@ set(MILVUS_TEST_FILES
         test_regex_query_util.cpp
         test_regex_query.cpp
         test_array_inverted_index.cpp
+        test_chunk_vector.cpp
+        test_mmap_chunk_manager.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
