@@ -538,6 +538,8 @@ dataNode:
     serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
+  slot:
+    slotCap: 2 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
 
 # Configures the system log output.
 log:

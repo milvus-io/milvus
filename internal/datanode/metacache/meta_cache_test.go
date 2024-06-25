@@ -103,27 +103,6 @@ func (s *MetaCacheSuite) TestMetaInfo() {
 	s.Equal(s.collSchema, s.cache.Schema())
 }
 
-func (s *MetaCacheSuite) TestCompactSegments() {
-	for i, seg := range s.newSegments {
-		// compaction from flushed[i], unflushed[i] and invalidSeg to new[i]
-		s.cache.CompactSegments(seg, s.partitionIDs[i], 100, NewBloomFilterSet(), s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
-	}
-
-	for i, partitionID := range s.partitionIDs {
-		segs := s.cache.GetSegmentsBy(WithPartitionID(partitionID))
-		for _, seg := range segs {
-			if seg.SegmentID() == s.newSegments[i] {
-				s.Equal(commonpb.SegmentState_Flushed, seg.State())
-				s.Equal(int64(100), seg.NumOfRows())
-				s.Equal(datapb.SegmentLevel_L1, seg.Level())
-			}
-			if seg.SegmentID() == s.flushedSegments[i] {
-				s.Equal(s.newSegments[i], seg.CompactTo())
-			}
-		}
-	}
-}
-
 func (s *MetaCacheSuite) TestAddSegment() {
 	testSegs := []int64{100, 101, 102}
 	for _, segID := range testSegs {

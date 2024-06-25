@@ -35,15 +35,17 @@ type CompactionScheduler struct {
 	taskGuard     sync.RWMutex
 
 	planHandler *compactionPlanHandler
+	cluster     Cluster
 }
 
 var _ Scheduler = (*CompactionScheduler)(nil)
 
-func NewCompactionScheduler() *CompactionScheduler {
+func NewCompactionScheduler(cluster Cluster) *CompactionScheduler {
 	return &CompactionScheduler{
 		taskNumber:    atomic.NewInt32(0),
 		queuingTasks:  make([]*compactionTask, 0),
 		parallelTasks: make(map[int64][]*compactionTask),
+		cluster:       cluster,
 	}
 }
 
@@ -62,71 +64,64 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 
 // Schedule pick 1 or 0 tasks for 1 node
 func (s *CompactionScheduler) Schedule() []*compactionTask {
-	nodeTasks := make(map[int64][]*compactionTask) // nodeID
+	s.taskGuard.RLock()
+	if len(s.queuingTasks) == 0 {
+		s.taskGuard.RUnlock()
+		return nil // To mitigate the need for frequent slot querying
+	}
+	s.taskGuard.RUnlock()
+
+	nodeSlots := s.cluster.QuerySlots()
+
+	l0ChannelExcludes := typeutil.NewSet[string]()
+	mixChannelExcludes := typeutil.NewSet[string]()
+
+	for _, tasks := range s.parallelTasks {
+		for _, t := range tasks {
+			switch t.plan.GetType() {
+			case datapb.CompactionType_Level0DeleteCompaction:
+				l0ChannelExcludes.Insert(t.plan.GetChannel())
+			case datapb.CompactionType_MixCompaction:
+				mixChannelExcludes.Insert(t.plan.GetChannel())
+			}
+		}
+	}
 
 	s.taskGuard.Lock()
 	defer s.taskGuard.Unlock()
-	for _, task := range s.queuingTasks {
-		if _, ok := nodeTasks[task.dataNodeID]; !ok {
-			nodeTasks[task.dataNodeID] = make([]*compactionTask, 0)
-		}
 
-		nodeTasks[task.dataNodeID] = append(nodeTasks[task.dataNodeID], task)
-	}
-
-	executable := make(map[int64]*compactionTask)
-
-	pickPriorPolicy := func(tasks []*compactionTask, exclusiveChannels []string, executing []string) *compactionTask {
-		for _, task := range tasks {
-			if lo.Contains(exclusiveChannels, task.plan.GetChannel()) {
-				continue
-			}
-
-			if task.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				// Channel of LevelZeroCompaction task with no executing compactions
-				if !lo.Contains(executing, task.plan.GetChannel()) {
-					return task
-				}
-
-				// Don't schedule any tasks for channel with LevelZeroCompaction task
-				// when there're executing compactions
-				exclusiveChannels = append(exclusiveChannels, task.plan.GetChannel())
-				continue
-			}
-
-			return task
-		}
-
-		return nil
-	}
-
-	// pick 1 or 0 task for 1 node
-	for node, tasks := range nodeTasks {
-		parallel := s.parallelTasks[node]
-		if len(parallel) >= calculateParallel() {
-			log.Info("Compaction parallel in DataNode reaches the limit", zap.Int64("nodeID", node), zap.Int("parallel", len(parallel)))
+	picked := make([]*compactionTask, 0)
+	for _, t := range s.queuingTasks {
+		nodeID := s.pickAnyNode(nodeSlots)
+		if nodeID == NullNodeID {
+			log.Warn("cannot find datanode for compaction task",
+				zap.Int64("planID", t.plan.PlanID), zap.String("vchannel", t.plan.Channel))
 			continue
 		}
-
-		var (
-			executing         = typeutil.NewSet[string]()
-			channelsExecPrior = typeutil.NewSet[string]()
-		)
-		for _, t := range parallel {
-			executing.Insert(t.plan.GetChannel())
-			if t.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				channelsExecPrior.Insert(t.plan.GetChannel())
+		switch t.plan.GetType() {
+		case datapb.CompactionType_Level0DeleteCompaction:
+			if l0ChannelExcludes.Contain(t.plan.GetChannel()) ||
+				mixChannelExcludes.Contain(t.plan.GetChannel()) {
+				continue
 			}
-		}
-
-		picked := pickPriorPolicy(tasks, channelsExecPrior.Collect(), executing.Collect())
-		if picked != nil {
-			executable[node] = picked
+			t.dataNodeID = nodeID
+			picked = append(picked, t)
+			l0ChannelExcludes.Insert(t.plan.GetChannel())
+			nodeSlots[nodeID]--
+		case datapb.CompactionType_MixCompaction:
+			if l0ChannelExcludes.Contain(t.plan.GetChannel()) {
+				continue
+			}
+			t.dataNodeID = nodeID
+			picked = append(picked, t)
+			mixChannelExcludes.Insert(t.plan.GetChannel())
+			nodeSlots[nodeID]--
 		}
 	}
 
 	var pickPlans []int64
-	for node, task := range executable {
+	for _, task := range picked {
+		node := task.dataNodeID
 		pickPlans = append(pickPlans, task.plan.PlanID)
 		if _, ok := s.parallelTasks[node]; !ok {
 			s.parallelTasks[node] = []*compactionTask{task}
@@ -150,7 +145,7 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		}
 	}
 
-	return lo.Values(executable)
+	return picked
 }
 
 func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPlan) {
@@ -210,4 +205,25 @@ func (s *CompactionScheduler) LogStatus() {
 
 func (s *CompactionScheduler) GetTaskCount() int {
 	return int(s.taskNumber.Load())
+}
+
+func (s *CompactionScheduler) pickAnyNode(nodeSlots map[int64]int64) int64 {
+	var (
+		nodeID   int64 = NullNodeID
+		maxSlots int64 = -1
+	)
+	for id, slots := range nodeSlots {
+		if slots > 0 && slots > maxSlots {
+			nodeID = id
+			maxSlots = slots
+		}
+	}
+	return nodeID
+}
+
+func (s *CompactionScheduler) pickShardNode(nodeID int64, nodeSlots map[int64]int64) int64 {
+	if nodeSlots[nodeID] > 0 {
+		return nodeID
+	}
+	return NullNodeID
 }
