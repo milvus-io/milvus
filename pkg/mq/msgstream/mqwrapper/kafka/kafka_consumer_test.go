@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 func TestKafkaConsumer_Subscription(t *testing.T) {
@@ -20,7 +20,7 @@ func TestKafkaConsumer_Subscription(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	kc, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	kc, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer kc.Close()
 	assert.Equal(t, kc.Subscription(), groupID)
@@ -32,7 +32,7 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -58,7 +58,7 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -84,7 +84,7 @@ func TestKafkaConsumer_GetSeek(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -101,7 +101,7 @@ func TestKafkaConsumer_ChanWithNoAssign(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -137,7 +137,7 @@ func TestKafkaConsumer_SeekAfterChan(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -158,7 +158,7 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -185,7 +185,7 @@ func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
 	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionLatest)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionLatest)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	data1 = []int{444, 555}
@@ -210,7 +210,7 @@ func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
 	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 	assert.NoError(t, err)
 	msg := <-consumer.Chan()
 	assert.Equal(t, 111, BytesToInt(msg.Payload()))
@@ -219,7 +219,7 @@ func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
 	defer consumer.Close()
 
 	config = createConfig(groupID)
-	consumer2, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+	consumer2, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 	assert.NoError(t, err)
 	msg = <-consumer2.Chan()
 	assert.Equal(t, 111, BytesToInt(msg.Payload()))
@@ -261,7 +261,7 @@ func TestKafkaConsumer_CheckPreTopicValid(t *testing.T) {
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
 	config := createConfig(groupID)
-	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+	consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
@@ -280,7 +280,7 @@ func TestKafkaConsumer_Close(t *testing.T) {
 	t.Run("close after only get latest msgID", func(t *testing.T) {
 		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
 		config := createConfig(groupID)
-		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 		assert.NoError(t, err)
 		_, err = consumer.GetLatestMsgID()
 		assert.NoError(t, err)
@@ -290,7 +290,7 @@ func TestKafkaConsumer_Close(t *testing.T) {
 	t.Run("close after only Chan method is invoked", func(t *testing.T) {
 		groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
 		config := createConfig(groupID)
-		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+		consumer, err := newKafkaConsumer(config, 16, topic, groupID, mqcommon.SubscriptionPositionEarliest)
 		assert.NoError(t, err)
 		<-consumer.Chan()
 		consumer.Close()

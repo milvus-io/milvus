@@ -22,12 +22,12 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 // Check nmqMessage implements ConsumerMessage
 var (
-	_ mqwrapper.Message = (*nmqMessage)(nil)
+	_ common.Message = (*nmqMessage)(nil)
 )
 
 // nmqMessage wraps the message for natsmq
@@ -63,7 +63,7 @@ func (nm *nmqMessage) Payload() []byte {
 }
 
 // ID returns the id of natsmq message
-func (nm *nmqMessage) ID() mqwrapper.MessageID {
+func (nm *nmqMessage) ID() common.MessageID {
 	if nm.meta == nil {
 		var err error
 		// raw is always a jetstream message, should never fail.
