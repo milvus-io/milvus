@@ -36,6 +36,9 @@ def compute_neighbors(train_data_file_name, test_data_file_name, expr=None, top_
     # logger.info(f"test data {len(test_data)}")
     train_data = train_df["emb"].tolist()
     logger.info(f"train data after filter: {len(train_data)}")
+    if len(train_data) == 0:
+        return None
+
     t0 = time.time()
     distance = pairwise_distances(train_data, Y=test_data, metric="euclidean")
     tt = time.time() - t0
@@ -75,6 +78,8 @@ def compute_neighbors(train_data_file_name, test_data_file_name, expr=None, top_
 
 def merge_neighbors(file_list, final_file_name):
     logger.info(f"{file_list}, final file name {final_file_name}")
+    if len(file_list) == 0:
+        return
     t0 = time.time()
     files_num = len(file_list)
     # logger.info(f"merge neighbors files {files_num}")
@@ -153,6 +158,11 @@ if __name__ == "__main__":
         print(train_data_f)
         neighbors_file_name = compute_neighbors(train_data_f, test_data_file_name, expr)
         neighbors_file_name_list.append(neighbors_file_name)
+    neighbors_file_name_list_copy = []
+    for f in neighbors_file_name_list:
+        if f:
+            neighbors_file_name_list_copy.append(f)
+    neighbors_file_name_list = neighbors_file_name_list_copy
     if filter_field and expr_ascii:
         merge_neighbors(neighbors_file_name_list, f"{neighbor_dir}/neighbors-{expr_ascii}.parquet")
     else:
