@@ -65,6 +65,8 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 		CompactionTask: task,
 		meta:           h.meta,
 	}
+	alloc := &MockAllocator0{}
+	t.allocator = alloc
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err

@@ -55,6 +55,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
 
@@ -85,6 +88,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
@@ -118,6 +124,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
 }

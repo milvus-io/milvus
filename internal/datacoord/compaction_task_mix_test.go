@@ -35,6 +35,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		// plan: plan,
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
 
@@ -65,6 +68,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			},
 			meta: s.mockMeta,
 		}
+		alloc := NewNMockAllocator(s.T())
+		alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		task.allocator = alloc
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)

@@ -66,8 +66,6 @@ func (s *MixCompactionTaskSuite) SetupSuite() {
 func (s *MixCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, nil)
-
 	s.meta = genTestCollectionMeta()
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
@@ -83,8 +81,10 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 		TimeoutInSeconds: 10,
 		Type:             datapb.CompactionType_MixCompaction,
 		Schema:           s.meta.GetSchema(),
-		BeginLogID:       11111,
+		BeginLogID:       19530,
 	}
+
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, s.plan)
 	s.task.plan = s.plan
 }
 
