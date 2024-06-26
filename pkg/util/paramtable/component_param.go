@@ -3743,7 +3743,8 @@ type dataNodeConfig struct {
 	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4051,6 +4052,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)
+
+	p.L0CompactionMaxBatchSize = ParamItem{
+		Key:          "dataNode.compaction.levelZeroMaxBatchSize",
+		Version:      "2.4.5",
+		Doc:          "Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.",
+		DefaultValue: "-1",
+		Export:       true,
+	}
+	p.L0CompactionMaxBatchSize.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
