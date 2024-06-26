@@ -305,8 +305,14 @@ func (scheduler *taskScheduler) updateTaskDelta(task Task) {
 	var deltaMap map[int64]map[int64]int
 	switch task := task.(type) {
 	case *SegmentTask:
-		segment := scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTargetFirst)
-		delta = int(segment.GetNumOfRows())
+		// skip growing segment's count, cause doesn't know realtime row number of growing segment
+		if task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Historical {
+			segment := scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTargetFirst)
+			if segment != nil {
+				delta = int(segment.GetNumOfRows())
+			}
+		}
+
 		deltaMap = scheduler.segmentExecutingTaskDelta
 
 	case *ChannelTask:
