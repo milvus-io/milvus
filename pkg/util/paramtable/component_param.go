@@ -2059,10 +2059,13 @@ type queryNodeConfig struct {
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
-	CacheEnabled     ParamItem `refreshable:"false"`
-	CacheMemoryLimit ParamItem `refreshable:"false"`
-	MmapDirPath      ParamItem `refreshable:"false"`
-	MmapEnabled      ParamItem `refreshable:"false"`
+	CacheEnabled                        ParamItem `refreshable:"false"`
+	CacheMemoryLimit                    ParamItem `refreshable:"false"`
+	MmapDirPath                         ParamItem `refreshable:"false"`
+	MmapEnabled                         ParamItem `refreshable:"false"`
+	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
+	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
+	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
 
 	LazyLoadEnabled                      ParamItem `refreshable:"false"`
 	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
@@ -2316,6 +2319,38 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.GrowingMmapEnabled = ParamItem{
+		Key:          "queryNode.mmap.growingMmapEnabled",
+		Version:      "2.4.6",
+		DefaultValue: "false",
+		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
+		Doc:          "Enable mmap for using in growing raw data",
+		Export:       true,
+		Formatter: func(v string) string {
+			mmapEnabled := p.MmapEnabled.GetAsBool()
+			return strconv.FormatBool(mmapEnabled && getAsBool(v))
+		},
+	}
+	p.GrowingMmapEnabled.Init(base.mgr)
+
+	p.FixedFileSizeForMmapManager = ParamItem{
+		Key:          "queryNode.mmap.fixedFileSizeForMmapAlloc",
+		Version:      "2.4.6",
+		DefaultValue: "64",
+		Doc:          "tmp file size for mmap chunk manager",
+		Export:       true,
+	}
+	p.FixedFileSizeForMmapManager.Init(base.mgr)
+
+	p.MaxMmapDiskPercentageForMmapManager = ParamItem{
+		Key:          "querynode.mmap.maxDiskUsagePercentageForMmapAlloc",
+		Version:      "2.4.6",
+		DefaultValue: "20",
+		Doc:          "disk percentage used in mmap chunk manager",
+		Export:       true,
+	}
+	p.MaxMmapDiskPercentageForMmapManager.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyload.enabled",
@@ -3447,6 +3482,9 @@ type dataNodeConfig struct {
 
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	// slot
+	SlotCap ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3761,6 +3799,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.SlotCap = ParamItem{
+		Key:          "dataNode.slot.slotCap",
+		Version:      "2.4.2",
+		DefaultValue: "2",
+		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
+		Export:       true,
+	}
+	p.SlotCap.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

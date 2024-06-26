@@ -343,10 +343,10 @@ func (s *importScheduler) processFailed(task ImportTask) {
 	if task.GetType() == ImportTaskType {
 		segments := task.(*importTask).GetSegmentIDs()
 		for _, segment := range segments {
-			err := s.meta.DropSegment(segment)
+			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
+			err := s.meta.UpdateSegmentsInfo(op)
 			if err != nil {
-				log.Warn("drop import segment failed",
-					WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
+				log.Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
 				return
 			}
 		}

@@ -110,7 +110,7 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
-  rpc Compaction(CompactionPlan) returns (common.Status) {}
+  rpc CompactionV2(CompactionPlan) returns (common.Status) {}
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
   rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
 
@@ -127,6 +127,8 @@ service DataNode {
   rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
   rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
   rpc DropImport(DropImportRequest) returns(common.Status) {}
+
+  rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 }
 
 message FlushRequest {
@@ -526,6 +528,7 @@ message CompactionPlan {
   string channel = 7;
   int64 collection_ttl = 8;
   int64 total_rows = 9;
+  schema.CollectionSchema schema = 10;
 }
 
 message CompactionSegment {
@@ -832,4 +835,11 @@ message GcControlRequest {
   common.MsgBase base = 1;
   GcCommand command = 2;
   repeated common.KeyValuePair params = 3;
+}
+
+message QuerySlotRequest {}
+
+message QuerySlotResponse {
+  common.Status status = 1;
+  int64 num_slots = 2;
 }

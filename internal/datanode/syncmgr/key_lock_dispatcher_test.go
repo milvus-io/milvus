@@ -19,9 +19,6 @@ func (t *mockTask) done() {
 	close(t.ch)
 }
 
-func (t *mockTask) CalcTargetSegment() (int64, error) {
-	return t.targetID, t.err
-}
 func (t *mockTask) SegmentID() int64                  { panic("no implementation") }
 func (t *mockTask) Checkpoint() *msgpb.MsgPosition    { panic("no implementation") }
 func (t *mockTask) StartPosition() *msgpb.MsgPosition { panic("no implementation") }

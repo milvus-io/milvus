@@ -126,7 +126,7 @@ func (m *MockDataNode) GetMetrics(ctx context.Context, request *milvuspb.GetMetr
 	return m.metricResp, m.err
 }
 
-func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+func (m *MockDataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 
@@ -175,6 +175,10 @@ func (m *MockDataNode) QueryImport(ctx context.Context, req *datapb.QueryImportR
 
 func (m *MockDataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockDataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	return &datapb.QuerySlotResponse{}, m.err
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -281,7 +285,7 @@ func Test_NewServer(t *testing.T) {
 		server.datanode = &MockDataNode{
 			status: &commonpb.Status{},
 		}
-		resp, err := server.Compaction(ctx, nil)
+		resp, err := server.CompactionV2(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})

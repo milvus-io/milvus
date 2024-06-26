@@ -23,6 +23,7 @@ main(int argc, char** argv) {
         TestLocalPath);
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
         get_default_local_storage_config());
+    milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
 
     return RUN_ALL_TESTS();
 }

@@ -2378,7 +2378,10 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                 }
                 case DataType::VARCHAR: {
                     if (chunk_id < data_barrier) {
-                        if (segment_.type() == SegmentType::Growing) {
+                        if (segment_.type() == SegmentType::Growing &&
+                            !storage::MmapManager::GetInstance()
+                                 .GetMmapConfig()
+                                 .growing_enable_mmap) {
                             auto chunk_data =
                                 segment_
                                     .chunk_data<std::string>(field_id, chunk_id)

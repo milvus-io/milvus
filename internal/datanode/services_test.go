@@ -210,50 +210,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 
 func (s *DataNodeServicesSuite) TestCompaction() {
 	dmChannelName := "by-dev-rootcoord-dml_0_100v0"
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.StartOfUserFieldID, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
-			{FieldID: common.StartOfUserFieldID + 1, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "128"},
-			}},
-		},
-	}
-	flushedSegmentID := int64(100)
-	growingSegmentID := int64(101)
 
-	vchan := &datapb.VchannelInfo{
-		CollectionID:        1,
-		ChannelName:         dmChannelName,
-		UnflushedSegmentIds: []int64{},
-		FlushedSegmentIds:   []int64{},
-	}
-
-	err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, vchan, schema, genTestTickler())
-	s.Require().NoError(err)
-
-	fgservice, ok := s.node.flowgraphManager.GetFlowgraphService(dmChannelName)
-	s.Require().True(ok)
-
-	metaCache := metacache.NewMockMetaCache(s.T())
-	metaCache.EXPECT().Collection().Return(1).Maybe()
-	metaCache.EXPECT().Schema().Return(schema).Maybe()
-	s.node.writeBufferManager.Register(dmChannelName, metaCache, nil)
-
-	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
-		ID:            flushedSegmentID,
-		CollectionID:  1,
-		PartitionID:   2,
-		StartPosition: &msgpb.MsgPosition{},
-	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
-	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
-		ID:            growingSegmentID,
-		CollectionID:  1,
-		PartitionID:   2,
-		StartPosition: &msgpb.MsgPosition{},
-	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -264,45 +221,12 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Channel: dmChannelName,
 		}
 
-		resp, err := node.Compaction(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
 	})
 
-	s.Run("channel_not_match", func() {
-		node := s.node
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		req := &datapb.CompactionPlan{
-			PlanID:  1000,
-			Channel: dmChannelName + "other",
-		}
-
-		resp, err := node.Compaction(ctx, req)
-		s.NoError(err)
-		s.False(merr.Ok(resp))
-	})
-
-	s.Run("channel_dropped", func() {
-		node := s.node
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		node.compactionExecutor.dropped.Insert(dmChannelName)
-		defer node.compactionExecutor.dropped.Remove(dmChannelName)
-
-		req := &datapb.CompactionPlan{
-			PlanID:  1000,
-			Channel: dmChannelName,
-		}
-
-		resp, err := node.Compaction(ctx, req)
-		s.NoError(err)
-		s.False(merr.Ok(resp))
-	})
-
-	s.Run("compact_growing_segment", func() {
+	s.Run("unknown CompactionType", func() {
 		node := s.node
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -312,11 +236,11 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Channel: dmChannelName,
 			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
-				{SegmentID: growingSegmentID, Level: datapb.SegmentLevel_L1},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
 		}
 
-		resp, err := node.Compaction(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
 	})
@@ -506,126 +430,6 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 		zap.String("response", resp.Response))
 }
 
-func (s *DataNodeServicesSuite) TestSyncSegments() {
-	chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.StartOfUserFieldID, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
-			{FieldID: common.StartOfUserFieldID + 1, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "128"},
-			}},
-		},
-	}
-
-	err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
-		CollectionID:        1,
-		ChannelName:         chanName,
-		UnflushedSegmentIds: []int64{},
-		FlushedSegmentIds:   []int64{100, 200, 300},
-	}, schema, genTestTickler())
-	s.Require().NoError(err)
-	fg, ok := s.node.flowgraphManager.GetFlowgraphService(chanName)
-	s.Assert().True(ok)
-
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 101, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 200, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 201, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 300, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
-
-	s.Run("empty compactedFrom", func() {
-		req := &datapb.SyncSegmentsRequest{
-			CompactedTo: 400,
-			NumOfRows:   100,
-		}
-
-		req.CompactedFrom = []UniqueID{}
-		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().True(merr.Ok(status))
-	})
-
-	s.Run("invalid compacted from", func() {
-		req := &datapb.SyncSegmentsRequest{
-			CompactedTo:   400,
-			NumOfRows:     100,
-			CompactedFrom: []UniqueID{101, 201},
-		}
-
-		req.CompactedFrom = []UniqueID{101, 201}
-		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().False(merr.Ok(status))
-	})
-
-	s.Run("valid request numRows>0", func() {
-		req := &datapb.SyncSegmentsRequest{
-			CompactedFrom: []UniqueID{100, 200, 101, 201},
-			CompactedTo:   102,
-			NumOfRows:     100,
-			ChannelName:   chanName,
-			CollectionId:  1,
-		}
-		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().True(merr.Ok(status))
-
-		_, result := fg.metacache.GetSegmentByID(req.GetCompactedTo(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.True(result)
-		for _, compactFrom := range req.GetCompactedFrom() {
-			seg, result := fg.metacache.GetSegmentByID(compactFrom, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-			s.True(result)
-			s.Equal(req.CompactedTo, seg.CompactTo())
-		}
-
-		status, err = s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().True(merr.Ok(status))
-	})
-
-	s.Run("without_channel_meta", func() {
-		fg.metacache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushed),
-			metacache.WithSegmentIDs(100, 200, 300))
-
-		req := &datapb.SyncSegmentsRequest{
-			CompactedFrom: []int64{100, 200},
-			CompactedTo:   101,
-			NumOfRows:     0,
-		}
-		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().False(merr.Ok(status))
-	})
-
-	s.Run("valid_request_with_meta_num=0", func() {
-		fg.metacache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushed),
-			metacache.WithSegmentIDs(100, 200, 300))
-
-		req := &datapb.SyncSegmentsRequest{
-			CompactedFrom: []int64{100, 200},
-			CompactedTo:   301,
-			NumOfRows:     0,
-			ChannelName:   chanName,
-			CollectionId:  1,
-		}
-		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().True(merr.Ok(status))
-
-		seg, result := fg.metacache.GetSegmentByID(100, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.True(result)
-		s.Equal(metacache.NullSegment, seg.CompactTo())
-		seg, result = fg.metacache.GetSegmentByID(200, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.True(result)
-		s.Equal(metacache.NullSegment, seg.CompactTo())
-		_, result = fg.metacache.GetSegmentByID(301, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		s.False(result)
-	})
-}
-
 func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	req := &datapb.ResendSegmentStatsRequest{
 		Base: &commonpb.MsgBase{},
@@ -664,5 +468,27 @@ func (s *DataNodeServicesSuite) TestRPCWatch() {
 		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
 		s.NoError(err)
 		s.False(merr.Ok(resp.GetStatus()))
+	})
+}
+
+func (s *DataNodeServicesSuite) TestQuerySlot() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(resp.GetStatus()))
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }

@@ -21,10 +21,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+//go:generate mockery --name=Compactor --structname=MockCompactor --output=./  --filename=mock_compactor.go --with-expecter --inpackage
 type Compactor interface {
 	Complete()
 	Compact() (*datapb.CompactionPlanResult, error)
-	InjectDone()
 	Stop()
 	GetPlanID() typeutil.UniqueID
 	GetCollection() typeutil.UniqueID

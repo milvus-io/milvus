@@ -970,7 +970,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, 111, &segment);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 

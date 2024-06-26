@@ -51,9 +51,8 @@ var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 
 // execCompactionPlan start to execute plan and return immediately
-func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
 	h.spyChan <- plan
-	return nil
 }
 
 // completeCompaction record the result of a compaction
@@ -106,6 +105,22 @@ func Test_compactionTrigger_force(t *testing.T) {
 
 	vecFieldID := int64(201)
 	indexID := int64(1001)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  vecFieldID,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -292,21 +307,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 					},
 					collections: map[int64]*collectionInfo{
 						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
+							ID:     2,
+							Schema: schema,
 							Properties: map[string]string{
 								common.CollectionTTLConfigKey: "0",
 							},
@@ -469,6 +471,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Type:             datapb.CompactionType_MixCompaction,
 					Channel:          "ch1",
 					TotalRows:        200,
+					Schema:           schema,
 				},
 			},
 		},
@@ -2000,12 +2003,12 @@ func Test_compactionTrigger_new(t *testing.T) {
 }
 
 func Test_compactionTrigger_allocTs(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
 	assert.True(t, ts > 0)
 
-	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
+	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
 	ts, err = got.allocTs()
 	assert.Error(t, err)
 	assert.Equal(t, uint64(0), ts)
@@ -2032,7 +2035,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	}
 
 	m := &meta{segments: NewSegmentsInfo(), collections: collections}
-	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(),
+	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, newMockAllocator(),
 		&ServerHandler{
 			&Server{
 				meta: m,
@@ -2386,7 +2389,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 				},
 			},
 		}, nil)
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return()
 		tr.handleSignal(&compactionSignal{
 			segmentID:    1,
 			collectionID: s.collectionID,
@@ -2517,7 +2520,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 				common.CollectionAutoCompactionKey: "false",
 			},
 		}, nil)
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return()
 		tr.handleGlobalSignal(&compactionSignal{
 			segmentID:    1,
 			collectionID: s.collectionID,

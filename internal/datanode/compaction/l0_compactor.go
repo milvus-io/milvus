@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -31,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,8 +50,7 @@ type LevelZeroCompactionTask struct {
 	io.BinlogIO
 
 	allocator allocator.Allocator
-	metacache metacache.MetaCache
-	syncmgr   syncmgr.SyncManager
+	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
 
@@ -65,8 +65,7 @@ func NewLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
-	metaCache metacache.MetaCache,
-	syncmgr syncmgr.SyncManager,
+	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
@@ -76,8 +75,7 @@ func NewLevelZeroCompactionTask(
 
 		BinlogIO:  binlogIO,
 		allocator: alloc,
-		metacache: metaCache,
-		syncmgr:   syncmgr,
+		cm:        cm,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("levelzero compaction"),
 		done:      make(chan struct{}, 1),
@@ -102,11 +100,9 @@ func (t *LevelZeroCompactionTask) GetChannelName() string {
 }
 
 func (t *LevelZeroCompactionTask) GetCollection() int64 {
-	return t.metacache.Collection()
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
-
-// Do nothing for levelzero compaction
-func (t *LevelZeroCompactionTask) InjectDone() {}
 
 func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
@@ -123,13 +119,10 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		return s.Level == datapb.SegmentLevel_L0
 	})
 
-	targetSegIDs := lo.FilterMap(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) (int64, bool) {
-		if s.Level == datapb.SegmentLevel_L1 {
-			return s.GetSegmentID(), true
-		}
-		return 0, false
+	targetSegments := lo.Filter(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return s.Level != datapb.SegmentLevel_L0
 	})
-	if len(targetSegIDs) == 0 {
+	if len(targetSegments) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
@@ -157,7 +150,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	}
 
 	batchSize := getMaxBatchSize(totalSize)
-	resultSegments, err := t.process(ctx, batchSize, targetSegIDs, lo.Values(totalDeltalogs)...)
+	resultSegments, err := t.process(ctx, batchSize, targetSegments, lo.Values(totalDeltalogs)...)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +234,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
 	allDelta *storage.DeleteData,
-	targetSegIDs []int64,
+	segmentBfs map[int64]*metacache.BloomFilterSet,
 ) (map[int64]*SegmentDeltaWriter, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
@@ -250,10 +243,8 @@ func (t *LevelZeroCompactionTask) splitDelta(
 		return segment.GetSegmentID(), segment
 	})
 
-	// segments shall be safe to read outside
-	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
 	// spilt all delete data to segments
-	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segments)
+	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
 
 	var err error
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
@@ -295,7 +286,7 @@ type BatchApplyRet = struct {
 	Segment2Hits map[int64][]bool
 }
 
-func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs []*metacache.SegmentInfo) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -303,9 +294,8 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaDa
 	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
 		segment2Hits := make(map[int64][]bool, 0)
 		lc := storage.NewBatchLocationsCache(pks)
-		for _, s := range segmentBfs {
-			segmentID := s.SegmentID()
-			hits := s.GetBloomFilterSet().BatchPkExist(lc)
+		for segmentID, bf := range segmentBfs {
+			hits := bf.BatchPkExist(lc)
 			segment2Hits[segmentID] = hits
 		}
 		return segment2Hits
@@ -338,7 +328,7 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaDa
 	return retMap
 }
 
-func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
@@ -366,11 +356,16 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 		}
 
 		batchSegments := targetSegments[left:right]
-		batchSegWriter, err := t.splitDelta(ctx, allDelta, batchSegments)
+		segmentBFs, err := t.loadBF(batchSegments)
 		if err != nil {
-			log.Warn("L0 compaction splitDelta fail", zap.Error(err))
 			return nil, err
 		}
+
+		batchSegWriter, err := t.splitDelta(ctx, allDelta, segmentBFs)
+		if err != nil {
+			return nil, err
+		}
+
 		batchResults, err := t.serializeUpload(ctx, batchSegWriter)
 		if err != nil {
 			log.Warn("L0 compaction serialize upload fail", zap.Error(err))
@@ -408,4 +403,42 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 	}
 
 	return dData, nil
+}
+
+func (t *LevelZeroCompactionTask) loadBF(targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
+	log := log.Ctx(t.ctx).With(
+		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.String("type", t.plan.GetType().String()),
+	)
+
+	var (
+		futures = make([]*conc.Future[any], 0, len(targetSegments))
+		pool    = io.GetOrCreateStatsPool()
+
+		mu  = &sync.Mutex{}
+		bfs = make(map[int64]*metacache.BloomFilterSet)
+	)
+
+	for _, segment := range targetSegments {
+		segment := segment
+		future := pool.Submit(func() (any, error) {
+			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
+				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			pks, err := util.LoadStats(t.ctx, t.cm,
+				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			if err != nil {
+				log.Warn("failed to load segment stats log", zap.Error(err))
+				return err, err
+			}
+			bf := metacache.NewBloomFilterSet(pks...)
+			mu.Lock()
+			defer mu.Unlock()
+			bfs[segment.GetSegmentID()] = bf
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	err := conc.AwaitAll(futures...)
+	return bfs, err
 }
