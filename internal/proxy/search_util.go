@@ -37,7 +37,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 	}
-	if err := validateTopKLimit(topK); err != nil {
+	if err := validateLimit(topK); err != nil {
 		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
 	}
 
@@ -51,7 +51,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 
 			if offset != 0 {
-				if err := validateTopKLimit(offset); err != nil {
+				if err := validateLimit(offset); err != nil {
 					return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 				}
 			}
@@ -59,7 +59,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	queryTopK := topK + offset
-	if err := validateTopKLimit(queryTopK); err != nil {
+	if err := validateLimit(queryTopK); err != nil {
 		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
