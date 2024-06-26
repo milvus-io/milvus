@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -57,13 +58,10 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	schema := &schemapb.CollectionSchema{}
 	task := &ImportTask{
 		req: &datapb.ImportRequest{
-			Ts: 1000,
-			AutoIDRange: &datapb.AutoIDRange{
-				Begin: 0,
-				End:   count,
-			},
+			Ts:     1000,
 			Schema: schema,
 		},
+		allocator: allocator.NewStaticAllocator(0, count*2),
 	}
 
 	pkField.DataType = schemapb.DataType_Int64
