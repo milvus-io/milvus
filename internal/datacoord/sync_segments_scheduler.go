@@ -98,7 +98,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 				continue
 			}
 			for _, partitionID := range collInfo.Partitions {
-				if err := sss.SyncSegments(collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
+				if err := sss.SyncFlushedSegments(collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
 					log.Warn("sync segment with channel failed, retry next ticker",
 						zap.Int64("collectionID", collID),
 						zap.Int64("partitionID", partitionID),
@@ -111,11 +111,11 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 	}
 }
 
-func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
+func (sss *SyncSegmentsScheduler) SyncFlushedSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
 	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && isSegmentHealthy(info)
+		return info.GetPartitionID() == partitionID && isFlush(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,
@@ -125,15 +125,16 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	}
 
 	for _, seg := range segments {
+		req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
+			SegmentId: seg.GetID(),
+			State:     seg.GetState(),
+			Level:     seg.GetLevel(),
+			NumOfRows: seg.GetNumOfRows(),
+		}
 		for _, statsLog := range seg.GetStatslogs() {
 			if statsLog.GetFieldID() == pkFieldID {
-				req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
-					SegmentId:  seg.GetID(),
-					PkStatsLog: statsLog,
-					State:      seg.GetState(),
-					Level:      seg.GetLevel(),
-					NumOfRows:  seg.GetNumOfRows(),
-				}
+				req.SegmentInfos[seg.ID].PkStatsLog = statsLog
+				break
 			}
 		}
 	}

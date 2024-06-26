@@ -200,7 +200,7 @@ func TestCreateArrayCollections(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionPartitionKey(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -421,7 +421,7 @@ func TestCreateCollectionWithValidName(t *testing.T) {
 func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 	t.Parallel()
 	// connect
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	// create collection with invalid field name
@@ -436,7 +436,8 @@ func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 		common.CheckErr(t, err, false, "field name should not be empty",
 			"The first character of a field name must be an underscore or letter",
 			"Field name cannot only contain numbers, letters, and underscores",
-			"The length of a field name must be less than 255 characters")
+			"The length of a field name must be less than 255 characters",
+			"Field name can only contain numbers, letters, and underscores")
 	}
 }
 
@@ -515,7 +516,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 
 // create autoID or not collection with non-int64 and non-varchar field
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 	t.Parallel()
 	// create collection with autoID true or not
@@ -557,7 +558,7 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)

@@ -394,3 +394,22 @@ func GenDynamicColumnData(start int, nb int) []column.Column {
 	}
 	return data
 }
+
+func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *column.ColumnJSONBytes {
+	values := make([][]byte, 0, nb)
+	for i := 0; i < nb; i++ {
+		m := make(map[string]interface{})
+		for _, c := range columns {
+			// range guaranteed
+			m[c.Name()], _ = c.Get(i)
+		}
+		bs, err := json.Marshal(&m)
+		if err != nil {
+			log.Fatal("MergeColumnsToDynamic failed:", zap.Error(err))
+		}
+		values = append(values, bs)
+	}
+	jsonColumn := column.NewColumnJSONBytes(columnName, values).WithIsDynamic(true)
+
+	return jsonColumn
+}

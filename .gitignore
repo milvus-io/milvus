@@ -18,7 +18,6 @@ internal/core/build/*
 **/.idea/*
 internal/msgstream/pulsarms/client-cpp/build/
 internal/msgstream/pulsarms/client-cpp/build/*
-internal/kv/rocksdb/cwrapper/output/
 tests/python_client/default.etcd/
 
 # vscode generated files
@@ -97,7 +96,6 @@ deployments/docker/gpu/*/volumes
 
 # rocksdb
 cwrapper_rocksdb_build/
-internal/kv/rocksdb/cwrapper/
 
 # local file data
 **/data/*

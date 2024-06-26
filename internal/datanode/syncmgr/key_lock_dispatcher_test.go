@@ -1,6 +1,7 @@
 package syncmgr
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -41,22 +42,24 @@ type KeyLockDispatcherSuite struct {
 }
 
 func (s *KeyLockDispatcherSuite) TestKeyLock() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	d := newKeyLockDispatcher[int64](2)
 
 	done := make(chan struct{})
 	t1 := NewMockTask(s.T())
-	t1.EXPECT().Run().Run(func() {
+	t1.EXPECT().Run(ctx).Run(func(_ context.Context) {
 		<-done
 	}).Return(nil)
 	t2 := NewMockTask(s.T())
-	t2.EXPECT().Run().Return(nil)
+	t2.EXPECT().Run(ctx).Return(nil)
 
 	sig := atomic.NewBool(false)
 
-	d.Submit(1, t1)
+	d.Submit(ctx, 1, t1)
 
 	go func() {
-		d.Submit(1, t2)
+		d.Submit(ctx, 1, t2)
 
 		sig.Store(true)
 	}()
@@ -69,23 +72,25 @@ func (s *KeyLockDispatcherSuite) TestKeyLock() {
 }
 
 func (s *KeyLockDispatcherSuite) TestCap() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	d := newKeyLockDispatcher[int64](1)
 
 	t1 := NewMockTask(s.T())
 	t2 := NewMockTask(s.T())
 
 	done := make(chan struct{})
-	t1.EXPECT().Run().Run(func() {
+	t1.EXPECT().Run(ctx).Run(func(_ context.Context) {
 		<-done
 	}).Return(nil)
-	t2.EXPECT().Run().Return(nil)
+	t2.EXPECT().Run(ctx).Return(nil)
 	sig := atomic.NewBool(false)
 
-	d.Submit(1, t1)
+	d.Submit(ctx, 1, t1)
 
 	go func() {
 		// defer t2.done()
-		d.Submit(2, t2)
+		d.Submit(ctx, 2, t2)
 
 		sig.Store(true)
 	}()

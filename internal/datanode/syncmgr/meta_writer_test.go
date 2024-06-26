@@ -1,6 +1,7 @@
 package syncmgr
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -34,6 +35,8 @@ func (s *MetaWriterSuite) SetupTest() {
 }
 
 func (s *MetaWriterSuite) TestNormalSave() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 
 	bfs := metacache.NewBloomFilterSet()
@@ -44,11 +47,13 @@ func (s *MetaWriterSuite) TestNormalSave() {
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
-	err := s.writer.UpdateSync(task)
+	err := s.writer.UpdateSync(ctx, task)
 	s.NoError(err)
 }
 
 func (s *MetaWriterSuite) TestReturnError() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
 	bfs := metacache.NewBloomFilterSet()
@@ -58,7 +63,7 @@ func (s *MetaWriterSuite) TestReturnError() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
-	err := s.writer.UpdateSync(task)
+	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
 }
 

@@ -650,8 +650,10 @@ common:
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
+  # clustering key/compaction related
   usePartitionKeyAsClusteringKey: false
   useVectorAsClusteringKey: false
+  enableVectorClusteringKey: false
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

@@ -113,7 +113,7 @@ func (t *SyncTask) HandleError(err error) {
 	}
 }
 
-func (t *SyncTask) Run() (err error) {
+func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
 	log := t.getLogger()
@@ -145,7 +145,7 @@ func (t *SyncTask) Run() (err error) {
 	t.processStatsBlob()
 	t.processDeltaBlob()
 
-	err = t.writeLogs()
+	err = t.writeLogs(ctx)
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
 		return err
@@ -164,7 +164,7 @@ func (t *SyncTask) Run() (err error) {
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
-		err = t.writeMeta()
+		err = t.writeMeta(ctx)
 		if err != nil {
 			log.Warn("failed to save serialized data into storage", zap.Error(err))
 			return err
@@ -312,15 +312,19 @@ func (t *SyncTask) appendDeltalog(deltalog *datapb.Binlog) {
 }
 
 // writeLogs writes log files (binlog/deltalog/statslog) into storage via chunkManger.
-func (t *SyncTask) writeLogs() error {
-	return retry.Do(context.Background(), func() error {
-		return t.chunkManager.MultiWrite(context.Background(), t.segmentData)
+func (t *SyncTask) writeLogs(ctx context.Context) error {
+	return retry.Handle(ctx, func() (bool, error) {
+		err := t.chunkManager.MultiWrite(ctx, t.segmentData)
+		if err != nil {
+			return !merr.IsCanceledOrTimeout(err), err
+		}
+		return false, nil
 	}, t.writeRetryOpts...)
 }
 
 // writeMeta updates segments via meta writer in option.
-func (t *SyncTask) writeMeta() error {
-	return t.metaWriter.UpdateSync(t)
+func (t *SyncTask) writeMeta(ctx context.Context) error {
+	return t.metaWriter.UpdateSync(ctx, t)
 }
 
 func (t *SyncTask) SegmentID() int64 {

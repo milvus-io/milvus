@@ -19,9 +19,9 @@ import (
 
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
-	UpdateSync(*SyncTask) error
+	UpdateSync(context.Context, *SyncTask) error
 	UpdateSyncV2(*SyncTaskV2) error
-	DropChannel(string) error
+	DropChannel(context.Context, string) error
 }
 
 type brokerMetaWriter struct {
@@ -38,7 +38,7 @@ func BrokerMetaWriter(broker broker.Broker, serverID int64, opts ...retry.Option
 	}
 }
 
-func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
+func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error {
 	var (
 		checkPoints       = []*datapb.CheckPoint{}
 		deltaFieldBinlogs = []*datapb.FieldBinlog{}
@@ -102,8 +102,8 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Channel:        pack.channelName,
 		SegLevel:       pack.level,
 	}
-	err := retry.Do(context.Background(), func() error {
-		err := b.broker.SaveBinlogPaths(context.Background(), req)
+	err := retry.Handle(ctx, func() (bool, error) {
+		err := b.broker.SaveBinlogPaths(ctx, req)
 		// Segment not found during stale segment flush. Segment might get compacted already.
 		// Stop retry and still proceed to the end, ignoring this error.
 		if !pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
@@ -112,19 +112,19 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 			log.Warn("failed to SaveBinlogPaths",
 				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
-			return nil
+			return false, nil
 		}
 		// meta error, datanode handles a virtual channel does not belong here
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", pack.channelName))
-			return nil
+			return false, nil
 		}
 
 		if err != nil {
-			return err
+			return !merr.IsCanceledOrTimeout(err), err
 		}
 
-		return nil
+		return false, nil
 	}, b.opts...)
 	if err != nil {
 		log.Warn("failed to SaveBinlogPaths",
@@ -214,15 +214,19 @@ func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
 	return err
 }
 
-func (b *brokerMetaWriter) DropChannel(channelName string) error {
-	err := retry.Do(context.Background(), func() error {
+func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) error {
+	err := retry.Handle(ctx, func() (bool, error) {
 		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithSourceID(b.serverID),
 			),
 			ChannelName: channelName,
 		})
-		return merr.CheckRPCCall(status, err)
+		err = merr.CheckRPCCall(status, err)
+		if err != nil {
+			return !merr.IsCanceledOrTimeout(err), err
+		}
+		return false, nil
 	}, b.opts...)
 	if err != nil {
 		log.Warn("failed to DropChannel",

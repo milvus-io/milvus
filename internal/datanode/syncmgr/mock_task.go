@@ -3,6 +3,8 @@
 package syncmgr
 
 import (
+	context "context"
+
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -137,13 +139,13 @@ func (_c *MockTask_HandleError_Call) RunAndReturn(run func(error)) *MockTask_Han
 	return _c
 }
 
-// Run provides a mock function with given fields:
-func (_m *MockTask) Run() error {
-	ret := _m.Called()
+// Run provides a mock function with given fields: _a0
+func (_m *MockTask) Run(_a0 context.Context) error {
+	ret := _m.Called(_a0)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(_a0)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -157,13 +159,14 @@ type MockTask_Run_Call struct {
 }
 
 // Run is a helper method to define mock.On call
-func (_e *MockTask_Expecter) Run() *MockTask_Run_Call {
-	return &MockTask_Run_Call{Call: _e.mock.On("Run")}
+//   - _a0 context.Context
+func (_e *MockTask_Expecter) Run(_a0 interface{}) *MockTask_Run_Call {
+	return &MockTask_Run_Call{Call: _e.mock.On("Run", _a0)}
 }
 
-func (_c *MockTask_Run_Call) Run(run func()) *MockTask_Run_Call {
+func (_c *MockTask_Run_Call) Run(run func(_a0 context.Context)) *MockTask_Run_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -173,7 +176,7 @@ func (_c *MockTask_Run_Call) Return(_a0 error) *MockTask_Run_Call {
 	return _c
 }
 
-func (_c *MockTask_Run_Call) RunAndReturn(run func() error) *MockTask_Run_Call {
+func (_c *MockTask_Run_Call) RunAndReturn(run func(context.Context) error) *MockTask_Run_Call {
 	_c.Call.Return(run)
 	return _c
 }

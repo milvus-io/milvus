@@ -27,6 +27,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -79,7 +80,7 @@ func NewClient(url string, options ...nats.Option) (*nmqClient, error) {
 }
 
 // CreateProducer creates a producer for natsmq client
-func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+func (nc *nmqClient) CreateProducer(options common.ProducerOptions) (mqwrapper.Producer, error) {
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -151,9 +152,9 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	position := options.SubscriptionInitialPosition
 	// TODO: should we only allow exclusive subscribe? Current logic allows double subscribe.
 	switch position {
-	case mqwrapper.SubscriptionPositionLatest:
+	case common.SubscriptionPositionLatest:
 		sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.DeliverNew())
-	case mqwrapper.SubscriptionPositionEarliest:
+	case common.SubscriptionPositionEarliest:
 		sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.DeliverAll())
 	}
 	if err != nil {
@@ -176,12 +177,12 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 }
 
 // EarliestMessageID returns the earliest message ID for nmq client
-func (nc *nmqClient) EarliestMessageID() mqwrapper.MessageID {
+func (nc *nmqClient) EarliestMessageID() common.MessageID {
 	return &nmqID{messageID: 1}
 }
 
 // StringToMsgID converts string id to MessageID
-func (nc *nmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
+func (nc *nmqClient) StringToMsgID(id string) (common.MessageID, error) {
 	rID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse string to MessageID")
@@ -190,7 +191,7 @@ func (nc *nmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 }
 
 // BytesToMsgID converts a byte array to messageID
-func (nc *nmqClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+func (nc *nmqClient) BytesToMsgID(id []byte) (common.MessageID, error) {
 	rID := DeserializeNmqID(id)
 	return &nmqID{messageID: rID}, nil
 }
