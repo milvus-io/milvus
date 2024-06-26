@@ -29,8 +29,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -186,7 +186,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 
 		if params.PreCreatedTopicEnabled.GetAsBool() {
 			subName := fmt.Sprintf("pre-created-topic-check-%s", name)
-			ms.AsConsumer(ctx, []string{name}, subName, mqwrapper.SubscriptionPositionUnknown)
+			ms.AsConsumer(ctx, []string{name}, subName, common.SubscriptionPositionUnknown)
 			// check if topic is existed
 			// kafka and rmq will err if the topic does not yet exist, pulsar will not
 			// allow topics is not empty, for the reason that when restart or upgrade, the topic is not empty

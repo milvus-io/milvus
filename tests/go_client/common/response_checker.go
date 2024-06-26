@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 				}
 			}
 			if !contains {
-				t.FailNow()
+				t.Fatalf("CheckErr failed, actualErr doesn contains any expErrorMsg, please check test cases!")
 			}
 		}
 	}
@@ -60,40 +61,64 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeVarChar:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarChar).Data(), columnB.(*column.ColumnVarChar).Data())
 	case entity.FieldTypeJSON:
-		log.Debug("columnA", zap.Any("data", columnA.(*column.ColumnJSONBytes).Data()))
-		log.Debug("columnB", zap.Any("data", columnB.(*column.ColumnJSONBytes).Data()))
-		require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
+		log.Debug("data", zap.String("name", columnA.Name()), zap.Any("type", columnA.Type()), zap.Any("data", columnA.FieldData()))
+		log.Debug("data", zap.String("name", columnB.Name()), zap.Any("type", columnB.Type()), zap.Any("data", columnB.FieldData()))
+		require.Equal(t, reflect.TypeOf(columnA), reflect.TypeOf(columnB))
+		switch columnA.(type) {
+		case *column.ColumnDynamic:
+			require.ElementsMatch(t, columnA.(*column.ColumnDynamic).Data(), columnB.(*column.ColumnDynamic).Data())
+		case *column.ColumnJSONBytes:
+			require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
+		}
 	case entity.FieldTypeFloatVector:
 		require.ElementsMatch(t, columnA.(*column.ColumnFloatVector).Data(), columnB.(*column.ColumnFloatVector).Data())
 	case entity.FieldTypeBinaryVector:
 		require.ElementsMatch(t, columnA.(*column.ColumnBinaryVector).Data(), columnB.(*column.ColumnBinaryVector).Data())
+	case entity.FieldTypeFloat16Vector:
+		require.ElementsMatch(t, columnA.(*column.ColumnFloat16Vector).Data(), columnB.(*column.ColumnFloat16Vector).Data())
+	case entity.FieldTypeBFloat16Vector:
+		require.ElementsMatch(t, columnA.(*column.ColumnBFloat16Vector).Data(), columnB.(*column.ColumnBFloat16Vector).Data())
+	case entity.FieldTypeSparseVector:
+		require.ElementsMatch(t, columnA.(*column.ColumnSparseFloatVector).Data(), columnB.(*column.ColumnSparseFloatVector).Data())
 	case entity.FieldTypeArray:
-		log.Info("TODO support column element type")
+		EqualArrayColumn(t, columnA, columnB)
 	default:
 		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool,
-			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32, entity.FieldTypeInt64,
-			entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString, entity.FieldTypeVarChar,
-			entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
+			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32,
+			entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString,
+			entity.FieldTypeVarChar, entity.FieldTypeArray, entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
 		}))
 	}
 }
 
-// CheckOutputFields check query output fields
-func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.Column) {
-	actualFields := make([]string, 0)
-	for _, actualColumn := range actualColumns {
-		actualFields = append(actualFields, actualColumn.Name())
-	}
-	require.ElementsMatchf(t, expFields, actualFields, fmt.Sprintf("Expected search output fields: %v, actual: %v", expFields, actualFields))
-}
-
-// CheckSearchResult check search result, check nq, topk, ids, score
-func CheckSearchResult(t *testing.T, actualSearchResults []clientv2.ResultSet, expNq int, expTopK int) {
-	require.Equal(t, len(actualSearchResults), expNq)
-	require.Len(t, actualSearchResults, expNq)
-	for _, actualSearchResult := range actualSearchResults {
-		require.Equal(t, actualSearchResult.ResultCount, expTopK)
+// EqualColumn assert field data is equal of two columns
+func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column) {
+	require.Equal(t, columnA.Name(), columnB.Name())
+	require.IsType(t, columnA.Type(), entity.FieldTypeArray)
+	require.IsType(t, columnB.Type(), entity.FieldTypeArray)
+	switch columnA.(type) {
+	case *column.ColumnBoolArray:
+		require.ElementsMatch(t, columnA.(*column.ColumnBoolArray).Data(), columnB.(*column.ColumnBoolArray).Data())
+	case *column.ColumnInt8Array:
+		require.ElementsMatch(t, columnA.(*column.ColumnInt8Array).Data(), columnB.(*column.ColumnInt8Array).Data())
+	case *column.ColumnInt16Array:
+		require.ElementsMatch(t, columnA.(*column.ColumnInt16Array).Data(), columnB.(*column.ColumnInt16Array).Data())
+	case *column.ColumnInt32Array:
+		require.ElementsMatch(t, columnA.(*column.ColumnInt32Array).Data(), columnB.(*column.ColumnInt32Array).Data())
+	case *column.ColumnInt64Array:
+		require.ElementsMatch(t, columnA.(*column.ColumnInt64Array).Data(), columnB.(*column.ColumnInt64Array).Data())
+	case *column.ColumnFloatArray:
+		require.ElementsMatch(t, columnA.(*column.ColumnFloatArray).Data(), columnB.(*column.ColumnFloatArray).Data())
+	case *column.ColumnDoubleArray:
+		require.ElementsMatch(t, columnA.(*column.ColumnDoubleArray).Data(), columnB.(*column.ColumnDoubleArray).Data())
+	case *column.ColumnVarCharArray:
+		require.ElementsMatch(t, columnA.(*column.ColumnVarCharArray).Data(), columnB.(*column.ColumnVarCharArray).Data())
+	default:
+		log.Info("Support array element type is:", zap.Any("FieldType", []entity.FieldType{
+			entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
+			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar,
+		}))
 	}
 }
 
@@ -110,5 +135,42 @@ func CheckInsertResult(t *testing.T, expIds column.Column, insertRes clientv2.In
 		require.ElementsMatch(t, actualIds.(*column.ColumnVarChar).Data(), expIds.(*column.ColumnVarChar).Data())
 	default:
 		log.Info("The primary field only support ", zap.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
+	}
+}
+
+// CheckOutputFields check query output fields
+func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.Column) {
+	actualFields := make([]string, 0)
+	for _, actualColumn := range actualColumns {
+		actualFields = append(actualFields, actualColumn.Name())
+	}
+	log.Debug("CheckOutputFields", zap.Any("expFields", expFields), zap.Any("actualFields", actualFields))
+	require.ElementsMatchf(t, expFields, actualFields, fmt.Sprintf("Expected search output fields: %v, actual: %v", expFields, actualFields))
+}
+
+// CheckSearchResult check search result, check nq, topk, ids, score
+func CheckSearchResult(t *testing.T, actualSearchResults []clientv2.ResultSet, expNq int, expTopK int) {
+	require.Equal(t, len(actualSearchResults), expNq)
+	require.Len(t, actualSearchResults, expNq)
+	for _, actualSearchResult := range actualSearchResults {
+		require.Equal(t, actualSearchResult.ResultCount, expTopK)
+	}
+}
+
+// CheckQueryResult check query result, column name, type and field
+func CheckQueryResult(t *testing.T, expColumns []column.Column, actualColumns []column.Column) {
+	require.Equal(t, len(actualColumns), len(expColumns),
+		"The len of actual columns %d should greater or equal to the expected columns %d", len(actualColumns), len(expColumns))
+	for _, expColumn := range expColumns {
+		exist := false
+		for _, actualColumn := range actualColumns {
+			if expColumn.Name() == actualColumn.Name() {
+				exist = true
+				EqualColumn(t, expColumn, actualColumn)
+			}
+		}
+		if !exist {
+			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+		}
 	}
 }

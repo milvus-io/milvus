@@ -19,11 +19,11 @@ package pulsar
 import (
 	"github.com/apache/pulsar-client-go/pulsar"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 // Check pulsarMessage implements ConsumerMessage
-var _ mqwrapper.Message = (*pulsarMessage)(nil)
+var _ common.Message = (*pulsarMessage)(nil)
 
 type pulsarMessage struct {
 	msg pulsar.Message
@@ -41,7 +41,7 @@ func (pm *pulsarMessage) Payload() []byte {
 	return pm.msg.Payload()
 }
 
-func (pm *pulsarMessage) ID() mqwrapper.MessageID {
+func (pm *pulsarMessage) ID() common.MessageID {
 	id := pm.msg.ID()
 	pid := &pulsarID{messageID: id}
 	return pid

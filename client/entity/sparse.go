@@ -83,7 +83,7 @@ func (e sliceSparseEmbedding) Swap(i, j int) {
 	e.values[i], e.values[j] = e.values[j], e.values[i]
 }
 
-func deserializeSliceSparceEmbedding(bs []byte) (sliceSparseEmbedding, error) {
+func DeserializeSliceSparseEmbedding(bs []byte) (sliceSparseEmbedding, error) {
 	length := len(bs)
 	if length%8 != 0 {
 		return sliceSparseEmbedding{}, errors.New("not valid sparse embedding bytes")

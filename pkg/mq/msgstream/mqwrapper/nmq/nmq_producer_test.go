@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
 func TestNatsMQProducer(t *testing.T) {
@@ -30,7 +30,7 @@ func TestNatsMQProducer(t *testing.T) {
 	assert.NoError(t, err)
 	defer c.Close()
 	topic := t.Name()
-	pOpts := mqwrapper.ProducerOptions{Topic: topic}
+	pOpts := common.ProducerOptions{Topic: topic}
 
 	// Check Topic()
 	p, err := c.CreateProducer(pOpts)
@@ -38,7 +38,7 @@ func TestNatsMQProducer(t *testing.T) {
 	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
 
 	// Check Send()
-	msg := &mqwrapper.ProducerMessage{
+	msg := &common.ProducerMessage{
 		Payload:    []byte{},
 		Properties: map[string]string{},
 	}

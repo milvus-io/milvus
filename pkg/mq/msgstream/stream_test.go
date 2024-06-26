@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
@@ -39,7 +40,7 @@ func testStreamOperation(t *testing.T, mqClient mqwrapper.Client) {
 func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+	producer, err := mqClient.CreateProducer(common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -48,7 +49,7 @@ func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	defer consumer.Close()
@@ -60,7 +61,7 @@ func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+	producer, err := mqClient.CreateProducer(common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -71,7 +72,7 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
+		SubscriptionInitialPosition: common.SubscriptionPositionLatest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -89,7 +90,7 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+	producer, err := mqClient.CreateProducer(common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -101,7 +102,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
+		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -123,7 +124,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+	producer, err := mqClient.CreateProducer(common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -135,7 +136,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
+		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -157,7 +158,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(mqwrapper.ProducerOptions{
+	producer, err := mqClient.CreateProducer(common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -169,7 +170,7 @@ func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) 
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
+		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -189,8 +190,8 @@ func testSendAndRecv(t *testing.T, p mqwrapper.Producer, c mqwrapper.Consumer) {
 	msg := generateRandMessage(1024*5, 10)
 
 	var (
-		producerIDs []mqwrapper.MessageID
-		consumerIDs []mqwrapper.MessageID
+		producerIDs []common.MessageID
+		consumerIDs []common.MessageID
 	)
 
 	wg := sync.WaitGroup{}
@@ -212,7 +213,7 @@ func testSendAndRecv(t *testing.T, p mqwrapper.Producer, c mqwrapper.Consumer) {
 	assert.Empty(t, recvMessages(context.Background(), t, c, msg, time.Second))
 }
 
-func compareMultiIDs(t *testing.T, producerIDs []mqwrapper.MessageID, consumerIDs []mqwrapper.MessageID) {
+func compareMultiIDs(t *testing.T, producerIDs []common.MessageID, consumerIDs []common.MessageID) {
 	assert.Equal(t, len(producerIDs), len(consumerIDs))
 	for i := range producerIDs {
 		compare, err := producerIDs[i].Equal(consumerIDs[i].Serialize())
@@ -230,10 +231,10 @@ func generateRandMessage(m int, n int) []string {
 	return cases
 }
 
-func sendMessages(ctx context.Context, t *testing.T, p mqwrapper.Producer, testCase []string) []mqwrapper.MessageID {
-	ids := make([]mqwrapper.MessageID, 0, len(testCase))
+func sendMessages(ctx context.Context, t *testing.T, p mqwrapper.Producer, testCase []string) []common.MessageID {
+	ids := make([]common.MessageID, 0, len(testCase))
 	for _, s := range testCase {
-		id, err := p.Send(ctx, &mqwrapper.ProducerMessage{
+		id, err := p.Send(ctx, &common.ProducerMessage{
 			Payload: []byte(s),
 		})
 		assert.NoError(t, err)
@@ -242,8 +243,8 @@ func sendMessages(ctx context.Context, t *testing.T, p mqwrapper.Producer, testC
 	return ids
 }
 
-func recvMessages(ctx context.Context, t *testing.T, c mqwrapper.Consumer, testCase []string, timeout time.Duration) []mqwrapper.MessageID {
-	ids := make([]mqwrapper.MessageID, 0, len(testCase))
+func recvMessages(ctx context.Context, t *testing.T, c mqwrapper.Consumer, testCase []string, timeout time.Duration) []common.MessageID {
+	ids := make([]common.MessageID, 0, len(testCase))
 	timeoutTicker := time.NewTicker(timeout)
 	defer timeoutTicker.Stop()
 	for {
