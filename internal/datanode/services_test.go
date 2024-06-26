@@ -229,6 +229,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 
 	s.Run("unknown CompactionType", func() {
@@ -243,11 +244,13 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
+			BeginLogID: 100,
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 
 	s.Run("compact_clustering", func() {
@@ -262,11 +265,60 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			Type: datapb.CompactionType_ClusteringCompaction,
+			Type:                 datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:           100,
+			PreAllocatedSegments: &datapb.IDRange{Begin: 100, End: 200},
 		}
 
-		_, err := node.CompactionV2(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
+		s.True(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("beginLogID is invalid", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type:       datapb.CompactionType_ClusteringCompaction,
+			BeginLogID: 0,
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("pre-allocated segmentID range is invalid", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type:                 datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:           100,
+			PreAllocatedSegments: &datapb.IDRange{Begin: 0, End: 0},
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 }
 
