@@ -820,12 +820,11 @@ func (rm *ResourceManager) unassignNode(node int64) (string, error) {
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
 		if err := rm.catalog.SaveResourceGroup(rg.GetMeta()); err != nil {
-			log.Warn("unassign node from resource group",
+			log.Fatal("unassign node from resource group",
 				zap.String("rgName", rg.GetName()),
 				zap.Int64("node", node),
 				zap.Error(err),
 			)
-			return "", merr.WrapErrResourceGroupServiceAvailable()
 		}
 
 		// Commit updates to memory.
