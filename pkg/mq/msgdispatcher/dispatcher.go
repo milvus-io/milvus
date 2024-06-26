@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -234,7 +235,7 @@ func (d *Dispatcher) work() {
 					}
 				}
 				if err != nil {
-					t.pos = pack.StartPositions[0]
+					t.pos = proto.Clone(pack.StartPositions[0]).(*Pos)
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
 					d.lagTargets.Insert(t.vchannel, t)
