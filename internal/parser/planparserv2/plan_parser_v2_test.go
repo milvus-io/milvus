@@ -385,7 +385,7 @@ func TestExpr_Combinations(t *testing.T) {
 		`(Int64Field / 7 != 8) or (Int64Field % 10 == 9)`,
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
-		`A > 50 OR B < 40`,
+		`A > 50 or B < 40`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1242,6 +1242,55 @@ func BenchmarkMarshalGVInt(b *testing.B) {
 			},
 		}
 	})
+	pn := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_TermExpr{
+						TermExpr: &planpb.TermExpr{
+							ColumnInfo: &planpb.ColumnInfo{},
+							Values:     values,
+							// IsoValues:  isoValues,
+							// Isomorphic: true,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(b.N),
+			},
+		},
+	}
+
+	var bs []byte
+	var err error
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bs, err = proto.Marshal(pn)
+	}
+	assert.NoError(b, err)
+	assert.NotNil(b, bs)
+}
+
+func BenchmarkMarshalGVIntArr(b *testing.B) {
+	data := make([]int64, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		data = append(data, int64(i))
+	}
+	values := []*planpb.GenericValue{
+		{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					Array: lo.Map(data, func(id int64, _ int) *planpb.GenericValue {
+						return &planpb.GenericValue{
+							Val: &planpb.GenericValue_Int64Val{
+								Int64Val: id,
+							},
+						}
+					}),
+				},
+			},
+		},
+	}
 	pn := &planpb.PlanNode{
 		Node: &planpb.PlanNode_Query{
 			Query: &planpb.QueryPlanNode{
