@@ -798,6 +798,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		resp.Status = merr.Status(err2)
 		return resp, nil
 	}
+	result.Status = merr.Success()
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.
