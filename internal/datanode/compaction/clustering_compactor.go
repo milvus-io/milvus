@@ -771,6 +771,7 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 
 	if err := t.binlogIO.Upload(ctx, kvs); err != nil {
 		log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
+		return err
 	}
 
 	for fID, path := range partialBinlogs {

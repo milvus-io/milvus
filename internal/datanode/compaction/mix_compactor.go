@@ -151,6 +151,7 @@ func (t *mixCompactionTask) merge(
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
 			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
+			return nil, err
 		}
 		downloadTimeCost += time.Since(downloadStart)
 
@@ -205,6 +206,7 @@ func (t *mixCompactionTask) merge(
 				uploadStart := time.Now()
 				if err := t.binlogIO.Upload(ctx, kvs); err != nil {
 					log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
+					return nil, err
 				}
 				uploadTimeCost += time.Since(uploadStart)
 				mergeFieldBinlogs(allBinlogs, partialBinlogs)
@@ -226,6 +228,7 @@ func (t *mixCompactionTask) merge(
 		uploadStart := time.Now()
 		if err := t.binlogIO.Upload(ctx, kvs); err != nil {
 			log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
+			return nil, err
 		}
 		uploadTimeCost += time.Since(uploadStart)
 
