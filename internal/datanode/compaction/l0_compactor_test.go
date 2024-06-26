@@ -79,6 +79,36 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.dBlob = blob.GetValue()
 }
 
+func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
+	tests := []struct {
+		baseMem        float64
+		memLimit       float64
+		batchSizeLimit string
+
+		expected    int
+		description string
+	}{
+		{10, 100, "-1", 10, "no limitation on maxBatchSize"},
+		{10, 100, "0", 10, "no limitation on maxBatchSize v2"},
+		{10, 100, "11", 10, "maxBatchSize == 11"},
+		{10, 100, "1", 1, "maxBatchSize == 1"},
+		{10, 12, "-1", 1, "no limitation on maxBatchSize"},
+		{10, 12, "100", 1, "maxBatchSize == 100"},
+	}
+
+	maxSizeK := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.Key
+	defer paramtable.Get().Reset(maxSizeK)
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			paramtable.Get().Save(maxSizeK, test.batchSizeLimit)
+			defer paramtable.Get().Reset(maxSizeK)
+
+			actual := getMaxBatchSize(test.baseMem, test.memLimit)
+			s.Equal(test.expected, actual)
+		})
+	}
+}
+
 func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 	plan := &datapb.CompactionPlan{
 		PlanID: 19530,

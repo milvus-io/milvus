@@ -517,8 +517,6 @@ dataNode:
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
-    # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 10
     updateChannelCheckpointMaxParallel: 10
     updateChannelCheckpointInterval: 60 # the interval duration(in seconds) for datanode to update channel checkpoint of each channel
     updateChannelCheckpointRPCTimeout: 20 # timeout in seconds for UpdateChannelCheckpoint RPC call
@@ -530,6 +528,7 @@ dataNode:
     readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
   compaction:
     levelZeroBatchMemoryRatio: 0.05 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
+    levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   ip:  # if not specified, use the first unicastable address
   port: 21124
