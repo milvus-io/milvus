@@ -5,8 +5,8 @@ shared:
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
   - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
-      - &failed_on_ubuntu_20 'status-success!=Build and test AMD64 Ubuntu 20.04'
-      - &failed_on_ubuntu_22 'status-success!=Build and test AMD64 Ubuntu 22.04'
+      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
+      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
 
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
