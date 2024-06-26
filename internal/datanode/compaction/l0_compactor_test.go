@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestLevelZeroCompactionTaskSuite(t *testing.T) {
@@ -501,8 +500,8 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBfs)
-
+	deltaWriters, err := s.task.splitDelta(context.TODO(), s.dData, segmentBfs)
+	s.NoError(err)
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
 	s.EqualValues(2, deltaWriters[100].GetRowNum())
