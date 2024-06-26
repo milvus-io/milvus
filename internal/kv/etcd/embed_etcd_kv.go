@@ -38,6 +38,11 @@ import (
 // implementation assertion
 var _ kv.MetaKv = (*EmbedEtcdKV)(nil)
 
+const (
+	defaultRetryCount    = 3
+	defaultRetryInterval = 1 * time.Second
+)
+
 // EmbedEtcdKV use embedded Etcd instance as a KV storage
 type EmbedEtcdKV struct {
 	client    *clientv3.Client
@@ -48,9 +53,26 @@ type EmbedEtcdKV struct {
 	requestTimeout time.Duration
 }
 
+func retry(attempts int, sleep time.Duration, fn func() error) error {
+	for i := 0; ; i++ {
+		err := fn()
+		if err == nil || i >= (attempts-1) {
+			return err
+		}
+		time.Sleep(sleep)
+	}
+}
+
 // NewEmbededEtcdKV creates a new etcd kv.
 func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*EmbedEtcdKV, error) {
-	e, err := embed.StartEtcd(cfg)
+	var e *embed.Etcd
+	var err error
+
+	err = retry(defaultRetryCount, defaultRetryInterval, func() error {
+		e, err = embed.StartEtcd(cfg)
+		return err
+	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -69,15 +91,22 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 
 		requestTimeout: opt.requestTimeout,
 	}
+	// wait until embed etcd is ready with retry mechanism
+	err = retry(defaultRetryCount, defaultRetryInterval, func() error {
+		select {
+		case <-e.Server.ReadyNotify():
+			log.Info("Embedded etcd is ready!")
+			return nil
+		case <-time.After(60 * time.Second):
+			e.Server.Stop() // trigger a shutdown
+			return errors.New("Embedded etcd took too long to start")
+		}
+	})
 
-	// wait until embed etcd is ready
-	select {
-	case <-e.Server.ReadyNotify():
-		log.Info("Embedded etcd is ready!")
-	case <-time.After(60 * time.Second):
-		e.Server.Stop() // trigger a shutdown
-		return nil, errors.New("Embedded etcd took too long to start")
+	if err != nil {
+		return nil, err
 	}
+
 	return kv, nil
 }
 
