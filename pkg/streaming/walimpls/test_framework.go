@@ -247,20 +247,15 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 				"const": "t",
 			}
 			typ := message.MessageTypeUnknown
-			msg := message.NewBuilder().
+			msg := message.NewMutableMessageBuilder().
+				WithMessageType(typ).
 				WithPayload(payload).
 				WithProperties(properties).
-				WithMessageType(typ).
 				BuildMutable()
 			id, err := w.Append(ctx, msg)
 			assert.NoError(f.t, err)
 			assert.NotNil(f.t, id)
-			ids[i] = message.NewBuilder().
-				WithPayload(payload).
-				WithProperties(properties).
-				WithMessageID(id).
-				WithMessageType(typ).
-				BuildImmutable()
+			ids[i] = msg.IntoImmutableMessage(id)
 		}(i)
 	}
 	swg.Wait()
@@ -280,19 +275,14 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 		"const": "t",
 		"term":  strconv.FormatInt(int64(f.term), 10),
 	}
-	msg := message.NewBuilder().
+	msg := message.NewMutableMessageBuilder().
 		WithPayload(payload).
 		WithProperties(properties).
 		WithMessageType(message.MessageTypeTimeTick).
 		BuildMutable()
 	id, err := w.Append(ctx, msg)
 	assert.NoError(f.t, err)
-	ids[f.messageCount-1] = message.NewBuilder().
-		WithPayload(payload).
-		WithProperties(properties).
-		WithMessageID(id).
-		WithMessageType(message.MessageTypeTimeTick).
-		BuildImmutable()
+	ids[f.messageCount-1] = msg.IntoImmutableMessage(id)
 	return ids, nil
 }
 

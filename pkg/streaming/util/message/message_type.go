@@ -24,6 +24,12 @@ func (t MessageType) marshal() string {
 	return strconv.FormatInt(int64(t), 10)
 }
 
+// Valid checks if the MessageType is valid.
+func (t MessageType) Valid() bool {
+	return t == MessageTypeTimeTick
+	// TODO: fill more.
+}
+
 // unmarshalMessageType unmarshal MessageType from string.
 func unmarshalMessageType(s string) MessageType {
 	i, err := strconv.ParseInt(s, 10, 32)
