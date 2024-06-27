@@ -109,10 +109,10 @@ func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	return nil
 }
 
-func validateTopKLimit(topK int64) error {
+func validateLimit(limit int64) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
-	if topK <= 0 || topK > topKLimit {
-		return fmt.Errorf("top k should be in range [1, %d], but got %d", topKLimit, topK)
+	if limit <= 0 || limit > topKLimit {
+		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
 	}
 	return nil
 }

@@ -1,6 +1,12 @@
 shared:
   - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
+      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
+      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
 
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
@@ -40,7 +46,7 @@ pull_request_rules:
           - base=sql_beta
           - base=master
           - base~=^2(\.\d+){1,2}$
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -58,7 +64,7 @@ pull_request_rules:
     conditions:
       - base~=^2(\.\d+){2}$
       # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -116,7 +122,7 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
@@ -131,9 +137,9 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed -2.2.*
     conditions:
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - base~=^2\.2\.\d+$
       # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
@@ -259,9 +265,9 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
       # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -275,10 +281,10 @@ pull_request_rules:
 
   - name: Test passed for skip e2e - 2.2.*
     conditions:
+      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - base~=^2\.2\.\d+$
       - title~=\[skip e2e\]
       # - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -312,8 +318,9 @@ pull_request_rules:
           - base~=^2(\.\d+){1,2}$
       - *source_code_files
       - or:
+          - *failed_on_ubuntu_20
+          - *failed_on_ubuntu_22
           # - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
-          - 'status-success!=Build and test AMD64 Ubuntu 22.04'
           - 'status-success!=UT for Cpp'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
@@ -330,8 +337,9 @@ pull_request_rules:
       - base~=^2\.2\.\d+$
       - *source_code_files
       - or:
+          - *failed_on_ubuntu_20
+          - *failed_on_ubuntu_22
           # - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
-          - 'status-success!=Build and test AMD64 Ubuntu 20.04'
           - 'status-success!=UT for Cpp'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
