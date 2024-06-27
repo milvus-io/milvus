@@ -16,19 +16,10 @@
 
 package indexparamcheck
 
-/*
-#cgo pkg-config: milvus_segcore
-#include "segcore/check_vec_index_c.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"strconv"
-	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -77,12 +68,4 @@ func setDefaultIfNotExist(params map[string]string, key string, defaultValue str
 	if !exist {
 		params[key] = defaultValue
 	}
-}
-
-func CheckVecIndexWithDataTypeExist(name string, dType schemapb.DataType) bool {
-	cIndexName := C.CString(name)
-	cType := uint32(dType)
-	defer C.free(unsafe.Pointer(cIndexName))
-	check := bool(C.CheckVecIndexWithDataType(cIndexName, cType))
-	return check
 }

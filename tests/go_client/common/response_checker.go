@@ -154,6 +154,8 @@ func CheckSearchResult(t *testing.T, actualSearchResults []clientv2.ResultSet, e
 	require.Len(t, actualSearchResults, expNq)
 	for _, actualSearchResult := range actualSearchResults {
 		require.Equal(t, actualSearchResult.ResultCount, expTopK)
+		require.Equal(t, actualSearchResult.IDs.Len(), expTopK)
+		require.Equal(t, len(actualSearchResult.Scores), expTopK)
 	}
 }
 

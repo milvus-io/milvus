@@ -63,6 +63,24 @@ func createDefaultMilvusClient(ctx context.Context, t *testing.T) *base.MilvusCl
 	return mc
 }
 
+// create connect
+func createMilvusClient(ctx context.Context, t *testing.T, cfg *clientv2.ClientConfig) *base.MilvusClient {
+	t.Helper()
+
+	var (
+		mc  *base.MilvusClient
+		err error
+	)
+	mc, err = base.NewMilvusClient(ctx, cfg)
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		mc.Close(ctx)
+	})
+
+	return mc
+}
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 	log.Info("Parser Milvus address", zap.String("address", *addr))

@@ -40,7 +40,6 @@ func TestCreateCollection(t *testing.T) {
 	}
 }
 
-// func TestCreateCollection(t *testing.T) {}
 func TestCreateAutoIdCollectionField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -626,7 +625,7 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 		numPartitions int64
 		errMsg        string
 	}{
-		{common.MaxPartitionNum + 1, "exceeds max configuration (4096)"},
+		{common.MaxPartitionNum + 1, "exceeds max configuration (1024)"},
 		{-1, "the specified partitions should be greater than 0 if partition key is used"},
 	}
 	for _, npStruct := range invalidNumPartitionStruct {

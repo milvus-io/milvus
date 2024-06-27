@@ -2000,10 +2000,10 @@ func Test_NQLimit(t *testing.T) {
 
 func Test_TopKLimit(t *testing.T) {
 	paramtable.Init()
-	assert.Nil(t, validateTopKLimit(16384))
-	assert.Nil(t, validateTopKLimit(1))
-	assert.Error(t, validateTopKLimit(16385))
-	assert.Error(t, validateTopKLimit(0))
+	assert.Nil(t, validateLimit(16384))
+	assert.Nil(t, validateLimit(1))
+	assert.Error(t, validateLimit(16385))
+	assert.Error(t, validateLimit(0))
 }
 
 func Test_MaxQueryResultWindow(t *testing.T) {
