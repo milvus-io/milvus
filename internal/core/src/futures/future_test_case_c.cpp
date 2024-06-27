@@ -32,7 +32,7 @@ future_create_test_case(int interval, int loop_cnt, int case_no) {
                 case 2:
                     throw folly::FutureNoExecutor();
                 case 3:
-                    throw milvus::SegcoreError(milvus::NotImplemented,
+                    throw milvus::SegcoreError(milvus::UnexpectedError,
                                                "case 3");
             }
             return new int(case_no);
