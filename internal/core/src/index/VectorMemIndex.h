@@ -94,8 +94,7 @@ class VectorMemIndex : public VectorIndex {
     BinarySet
     UploadV2(const Config& config = {}) override;
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
