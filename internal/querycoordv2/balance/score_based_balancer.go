@@ -150,18 +150,21 @@ func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []in
 }
 
 func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
-	rowCount := 0
+	nodeRowCount := 0
 	// calculate global sealed segment row count
 	globalSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
 	for _, s := range globalSegments {
-		rowCount += int(s.GetNumOfRows())
+		nodeRowCount += int(s.GetNumOfRows())
 	}
 
 	// calculate global growing segment row count
 	views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(nodeID))
 	for _, view := range views {
-		rowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
+		nodeRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
 	}
+
+	// calculate executing task cost in scheduler
+	nodeRowCount += b.scheduler.GetSegmentTaskDelta(nodeID, -1)
 
 	collectionRowCount := 0
 	// calculate collection sealed segment row count
@@ -175,7 +178,11 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 	for _, view := range collectionViews {
 		collectionRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
 	}
-	return collectionRowCount + int(float64(rowCount)*
+
+	// calculate executing task cost in scheduler
+	collectionRowCount += b.scheduler.GetSegmentTaskDelta(nodeID, collectionID)
+
+	return collectionRowCount + int(float64(nodeRowCount)*
 		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 }
 
