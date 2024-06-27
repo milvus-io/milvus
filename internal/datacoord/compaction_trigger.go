@@ -241,7 +241,7 @@ func (t *compactionTrigger) triggerCompaction() error {
 // triggerSingleCompaction trigger a compaction bundled with collection-partition-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	// If AutoCompaction disabled, flush request will not trigger compaction
-	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
 		return nil
 	}
 
