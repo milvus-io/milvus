@@ -135,7 +135,7 @@ func TestFutures(t *testing.T) {
 	future.BlockUntilReady() // test block until ready too.
 	result, err = future.BlockAndLeakyGet()
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrSegcorePretendFinished)
+	assert.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 	assert.Nil(t, result)
 	// The inner function sleep 1 seconds, so the future cost must be greater than 0.5 seconds.
 	assert.Greater(t, time.Since(start).Seconds(), 0.5)
