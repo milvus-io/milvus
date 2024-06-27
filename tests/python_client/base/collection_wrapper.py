@@ -294,10 +294,13 @@ class ApiCollectionWrapper:
         return self.collection.indexes
 
     @trace()
-    def index(self, check_task=None, check_items=None):
+    def index(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.index])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
+        if "index_name" in kwargs:
+            index_name = kwargs.get('index_name')
+            kwargs.update({"index_name": index_name})
+        res, check = api_request([self.collection.index], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     @trace()
