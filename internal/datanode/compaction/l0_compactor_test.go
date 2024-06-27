@@ -286,8 +286,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
-
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
