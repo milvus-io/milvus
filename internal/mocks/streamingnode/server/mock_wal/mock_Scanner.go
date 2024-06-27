@@ -3,7 +3,7 @@
 package mock_wal
 
 import (
-	message "github.com/milvus-io/milvus/internal/util/streamingutil/message"
+	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 )
 

@@ -1,18 +1,27 @@
-package wal
+package walimpls
 
 import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 )
 
-// ReadOption is the option for reading records from the wal.
 type ReadOption struct {
+	// The name of the reader.
+	Name string
+	// ReadAheadBufferSize sets the size of scanner read ahead queue size.
+	// Control how many messages can be read ahead by the scanner.
+	// Higher value could potentially increase the scanner throughput but bigger memory utilization.
+	// 0 is the default value determined by the underlying wal implementation.
+	ReadAheadBufferSize int
+	// DeliverPolicy sets the deliver policy of the reader.
 	DeliverPolicy options.DeliverPolicy
-	DeliverOrder  options.DeliverOrder
 }
 
-// Scanner is the interface for reading records from the wal.
-type Scanner interface {
+// ScannerImpls is the interface for reading records from the wal.
+type ScannerImpls interface {
+	// Name returns the name of scanner.
+	Name() string
+
 	// Chan returns the channel of message.
 	Chan() <-chan message.ImmutableMessage
 
