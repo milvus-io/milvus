@@ -222,8 +222,12 @@ source ${ROOT_DIR}/scripts/setenv.sh
 
 CMAKE_GENERATOR="Unix Makefiles"
 
-# UBUNTU system build diskann index
-if [ "$OS_NAME" == "ubuntu20.04" ] ; then
+# build with diskann index if OS is ubuntu or rocky or amzn
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+fi
+if [ "$OS" = "ubuntu" ] || [ "$OS" = "rocky" ] || [ "$OS" = "amzn" ]; then
   BUILD_DISK_ANN=ON
 fi
 
