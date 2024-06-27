@@ -52,6 +52,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
@@ -61,6 +62,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
 	// oltp grpc may hangs forever, add timeout logic at go side
@@ -78,6 +80,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
@@ -87,6 +90,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
 
