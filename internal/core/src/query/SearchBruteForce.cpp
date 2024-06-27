@@ -206,8 +206,7 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
     }
     auto search_cfg = PrepareBFSearchParams(search_info);
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         iterators_val;
     switch (data_type) {
         case DataType::VECTOR_FLOAT:

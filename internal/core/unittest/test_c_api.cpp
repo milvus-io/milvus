@@ -1904,8 +1904,8 @@ TEST(CApiTest, LoadIndexInfo) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
     knowhere::BinarySet binary_set;
@@ -1955,8 +1955,8 @@ TEST(CApiTest, LoadIndexSearch) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
 
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
@@ -1979,7 +1979,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto query_dataset =
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
-    auto result = indexing.Search(*query_dataset, conf, nullptr);
+    auto result = indexing.Search(query_dataset, conf, nullptr);
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {

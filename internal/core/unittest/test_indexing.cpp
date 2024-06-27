@@ -449,8 +449,7 @@ TEST(Indexing, Iterator) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         kw_iterators = vec_index->VectorIterators(
             query_ds, searchInfo.search_params_, view);
     ASSERT_TRUE(kw_iterators.has_value());

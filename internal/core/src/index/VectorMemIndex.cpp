@@ -147,11 +147,11 @@ VectorMemIndex<T>::UploadV2(const Config& config) {
 }
 
 template <typename T>
-knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
                                    const milvus::BitsetView& bitset) const {
-    return this->index_.AnnIterator(*dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset);
 }
 
 template <typename T>
@@ -434,7 +434,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(dataset->GetDim());
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
-    auto stat = index_.Build(*dataset, index_config);
+    auto stat = index_.Build(dataset, index_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
@@ -572,7 +572,7 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     index_config.update(config);
 
     knowhere::TimeRecorder rc("AddWithDataset", 1);
-    auto stat = index_.Add(*dataset, index_config);
+    auto stat = index_.Add(dataset, index_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to append index, " + KnowhereStatusString(stat));
@@ -601,7 +601,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                                       GetMetricType());
             }
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
-            auto res = index_.RangeSearch(*dataset, search_conf, bitset);
+            auto res = index_.RangeSearch(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
@@ -615,7 +615,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             return result;
         } else {
             milvus::tracer::AddEvent("start_knowhere_index_search");
-            auto res = index_.Search(*dataset, search_conf, bitset);
+            auto res = index_.Search(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
@@ -662,7 +662,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
                   "failed to get vector, index is sparse");
     }
 
-    auto res = index_.GetVectorByIds(*dataset);
+    auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, " + KnowhereStatusString(res.error()));
@@ -680,7 +680,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 template <typename T>
 std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
-    auto res = index_.GetVectorByIds(*dataset);
+    auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, " + KnowhereStatusString(res.error()));
