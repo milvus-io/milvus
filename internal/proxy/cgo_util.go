@@ -14,34 +14,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package initcore
+package proxy
+
+/*
+#cgo pkg-config: milvus_segcore
+#include "segcore/check_vec_index_c.h"
+#include <stdlib.h>
+*/
+import "C"
 
 import (
-	"testing"
+	"unsafe"
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func TestTracer(t *testing.T) {
-	paramtable.Init()
-	InitTraceConfig(paramtable.Get())
-
-	paramtable.Get().Save(paramtable.Get().TraceCfg.Exporter.Key, "stdout")
-	ResetTraceConfig(paramtable.Get())
-}
-
-func TestOtlpHang(t *testing.T) {
-	paramtable.Init()
-	InitTraceConfig(paramtable.Get())
-
-	paramtable.Get().Save(paramtable.Get().TraceCfg.Exporter.Key, "otlp")
-	paramtable.Get().Save(paramtable.Get().TraceCfg.InitTimeoutSeconds.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.Exporter.Key)
-	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.InitTimeoutSeconds.Key)
-
-	assert.Panics(t, func() {
-		ResetTraceConfig(paramtable.Get())
-	})
+func CheckVecIndexWithDataTypeExist(name string, dType schemapb.DataType) bool {
+	cIndexName := C.CString(name)
+	cType := uint32(dType)
+	defer C.free(unsafe.Pointer(cIndexName))
+	check := bool(C.CheckVecIndexWithDataType(cIndexName, cType))
+	return check
 }

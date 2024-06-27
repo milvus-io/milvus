@@ -189,6 +189,50 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 	s.EqualValues(1, predict[0])
 }
 
+func (s *MetaCacheSuite) Test_DetectMissingSegments() {
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 9: {}, 10: {},
+	}
+
+	missingSegments := s.cache.DetectMissingSegments(segments)
+	s.ElementsMatch(missingSegments, []int64{9, 10})
+}
+
+func (s *MetaCacheSuite) Test_UpdateSegmentView() {
+	addSegments := []*datapb.SyncSegmentInfo{
+		{
+			SegmentId:  100,
+			PkStatsLog: nil,
+			State:      commonpb.SegmentState_Flushed,
+			Level:      datapb.SegmentLevel_L1,
+			NumOfRows:  10240,
+		},
+	}
+	addSegmentsBF := []*BloomFilterSet{
+		NewBloomFilterSet(),
+	}
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 100: {},
+	}
+
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
+
+	addSegments = []*datapb.SyncSegmentInfo{
+		{
+			SegmentId:  101,
+			PkStatsLog: nil,
+			State:      commonpb.SegmentState_Flushed,
+			Level:      datapb.SegmentLevel_L1,
+			NumOfRows:  10240,
+		},
+	}
+
+	segments = map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 101: {},
+	}
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
+}
+
 func TestMetaCacheSuite(t *testing.T) {
 	suite.Run(t, new(MetaCacheSuite))
 }

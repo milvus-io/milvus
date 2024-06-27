@@ -535,6 +535,10 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	)
 }
 
+func (w *NativePayloadWriter) Reserve(size int) {
+	w.builder.Reserve(size)
+}
+
 func (w *NativePayloadWriter) GetPayloadBufferFromWriter() ([]byte, error) {
 	data := w.output.Bytes()
 

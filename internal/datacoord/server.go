@@ -127,6 +127,7 @@ type Server struct {
 	compactionTrigger     trigger
 	compactionHandler     compactionPlanContext
 	compactionViewManager *CompactionViewManager
+	syncSegmentsScheduler *SyncSegmentsScheduler
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -389,6 +390,8 @@ func (s *Server) initDataCoord() error {
 	}
 	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.buildIndexCh)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
+
+	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -724,6 +727,7 @@ func (s *Server) startServerLoop() {
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
+	s.syncSegmentsScheduler.Start()
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
@@ -1114,6 +1118,7 @@ func (s *Server) Stop() error {
 
 	s.importScheduler.Close()
 	s.importChecker.Close()
+	s.syncSegmentsScheduler.Stop()
 
 	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
