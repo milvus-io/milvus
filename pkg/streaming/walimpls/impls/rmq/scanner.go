@@ -66,11 +66,11 @@ func (s *scannerImpl) executeConsume() {
 			// record the last message id to avoid repeated consume message.
 			// and exclude message id should be filterred.
 			if s.exclude == nil || !s.exclude.EQ(msgID) {
-				s.msgChannel <- message.NewBuilder().
-					WithMessageID(msgID).
-					WithPayload(msg.Payload()).
-					WithProperties(msg.Properties()).
-					BuildImmutable()
+				s.msgChannel <- message.NewImmutableMesasge(
+					msgID,
+					msg.Payload(),
+					msg.Properties(),
+				)
 			}
 		}
 	}

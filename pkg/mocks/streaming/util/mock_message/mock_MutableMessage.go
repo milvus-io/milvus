@@ -232,6 +232,47 @@ func (_c *MockMutableMessage_Properties_Call) RunAndReturn(run func() message.Pr
 	return _c
 }
 
+// Version provides a mock function with given fields:
+func (_m *MockMutableMessage) Version() message.Version {
+	ret := _m.Called()
+
+	var r0 message.Version
+	if rf, ok := ret.Get(0).(func() message.Version); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(message.Version)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_Version_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Version'
+type MockMutableMessage_Version_Call struct {
+	*mock.Call
+}
+
+// Version is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) Version() *MockMutableMessage_Version_Call {
+	return &MockMutableMessage_Version_Call{Call: _e.mock.On("Version")}
+}
+
+func (_c *MockMutableMessage_Version_Call) Run(run func()) *MockMutableMessage_Version_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_Version_Call) Return(_a0 message.Version) *MockMutableMessage_Version_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_Version_Call) RunAndReturn(run func() message.Version) *MockMutableMessage_Version_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithLastConfirmed provides a mock function with given fields: id
 func (_m *MockMutableMessage) WithLastConfirmed(id message.MessageID) message.MutableMessage {
 	ret := _m.Called(id)
