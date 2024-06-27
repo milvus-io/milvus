@@ -68,7 +68,7 @@ func (e sliceSparseEmbedding) Serialize() []byte {
 	for idx := 0; idx < e.Len(); idx++ {
 		pos, value, _ := e.Get(idx)
 		binary.LittleEndian.PutUint32(row[idx*8:], pos)
-		binary.LittleEndian.PutUint32(row[pos*8+4:], math.Float32bits(value))
+		binary.LittleEndian.PutUint32(row[idx*8+4:], math.Float32bits(value))
 	}
 	return row
 }
