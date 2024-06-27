@@ -223,7 +223,7 @@ source ${ROOT_DIR}/scripts/setenv.sh
 CMAKE_GENERATOR="Unix Makefiles"
 
 # UBUNTU system build diskann index
-if [ "$OS_NAME" == "ubuntu20.04" ] ; then
+if [[ "$OS_NAME" == ubuntu* ]] ; then
   BUILD_DISK_ANN=ON
 fi
 
