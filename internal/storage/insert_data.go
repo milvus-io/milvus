@@ -50,20 +50,24 @@ type InsertData struct {
 }
 
 func NewInsertData(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0)
+}
+
+func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int) (*InsertData, error) {
 	if schema == nil {
-		return nil, fmt.Errorf("Nil input schema")
+		return nil, merr.WrapErrParameterMissing("collection schema")
 	}
 
 	idata := &InsertData{
 		Data: make(map[FieldID]FieldData),
 	}
 
-	for _, fSchema := range schema.Fields {
-		fieldData, err := NewFieldData(fSchema.DataType, fSchema)
+	for _, field := range schema.GetFields() {
+		fieldData, err := NewFieldData(field.DataType, field, cap)
 		if err != nil {
 			return nil, err
 		}
-		idata.Data[fSchema.FieldID] = fieldData
+		idata.Data[field.FieldID] = fieldData
 	}
 	return idata, nil
 }
@@ -147,7 +151,7 @@ type FieldData interface {
 	GetDataType() schemapb.DataType
 }
 
-func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema) (FieldData, error) {
+func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	typeParams := fieldSchema.GetTypeParams()
 	switch dataType {
 	case schemapb.DataType_Float16Vector:
@@ -156,7 +160,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 			return nil, err
 		}
 		return &Float16VectorFieldData{
-			Data: make([]byte, 0),
+			Data: make([]byte, 0, cap),
 			Dim:  dim,
 		}, nil
 	case schemapb.DataType_BFloat16Vector:
@@ -165,7 +169,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 			return nil, err
 		}
 		return &BFloat16VectorFieldData{
-			Data: make([]byte, 0),
+			Data: make([]byte, 0, cap),
 			Dim:  dim,
 		}, nil
 	case schemapb.DataType_FloatVector:
@@ -174,7 +178,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 			return nil, err
 		}
 		return &FloatVectorFieldData{
-			Data: make([]float32, 0),
+			Data: make([]float32, 0, cap),
 			Dim:  dim,
 		}, nil
 	case schemapb.DataType_BinaryVector:
@@ -183,56 +187,56 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 			return nil, err
 		}
 		return &BinaryVectorFieldData{
-			Data: make([]byte, 0),
+			Data: make([]byte, 0, cap),
 			Dim:  dim,
 		}, nil
 	case schemapb.DataType_SparseFloatVector:
 		return &SparseFloatVectorFieldData{}, nil
 	case schemapb.DataType_Bool:
 		return &BoolFieldData{
-			Data: make([]bool, 0),
+			Data: make([]bool, 0, cap),
 		}, nil
 
 	case schemapb.DataType_Int8:
 		return &Int8FieldData{
-			Data: make([]int8, 0),
+			Data: make([]int8, 0, cap),
 		}, nil
 
 	case schemapb.DataType_Int16:
 		return &Int16FieldData{
-			Data: make([]int16, 0),
+			Data: make([]int16, 0, cap),
 		}, nil
 
 	case schemapb.DataType_Int32:
 		return &Int32FieldData{
-			Data: make([]int32, 0),
+			Data: make([]int32, 0, cap),
 		}, nil
 
 	case schemapb.DataType_Int64:
 		return &Int64FieldData{
-			Data: make([]int64, 0),
+			Data: make([]int64, 0, cap),
 		}, nil
 	case schemapb.DataType_Float:
 		return &FloatFieldData{
-			Data: make([]float32, 0),
+			Data: make([]float32, 0, cap),
 		}, nil
 
 	case schemapb.DataType_Double:
 		return &DoubleFieldData{
-			Data: make([]float64, 0),
+			Data: make([]float64, 0, cap),
 		}, nil
 	case schemapb.DataType_JSON:
 		return &JSONFieldData{
-			Data: make([][]byte, 0),
+			Data: make([][]byte, 0, cap),
 		}, nil
 	case schemapb.DataType_Array:
 		return &ArrayFieldData{
-			Data:        make([]*schemapb.ScalarField, 0),
+			Data:        make([]*schemapb.ScalarField, 0, cap),
 			ElementType: fieldSchema.GetElementType(),
 		}, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return &StringFieldData{
-			Data:     make([]string, 0),
+			Data:     make([]string, 0, cap),
 			DataType: dataType,
 		}, nil
 	default:
