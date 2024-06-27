@@ -79,7 +79,8 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
             auto& extras = descriptor_event.event_data.extras;
             AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(),
                        "index build id not exist");
-            index_meta.build_id = std::stol(extras[INDEX_BUILD_ID_KEY]);
+            index_meta.build_id = std::stol(
+                std::any_cast<std::string>(extras[INDEX_BUILD_ID_KEY]));
             index_data->set_index_meta(index_meta);
             index_data->SetTimestamps(index_event_data.start_timestamp,
                                       index_event_data.end_timestamp);

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <any>
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -34,7 +35,7 @@ GetFixPartSize(DescriptorEventData& data) {
            sizeof(data.fix_part.segment_id) + sizeof(data.fix_part.field_id) +
            sizeof(data.fix_part.start_timestamp) +
            sizeof(data.fix_part.end_timestamp) +
-           sizeof(data.fix_part.data_type) + sizeof(data.fix_part.nullable);
+           sizeof(data.fix_part.data_type);
 }
 int
 GetFixPartSize(BaseEventData& data) {
@@ -107,8 +108,6 @@ DescriptorEventDataFixPart::DescriptorEventDataFixPart(BinlogReaderPtr reader) {
     assert(ast.ok());
     ast = reader->Read(sizeof(field_id), &field_id);
     assert(ast.ok());
-    ast = reader->Read(sizeof(nullable), &nullable);
-    assert(ast.ok());
     ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
     assert(ast.ok());
     ast = reader->Read(sizeof(end_timestamp), &end_timestamp);
@@ -122,7 +121,7 @@ DescriptorEventDataFixPart::Serialize() {
     auto fix_part_size = sizeof(collection_id) + sizeof(partition_id) +
                          sizeof(segment_id) + sizeof(field_id) +
                          sizeof(start_timestamp) + sizeof(end_timestamp) +
-                         sizeof(data_type) + sizeof(nullable);
+                         sizeof(data_type);
     std::vector<uint8_t> res(fix_part_size);
     int offset = 0;
     memcpy(res.data() + offset, &collection_id, sizeof(collection_id));
@@ -133,8 +132,6 @@ DescriptorEventDataFixPart::Serialize() {
     offset += sizeof(segment_id);
     memcpy(res.data() + offset, &field_id, sizeof(field_id));
     offset += sizeof(field_id);
-    memcpy(res.data() + offset, &nullable, sizeof(nullable));
-    offset += sizeof(nullable);
     memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
     offset += sizeof(start_timestamp);
     memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
@@ -168,6 +165,9 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     if (json.contains(INDEX_BUILD_ID_KEY)) {
         extras[INDEX_BUILD_ID_KEY] = json[INDEX_BUILD_ID_KEY];
     }
+    if (json.contains(NULLABLE)) {
+        extras[NULLABLE] = json[NULLABLE];
+    }
 }
 
 std::vector<uint8_t>
@@ -175,7 +175,11 @@ DescriptorEventData::Serialize() {
     auto fix_part_data = fix_part.Serialize();
     nlohmann::json extras_json;
     for (auto v : extras) {
-        extras_json.emplace(v.first, v.second);
+        if (v.first == NULLABLE) {
+            extras_json.emplace(v.first, std::any_cast<bool>(v.second));
+        } else {
+            extras_json.emplace(v.first, std::any_cast<std::string>(v.second));
+        }
     }
     std::string extras_string = extras_json.dump();
     extra_length = extras_string.size();
