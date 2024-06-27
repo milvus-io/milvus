@@ -162,8 +162,8 @@ var (
 	ErrSegcore                    = newMilvusError("segcore error", 2000, false)
 	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2001, false)
 	ErrSegcorePretendFinished     = newMilvusError("segcore pretend finished", 2002, false)
-	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2200, false) // throw from segcore.
-	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2201, false)   // throw from segcore.
+	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2037, false) // throw from segcore.
+	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2038, false)   // throw from segcore.
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
