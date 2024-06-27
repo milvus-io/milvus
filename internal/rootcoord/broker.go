@@ -280,7 +280,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		},
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
-		Properties:     req.GetProperties(),
+		Properties:     colMeta.Properties,
 		VChannels:      colMeta.VirtualChannelNames,
 	}
 
