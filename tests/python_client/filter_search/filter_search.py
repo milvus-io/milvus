@@ -1,4 +1,7 @@
 from locust import HttpUser, task, events, LoadTestShape
+from locust.runners import STATE_STOPPING, STATE_STOPPED, STATE_CLEANUP
+import threading
+
 import random
 import pandas as pd
 import re
@@ -91,9 +94,9 @@ class MilvusUser(HttpUser):
               f"95th percentile is {self.recall_list[int(len(self.recall_list) * 0.95)]}, "
               f"99th percentile is {self.recall_list[int(len(self.recall_list) * 0.99)]}, "
               )
-        data = {"ts": self.ts_list, "recall": self.recall_list}
-        df = pd.DataFrame(data)
-        df.to_parquet(f"/tmp/ci_logs/recall-of-{filter}-{uuid.uuid4()}.parquet", index=False)
+        # data = {"ts": self.ts_list, "recall": self.recall_list}
+        # df = pd.DataFrame(data)
+        # df.to_parquet(f"/tmp/ci_logs/recall-of-{filter}-{uuid.uuid4()}.parquet", index=False)
 
 class StagesShape(LoadTestShape):
     """
