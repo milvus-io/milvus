@@ -674,6 +674,7 @@ func (s *Server) initIndexNodeManager() {
 
 func (s *Server) initCompaction() {
 	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 	triggerv2 := NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler)
 	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
 }
@@ -686,6 +687,10 @@ func (s *Server) stopCompaction() {
 	if s.compactionHandler != nil {
 		s.compactionHandler.stop()
 	}
+
+	if s.compactionViewManager != nil {
+		s.compactionViewManager.Close()
+	}
 }
 
 func (s *Server) startCompaction() {
@@ -695,6 +700,10 @@ func (s *Server) startCompaction() {
 
 	if s.compactionTrigger != nil {
 		s.compactionTrigger.start()
+	}
+
+	if s.compactionViewManager != nil {
+		s.compactionViewManager.Start()
 	}
 }
 

@@ -548,12 +548,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		if paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
-			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-				req.GetSegmentID(), req.GetChannel(), false)
-			if err != nil {
-				log.Warn("failed to trigger single compaction")
-			}
+		err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
+			req.GetSegmentID(), req.GetChannel(), false)
+		if err != nil {
+			log.Warn("failed to trigger single compaction")
 		}
 	}
 
