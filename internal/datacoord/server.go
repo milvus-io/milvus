@@ -126,7 +126,7 @@ type Server struct {
 
 	compactionTrigger        trigger
 	compactionHandler        compactionPlanContext
-	compactionTriggerManager *CompactionTriggerManager
+	compactionTriggerManager TriggerManager
 
 	syncSegmentsScheduler *SyncSegmentsScheduler
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
@@ -690,7 +690,7 @@ func (s *Server) stopCompaction() {
 		s.compactionTrigger.stop()
 	}
 	if s.compactionTriggerManager != nil {
-		s.compactionTriggerManager.Close()
+		s.compactionTriggerManager.Stop()
 	}
 
 	if s.compactionHandler != nil {

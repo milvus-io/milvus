@@ -103,9 +103,9 @@ func (s *CompactionViewManagerSuite) SetupTest() {
 }
 
 func (s *CompactionViewManagerSuite) TestCheckLoop() {
-	s.Run("Test start and close", func() {
+	s.Run("Test start and stop", func() {
 		s.m.Start()
-		s.m.Close()
+		s.m.Stop()
 	})
 
 	s.Run("Test not enable auto compaction", func() {
