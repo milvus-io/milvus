@@ -108,6 +108,9 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+
 	suite.jobScheduler.Start()
 	suite.balancer = balance.NewScoreBasedBalancer(
 		suite.taskScheduler,
@@ -539,6 +542,8 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 
 	// test copy mode, expect generate 1 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
 		actions := t.Actions()
 		suite.Equal(len(actions), 1)
@@ -556,6 +561,8 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 
 	// test transfer all segments, expect generate 4 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	counter := atomic.NewInt64(0)
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
 		actions := t.Actions()
@@ -575,6 +582,8 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 
 	// test transfer all segment to all nodes, expect generate 4 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	counter = atomic.NewInt64(0)
 	nodeSet := typeutil.NewUniqueSet()
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
@@ -745,6 +754,8 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 
 	// test copy mode, expect generate 1 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
 		actions := t.Actions()
 		suite.Equal(len(actions), 1)
@@ -762,6 +773,8 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 
 	// test transfer all channels, expect generate 4 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	counter := atomic.NewInt64(0)
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
 		actions := t.Actions()
@@ -781,6 +794,8 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 
 	// test transfer all channels to all nodes, expect generate 4 load segment task
 	suite.taskScheduler.ExpectedCalls = nil
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	counter = atomic.NewInt64(0)
 	nodeSet := typeutil.NewUniqueSet()
 	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
