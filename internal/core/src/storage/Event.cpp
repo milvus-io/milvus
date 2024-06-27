@@ -14,7 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <glog/logging.h>
 #include <any>
+#include <string>
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -25,6 +27,7 @@
 #include "storage/Event.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
+#include "log/Log.h"
 
 namespace milvus::storage {
 
@@ -160,13 +163,15 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     nlohmann::json json =
         nlohmann::json::parse(extra_bytes.begin(), extra_bytes.end());
     if (json.contains(ORIGIN_SIZE_KEY)) {
-        extras[ORIGIN_SIZE_KEY] = json[ORIGIN_SIZE_KEY];
+        extras[ORIGIN_SIZE_KEY] =
+            static_cast<std::string>(json[ORIGIN_SIZE_KEY]);
     }
     if (json.contains(INDEX_BUILD_ID_KEY)) {
-        extras[INDEX_BUILD_ID_KEY] = json[INDEX_BUILD_ID_KEY];
+        extras[INDEX_BUILD_ID_KEY] =
+            static_cast<std::string>(json[INDEX_BUILD_ID_KEY]);
     }
     if (json.contains(NULLABLE)) {
-        extras[NULLABLE] = json[NULLABLE];
+        extras[NULLABLE] = static_cast<bool>(json[NULLABLE]);
     }
 }
 
