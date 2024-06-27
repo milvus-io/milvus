@@ -47,6 +47,7 @@ type PayloadWriterInterface interface {
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
 	ReleasePayloadWriter()
+	Reserve(size int)
 	Close()
 }
 

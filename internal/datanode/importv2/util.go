@@ -79,7 +79,7 @@ func NewSyncTask(ctx context.Context,
 	}
 
 	syncPack := &syncmgr.SyncPack{}
-	syncPack.WithInsertData(insertData).
+	syncPack.WithInsertData([]*storage.InsertData{insertData}).
 		WithDeleteData(deleteData).
 		WithCollectionID(collectionID).
 		WithPartitionID(partitionID).

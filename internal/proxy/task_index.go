@@ -364,16 +364,18 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
-	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
-		exist := indexparamcheck.CheckVecIndexWithDataTypeExist(indexType, field.DataType)
-		if !exist {
-			return fmt.Errorf("data type %d can't build with this index %s", field.DataType, indexType)
-		}
-	}
+
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
 		return fmt.Errorf("invalid index type: %s", indexType)
+	}
+
+	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
+		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType)
+		if !exist {
+			return fmt.Errorf("data type %d can't build with this index %s", field.DataType, indexType)
+		}
 	}
 
 	isSparse := typeutil.IsSparseFloatVectorType(field.DataType)
