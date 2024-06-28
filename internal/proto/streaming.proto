@@ -26,8 +26,7 @@ message Message {
 message PChannelInfo {
     string name = 1; // channel name
     int64 term = 2; // A monotonic increasing term, every time the channel is recovered or moved to another streamingnode, the term will increase by meta server.
-    int64 serverID = 3; // The log node id address of the channel.
-    repeated VChannelInfo vChannelInfos = 4; // PChannel related vchannels.
+    int64 server_id = 3; // The log node id address of the channel.
 }
 
 // VChannelInfo is the information of a vchannel info.
@@ -39,7 +38,7 @@ message DeliverPolicy {
     oneof policy {
         google.protobuf.Empty all = 1; // deliver all messages.
         google.protobuf.Empty latest = 2; // deliver the latest message.
-        MessageID startFrom = 3; // deliver message from this message id. [startFrom, ...]
-        MessageID startAfter = 4; // deliver message after this message id. (startAfter, ...]
+        MessageID start_from = 3; // deliver message from this message id. [startFrom, ...]
+        MessageID start_after = 4; // deliver message after this message id. (startAfter, ...]
     }
 }

@@ -23,12 +23,10 @@ import (
 )
 
 type client struct {
-	server          RocksMQ
-	producerOptions []ProducerOptions
-	consumerOptions []ConsumerOptions
-	wg              *sync.WaitGroup
-	closeCh         chan struct{}
-	closeOnce       sync.Once
+	server    RocksMQ
+	wg        *sync.WaitGroup
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func newClient(options Options) (*client, error) {
@@ -37,10 +35,9 @@ func newClient(options Options) (*client, error) {
 	}
 
 	c := &client{
-		server:          options.Server,
-		producerOptions: []ProducerOptions{},
-		wg:              &sync.WaitGroup{},
-		closeCh:         make(chan struct{}),
+		server:  options.Server,
+		wg:      &sync.WaitGroup{},
+		closeCh: make(chan struct{}),
 	}
 	return c, nil
 }
@@ -61,7 +58,6 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.producerOptions = append(c.producerOptions, options)
 
 	return producer, nil
 }
@@ -116,10 +112,6 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 			return nil, err
 		}
 	}
-
-	// Take messages from RocksDB and put it into consumer.Chan(),
-	// trigger by consumer.MsgMutex which trigger by producer
-	c.consumerOptions = append(c.consumerOptions, options)
 
 	return consumer, nil
 }

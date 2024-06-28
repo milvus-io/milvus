@@ -133,8 +133,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
     if (search_info.group_by_field_id_.has_value()) {
         try {
             auto search_conf = search_info.search_params_;
-            knowhere::expected<
-                std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+            knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
                 iterators_val =
                     index.VectorIterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {

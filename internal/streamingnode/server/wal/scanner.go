@@ -1,8 +1,8 @@
 package wal
 
 import (
-	"github.com/milvus-io/milvus/internal/util/streamingutil/message"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/options"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 )
 
 // ReadOption is the option for reading records from the wal.

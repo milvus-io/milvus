@@ -2057,6 +2057,7 @@ class TestIndexDiskann(TestcaseBase):
                                  check_items={ct.err_code: 104,
                                               ct.err_msg: f"index type DISKANN does not support mmap"})
 
+
 @pytest.mark.tags(CaseLabel.GPU)
 class TestAutoIndex(TestcaseBase):
     """ Test case of Auto index """
@@ -2073,7 +2074,7 @@ class TestAutoIndex(TestcaseBase):
         actual_index_params = collection_w.index()[0].params
         assert default_autoindex_params == actual_index_params
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_params", cf.gen_autoindex_params())
     def test_create_autoindex_with_params(self, index_params):
         """
@@ -2108,7 +2109,7 @@ class TestAutoIndex(TestcaseBase):
                                                "err_msg": "only metric type can be "
                                                           "passed when use AutoIndex"})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_binary_vectors(self):
         """
         target: test create auto index on binary vectors
@@ -2116,12 +2117,32 @@ class TestAutoIndex(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
-        collection_w.create_index(binary_field_name, {},
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "HNSW only support float vector data type: invalid "
-                                                           "parameter[expected=valid index params][actual=invalid "
-                                                           "index params]"})
+        collection_w.create_index(binary_field_name, {})
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'JACCARD'}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_autoindex_on_all_vector_type(self):
+        """
+        target: test create auto index on all vector type
+        method: create index on all vector type
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float16_vec_field("fp16"),
+                  cf.gen_bfloat16_vec_field("bf16"), cf.gen_sparse_vec_field("sparse")]
+        schema = cf.gen_collection_schema(fields=fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index("fp16", index_name="fp16")
+        assert all(item in default_autoindex_params.items() for item in
+                   collection_w.index()[0].params.items())
+
+        collection_w.create_index("bf16", index_name="bf16")
+        assert all(item in default_autoindex_params.items() for item in
+                   collection_w.index(index_name="bf16")[0].params.items())
+
+        collection_w.create_index("sparse", index_name="sparse")
+        assert all(item in default_autoindex_params.items() for item in
+                   collection_w.index(index_name="sparse")[0].params.items())
 
 
 @pytest.mark.tags(CaseLabel.GPU)
