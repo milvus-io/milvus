@@ -301,6 +301,67 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 	}
 }
 
+func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
+	sps.SetupForClustering("age", schemapb.DataType_Int32)
+	paramtable.Init()
+	targetPartitions := make([]UniqueID, 0)
+	targetPartitions = append(targetPartitions, sps.targetPartition)
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and age<=550 and info != 'xxx'"
+		//as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and info != 'xxx' and age<=550"
+		//as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and age<=550 or info != 'xxx'"
+		//as info is not cluster key field, so 'or' one more will make it impossible to prune any segments
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+}
+
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 	sps.SetupForClustering("info", schemapb.DataType_VarChar)
 	paramtable.Init()
