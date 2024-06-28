@@ -2,7 +2,7 @@ version: '3.5'
 
 services:
   etcd:
-    image: milvusdb/etcd:3.5.5-r2
+    image: quay.io/coreos/etcd:v3.4.13
     ports:
       - "2379:2379"
       - "2380:2380"
@@ -23,8 +23,8 @@ services:
     ports:
       - "9000:9000"
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
     command: minio server /data
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
