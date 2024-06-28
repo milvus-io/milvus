@@ -65,10 +65,10 @@ var (
 		Help: "Total of assignment listener",
 	})
 
-	StreamingCoordAssignmentInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+	StreamingCoordAssignmentVersion = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "assignment_info",
 		Help: "Info of assignment",
-	}, "global_version", "local_version")
+	})
 
 	// StreamingNode metrics
 	StreamingNodeWALTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
@@ -119,7 +119,7 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 func RegisterStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordPChannelTotal)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
-	registry.MustRegister(StreamingCoordAssignmentInfo)
+	registry.MustRegister(StreamingCoordAssignmentVersion)
 }
 
 // RegisterStreamingNode registers log service metrics

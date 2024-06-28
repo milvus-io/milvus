@@ -5,6 +5,9 @@ dir: "mocks/{{trimPrefix .PackagePath \"github.com/milvus-io/milvus/pkg\" | dir 
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
 packages:
+  github.com/milvus-io/milvus/pkg/kv:
+    interfaces:
+      MetaKv:
   github.com/milvus-io/milvus/pkg/streaming/util/message:
     interfaces:
       MessageID:
