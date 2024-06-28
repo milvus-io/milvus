@@ -82,7 +82,7 @@ echo ${ARROWBIN_DIR}
 pushd ${ARROWBIN_DIR}
 targetNames=(
 "jemalloc-5.2.1.tar.bz2"
-"thrift-0.13.0.tar.gz"
+"thrift-0.20.0.tar.gz"
 "utf8proc-v2.7.0.tar.gz"
 "xsimd-7d1778c3b38d63db7cec7145d939f40bc5d859d1.tar.gz"
 "zstd-v1.5.1.tar.gz"
@@ -90,7 +90,7 @@ targetNames=(
 
 srcNames=(
 "jemalloc_ep-prefix/src/jemalloc-5.2.1.tar.bz2"
-"thrift_ep-prefix/src/thrift-0.13.0.tar.gz"
+"thrift_ep-prefix/src/thrift-0.20.0.tar.gz"
 "utf8proc_ep-prefix/src/v2.7.0.tar.gz"
 "src/7d1778c3b38d63db7cec7145d939f40bc5d859d1.tar.gz"
 "zstd_ep-prefix/src/v1.5.1.tar.gz"

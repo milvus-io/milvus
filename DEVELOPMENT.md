@@ -107,7 +107,7 @@ Linux systems (Recommend Ubuntu 20.04 or later):
 go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
-conan: 1.61
+conan: >= 2.4.1
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
@@ -116,7 +116,7 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
-conan: 1.61
+conan: >= 2.4.1
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
@@ -125,7 +125,7 @@ MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
-conan: 1.61
+conan: >= 2.4.1
 ```
 
 #### Installing Dependencies
