@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -34,18 +34,18 @@ func TestDelete(t *testing.T) {
 	// delete with expr
 	expr := fmt.Sprintf("%s < 10", common.DefaultInt64FieldName)
 	ids := []int64{10, 11, 12, 13, 14}
-	delRes, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(expr))
+	delRes, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(10), delRes.DeleteCount)
 
 	// delete with int64 pk
-	delRes, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, ids))
+	delRes, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, ids))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(5), delRes.DeleteCount)
 
 	// query, verify delete success
 	exprQuery := fmt.Sprintf("%s < 15", common.DefaultInt64FieldName)
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 }
@@ -70,17 +70,17 @@ func TestDeleteVarcharPks(t *testing.T) {
 	// delete varchar with pk
 	ids := []string{"0", "1", "2", "3", "4"}
 	expr := "varchar like '1%' "
-	delRes, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, ids))
+	delRes, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, ids))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(5), delRes.DeleteCount)
 
-	delRes, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(expr))
+	delRes, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(1110), delRes.DeleteCount)
 
 	// query, verify delete success
 	exprQuery := "varchar like '1%' and varchar not in ['0', '1', '2', '3', '4'] "
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 }
@@ -96,7 +96,7 @@ func TestDeleteEmptyCollection(t *testing.T) {
 
 	// delete expr-in from empty collection
 	delExpr := fmt.Sprintf("%s in [0]", common.DefaultInt64FieldName)
-	delRes, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(delExpr))
+	delRes, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(delExpr))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(1), delRes.DeleteCount)
 
@@ -105,7 +105,7 @@ func TestDeleteEmptyCollection(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	comExpr := fmt.Sprintf("%s < 10", common.DefaultInt64FieldName)
-	delRes, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(comExpr))
+	delRes, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(comExpr))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(0), delRes.DeleteCount)
 }
@@ -116,14 +116,14 @@ func TestDeleteNotExistName(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	// delete from not existed collection
-	_, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption("aaa").WithExpr(""))
+	_, errDelete := mc.Delete(ctx, client.NewDeleteOption("aaa").WithExpr(""))
 	common.CheckErr(t, errDelete, false, "collection not found")
 
 	// delete from not existed partition
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithPartition("aaa"))
+	_, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithPartition("aaa"))
 	common.CheckErr(t, errDelete, false, "partition not found[partition=aaa]")
 }
 
@@ -142,22 +142,22 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	idsPk := []int64{0, 1, 2, 3, 4}
-	_, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, idsPk))
+	_, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, idsPk))
 	common.CheckErr(t, errDelete, true)
 
-	_, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{"0", "1"}))
+	_, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{"0", "1"}))
 	common.CheckErr(t, errDelete, false, "collection not loaded")
 
 	// delete varchar with pk
 	expr := fmt.Sprintf("%s < 100", common.DefaultInt64FieldName)
-	_, errDelete2 := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(expr))
+	_, errDelete2 := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
 	common.CheckErr(t, errDelete2, false, "collection not loaded")
 
 	// index and load collection
 	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-	res, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)).
+	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)).
 		WithOutputFields([]string{common.QueryCountFieldName}).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := res.Fields[0].GetAsInt64(0)
@@ -174,20 +174,20 @@ func TestDeleteEmptyIds(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// delete
-	_, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, nil))
+	_, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, nil))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: int64 in []")
 
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, []int64{}))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, []int64{}))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: int64 in []")
 
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultInt64FieldName, []string{""}))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultInt64FieldName, []string{""}))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: int64 in [\"\"]")
 
 	t.Log("https://github.com/milvus-io/milvus/issues/33761")
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(""))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(""))
 	common.CheckErr(t, err, false, "delete plan can't be empty or always true")
 
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName))
 	common.CheckErr(t, err, false, "delete plan can't be empty or always true")
 }
 
@@ -211,18 +211,18 @@ func TestDeleteVarcharEmptyIds(t *testing.T) {
 	exprQuery := "varchar != '' "
 
 	// delete varchar with empty ids
-	delRes, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{}))
+	delRes, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{}))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(0), delRes.DeleteCount)
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb, queryRes.ResultCount)
 
 	// delete with default string ids
-	delRes, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{""}))
+	delRes, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultVarcharFieldName, []string{""}))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(1), delRes.DeleteCount)
-	queryRes, errQuery = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb, queryRes.ResultCount)
 }
@@ -236,13 +236,13 @@ func TestDeleteInvalidIds(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultVarcharFieldName, []int64{0}))
+	_, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultVarcharFieldName, []int64{0}))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: varchar in [0]")
 
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, []int64{0}))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, []int64{0}))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: int64 in [0]")
 
-	_, err = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultInt64FieldName, []string{"0"}))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithStringIDs(common.DefaultInt64FieldName, []string{"0"}))
 	common.CheckErr(t, err, false, "failed to create delete plan: cannot parse expression: int64 in [\"0\"]")
 }
 
@@ -259,11 +259,11 @@ func TestDeleteWithIds(t *testing.T) {
 	varcharField := entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(common.MaxLength)
 	collName := common.GenRandomString(prefix, 6)
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(int64Field).WithField(varcharField)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// insert
-	insertOpt := clientv2.NewColumnBasedInsertOption(collName)
+	insertOpt := client.NewColumnBasedInsertOption(collName)
 	for _, field := range schema.Fields {
 		if field.Name == pkName {
 			insertOpt.WithColumns(hp.GenColumnData(common.DefaultNb, field.DataType, *hp.TNewDataOption().TWithFieldName(pkName)))
@@ -278,16 +278,16 @@ func TestDeleteWithIds(t *testing.T) {
 	hp.CollPrepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
 
 	// delete with non-pk fields ids
-	resDe1, err := mc.Delete(ctx, clientv2.NewDeleteOption(collName).WithInt64IDs(common.DefaultInt64FieldName, []int64{0, 1}))
+	resDe1, err := mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs(common.DefaultInt64FieldName, []int64{0, 1}))
 	common.CheckErr(t, err, true)
 	require.Equal(t, int64(2), resDe1.DeleteCount)
 
-	resDe2, err2 := mc.Delete(ctx, clientv2.NewDeleteOption(collName).WithStringIDs(common.DefaultVarcharFieldName, []string{"2", "3", "4"}))
+	resDe2, err2 := mc.Delete(ctx, client.NewDeleteOption(collName).WithStringIDs(common.DefaultVarcharFieldName, []string{"2", "3", "4"}))
 	common.CheckErr(t, err2, true)
 	require.Equal(t, int64(3), resDe2.DeleteCount)
 
 	// query and verify
-	resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(collName).WithFilter("pk < 5").WithConsistencyLevel(entity.ClStrong))
+	resQuery, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("pk < 5").WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.Zero(t, resQuery.ResultCount)
 }
@@ -301,7 +301,7 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	parName := "p1"
-	err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into p1
@@ -315,16 +315,16 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 
 	// delete with default params, actually delete from all partitions
 	expr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
-	resDel, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(expr))
+	resDel, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(common.DefaultNb*2), resDel.DeleteCount)
 
 	// query, verify delete all partitions
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 
-	queryRes, errQuery = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
 		WithConsistencyLevel(entity.ClStrong).WithFilter(expr))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
@@ -339,7 +339,7 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	parName := "p1"
-	err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into p1
@@ -353,16 +353,16 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 
 	// delete with default params, actually delete from all partitions
 	expr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
-	resDel, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(expr).WithPartition(""))
+	resDel, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(expr).WithPartition(""))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(common.DefaultNb*2), resDel.DeleteCount)
 
 	// query, verify delete all partitions
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
 
-	queryRes, errQuery = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithPartitions([]string{common.DefaultPartition, parName}).
 		WithConsistencyLevel(entity.ClStrong).WithFilter(expr))
 	common.CheckErr(t, errQuery, true)
 	require.Zero(t, queryRes.ResultCount)
@@ -377,7 +377,7 @@ func TestDeletePartitionName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	parName := "p1"
-	err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into parName
@@ -396,37 +396,37 @@ func TestDeletePartitionName(t *testing.T) {
 
 	// delete ids that not existed in partition
 	// delete [0, 200) from p1
-	del1, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprDefault).WithPartition(parName))
+	del1, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprDefault).WithPartition(parName))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(0), del1.DeleteCount)
 
 	// delete [4800, 6000) from _default
-	del2, errDelete := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprP1).WithPartition(common.DefaultPartition))
+	del2, errDelete := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprP1).WithPartition(common.DefaultPartition))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(0), del2.DeleteCount)
 
 	// query and verify
-	resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithOutputFields([]string{common.QueryCountFieldName}).
+	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithOutputFields([]string{common.QueryCountFieldName}).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := resQuery.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb*2), count)
 
 	// delete from partition
-	del1, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprDefault).WithPartition(common.DefaultPartition))
+	del1, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprDefault).WithPartition(common.DefaultPartition))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(200), del1.DeleteCount)
 
-	del2, errDelete = mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprP1).WithPartition(parName))
+	del2, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprP1).WithPartition(parName))
 	common.CheckErr(t, errDelete, true)
 	require.Equal(t, int64(1500), del2.DeleteCount)
 
 	// query, verify delete all partitions
-	queryRes, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
+	queryRes, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb*2-200-1500, queryRes.ResultCount)
 
-	queryRes, errQuery = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong).
+	queryRes, errQuery = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprQuery).WithConsistencyLevel(entity.ClStrong).
 		WithPartitions([]string{common.DefaultPartition, parName}))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb*2-200-1500, queryRes.ResultCount)
@@ -494,12 +494,12 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
 
-		resDe, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
+		resDe, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
 		common.CheckErr(t, err, true)
 		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
 		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
 
-		resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
+		resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, true)
 		require.Zero(t, resQuery.ResultCount)
 	}
@@ -522,7 +522,7 @@ func TestDeleteInvalidExpr(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	for _, _invalidExpr := range common.InvalidExpressions {
-		_, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithExpr(_invalidExpr.Expr))
+		_, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(_invalidExpr.Expr))
 		common.CheckErr(t, err, _invalidExpr.ErrNil, _invalidExpr.ErrMsg)
 	}
 }
@@ -546,13 +546,13 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 
 	// delete
 	deleteIds := []int64{0, 0, 0, 0, 0}
-	delRes, err := mc.Delete(ctx, clientv2.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIds))
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIds))
 	common.CheckErr(t, err, true)
 	require.Equal(t, 5, int(delRes.DeleteCount))
 
 	// query, verify delete success
 	expr := fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)
-	resQuery, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
+	resQuery, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errQuery, true)
 	require.Equal(t, common.DefaultNb-1, resQuery.ResultCount)
 }

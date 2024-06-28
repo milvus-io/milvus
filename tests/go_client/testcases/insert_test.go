@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -29,7 +29,7 @@ func TestInsertDefault(t *testing.T) {
 		columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
 		pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *columnOpt)
 		vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *columnOpt)
-		insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
+		insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
 		if !autoID {
 			insertOpt.WithColumns(pkColumn)
 		}
@@ -51,14 +51,14 @@ func TestInsertDefaultPartition(t *testing.T) {
 
 		// create partition
 		parName := common.GenRandomString("par", 4)
-		err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+		err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 		common.CheckErr(t, err, true)
 
 		// insert
 		columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
 		pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *columnOpt)
 		vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *columnOpt)
-		insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
+		insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
 		if !autoID {
 			insertOpt.WithColumns(pkColumn)
 		}
@@ -82,7 +82,7 @@ func TestInsertVarcharPkDefault(t *testing.T) {
 		columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
 		pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, *columnOpt)
 		vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeBinaryVector, *columnOpt)
-		insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
+		insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
 		if !autoID {
 			insertOpt.WithColumns(pkColumn)
 		}
@@ -105,7 +105,7 @@ func TestInsertAllFieldsData(t *testing.T) {
 		_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(dynamic))
 
 		// insert
-		insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName)
+		insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName)
 		columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
 		for _, field := range schema.Fields {
 			if field.DataType == entity.FieldTypeArray {
@@ -123,7 +123,7 @@ func TestInsertAllFieldsData(t *testing.T) {
 		common.CheckInsertResult(t, pkColumn, insertRes)
 
 		// flush and check row count
-		flushTak, _ := mc.Flush(ctx, clientv2.NewFlushOption(schema.CollectionName))
+		flushTak, _ := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		err := flushTak.Await(ctx)
 		common.CheckErr(t, err, true)
 	}
@@ -139,7 +139,7 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 
 	// insert without dynamic field
-	insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName)
+	insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName)
 	columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
 
 	for _, field := range schema.Fields {
@@ -151,7 +151,7 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	require.Equal(t, common.DefaultNb, int(insertRes.InsertCount))
 
 	// insert with dynamic field
-	insertOptDynamic := clientv2.NewColumnBasedInsertOption(schema.CollectionName)
+	insertOptDynamic := client.NewColumnBasedInsertOption(schema.CollectionName)
 	columnOpt.TWithStart(common.DefaultNb)
 	for _, fieldType := range hp.GetAllScalarFieldType() {
 		if fieldType == entity.FieldTypeArray {
@@ -166,17 +166,17 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	require.Equal(t, common.DefaultNb, int(insertRes2.InsertCount))
 
 	// index
-	it, _ := mc.CreateIndex(ctx, clientv2.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewSCANNIndex(entity.COSINE, 32, false)))
+	it, _ := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewSCANNIndex(entity.COSINE, 32, false)))
 	err := it.Await(ctx)
 	common.CheckErr(t, err, true)
 
 	// load
-	lt, _ := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName))
+	lt, _ := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName))
 	err = lt.Await(ctx)
 	common.CheckErr(t, err, true)
 
 	// query
-	res, _ := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter("int64 == 3000").WithOutputFields([]string{"*"}))
+	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 == 3000").WithOutputFields([]string{"*"}))
 	common.CheckOutputFields(t, []string{common.DefaultFloatVecFieldName, common.DefaultInt64FieldName, common.DefaultDynamicFieldName}, res.Fields)
 	for _, c := range res.Fields {
 		log.Debug("data", zap.Any("data", c.FieldData()))
@@ -192,7 +192,7 @@ func TestInsertEmptyArray(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim).TWithMaxCapacity(0)
-	insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName)
+	insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName)
 	for _, field := range schema.Fields {
 		if field.DataType == entity.FieldTypeArray {
 			columnOpt.TWithElementType(field.ElementType)
@@ -222,7 +222,7 @@ func TestInsertArrayDataTypeNotMatch(t *testing.T) {
 
 		// create collection
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(arrayField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// prepare data
@@ -231,7 +231,7 @@ func TestInsertArrayDataTypeNotMatch(t *testing.T) {
 			columnType = entity.FieldTypeBool
 		}
 		arrayColumn := hp.GenColumnData(100, entity.FieldTypeArray, *hp.TNewDataOption().TWithElementType(columnType).TWithFieldName("array"))
-		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, int64Column, vecColumn, arrayColumn))
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, int64Column, vecColumn, arrayColumn))
 		common.CheckErr(t, err, false, "insert data does not match")
 	}
 }
@@ -253,12 +253,12 @@ func TestInsertArrayDataCapacityExceed(t *testing.T) {
 
 		// create collection
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(arrayField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// insert array data capacity > field.MaxCapacity
 		arrayColumn := hp.GenColumnData(100, entity.FieldTypeArray, *hp.TNewDataOption().TWithElementType(eleType).TWithFieldName("array").TWithMaxCapacity(common.TestCapacity * 2))
-		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, int64Column, vecColumn, arrayColumn))
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, int64Column, vecColumn, arrayColumn))
 		common.CheckErr(t, err, false, "array length exceeds max capacity")
 	}
 }
@@ -270,7 +270,7 @@ func TestInsertNotExist(t *testing.T) {
 
 	// insert data into not exist collection
 	intColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
-	_, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption("notExist", intColumn))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption("notExist", intColumn))
 	common.CheckErr(t, err, false, "can't find collection")
 
 	// insert data into not exist partition
@@ -278,7 +278,7 @@ func TestInsertNotExist(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithDim(common.DefaultDim))
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, intColumn, vecColumn).WithPartition("aaa"))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, intColumn, vecColumn).WithPartition("aaa"))
 	common.CheckErr(t, err, false, "partition not found")
 }
 
@@ -300,19 +300,19 @@ func TestInsertColumnsMismatchFields(t *testing.T) {
 	collName := schema.CollectionName
 
 	// len(column) < len(fields)
-	_, errInsert := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, intColumn))
+	_, errInsert := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn))
 	common.CheckErr(t, errInsert, false, "not passed")
 
 	// len(column) > len(fields)
-	_, errInsert2 := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, intColumn, vecColumn, vecColumn))
+	_, errInsert2 := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn, vecColumn, vecColumn))
 	common.CheckErr(t, errInsert2, false, "duplicated column")
 
 	//
-	_, errInsert3 := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, intColumn, floatColumn, vecColumn))
+	_, errInsert3 := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, intColumn, floatColumn, vecColumn))
 	common.CheckErr(t, errInsert3, false, "does not exist in collection")
 
 	// order(column) != order(fields)
-	_, errInsert4 := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(collName, vecColumn, intColumn))
+	_, errInsert4 := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, vecColumn, intColumn))
 	common.CheckErr(t, errInsert4, true)
 }
 
@@ -330,7 +330,7 @@ func TestInsertColumnsDifferentLen(t *testing.T) {
 	vecColumn := hp.GenColumnData(200, entity.FieldTypeFloatVector, *columnOpt)
 
 	// len(column) < len(fields)
-	_, errInsert := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, intColumn, vecColumn))
+	_, errInsert := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, intColumn, vecColumn))
 	common.CheckErr(t, errInsert, false, "column size not match")
 }
 
@@ -346,17 +346,17 @@ func TestInsertInvalidColumn(t *testing.T) {
 	pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{})
 	vecColumn := hp.GenColumnData(100, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 
-	_, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn))
 	common.CheckErr(t, err, false, "need long int array][actual=got nil]")
 
 	// insert with empty vector data
 	vecColumn2 := column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, [][]float32{})
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn2))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn2))
 	common.CheckErr(t, err, false, "num_rows should be greater than 0")
 
 	// insert with vector data dim not match
 	vecColumnDim := column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim-8, [][]float32{})
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumnDim))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumnDim))
 	common.CheckErr(t, err, false, "vector dim 120 not match collection definition")
 }
 
@@ -378,7 +378,7 @@ func TestInsertColumnVarcharExceedLen(t *testing.T) {
 	pkColumn := column.NewColumnVarChar(common.DefaultVarcharFieldName, varcharValues)
 	vecColumn := hp.GenColumnData(100, entity.FieldTypeBinaryVector, *hp.TNewDataOption())
 
-	_, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn))
 	common.CheckErr(t, err, false, "the length (12) of 0th VarChar varchar exceeds max length (0)%!(EXTRA int64=10)")
 }
 
@@ -398,7 +398,7 @@ func TestInsertSparseData(t *testing.T) {
 		hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, *columnOpt),
 		hp.GenColumnData(common.DefaultNb, entity.FieldTypeSparseVector, *columnOpt.TWithSparseMaxLen(common.DefaultDim)),
 	}
-	inRes, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, columns...))
+	inRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, columns...))
 	common.CheckErr(t, err, true)
 	common.CheckInsertResult(t, pkColumn, inRes)
 }
@@ -422,7 +422,7 @@ func TestInsertSparseDataMaxDim(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	sparseColumn := column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec})
-	inRes, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, varcharColumn, sparseColumn))
+	inRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, varcharColumn, sparseColumn))
 	common.CheckErr(t, err, true)
 	common.CheckInsertResult(t, pkColumn, inRes)
 }
@@ -453,7 +453,7 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 	sparseVec, err := entity.NewSliceSparseEmbedding(positions, values)
 	common.CheckErr(t, err, true)
 	data1 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, data1...))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data1...))
 	common.CheckErr(t, err, false, "invalid index in sparse float vector: must be less than 2^32-1")
 
 	// invalid sparse vector: empty position and values
@@ -462,7 +462,7 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 	sparseVec, err = entity.NewSliceSparseEmbedding(positions, values)
 	common.CheckErr(t, err, true)
 	data2 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, data2...))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data2...))
 	common.CheckErr(t, err, false, "empty sparse float vector row")
 }
 
@@ -484,7 +484,7 @@ func TestInsertSparseVectorSamePosition(t *testing.T) {
 	sparseVec, err := entity.NewSliceSparseEmbedding([]uint32{2, 10, 2}, []float32{0.4, 0.5, 0.6})
 	common.CheckErr(t, err, true)
 	data = append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, data...))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data...))
 	common.CheckErr(t, err, false, "unsorted or same indices in sparse float vector")
 }
 
@@ -506,7 +506,7 @@ func TestInsertDefaultRows(t *testing.T) {
 		// insert rows
 		rows := hp.GenInt64VecRows(common.DefaultNb, false, autoId, *hp.TNewDataOption())
 		log.Info("rows data", zap.Any("rows[8]", rows[8]))
-		ids, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+		ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 		common.CheckErr(t, err, true)
 		if !autoId {
 			int64Values := make([]int64, 0, common.DefaultNb)
@@ -518,7 +518,7 @@ func TestInsertDefaultRows(t *testing.T) {
 		require.Equal(t, ids.InsertCount, int64(common.DefaultNb))
 
 		// flush and check row count
-		flushTask, errFlush := mc.Flush(ctx, clientv2.NewFlushOption(schema.CollectionName))
+		flushTask, errFlush := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		common.CheckErr(t, errFlush, true)
 		errFlush = flushTask.Await(ctx)
 		common.CheckErr(t, errFlush, true)
@@ -541,7 +541,7 @@ func TestInsertAllFieldsRows(t *testing.T) {
 		rows := hp.GenAllFieldsRows(common.DefaultNb, false, *hp.TNewDataOption())
 		log.Debug("", zap.Any("row[0]", rows[0]))
 		log.Debug("", zap.Any("row", rows[1]))
-		ids, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+		ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 		common.CheckErr(t, err, true)
 
 		int64Values := make([]int64, 0, common.DefaultNb)
@@ -551,7 +551,7 @@ func TestInsertAllFieldsRows(t *testing.T) {
 		common.CheckInsertResult(t, column.NewColumnInt64(common.DefaultInt64FieldName, int64Values), ids)
 
 		// flush and check row count
-		flushTask, errFlush := mc.Flush(ctx, clientv2.NewFlushOption(schema.CollectionName))
+		flushTask, errFlush := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		common.CheckErr(t, errFlush, true)
 		errFlush = flushTask.Await(ctx)
 		common.CheckErr(t, errFlush, true)
@@ -572,7 +572,7 @@ func TestInsertVarcharRows(t *testing.T) {
 
 		// insert rows
 		rows := hp.GenInt64VarcharSparseRows(common.DefaultNb, false, autoId, *hp.TNewDataOption().TWithSparseMaxLen(1000))
-		ids, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+		ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 		common.CheckErr(t, err, true)
 
 		int64Values := make([]int64, 0, common.DefaultNb)
@@ -582,7 +582,7 @@ func TestInsertVarcharRows(t *testing.T) {
 		common.CheckInsertResult(t, column.NewColumnInt64(common.DefaultInt64FieldName, int64Values), ids)
 
 		// flush and check row count
-		flushTask, errFlush := mc.Flush(ctx, clientv2.NewFlushOption(schema.CollectionName))
+		flushTask, errFlush := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		common.CheckErr(t, errFlush, true)
 		errFlush = flushTask.Await(ctx)
 		common.CheckErr(t, errFlush, true)
@@ -597,7 +597,7 @@ func TestInsertSparseRows(t *testing.T) {
 	sparseField := entity.NewField().WithName(common.DefaultSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
 	collName := common.GenRandomString("insert", 6)
 	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(sparseField)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// prepare rows
@@ -613,7 +613,7 @@ func TestInsertSparseRows(t *testing.T) {
 		}
 		rows = append(rows, &baseRow)
 	}
-	ids, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+	ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 	common.CheckErr(t, err, true)
 
 	int64Values := make([]int64, 0, common.DefaultNb)
@@ -623,7 +623,7 @@ func TestInsertSparseRows(t *testing.T) {
 	common.CheckInsertResult(t, column.NewColumnInt64(common.DefaultInt64FieldName, int64Values), ids)
 
 	// flush and check row count
-	flushTask, errFlush := mc.Flush(ctx, clientv2.NewFlushOption(schema.CollectionName))
+	flushTask, errFlush := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 	common.CheckErr(t, errFlush, true)
 	errFlush = flushTask.Await(ctx)
 	common.CheckErr(t, errFlush, true)
@@ -639,12 +639,12 @@ func TestInsertRowFieldNameNotMatch(t *testing.T) {
 	int64Field := entity.NewField().WithName("pk").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	collName := common.GenRandomString(prefix, 6)
 	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// insert rows, with json key name: int64
 	rows := hp.GenInt64VecRows(10, false, false, *hp.TNewDataOption())
-	_, errInsert := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+	_, errInsert := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 	common.CheckErr(t, errInsert, false, "row 0 does not has field pk")
 }
 
@@ -664,7 +664,7 @@ func TestInsertRowMismatchFields(t *testing.T) {
 		}
 		rowsLess = append(rowsLess, row)
 	}
-	_, errInsert := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rowsLess...))
+	_, errInsert := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsLess...))
 	common.CheckErr(t, errInsert, false, "[expected=need float vector][actual=got nil]")
 
 	/*
@@ -680,7 +680,7 @@ func TestInsertRowMismatchFields(t *testing.T) {
 			rowsMore = append(rowsMore, row)
 		}
 		log.Debug("Row data", zap.Any("row[0]", rowsMore[0]))
-		_, errInsert = mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rowsMore...))
+		_, errInsert = mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsMore...))
 		common.CheckErr(t, errInsert, false, "")
 	*/
 
@@ -694,7 +694,7 @@ func TestInsertRowMismatchFields(t *testing.T) {
 		rowsOrder = append(rowsOrder, row)
 	}
 	log.Debug("Row data", zap.Any("row[0]", rowsOrder[0]))
-	_, errInsert = mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rowsOrder...))
+	_, errInsert = mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsOrder...))
 	common.CheckErr(t, errInsert, true)
 }
 
@@ -711,7 +711,7 @@ func TestInsertAutoIDInvalidRow(t *testing.T) {
 		// insert rows: autoId true -> o pk data; autoID false -> has pk data
 		rows := hp.GenInt64VecRows(10, false, !autoId, *hp.TNewDataOption())
 		log.Info("rows data", zap.Any("rows[8]", rows[0]))
-		_, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+		_, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 		common.CheckErr(t, err, false, "missing pk data")
 	}
 }

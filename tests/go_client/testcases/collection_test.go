@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -25,16 +25,16 @@ func TestCreateCollection(t *testing.T) {
 	for _, collectionFieldsType := range []hp.CollectionFieldsType{hp.Int64Vec, hp.VarcharBinary, hp.Int64VarcharSparseVec, hp.AllFields} {
 		fields := hp.FieldsFact.GenFieldsForCollection(collectionFieldsType, hp.TNewFieldsOption())
 		schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(schema.CollectionName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 		common.CheckErr(t, err, true)
 
 		// has collections and verify
-		has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+		has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 		common.CheckErr(t, err, true)
 		require.True(t, has)
 
 		// list collections and verify
-		collections, err := mc.ListCollections(ctx, clientv2.NewListCollectionOption())
+		collections, err := mc.ListCollections(ctx, client.NewListCollectionOption())
 		common.CheckErr(t, err, true)
 		require.Contains(t, collections, schema.CollectionName)
 	}
@@ -51,18 +51,18 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 		// pk field with name
 		collName := common.GenRandomString(prefix, 6)
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// verify field name
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		require.True(t, coll.Schema.AutoID)
 		require.True(t, coll.Schema.Fields[0].AutoID)
 
 		// insert
 		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
-		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, true)
 	}
 }
@@ -78,11 +78,11 @@ func TestCreateCollectionShards(t *testing.T) {
 		// pk field with name
 		collName := common.GenRandomString(prefix, 6)
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
 		common.CheckErr(t, err, true)
 
 		// verify field name
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		if shard < 1 {
 			shard = 1
@@ -104,18 +104,18 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 
 		// pk field with name
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// verify field name
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		log.Info("schema autoID", zap.Bool("schemaAuto", coll.Schema.AutoID))
 		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
 		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
-		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, false, "field pk not passed")
 	}
 }
@@ -133,18 +133,18 @@ func TestCreateAutoIdCollection(t *testing.T) {
 
 		// pk field with name
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema).WithAutoID(true))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithAutoID(true))
 		common.CheckErr(t, err, true)
 
 		// verify field name
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		log.Info("schema autoID", zap.Bool("schemaAuto", coll.Schema.AutoID))
 		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
 		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
-		_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, vecColumn))
 		common.CheckErr(t, err, false, "field pk not passed")
 	}
 }
@@ -160,11 +160,11 @@ func TestCreateJsonCollection(t *testing.T) {
 
 	// pk field with name
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(jsonField)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 }
@@ -188,11 +188,11 @@ func TestCreateArrayCollections(t *testing.T) {
 	}
 
 	// pk field with name
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 }
@@ -211,10 +211,10 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 		collName := common.GenRandomString(prefix, 6)
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(partitionKeyField)
 
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 
 		for _, field := range coll.Schema.Fields {
@@ -224,7 +224,7 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 		}
 
 		// verify partitions
-		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
+		partitions, err := mc.ListPartitions(ctx, client.NewListPartitionOption(collName))
 		require.Len(t, partitions, common.DefaultPartitionNum)
 		common.CheckErr(t, err, true)
 	}
@@ -245,11 +245,11 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 		collName := common.GenRandomString(prefix, 6)
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(partitionKeyField)
 
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// verify partitions num
-		partitions, err := mc.ListPartitions(ctx, clientv2.NewListPartitionOption(collName))
+		partitions, err := mc.ListPartitions(ctx, client.NewListPartitionOption(collName))
 		require.Len(t, partitions, int(numPartition))
 		common.CheckErr(t, err, true)
 	}
@@ -265,15 +265,15 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithDynamicFieldEnabled(true)
 	// pk field with name
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 
-	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, coll.Schema.EnableDynamicField)
 
@@ -282,7 +282,7 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
 	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, true)
 }
 
@@ -297,15 +297,15 @@ func TestCreateCollectionDynamic(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
 	// pk field with name
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 
-	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(schema.CollectionName))
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	log.Info("collection dynamic", zap.Bool("collectionSchema", coll.Schema.EnableDynamicField))
 	common.CheckErr(t, err, true)
 	// require.True(t, coll.Schema.Fields[0].IsDynamic)
@@ -315,7 +315,7 @@ func TestCreateCollectionDynamic(t *testing.T) {
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
 	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
-	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, false, "field dynamicNumber does not exist")
 }
 
@@ -333,11 +333,11 @@ func TestCreateCollectionAllFields(t *testing.T) {
 	}
 
 	// pk field with name
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 }
@@ -352,11 +352,11 @@ func TestCreateCollectionSparseVector(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(sparseVecField)
 	// pk field with name
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
 
 	// verify field name
-	has, err := mc.HasCollection(ctx, clientv2.NewHasCollectionOption(schema.CollectionName))
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
 	require.True(t, has)
 }
@@ -375,11 +375,11 @@ func TestCreateCollectionWithValidFieldName(t *testing.T) {
 		pkField := entity.NewField().WithName(name).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 		vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// verify field name
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		require.Equal(t, name, coll.Schema.Fields[0].Name)
 	}
@@ -404,14 +404,14 @@ func TestCreateCollectionWithValidName(t *testing.T) {
 
 	for _, name := range common.GenValidNames() {
 		schema := genDefaultSchema().WithName(name)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(name, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema))
 		common.CheckErr(t, err, true)
 
-		collections, err := mc.ListCollections(ctx, clientv2.NewListCollectionOption())
+		collections, err := mc.ListCollections(ctx, client.NewListCollectionOption())
 		common.CheckErr(t, err, true)
 		require.Contains(t, collections, name)
 
-		err = mc.DropCollection(ctx, clientv2.NewDropCollectionOption(name))
+		err = mc.DropCollection(ctx, client.NewDropCollectionOption(name))
 		common.CheckErr(t, err, true)
 	}
 }
@@ -429,7 +429,7 @@ func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 		pkField := entity.NewField().WithName(invalidName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 		vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(128)
 		schema := entity.NewSchema().WithName("aaa").WithField(pkField).WithField(vecField)
-		collOpt := clientv2.NewCreateCollectionOption("aaa", schema)
+		collOpt := client.NewCreateCollectionOption("aaa", schema)
 
 		err := mc.CreateCollection(ctx, collOpt)
 		common.CheckErr(t, err, false, "field name should not be empty",
@@ -450,7 +450,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 	// create collection and schema no name
 	schema := genDefaultSchema()
-	err2 := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err2, false, "collection name should not be empty")
 
 	// create collection with invalid schema name
@@ -459,7 +459,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 		// schema has invalid name
 		schema.WithName(invalidName)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, "collection name should not be empty",
 			"the first character of a collection name must be an underscore or letter",
 			"collection name can only contain numbers, letters and underscores",
@@ -467,13 +467,13 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 		// collection option has invalid name
 		schema.WithName(collName)
-		err2 := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(invalidName, schema))
+		err2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
 		common.CheckErr(t, err2, false, "collection name matches schema name")
 	}
 
 	// collection name not equal to schema name
 	schema.WithName(collName)
-	err3 := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(common.GenRandomString("pre", 4), schema))
+	err3 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(common.GenRandomString("pre", 4), schema))
 	common.CheckErr(t, err3, false, "collection name matches schema name")
 }
 
@@ -507,7 +507,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 		for _, field := range invalidField.fields {
 			schema.WithField(field)
 		}
-		collOpt := clientv2.NewCreateCollectionOption(collName, schema)
+		collOpt := client.NewCreateCollectionOption(collName, schema)
 		err := mc.CreateCollection(ctx, collOpt)
 		common.CheckErr(t, err, false, invalidField.errMsg)
 	}
@@ -521,13 +521,13 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 	// create collection with autoID true or not
 	collName := common.GenRandomString(prefix, 6)
 
-	for _, autoId := range []bool{true, false} {
+	for _, autoId := range [2]bool{true, false} {
 		vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 		// pk field type: non-int64 and non-varchar
 		for _, fieldType := range hp.GetInvalidPkFieldType() {
 			invalidPkField := entity.NewField().WithName("pk").WithDataType(fieldType).WithIsPrimaryKey(true)
 			schema := entity.NewSchema().WithName(collName).WithField(vecField).WithField(invalidPkField).WithAutoID(autoId)
-			errNonInt64Field := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+			errNonInt64Field := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 			common.CheckErr(t, errNonInt64Field, false, "the data type of primary key should be Int64 or VarChar")
 		}
 	}
@@ -546,12 +546,12 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 	// two vector fields have same name
 	collName := common.GenRandomString(prefix, 6)
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(vecField)
-	errDupField := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	errDupField := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, errDupField, false, "duplicated field name")
 
 	// two named "id" fields, one is pk field and other is scalar field
 	schema2 := entity.NewSchema().WithName(collName).WithField(pkField).WithField(pkField2).WithField(vecField).WithAutoID(true)
-	errDupField2 := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema2))
+	errDupField2 := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema2))
 	common.CheckErr(t, errDupField2, false, "duplicated field name")
 }
 
@@ -564,7 +564,6 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	collName := common.GenRandomString(prefix, 6)
 
-	t.Parallel()
 	for _, fieldType := range hp.GetInvalidPartitionKeyFieldType() {
 		log.Debug("TestCreateCollectionInvalidPartitionKeyType", zap.Any("partitionKeyFieldType", fieldType))
 		partitionKeyField := entity.NewField().WithName("parKey").WithDataType(fieldType).WithIsPartitionKey(true)
@@ -572,7 +571,7 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 			partitionKeyField.WithElementType(entity.FieldTypeInt64)
 		}
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(partitionKeyField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, "the data type of partition key should be Int64 or VarChar")
 	}
 }
@@ -587,7 +586,7 @@ func TestCreateCollectionPartitionKeyPk(t *testing.T) {
 	collName := common.GenRandomString(prefix, 6)
 
 	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "the partition key field must not be primary field")
 }
 
@@ -604,7 +603,7 @@ func TestCreateCollectionPartitionKeyNum(t *testing.T) {
 	pkField2 := entity.NewField().WithName("pk_2").WithDataType(entity.FieldTypeVarChar).WithMaxLength(common.TestMaxLen).WithIsPartitionKey(true)
 
 	schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(pkField1).WithField(pkField2)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "there are more than one partition key")
 }
 
@@ -630,7 +629,7 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 	}
 	for _, npStruct := range invalidNumPartitionStruct {
 		// create collection with num partitions
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, npStruct.errMsg)
 	}
 }
@@ -646,7 +645,7 @@ func TestCreateCollectionMultiAutoId(t *testing.T) {
 		entity.NewField().WithName("dupInt").WithDataType(entity.FieldTypeInt64).WithIsAutoID(true)).WithField(
 		entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim),
 	).WithName(collName)
-	errMultiAuto := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	errMultiAuto := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, errMultiAuto, false, "only one field can speficy AutoID with true")
 }
 
@@ -665,11 +664,11 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 		).WithName(collName).WithAutoID(!autoId)
 
 		// create collection
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
 
 		// describe collection
-		coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
 		require.EqualValues(t, autoId, coll.Schema.AutoID)
 		for _, field := range coll.Schema.Fields {
@@ -694,10 +693,10 @@ func TestCreateCollectionDescription(t *testing.T) {
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithDescription(schemaDesc)
 
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 
-	coll, err := mc.DescribeCollection(ctx, clientv2.NewDescribeCollectionOption(collName))
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, schemaDesc, coll.Schema.Description)
 	for _, field := range coll.Schema.Fields {
@@ -738,7 +737,7 @@ func TestCreateBinaryCollectionInvalidDim(t *testing.T) {
 		).WithName(collName)
 
 		// create collection
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, invalidDim.errMsg)
 	}
 }
@@ -774,7 +773,7 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 			).WithName(collName)
 
 			// create collection
-			err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 			common.CheckErr(t, err, false, invalidDim.errMsg)
 		}
 	}
@@ -789,7 +788,7 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 		entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).WithField(
 		entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector),
 	).WithName(collName)
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "dimension is not defined in field type params, check type param `dim` for vector field")
 }
 
@@ -805,7 +804,7 @@ func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
 	).WithName(collName)
 
 	// create collection
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "dim should not be specified for sparse vector field sparse")
 }
 
@@ -821,13 +820,13 @@ func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(arrayField)
 
 	// create collection
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "type param(max_capacity) should be specified for array field")
 
 	// invalid Capacity
 	for _, invalidCapacity := range []int64{-1, 0, common.MaxCapacity + 1} {
 		arrayField.WithMaxCapacity(invalidCapacity)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, "the maximum capacity specified for a Array should be in (0, 4096]")
 	}
 }
@@ -845,13 +844,13 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(arrayVarcharField)
 
 	// create collection
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
 
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
 	}
 }
@@ -868,13 +867,13 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 
 	schema := entity.NewSchema().WithName(collName).WithField(varcharField).WithField(vecField)
 	// create collection
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
 
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
 	}
 }
@@ -890,7 +889,7 @@ func TestCreateArrayNotSupportedFieldType(t *testing.T) {
 	for _, fieldType := range []entity.FieldType{entity.FieldTypeArray, entity.FieldTypeJSON, entity.FieldTypeBinaryVector, entity.FieldTypeFloatVector} {
 		field := entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(fieldType)
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(field)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, false, fmt.Sprintf("element type %s is not supported", fieldType.Name()))
 	}
 }
@@ -907,7 +906,7 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 		vecField := entity.NewField().WithName(fmt.Sprintf("vec_%d", i)).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 		schema.WithField(vecField)
 	}
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, false, fmt.Sprintf("maximum vector field's number should be limited to %d", common.MaxVectorFieldNum))
 }
 
@@ -922,7 +921,7 @@ func TestCreateCollectionInvalidShards(t *testing.T) {
 		// pk field with name
 		collName := common.GenRandomString(prefix, 6)
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
 		common.CheckErr(t, err, false, fmt.Sprintf("maximum shards's number should be limited to %d", common.MaxShardNum))
 	}
 }
@@ -946,7 +945,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {
-		err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(collName, mSchema.schema))
+		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, mSchema.schema))
 		common.CheckErr(t, err, false, mSchema.errMsg)
 	}
 }
