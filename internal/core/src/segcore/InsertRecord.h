@@ -116,9 +116,9 @@ class OffsetOrderedMap : public OffsetMap {
                bool false_filtered_out) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
-        // if (limit == Unlimited || limit == NoLimit) {
-        //     limit = map_.size();
-        // }
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = map_.size();
+        }
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
@@ -142,15 +142,15 @@ class OffsetOrderedMap : public OffsetMap {
         if (!false_filtered_out) {
             cnt = size - bitset.count();
         }
-        if (limit == Unlimited || limit == NoLimit) {
-            limit = cnt;
-        }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         auto it = map_.begin();
         for (; hit_num < limit && it != map_.end(); it++) {
-            for (auto seg_offset : it->second) {
+            // Offsets in the growing segment are ordered by timestamp,
+            // so traverse from back to front to obtain the latest offset.
+            for (int i = it->second.size() - 1; i >= 0; --i) {
+                auto seg_offset = it->second[i];
                 if (seg_offset >= size) {
                     // Frequently concurrent insert/query will cause this case.
                     continue;
@@ -159,9 +159,8 @@ class OffsetOrderedMap : public OffsetMap {
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
-                    if (hit_num >= limit) {
-                        break;
-                    }
+                    // PK hit, no need to continue traversing offsets with the same PK.
+                    break;
                 }
             }
         }
@@ -268,6 +267,7 @@ class OffsetOrderedArray : public OffsetMap {
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         auto it = array_.begin();
+        PkType last_hit;
         for (; hit_num < limit && it != array_.end(); it++) {
             auto seg_offset = it->second;
             if (seg_offset >= size) {
@@ -276,6 +276,11 @@ class OffsetOrderedArray : public OffsetMap {
             }
 
             if (!(bitset[seg_offset] ^ false_filtered_out)) {
+                if (it->first == last_hit) {
+                    // skip duplicate PK
+                    continue;
+                }
+                last_hit = it->first;
                 seg_offsets.push_back(seg_offset);
                 hit_num++;
             }
