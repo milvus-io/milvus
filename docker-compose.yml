@@ -2,7 +2,7 @@ version: '3.5'
 
 services:
   etcd:
-    image: quay.io/coreos/etcd:v3.4.13
+    image: milvusdb/etcd:3.5.5-r2
     ports:
       - "2379:2379"
       - "2380:2380"
