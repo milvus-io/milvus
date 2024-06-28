@@ -6,7 +6,7 @@ EXPOSE 19530
 
 # Set environment variables
 ENV ETCD_ENDPOINTS=https://etcd-service.onrender.com:2379
-ENV MINIO_ADDRESS=minio:9000
+ENV MINIO_ADDRESS=https://minio-service-p715.onrender.com:9000
 ENV MINIO_ACCESS_KEY=minioadmin
 ENV MINIO_SECRET_KEY=minioadmin
 
