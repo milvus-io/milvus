@@ -26,7 +26,10 @@ namespace milvus::storage {
 
 class PayloadReader {
  public:
-    explicit PayloadReader(const uint8_t* data, int length, DataType data_type);
+    explicit PayloadReader(const uint8_t* data,
+                           int length,
+                           DataType data_type,
+                           bool nullable);
 
     ~PayloadReader() = default;
 
@@ -41,6 +44,7 @@ class PayloadReader {
  private:
     DataType column_type_;
     int dim_;
+    bool nullable;
     FieldDataPtr field_data_;
 };
 

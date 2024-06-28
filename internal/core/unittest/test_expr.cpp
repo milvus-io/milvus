@@ -1613,7 +1613,8 @@ TEST(Expr, TestExprPerformance) {
 
 TEST_P(ExprTest, test_term_pk) {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(FieldName("Timestamp"), FieldId(1), DataType::INT64);
+    schema->AddField(
+        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);

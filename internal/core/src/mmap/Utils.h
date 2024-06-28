@@ -39,6 +39,9 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                std::vector<std::vector<uint64_t>>& element_indices) {
     size_t total_written{0};
+    if (data->IsNullable()) {
+        total_written += file.Write(data->ValidData(), data->ValidDataSize());
+    }
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case DataType::VARCHAR:
@@ -93,7 +96,7 @@ WriteFieldData(File& file,
                           GetDataTypeName(data_type));
         }
     } else {
-        total_written += file.Write(data->Data(), data->Size());
+        total_written += file.Write(data->Data(), data->DataSize());
     }
 
     return total_written;

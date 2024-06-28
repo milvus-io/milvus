@@ -81,7 +81,8 @@ struct BaseEventData {
     BaseEventData() = default;
     explicit BaseEventData(BinlogReaderPtr reader,
                            int event_length,
-                           DataType data_type);
+                           DataType data_type,
+                           bool nullable);
 
     std::vector<uint8_t>
     Serialize();
@@ -104,7 +105,9 @@ struct BaseEvent {
     int64_t event_offset;
 
     BaseEvent() = default;
-    explicit BaseEvent(BinlogReaderPtr reader, DataType data_type);
+    explicit BaseEvent(BinlogReaderPtr reader,
+                       DataType data_type,
+                       bool nullable);
 
     std::vector<uint8_t>
     Serialize();

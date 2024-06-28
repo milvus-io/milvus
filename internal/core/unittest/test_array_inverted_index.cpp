@@ -35,21 +35,21 @@ GenTestSchema() {
     schema_->set_primary_field_id(pk);
 
     if constexpr (std::is_same_v<T, bool>) {
-        schema_->AddDebugArrayField("array", DataType::BOOL);
+        schema_->AddDebugArrayField("array", DataType::BOOL,false);
     } else if constexpr (std::is_same_v<T, int8_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT8);
+        schema_->AddDebugArrayField("array", DataType::INT8,false);
     } else if constexpr (std::is_same_v<T, int16_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT16);
+        schema_->AddDebugArrayField("array", DataType::INT16,false);
     } else if constexpr (std::is_same_v<T, int32_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT32);
+        schema_->AddDebugArrayField("array", DataType::INT32,false);
     } else if constexpr (std::is_same_v<T, int64_t>) {
-        schema_->AddDebugArrayField("array", DataType::INT64);
+        schema_->AddDebugArrayField("array", DataType::INT64,false);
     } else if constexpr (std::is_same_v<T, float>) {
-        schema_->AddDebugArrayField("array", DataType::FLOAT);
+        schema_->AddDebugArrayField("array", DataType::FLOAT,false);
     } else if constexpr (std::is_same_v<T, double>) {
-        schema_->AddDebugArrayField("array", DataType::DOUBLE);
+        schema_->AddDebugArrayField("array", DataType::DOUBLE,false);
     } else if constexpr (std::is_same_v<T, std::string>) {
-        schema_->AddDebugArrayField("array", DataType::VARCHAR);
+        schema_->AddDebugArrayField("array", DataType::VARCHAR,false);
     }
 
     return schema_;

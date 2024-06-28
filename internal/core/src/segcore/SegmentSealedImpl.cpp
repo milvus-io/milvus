@@ -463,7 +463,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
-
                 stats_.mem_size += field_data->Size();
             }
             LoadPrimitiveSkipIndex(
@@ -546,7 +545,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                                strerror(errno)));
 
         for (auto i = 0; i < field_data->get_num_rows(); i++) {
-            auto size = field_data->Size(i);
+            auto size = field_data->DataSize(i);
             indices.emplace_back(total_written);
             total_written += size;
         }
@@ -1206,6 +1205,16 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
     auto ret = fill_with_empty(field_id, count);
+    if (column->IsNullable()) {
+        auto dst = ret->mutable_valid_data()->mutable_data();
+        // auto valid_data = std::make_unique<bool[]>(count);
+        for (size_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            auto bit =
+                (column->ValidData()[offset >> 3] >> ((offset & 0x07))) & 1;
+            dst[i] = bit;
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING: {

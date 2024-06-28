@@ -31,6 +31,7 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
     DescriptorEvent descriptor_event(reader);
     DataType data_type =
         DataType(descriptor_event.event_data.fix_part.data_type);
+    bool nullable = descriptor_event.event_data.fix_part.nullable;
     auto descriptor_fix_part = descriptor_event.event_data.fix_part;
     FieldDataMeta data_meta{descriptor_fix_part.collection_id,
                             descriptor_fix_part.partition_id,
@@ -42,7 +43,7 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
             auto event_data_length =
                 header.event_length_ - GetEventHeaderSize(header);
             auto insert_event_data =
-                InsertEventData(reader, event_data_length, data_type);
+                InsertEventData(reader, event_data_length, data_type, nullable);
             auto insert_data =
                 std::make_unique<InsertData>(insert_event_data.field_data);
             insert_data->SetFieldDataMeta(data_meta);
@@ -54,7 +55,7 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
             auto event_data_length =
                 header.event_length_ - GetEventHeaderSize(header);
             auto index_event_data =
-                IndexEventData(reader, event_data_length, data_type);
+                IndexEventData(reader, event_data_length, data_type, nullable);
             auto field_data = index_event_data.field_data;
             // for compatible with golang indexcode.Serialize, which set dataType to String
             if (data_type == DataType::STRING) {
@@ -63,7 +64,7 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
                 AssertInfo(
                     field_data->get_num_rows() == 1,
                     "wrong length of string num in old index binlog file");
-                auto new_field_data = CreateFieldData(DataType::INT8);
+                auto new_field_data = CreateFieldData(DataType::INT8, nullable);
                 new_field_data->FillFieldData(
                     (*static_cast<const std::string*>(field_data->RawValue(0)))
                         .c_str(),

@@ -32,8 +32,10 @@ class PayloadInputStream;
 struct Payload {
     DataType data_type;
     const uint8_t* raw_data;
-    int64_t rows;
+    const uint8_t* valid_data;
+    const int64_t rows;
     std::optional<int> dimension;
+    bool nullable;
 };
 
 class PayloadOutputStream : public arrow::io::OutputStream {
