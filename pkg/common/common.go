@@ -121,6 +121,7 @@ const (
 
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IsSparseKey               = "is_sparse"
+	AutoIndexName             = "AUTOINDEX"
 )
 
 //  Collection properties key
