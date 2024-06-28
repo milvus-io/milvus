@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -1591,10 +1592,18 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	err := s.sessionManager.CheckHealth(ctx)
 	if err != nil {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: []string{err.Error()}}, nil
+		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+	if err = CheckAllChannelsWatched(s.meta, s.channelManager); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	if err = CheckCheckPointsHealth(s.meta); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
