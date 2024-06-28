@@ -307,12 +307,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log.Info("compact start")
 
-	targetSegID, err := t.allocator.AllocOne()
-	if err != nil {
-		log.Warn("compact wrong, unable to allocate segmentID", zap.Error(err))
-		return nil, err
-	}
-
+	targetSegID := t.plan.GetPreAllocatedSegments().GetBegin()
 	previousRowCount := t.getNumRows()
 
 	writer, err := NewSegmentWriter(t.plan.GetSchema(), previousRowCount, targetSegID, partitionID, collectionID)

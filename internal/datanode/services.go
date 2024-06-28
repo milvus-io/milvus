@@ -215,7 +215,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 
 	if req.GetBeginLogID() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("beginLogID is invalid")), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
 	}
 
 	/*
@@ -235,6 +235,9 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
+		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
 		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
@@ -242,7 +245,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("pre-allocated segmentID range is invalid")), nil
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		task = compaction.NewClusteringCompactionTask(
 			taskCtx,
