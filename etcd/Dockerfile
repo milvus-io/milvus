@@ -1,8 +1,8 @@
-# Use an alpine base image for simplicity
-FROM alpine:latest
+# Use the official etcd image
+FROM quay.io/coreos/etcd:v3.4.13
 
-# Install etcd and curl
-RUN apk add --no-cache etcd curl
+# Install curl using apt-get
+RUN apt-get update && apt-get install -y curl
 
 # Expose the necessary ports
 EXPOSE 2379 2380
