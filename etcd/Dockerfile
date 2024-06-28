@@ -1,11 +1,6 @@
 # Use the official etcd image
 FROM quay.io/coreos/etcd:v3.4.13
 
-# Create a health check script
-RUN echo '#!/bin/sh' > /healthcheck.sh \
-    && echo 'wget -qO- http://localhost:2379/health' >> /healthcheck.sh \
-    && chmod +x /healthcheck.sh
-
 # Expose the necessary ports
 EXPOSE 2379 2380
 
