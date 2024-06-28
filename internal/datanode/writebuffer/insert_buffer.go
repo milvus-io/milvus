@@ -74,7 +74,7 @@ type InsertBuffer struct {
 	BufferBase
 	collSchema *schemapb.CollectionSchema
 
-	buffer *storage.InsertData
+	buffers []*storage.InsertData
 }
 
 func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
@@ -87,13 +87,10 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	if estSize == 0 {
 		return nil, errors.New("Invalid schema")
 	}
-	buffer, err := storage.NewInsertData(sch)
-	if err != nil {
-		return nil, err
-	}
+
 	sizeLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 
-	return &InsertBuffer{
+	ib := &InsertBuffer{
 		BufferBase: BufferBase{
 			rowLimit:      noLimit,
 			sizeLimit:     sizeLimit,
@@ -101,26 +98,34 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 			TimestampTo:   0,
 		},
 		collSchema: sch,
-		buffer:     buffer,
-	}, nil
-}
-
-func (ib *InsertBuffer) Yield() *storage.InsertData {
-	if ib.IsEmpty() {
-		return nil
 	}
 
-	return ib.buffer
+	return ib, nil
+}
+
+func (ib *InsertBuffer) buffer(inData *storage.InsertData, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
+	// buffer := ib.currentBuffer()
+	// storage.MergeInsertData(buffer.buffer, inData)
+	ib.buffers = append(ib.buffers, inData)
+	ib.UpdateStatistics(int64(inData.GetRowNum()), int64(inData.GetMemorySize()), tr, startPos, endPos)
+}
+
+func (ib *InsertBuffer) Yield() []*storage.InsertData {
+	result := ib.buffers
+	// set buffer nil to so that fragmented buffer could get GCed
+	ib.buffers = nil
+	return result
 }
 
 func (ib *InsertBuffer) Buffer(inData *inData, startPos, endPos *msgpb.MsgPosition) int64 {
 	bufferedSize := int64(0)
 	for idx, data := range inData.data {
-		storage.MergeInsertData(ib.buffer, data)
 		tsData := inData.tsField[idx]
+		tr := ib.getTimestampRange(tsData)
+		ib.buffer(data, tr, startPos, endPos)
 
 		// update buffer size
-		ib.UpdateStatistics(int64(data.GetRowNum()), int64(data.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
+		ib.UpdateStatistics(int64(data.GetRowNum()), int64(data.GetMemorySize()), tr, startPos, endPos)
 		bufferedSize += int64(data.GetMemorySize())
 	}
 	return bufferedSize

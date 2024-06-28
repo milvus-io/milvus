@@ -30,6 +30,7 @@ import "C"
 import (
 	"fmt"
 	"path"
+	"time"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -51,6 +52,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
@@ -60,9 +62,16 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
-	C.InitTrace(&config)
+	// oltp grpc may hangs forever, add timeout logic at go side
+	timeout := params.TraceCfg.InitTimeoutSeconds.GetAsDuration(time.Second)
+	callWithTimeout(func() {
+		C.InitTrace(&config)
+	}, func() {
+		panic("init segcore tracing timeout, See issue #33483")
+	}, timeout)
 }
 
 func ResetTraceConfig(params *paramtable.ComponentParam) {
@@ -71,6 +80,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
@@ -80,9 +90,34 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
-	C.SetTrace(&config)
+
+	// oltp grpc may hangs forever, add timeout logic at go side
+	timeout := params.TraceCfg.InitTimeoutSeconds.GetAsDuration(time.Second)
+	callWithTimeout(func() {
+		C.SetTrace(&config)
+	}, func() {
+		panic("set segcore tracing timeout, See issue #33483")
+	}, timeout)
+}
+
+func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
+	if timeout > 0 {
+		ch := make(chan struct{})
+		go func() {
+			defer close(ch)
+			fn()
+		}()
+		select {
+		case <-ch:
+		case <-time.After(timeout):
+			timeoutHandler()
+		}
+	} else {
+		fn()
+	}
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
