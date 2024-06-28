@@ -79,7 +79,7 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].SegmentCnt(), nodesInfo[j].SegmentCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetNodeSegmentDelta(id1), b.scheduler.GetNodeSegmentDelta(id2)
+		delta1, delta2 := b.scheduler.GetSegmentTaskDelta(id1, -1), b.scheduler.GetSegmentTaskDelta(id2, -1)
 		return cnt1+delta1 < cnt2+delta2
 	})
 	ret := make([]SegmentAssignPlan, 0, len(segments))
@@ -112,7 +112,7 @@ func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []i
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetNodeChannelDelta(id1), b.scheduler.GetNodeChannelDelta(id2)
+		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1), b.scheduler.GetChannelTaskDelta(id2, -1)
 		return cnt1+delta1 < cnt2+delta2
 	})
 	ret := make([]ChannelAssignPlan, 0, len(channels))

@@ -140,6 +140,9 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 			rowcnt += int(view.NumOfGrowingRows)
 		}
 
+		// calculate executing task cost in scheduler
+		rowcnt += b.scheduler.GetSegmentTaskDelta(node, -1)
+
 		// more row count, less priority
 		nodeItem := newNodeItem(rowcnt, node)
 		ret = append(ret, &nodeItem)
@@ -152,8 +155,11 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 	for _, node := range nodeIDs {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
 
+		channelCount := len(channels)
+		// calculate executing task cost in scheduler
+		channelCount += b.scheduler.GetChannelTaskDelta(node, -1)
 		// more channel num, less priority
-		nodeItem := newNodeItem(len(channels), node)
+		nodeItem := newNodeItem(channelCount, node)
 		ret = append(ret, &nodeItem)
 	}
 	return ret
