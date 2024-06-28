@@ -78,7 +78,7 @@ type clusteringCompactionTask struct {
 	flushChan  chan FlushSignal
 	doneChan   chan struct{}
 
-	// metrics
+	// metrics, don't use
 	writtenRowNum *atomic.Int64
 
 	// inner field
@@ -102,9 +102,10 @@ type clusteringCompactionTask struct {
 type ClusterBuffer struct {
 	id int
 
-	writer           *SegmentWriter
-	bufferRowNum     atomic.Int64
-	bufferMemorySize atomic.Int64
+	writer *SegmentWriter
+
+	bufferMemorySize   atomic.Int64
+	bufferMemoryRowNUm atomic.Int64
 
 	flushedRowNum  atomic.Int64
 	flushedBinlogs map[typeutil.UniqueID]*datapb.FieldBinlog
@@ -571,7 +572,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 				currentBufferSize := t.getUsedMemoryBufferSize()
 
 				// trigger flushBinlog
-				currentBufferNum := clusterBuffer.bufferRowNum.Load()
+				currentBufferNum := clusterBuffer.writer.GetRowNum()
 				if clusterBuffer.flushedRowNum.Load()+currentBufferNum > t.plan.GetMaxSegmentRows() ||
 					clusterBuffer.writer.IsFull() {
 					// reach segment/binlog max size
@@ -640,7 +641,6 @@ func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuf
 		return err
 	}
 	t.writtenRowNum.Inc()
-	clusterBuffer.bufferRowNum.Add(1)
 	return nil
 }
 
@@ -810,7 +810,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	}
 	buffer.uploadedSegmentStats[writer.GetSegmentID()] = segmentStats
 
-	buffer.flushedRowNum.Store(0)
+	//buffer.flushedRowNum.Store(0)
 	buffer.flushedBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0)
 	for _, binlog := range seg.InsertLogs {
 		log.Debug("pack binlog in segment", zap.Int64("partitionID", t.partitionID), zap.Int64("segID", writer.GetSegmentID()), zap.String("binlog", binlog.String()))
@@ -833,13 +833,17 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 		runtime.GC()
 		debug.FreeOSMemory()
 	}()
-	log := log.With(zap.Int("bufferID", buffer.id),
-		zap.Int64("writerRowNum", writer.GetRowNum()),
-		zap.Int64("segmentID", writer.GetSegmentID()),
-		zap.Bool("pack", pack))
 	writtenMemorySize := int64(writer.WrittenMemorySize())
-	log.Info("start flush binlog", zap.Int("bufferID", buffer.id), zap.Int64("writerSize", writtenMemorySize))
-	if writer.GetRowNum() <= 0 {
+	writtenRowNum := writer.GetRowNum()
+	log := log.With(zap.Int("bufferID", buffer.id),
+		zap.Int64("segmentID", writer.GetSegmentID()),
+		zap.Bool("pack", pack),
+		zap.Int64("writerRowNum", writtenRowNum),
+		zap.Int64("writtenMemorySize", writtenMemorySize),
+	)
+
+	log.Info("start flush binlog")
+	if writtenRowNum <= 0 {
 		log.Debug("writerRowNum is zero, skip flush")
 		if pack {
 			return t.packBufferToSegment(ctx, buffer, writer)
@@ -867,11 +871,11 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 		}
 		buffer.flushedBinlogs[fID] = tmpBinlog
 	}
-	buffer.flushedRowNum.Add(buffer.bufferRowNum.Load())
+	buffer.flushedRowNum.Add(writer.GetRowNum())
 
-	// clean buffer
-	//buffer.bufferRowNum.Store(0)
+	// clean buffer with writer
 	buffer.bufferMemorySize.Sub(writtenMemorySize)
+	buffer.bufferMemoryRowNUm.Sub(writtenRowNum)
 
 	t.flushCount.Inc()
 	if pack {
@@ -1113,7 +1117,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 		segmentID = buffer.writer.GetSegmentID()
 		buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
 	}
-	if buffer.writer == nil || buffer.flushedRowNum.Load()+buffer.bufferRowNum.Load() > t.plan.GetMaxSegmentRows() {
+	if buffer.writer == nil || buffer.flushedRowNum.Load()+buffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() {
 		pack = true
 		segmentID, err = t.allocator.AllocOne()
 		if err != nil {
@@ -1127,6 +1131,5 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 	}
 
 	buffer.writer = writer
-	buffer.bufferRowNum.Store(0)
 	return pack, nil
 }
