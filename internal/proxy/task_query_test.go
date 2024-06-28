@@ -565,7 +565,7 @@ func TestTaskQuery_functions(t *testing.T) {
 					FieldsData: []*schemapb.FieldData{fieldData},
 				}
 
-				_, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result}, &queryParams{limit: typeutil.Unlimited})
+				_, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result, result}, &queryParams{limit: typeutil.Unlimited})
 				assert.Error(t, err)
 				paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 			})
