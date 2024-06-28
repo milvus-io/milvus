@@ -1,9 +1,6 @@
 # Use an appropriate base image
 FROM quay.io/coreos/etcd:v3.4.13
 
-# Install wget using apt-get
-RUN apt-get update && apt-get install -y wget
-
 # Expose the necessary ports
 EXPOSE 2379 2380
 
