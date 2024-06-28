@@ -1,9 +1,6 @@
 # Use the official etcd image
 FROM quay.io/coreos/etcd:v3.4.13
 
-# Install curl using apt-get
-RUN apt-get update && apt-get install -y curl
-
 # Expose the necessary ports
 EXPOSE 2379 2380
 
