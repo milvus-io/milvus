@@ -92,8 +92,8 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 			name := fmt.Sprintf("nodeCtxTtChecker-%s", curNode.node.Name())
 			checker = timerecord.NewChecker(name, manager)
 			curNode = curNode.downstream
-			defer checker.Close()
 		}
+		defer checker.Close()
 	}
 
 	for {
