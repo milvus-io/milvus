@@ -267,7 +267,7 @@ class OffsetOrderedArray : public OffsetMap {
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         auto it = array_.begin();
-        PkType last_hit;
+        T last_hit;
         for (; hit_num < limit && it != array_.end(); it++) {
             auto seg_offset = it->second;
             if (seg_offset >= size) {
