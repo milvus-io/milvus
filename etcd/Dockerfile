@@ -1,5 +1,8 @@
-# Use an appropriate base image
-FROM quay.io/coreos/etcd:v3.4.13
+# Use an alpine base image for simplicity
+FROM alpine:latest
+
+# Install etcd and curl
+RUN apk add --no-cache etcd curl
 
 # Expose the necessary ports
 EXPOSE 2379 2380
