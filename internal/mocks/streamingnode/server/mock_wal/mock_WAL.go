@@ -5,7 +5,7 @@ package mock_wal
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/internal/util/streamingutil/message"
+	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/internal/proto/streamingpb"
