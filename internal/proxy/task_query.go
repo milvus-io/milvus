@@ -603,11 +603,6 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		return ret, nil
 	}
 
-	if len(validRetrieveResults) == 1 {
-		ret.FieldsData = validRetrieveResults[0].GetFieldsData()
-		return ret, nil
-	}
-
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
