@@ -267,7 +267,6 @@ class OffsetOrderedArray : public OffsetMap {
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         auto it = array_.begin();
-        T last_hit;
         for (; hit_num < limit && it != array_.end(); it++) {
             auto seg_offset = it->second;
             if (seg_offset >= size) {
@@ -276,11 +275,6 @@ class OffsetOrderedArray : public OffsetMap {
             }
 
             if (!(bitset[seg_offset] ^ false_filtered_out)) {
-                if (it->first == last_hit) {
-                    // skip duplicate PK
-                    continue;
-                }
-                last_hit = it->first;
                 seg_offsets.push_back(seg_offset);
                 hit_num++;
             }
