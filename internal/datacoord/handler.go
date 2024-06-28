@@ -146,13 +146,23 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 				// Skip bulk insert segments.
 				continue
 			}
-			if s.GetLevel() == datapb.SegmentLevel_L2 && s.PartitionStatsVersion > currentPartitionStatsVersion {
-				// skip major compaction not fully completed.
+			if s.GetLevel() == datapb.SegmentLevel_L2 && s.PartitionStatsVersion != currentPartitionStatsVersion {
+				// in the process of L2 compaction, newly generated segment may be visible before the whole L2 compaction Plan
+				// is finished, we have to skip these fast-finished segment because all segments in one L2 Batch must be
+				// seen atomically, otherwise users will see intermediate result
 				continue
 			}
 			segmentInfos[s.GetID()] = s
 			switch {
 			case s.GetState() == commonpb.SegmentState_Dropped:
+				if s.GetLevel() == datapb.SegmentLevel_L2 && s.GetPartitionStatsVersion() == currentPartitionStatsVersion {
+					// if segment.partStatsVersion is equal to currentPartitionStatsVersion,
+					// it must have been indexed, this is guaranteed by clustering compaction process
+					// this is to ensure that the current valid L2 compaction produce is available to search/query
+					// to avoid insufficient data
+					indexedIDs.Insert(s.GetID())
+					continue
+				}
 				droppedIDs.Insert(s.GetID())
 			case !isFlushState(s.GetState()):
 				growingIDs.Insert(s.GetID())
