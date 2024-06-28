@@ -603,7 +603,11 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		return ret, nil
 	}
 
-	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
+	if len(validRetrieveResults) == 1 {
+		ret.FieldsData = validRetrieveResults[0].GetFieldsData()
+		return ret, nil
+	}
+
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
@@ -626,6 +630,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 	}
 
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
