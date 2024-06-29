@@ -2118,7 +2118,7 @@ class TestAutoIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         collection_w.create_index(binary_field_name, {})
-        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'JACCARD'}
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING'}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_all_vector_type(self):
