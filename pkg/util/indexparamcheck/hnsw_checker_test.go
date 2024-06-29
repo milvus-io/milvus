@@ -192,7 +192,7 @@ func Test_hnswChecker_SetDefaultMetricType(t *testing.T) {
 		},
 		{
 			dType:      schemapb.DataType_SparseFloatVector,
-			metricType: metric.COSINE,
+			metricType: metric.IP,
 		},
 		{
 			dType:      schemapb.DataType_BinaryVector,
