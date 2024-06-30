@@ -186,6 +186,10 @@ var (
 	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2308, true)
 	ErrClusteringCompactionGetCollectionFail      = newMilvusError("fail to get collection in compaction", 2309, true)
 	ErrCompactionResultNotFound                   = newMilvusError("compaction result not found", 2310, false)
+	ErrAnalyzeTaskNotFound                        = newMilvusError("analyze task not found", 2311, true)
+	ErrBuildCompactionRequestFail                 = newMilvusError("fail to build CompactionRequest", 2312, true)
+	ErrGetCompactionPlanResultFail                = newMilvusError("fail to get compaction plan", 2313, true)
+	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
