@@ -4225,7 +4225,7 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     int64_t total_size = 0;
     for (int i = 0; i < N; ++i) {
         auto str = "string_data_" + std::to_string(i);
-        total_size += str.size();
+        total_size += str.size() + sizeof(uint32_t);
         str_datas.emplace_back(str);
     }
     auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);
