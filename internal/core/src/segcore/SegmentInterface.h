@@ -138,6 +138,47 @@ class SegmentInternalInterface : public SegmentInterface {
         return static_cast<Span<T>>(chunk_data_impl(field_id, chunk_id));
     }
 
+    template <typename ViewType>
+    std::vector<ViewType>
+    chunk_view(FieldId field_id, int64_t chunk_id) const {
+        auto string_views = chunk_view_impl(field_id, chunk_id);
+        if constexpr (std::is_same_v<ViewType, std::string_view>) {
+            return std::move(string_views);
+        } else {
+            std::vector<ViewType> res;
+            res.reserve(string_views.size());
+            for (const auto& view : string_views) {
+                res.emplace_back(view);
+            }
+            return res;
+        }
+    }
+
+    template <typename ViewType>
+    std::vector<ViewType>
+    get_batch_views(FieldId field_id,
+                    int64_t chunk_id,
+                    int64_t start_offset,
+                    int64_t length) const {
+        if (this->type() == SegmentType::Growing) {
+            PanicInfo(ErrorCode::Unsupported,
+                      "get chunk views not supported for growing segment");
+        }
+        BufferView buffer =
+            get_chunk_buffer(field_id, chunk_id, start_offset, length);
+        std::vector<ViewType> res;
+        res.reserve(length);
+        char* pos = buffer.data_;
+        for (size_t j = 0; j < length; j++) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t);
+            res.emplace_back(ViewType(pos, size));
+            pos += size;
+        }
+        return res;
+    }
+
     template <typename T>
     const index::ScalarIndex<T>&
     chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
@@ -306,10 +347,25 @@ class SegmentInternalInterface : public SegmentInterface {
         bool ignore_non_pk,
         bool fill_ids) const;
 
+    // return whether field mmap or not
+    virtual bool
+    is_mmap_field(FieldId field_id) const = 0;
+
  protected:
     // internal API: return chunk_data in span
     virtual SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
+
+    // internal API: return chunk string views in vector
+    virtual std::vector<std::string_view>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const = 0;
+
+    // internal API: return buffer reference to field chunk data located from start_offset
+    virtual BufferView
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
     virtual const index::IndexBase*
