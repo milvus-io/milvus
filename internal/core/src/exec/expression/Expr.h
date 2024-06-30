@@ -119,7 +119,9 @@ class SegmentExpr : public Expr {
         is_index_mode_ = segment_->HasIndex(field_id_);
         if (is_index_mode_) {
             num_index_chunk_ = segment_->num_chunk_index(field_id_);
-        } else {
+        }
+        // if index not include raw data, also need load data
+        if (segment_->HasFieldData(field_id_)) {
             num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
         }
     }
@@ -166,6 +168,9 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         if (is_index_mode_) {
             MoveCursorForIndex();
+            if (segment_->HasFieldData(field_id_)) {
+                MoveCursorForData();
+            }
         } else {
             MoveCursorForData();
         }
@@ -173,10 +178,11 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk =
-            is_index_mode_ ? current_index_chunk_ : current_data_chunk_;
-        auto current_chunk_pos =
-            is_index_mode_ ? current_index_chunk_pos_ : current_data_chunk_pos_;
+        auto current_chunk = is_index_mode_ && use_index_ ? current_index_chunk_
+                                                          : current_data_chunk_;
+        auto current_chunk_pos = is_index_mode_ && use_index_
+                                     ? current_index_chunk_pos_
+                                     : current_data_chunk_pos_;
         auto current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
@@ -330,14 +336,17 @@ class SegmentExpr : public Expr {
     DataType pk_type_;
     int64_t batch_size_;
 
-    // State indicate position that expr computing at
-    // because expr maybe called for every batch.
     bool is_index_mode_{false};
     bool is_data_mode_{false};
+    // sometimes need to skip index and using raw data
+    // default true means use index as much as possible
+    bool use_index_{true};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
     int64_t num_index_chunk_{0};
+    // State indicate position that expr computing at
+    // because expr maybe called for every batch.
     int64_t current_data_chunk_{0};
     int64_t current_data_chunk_pos_{0};
     int64_t current_index_chunk_{0};
