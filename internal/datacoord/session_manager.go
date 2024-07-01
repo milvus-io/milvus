@@ -217,20 +217,17 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	timeout := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second) * time.Duration(max(len(req.GetSegmentInfos())/10, 1))
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	cli, err := c.getClient(ctx, nodeID)
+	cancel()
 	if err != nil {
 		log.Warn("failed to get client", zap.Error(err))
 		return err
 	}
 
 	err = retry.Do(context.Background(), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		resp, err := cli.SyncSegments(ctx, req)
+		// doesn't set timeout
+		resp, err := cli.SyncSegments(context.Background(), req)
 		if err := VerifyResponse(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
 			return err
