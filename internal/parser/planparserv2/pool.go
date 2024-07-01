@@ -72,11 +72,13 @@ func getParser(lexer *antlrparser.PlanLexer, listeners ...antlr.ErrorListener) *
 
 func putLexer(lexer *antlrparser.PlanLexer) {
 	lexer.SetInputStream(nil)
+	lexer.RemoveErrorListeners()
 	lexerPool.ReturnObject(context.TODO(), lexer)
 }
 
 func putParser(parser *antlrparser.PlanParser) {
 	parser.SetInputStream(nil)
+	parser.RemoveErrorListeners()
 	parserPool.ReturnObject(context.TODO(), parser)
 }
 
