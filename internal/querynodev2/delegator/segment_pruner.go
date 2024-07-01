@@ -31,6 +31,21 @@ type PruneInfo struct {
 	filterRatio float64
 }
 
+func NewSegmentList(partStats []*storage.PartitionStatsSnapshot) ([]*storage.SegmentStats, error) {
+	segmentStats := make([]*storage.SegmentStats, 0)
+	for _, partStat := range partStats {
+		for _, segStats := range partStat.SegmentStats {
+			if len(segStats.FieldStats) != 1 {
+				return nil, merr.WrapErrParameterInvalid(1, len(segStats.FieldStats), "segment status should exactly have 1 field")
+			}
+			segmentStats = append(segmentStats, &segStats)
+			//here it's safe to use segStat address, because the pointed memory is kept valid while being used
+			//this is promised by mutex for the partStats mechanism
+		}
+	}
+	return segmentStats, nil
+}
+
 func PruneSegments(ctx context.Context,
 	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot,
 	searchReq *internalpb.SearchRequest,

@@ -19,6 +19,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -37,6 +38,12 @@ type ScalarFieldValue interface {
 	GetValue() interface{}
 	Type() schemapb.DataType
 	Size() int64
+}
+
+func FromGenericValue(val *planpb.GenericValue, dType schemapb.DataType){
+	switch dType {
+	case
+	}
 }
 
 // DataType_Int8
