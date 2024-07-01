@@ -127,8 +127,8 @@ func (idx binIvfFlat) Params() map[string]string {
 	}
 }
 
-func NewBinIvfFlat(metricType MetricType, nlist int) Index {
-	return ivfPQIndex{
+func NewBinIvfFlatIndex(metricType MetricType, nlist int) Index {
+	return binIvfFlat{
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  BinIvfFlat,
