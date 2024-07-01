@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -1127,10 +1129,11 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 	tsafeManager := tsafe.NewTSafeReplica()
 	tsafeManager.Add(context.Background(), channelName, 100)
 	sd := &shardDelegator{
-		tsafeManager: tsafeManager,
-		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
-		latestTsafe:  atomic.NewUint64(0),
+		tsafeManager:  tsafeManager,
+		vchannelName:  channelName,
+		lifetime:      lifetime.NewLifetime(lifetime.Initializing),
+		latestTsafe:   atomic.NewUint64(0),
+		defaultLogger: log.With(zap.String("channel", channelName)),
 	}
 	defer sd.Close()
 
@@ -1154,10 +1157,11 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	tsafeManager := tsafe.NewTSafeReplica()
 	tsafeManager.Add(context.Background(), channelName, 100)
 	sd := &shardDelegator{
-		tsafeManager: tsafeManager,
-		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
-		latestTsafe:  atomic.NewUint64(0),
+		tsafeManager:  tsafeManager,
+		vchannelName:  channelName,
+		lifetime:      lifetime.NewLifetime(lifetime.Initializing),
+		latestTsafe:   atomic.NewUint64(0),
+		defaultLogger: log.With(zap.String("channel", channelName)),
 	}
 	defer sd.Close()
 
