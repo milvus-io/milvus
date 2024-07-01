@@ -261,3 +261,20 @@ func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 	}
 	return int64(bufferSize) / int64(sizePerRecord), nil
 }
+
+// todo(smellthemoon): use byte to store valid_data
+func bytesToBoolArray(length int, bytes []byte) []bool {
+	bools := make([]bool, 0, length)
+
+	for i := 0; i < length; i++ {
+		bit := (bytes[uint(i)/8] & BitMask[byte(i)%8]) != 0
+		bools = append(bools, bit)
+	}
+
+	return bools
+}
+
+var (
+	BitMask        = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
+	FlippedBitMask = [8]byte{254, 253, 251, 247, 239, 223, 191, 127}
+)

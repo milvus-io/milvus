@@ -142,7 +142,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			data = jsonStrs
 		case schemapb.DataType_BinaryVector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			const rowBytes = dim / 8
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
@@ -151,7 +151,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			rows := fieldData.GetRows().([]float32)
+			rows := fieldData.GetDataRows().([]float32)
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
@@ -159,7 +159,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			const rowBytes = dim * 2
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
@@ -168,7 +168,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			data = chunkedRows
 		default:
-			data = fieldData.GetRows()
+			data = fieldData.GetDataRows()
 		}
 
 		reader, err := CreateReader(data)
@@ -276,7 +276,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			}
 			data = jsonStrs
 		case schemapb.DataType_BinaryVector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			const rowBytes = dim / 8
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
@@ -285,7 +285,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			rows := fieldData.GetRows().([]float32)
+			rows := fieldData.GetDataRows().([]float32)
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
@@ -293,7 +293,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			const rowBytes = dim * 2
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
@@ -302,7 +302,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			}
 			data = chunkedRows
 		default:
-			data = fieldData.GetRows()
+			data = fieldData.GetDataRows()
 		}
 
 		reader, err := CreateReader(data)

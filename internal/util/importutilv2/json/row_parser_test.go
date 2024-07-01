@@ -66,6 +66,7 @@ func TestRowParser_Parse_Valid(t *testing.T) {
 		{name: `{"id": 1, "vector": [], "$meta": {"x": 8}}`, dyFields: []string{"x"}},
 		{name: `{"id": 1, "vector": [], "$meta": {}}`, dyFields: nil},
 		{name: `{"id": 1, "vector": [], "x": 8}`, dyFields: []string{"x"}},
+		{name: `{"id": 1, "vector": [], "x": null}`, dyFields: []string{"x"}},
 		{name: `{"id": 1, "vector": []}`, dyFields: nil},
 	}
 
@@ -74,6 +75,7 @@ func TestRowParser_Parse_Valid(t *testing.T) {
 			var mp map[string]interface{}
 
 			desc := json.NewDecoder(strings.NewReader(c.name))
+
 			desc.UseNumber()
 			err = desc.Decode(&mp)
 			assert.NoError(t, err)

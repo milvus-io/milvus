@@ -193,12 +193,12 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 
 		value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(s.metacache.Collection()))
 		s.NoError(err)
-		s.MetricsEqual(value, 5604)
+		s.MetricsEqual(value, 5607)
 
 		delMsg = s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 		err = wb.BufferData([]*msgstream.InsertMsg{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
-		s.MetricsEqual(value, 5844)
+		s.MetricsEqual(value, 5847)
 	})
 
 	s.Run("pk_type_not_match", func() {
