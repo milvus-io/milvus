@@ -8,7 +8,7 @@ grpcio-tools==1.37.1
 
 pandas==1.1.5
 scipy==1.10.0
-scikit-learn==0.19.1
+scikit-learn==1.5.0
 h5py==2.7.1
 # influxdb==5.2.2
 pyyaml>=5.1
