@@ -264,7 +264,6 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	}
 }
 
-<<<<<<< HEAD
 func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
