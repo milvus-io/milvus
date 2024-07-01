@@ -791,3 +791,40 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	}
 	return len(keys) == 0 && len(values) == 0
 }
+
+func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
+	tasks := make([]*datapb.CompactionTask, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(CompactionTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		info := &datapb.CompactionTask{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, info)
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveCompactionTask(ctx context.Context, coll *datapb.CompactionTask) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.CompactionTask)
+	k, v, err := buildCompactionTaskKV(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	key := buildCompactionTaskPath(task)
+	return kc.MetaKv.Remove(key)
+}

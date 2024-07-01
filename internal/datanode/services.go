@@ -256,7 +256,14 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			Status: merr.Status(err),
 		}, nil
 	}
-	results := node.compactionExecutor.getAllCompactionResults()
+
+	results := make([]*datapb.CompactionPlanResult, 0)
+	if req.GetPlanID() != 0 {
+		result := node.compactionExecutor.getCompactionResult(req.GetPlanID())
+		results = append(results, result)
+	} else {
+		results = node.compactionExecutor.getAllCompactionResults()
+	}
 	return &datapb.CompactionStateResponse{
 		Status:  merr.Success(),
 		Results: results,

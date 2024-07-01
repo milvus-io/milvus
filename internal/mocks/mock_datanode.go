@@ -64,8 +64,8 @@ type MockDataNode_CheckChannelOperationProgress_Call struct {
 }
 
 // CheckChannelOperationProgress is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.ChannelWatchInfo
+//   - _a0 context.Context
+//   - _a1 *datapb.ChannelWatchInfo
 func (_e *MockDataNode_Expecter) CheckChannelOperationProgress(_a0 interface{}, _a1 interface{}) *MockDataNode_CheckChannelOperationProgress_Call {
 	return &MockDataNode_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress", _a0, _a1)}
 }
@@ -119,8 +119,8 @@ type MockDataNode_CompactionV2_Call struct {
 }
 
 // CompactionV2 is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.CompactionPlan
+//   - _a0 context.Context
+//   - _a1 *datapb.CompactionPlan
 func (_e *MockDataNode_Expecter) CompactionV2(_a0 interface{}, _a1 interface{}) *MockDataNode_CompactionV2_Call {
 	return &MockDataNode_CompactionV2_Call{Call: _e.mock.On("CompactionV2", _a0, _a1)}
 }
@@ -174,8 +174,8 @@ type MockDataNode_DropImport_Call struct {
 }
 
 // DropImport is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.DropImportRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.DropImportRequest
 func (_e *MockDataNode_Expecter) DropImport(_a0 interface{}, _a1 interface{}) *MockDataNode_DropImport_Call {
 	return &MockDataNode_DropImport_Call{Call: _e.mock.On("DropImport", _a0, _a1)}
 }
@@ -229,8 +229,8 @@ type MockDataNode_FlushChannels_Call struct {
 }
 
 // FlushChannels is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.FlushChannelsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.FlushChannelsRequest
 func (_e *MockDataNode_Expecter) FlushChannels(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushChannels_Call {
 	return &MockDataNode_FlushChannels_Call{Call: _e.mock.On("FlushChannels", _a0, _a1)}
 }
@@ -284,8 +284,8 @@ type MockDataNode_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.FlushSegmentsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.FlushSegmentsRequest
 func (_e *MockDataNode_Expecter) FlushSegments(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushSegments_Call {
 	return &MockDataNode_FlushSegments_Call{Call: _e.mock.On("FlushSegments", _a0, _a1)}
 }
@@ -380,8 +380,8 @@ type MockDataNode_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.CompactionStateRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.CompactionStateRequest
 func (_e *MockDataNode_Expecter) GetCompactionState(_a0 interface{}, _a1 interface{}) *MockDataNode_GetCompactionState_Call {
 	return &MockDataNode_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", _a0, _a1)}
 }
@@ -435,8 +435,8 @@ type MockDataNode_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.GetComponentStatesRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *MockDataNode_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockDataNode_GetComponentStates_Call {
 	return &MockDataNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -490,8 +490,8 @@ type MockDataNode_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.GetMetricsRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockDataNode_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockDataNode_GetMetrics_Call {
 	return &MockDataNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
@@ -627,8 +627,8 @@ type MockDataNode_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *internalpb.GetStatisticsChannelRequest
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *MockDataNode_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockDataNode_GetStatisticsChannel_Call {
 	return &MockDataNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -682,8 +682,8 @@ type MockDataNode_ImportV2_Call struct {
 }
 
 // ImportV2 is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.ImportRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.ImportRequest
 func (_e *MockDataNode_Expecter) ImportV2(_a0 interface{}, _a1 interface{}) *MockDataNode_ImportV2_Call {
 	return &MockDataNode_ImportV2_Call{Call: _e.mock.On("ImportV2", _a0, _a1)}
 }
@@ -778,8 +778,8 @@ type MockDataNode_NotifyChannelOperation_Call struct {
 }
 
 // NotifyChannelOperation is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.ChannelOperationsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.ChannelOperationsRequest
 func (_e *MockDataNode_Expecter) NotifyChannelOperation(_a0 interface{}, _a1 interface{}) *MockDataNode_NotifyChannelOperation_Call {
 	return &MockDataNode_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation", _a0, _a1)}
 }
@@ -833,8 +833,8 @@ type MockDataNode_PreImport_Call struct {
 }
 
 // PreImport is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.PreImportRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.PreImportRequest
 func (_e *MockDataNode_Expecter) PreImport(_a0 interface{}, _a1 interface{}) *MockDataNode_PreImport_Call {
 	return &MockDataNode_PreImport_Call{Call: _e.mock.On("PreImport", _a0, _a1)}
 }
@@ -888,8 +888,8 @@ type MockDataNode_QueryImport_Call struct {
 }
 
 // QueryImport is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.QueryImportRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.QueryImportRequest
 func (_e *MockDataNode_Expecter) QueryImport(_a0 interface{}, _a1 interface{}) *MockDataNode_QueryImport_Call {
 	return &MockDataNode_QueryImport_Call{Call: _e.mock.On("QueryImport", _a0, _a1)}
 }
@@ -943,8 +943,8 @@ type MockDataNode_QueryPreImport_Call struct {
 }
 
 // QueryPreImport is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.QueryPreImportRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.QueryPreImportRequest
 func (_e *MockDataNode_Expecter) QueryPreImport(_a0 interface{}, _a1 interface{}) *MockDataNode_QueryPreImport_Call {
 	return &MockDataNode_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport", _a0, _a1)}
 }
@@ -998,8 +998,8 @@ type MockDataNode_QuerySlot_Call struct {
 }
 
 // QuerySlot is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.QuerySlotRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.QuerySlotRequest
 func (_e *MockDataNode_Expecter) QuerySlot(_a0 interface{}, _a1 interface{}) *MockDataNode_QuerySlot_Call {
 	return &MockDataNode_QuerySlot_Call{Call: _e.mock.On("QuerySlot", _a0, _a1)}
 }
@@ -1094,8 +1094,8 @@ type MockDataNode_ResendSegmentStats_Call struct {
 }
 
 // ResendSegmentStats is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.ResendSegmentStatsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.ResendSegmentStatsRequest
 func (_e *MockDataNode_Expecter) ResendSegmentStats(_a0 interface{}, _a1 interface{}) *MockDataNode_ResendSegmentStats_Call {
 	return &MockDataNode_ResendSegmentStats_Call{Call: _e.mock.On("ResendSegmentStats", _a0, _a1)}
 }
@@ -1128,7 +1128,7 @@ type MockDataNode_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//  - address string
+//   - address string
 func (_e *MockDataNode_Expecter) SetAddress(address interface{}) *MockDataNode_SetAddress_Call {
 	return &MockDataNode_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -1170,7 +1170,7 @@ type MockDataNode_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//  - dataCoord types.DataCoordClient
+//   - dataCoord types.DataCoordClient
 func (_e *MockDataNode_Expecter) SetDataCoordClient(dataCoord interface{}) *MockDataNode_SetDataCoordClient_Call {
 	return &MockDataNode_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
@@ -1203,7 +1203,7 @@ type MockDataNode_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//  - etcdClient *clientv3.Client
+//   - etcdClient *clientv3.Client
 func (_e *MockDataNode_Expecter) SetEtcdClient(etcdClient interface{}) *MockDataNode_SetEtcdClient_Call {
 	return &MockDataNode_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -1245,7 +1245,7 @@ type MockDataNode_SetRootCoordClient_Call struct {
 }
 
 // SetRootCoordClient is a helper method to define mock.On call
-//  - rootCoord types.RootCoordClient
+//   - rootCoord types.RootCoordClient
 func (_e *MockDataNode_Expecter) SetRootCoordClient(rootCoord interface{}) *MockDataNode_SetRootCoordClient_Call {
 	return &MockDataNode_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
@@ -1299,8 +1299,8 @@ type MockDataNode_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *internalpb.ShowConfigurationsRequest
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
 func (_e *MockDataNode_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockDataNode_ShowConfigurations_Call {
 	return &MockDataNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
@@ -1436,8 +1436,8 @@ type MockDataNode_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.SyncSegmentsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.SyncSegmentsRequest
 func (_e *MockDataNode_Expecter) SyncSegments(_a0 interface{}, _a1 interface{}) *MockDataNode_SyncSegments_Call {
 	return &MockDataNode_SyncSegments_Call{Call: _e.mock.On("SyncSegments", _a0, _a1)}
 }
@@ -1470,7 +1470,7 @@ type MockDataNode_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//  - stateCode commonpb.StateCode
+//   - stateCode commonpb.StateCode
 func (_e *MockDataNode_Expecter) UpdateStateCode(stateCode interface{}) *MockDataNode_UpdateStateCode_Call {
 	return &MockDataNode_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", stateCode)}
 }
@@ -1524,8 +1524,8 @@ type MockDataNode_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.WatchDmChannelsRequest
+//   - _a0 context.Context
+//   - _a1 *datapb.WatchDmChannelsRequest
 func (_e *MockDataNode_Expecter) WatchDmChannels(_a0 interface{}, _a1 interface{}) *MockDataNode_WatchDmChannels_Call {
 	return &MockDataNode_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", _a0, _a1)}
 }

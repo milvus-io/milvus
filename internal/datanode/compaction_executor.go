@@ -159,6 +159,24 @@ func (c *compactionExecutor) discardPlan(channel string) {
 	})
 }
 
+func (c *compactionExecutor) getCompactionResult(planID int64) *datapb.CompactionPlanResult {
+	c.resultGuard.RLock()
+	defer c.resultGuard.RUnlock()
+	_, ok := c.executing.Get(planID)
+	if ok {
+		result := &datapb.CompactionPlanResult{
+			State:  commonpb.CompactionState_Executing,
+			PlanID: planID,
+		}
+		return result
+	}
+	result, ok2 := c.completed.Get(planID)
+	if !ok2 {
+		return &datapb.CompactionPlanResult{}
+	}
+	return result
+}
+
 func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanResult {
 	c.resultGuard.RLock()
 	defer c.resultGuard.RUnlock()

@@ -1036,3 +1036,62 @@ func WrapErrInconsistentRequery(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrCompactionReadDeltaLogErr(msg ...string) error {
+	err := error(ErrCompactionReadDeltaLogErr)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrIllegalCompactionPlan(msg ...string) error {
+	err := error(ErrIllegalCompactionPlan)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrCompactionPlanConflict(msg ...string) error {
+	err := error(ErrCompactionPlanConflict)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrClusteringCompactionClusterNotSupport(msg ...string) error {
+	err := error(ErrClusteringCompactionClusterNotSupport)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrClusteringCompactionCollectionNotSupport(msg ...string) error {
+	err := error(ErrClusteringCompactionCollectionNotSupport)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrClusteringCompactionNotSupportVector(msg ...string) error {
+	err := error(ErrClusteringCompactionNotSupportVector)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return wrapFieldsWithDesc(ErrClusteringCompactionSubmitTaskFail, err.Error(), value("taskType", taskType))
+}
+
+func WrapErrClusteringCompactionMetaError(operation string, err error) error {
+	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
+}
