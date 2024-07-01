@@ -68,7 +68,7 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  path: /tmp/milvus/data # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -405,7 +405,7 @@ indexCoord:
 
 indexNode:
   scheduler:
-    buildParallel: 1
+    buildParallel: 10
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
   ip:  # if not specified, use the first unicastable address
@@ -426,7 +426,7 @@ dataCoord:
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
   segment:
-    maxSize: 1024 # Maximum size of a segment in MB
+    maxSize: 512 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.12
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
@@ -451,7 +451,7 @@ dataCoord:
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:
-    enableAutoCompaction: true
+    enableAutoCompaction: false
     indexBasedCompaction: true
     rpcTimeout: 10
     maxParallelTaskNum: 10
@@ -459,7 +459,7 @@ dataCoord:
     clustering:
       enable: true
       autoEnable: false
-      triggerInterval: 600
+      triggerInterval: 180
       stateCheckInterval: 10
       gcInterval: 600
       minInterval: 3600
@@ -471,8 +471,8 @@ dataCoord:
       # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
       # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
       # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
-      preferSegmentSize: 512m       
-      maxSegmentSize: 1024m
+      preferSegmentSize: 50m       
+      maxSegmentSize: 100m
       maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
       maxCentroidsNum: 10240
       minCentroidsNum: 16
