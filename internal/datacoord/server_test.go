@@ -57,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
@@ -319,17 +318,14 @@ func TestGetSegmentInfo(t *testing.T) {
 					Binlogs: []*datapb.Binlog{
 						{
 							EntriesNum: 20,
-							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 801),
 							LogID:      801,
 						},
 						{
 							EntriesNum: 20,
-							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 802),
 							LogID:      802,
 						},
 						{
 							EntriesNum: 20,
-							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 803),
 							LogID:      803,
 						},
 					},
@@ -343,10 +339,10 @@ func TestGetSegmentInfo(t *testing.T) {
 			SegmentIDs: []int64{0},
 		}
 		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(resp.GetInfos()))
 		// Check that # of rows is corrected from 100 to 60.
 		assert.EqualValues(t, 60, resp.GetInfos()[0].GetNumOfRows())
-		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with wrong segmentID", func(t *testing.T) {
@@ -1823,17 +1819,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 				Binlogs: []*datapb.Binlog{
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 901),
 						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 902),
 						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 903),
 						LogID:      903,
 					},
 				},
@@ -1846,12 +1839,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 				Binlogs: []*datapb.Binlog{
 					{
 						EntriesNum: 30,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 801),
 						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 802),
 						LogID:      802,
 					},
 				},
@@ -1925,17 +1916,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 				Binlogs: []*datapb.Binlog{
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 901),
 						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 902),
 						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 903),
 						LogID:      903,
 					},
 				},
@@ -1948,12 +1936,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 				Binlogs: []*datapb.Binlog{
 					{
 						EntriesNum: 30,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 801),
 						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
-						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 802),
 						LogID:      802,
 					},
 				},
