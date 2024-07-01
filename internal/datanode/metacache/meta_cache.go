@@ -291,8 +291,10 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 	}
 
 	for segID, info := range c.segmentInfos {
-		if info.partitionID != partitionID ||
-			(info.state != commonpb.SegmentState_Flushed && info.state != commonpb.SegmentState_Flushing) {
+		// only check flushed segments
+		// 1. flushing may be compacted on datacoord
+		// 2. growing may doesn't have stats log, it won't include in sync views
+		if info.partitionID != partitionID || info.state != commonpb.SegmentState_Flushed {
 			continue
 		}
 		if _, ok := allSegments[segID]; !ok {
