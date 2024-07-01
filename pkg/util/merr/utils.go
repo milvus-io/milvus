@@ -639,36 +639,33 @@ func WrapErrReplicaNotAvailable(id int64, msg ...string) error {
 }
 
 // Channel related
-func WrapErrChannelNotFound(name string, msg ...string) error {
-	err := wrapFields(ErrChannelNotFound, value("channel", name))
+
+func warpChannelErr(mErr milvusError, name string, msg ...string) error {
+	err := wrapFields(mErr, value("channel", name))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrChannelNotFound(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelNotFound, name, msg...)
+}
+
+func WrapErrChannelCPExceededMaxLag(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelCPExceededMaxLag, name, msg...)
 }
 
 func WrapErrChannelLack(name string, msg ...string) error {
-	err := wrapFields(ErrChannelLack, value("channel", name))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
+	return warpChannelErr(ErrChannelLack, name, msg...)
 }
 
 func WrapErrChannelReduplicate(name string, msg ...string) error {
-	err := wrapFields(ErrChannelReduplicate, value("channel", name))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
+	return warpChannelErr(ErrChannelReduplicate, name, msg...)
 }
 
 func WrapErrChannelNotAvailable(name string, msg ...string) error {
-	err := wrapFields(ErrChannelNotAvailable, value("channel", name))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
+	return warpChannelErr(ErrChannelNotAvailable, name, msg...)
 }
 
 // Segment related

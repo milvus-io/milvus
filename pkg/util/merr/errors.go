@@ -77,10 +77,11 @@ var (
 	ErrReplicaNotAvailable = newMilvusError("replica not available", 401, false)
 
 	// Channel & Delegator related
-	ErrChannelNotFound     = newMilvusError("channel not found", 500, false)
-	ErrChannelLack         = newMilvusError("channel lacks", 501, false)
-	ErrChannelReduplicate  = newMilvusError("channel reduplicates", 502, false)
-	ErrChannelNotAvailable = newMilvusError("channel not available", 503, false)
+	ErrChannelNotFound         = newMilvusError("channel not found", 500, false)
+	ErrChannelLack             = newMilvusError("channel lacks", 501, false)
+	ErrChannelReduplicate      = newMilvusError("channel reduplicates", 502, false)
+	ErrChannelNotAvailable     = newMilvusError("channel not available", 503, false)
+	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
