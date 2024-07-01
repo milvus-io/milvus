@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestMessageID(t *testing.T) {
@@ -40,19 +40,6 @@ func TestMessageID(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// only for pulsar id unittest.
-type MessageIdData struct {
-	LedgerId   *uint64 `protobuf:"varint,1,req,name=ledgerId" json:"ledgerId,omitempty"`
-	EntryId    *uint64 `protobuf:"varint,2,req,name=entryId" json:"entryId,omitempty"`
-	Partition  *int32  `protobuf:"varint,3,opt,name=partition,def=-1" json:"partition,omitempty"`
-	BatchIndex *int32  `protobuf:"varint,4,opt,name=batch_index,json=batchIndex,def=-1" json:"batch_index,omitempty"`
-}
-
-func (m *MessageIdData) Reset()         { *m = MessageIdData{} }
-func (m *MessageIdData) String() string { return proto.CompactTextString(m) }
-
-func (*MessageIdData) ProtoMessage() {}
-
 // newMessageIDOfPulsar only for test.
 func newMessageIDOfPulsar(ledgerID uint64, entryID uint64, batchIdx int32) pulsarID {
 	id := &MessageIdData{
@@ -60,6 +47,7 @@ func newMessageIDOfPulsar(ledgerID uint64, entryID uint64, batchIdx int32) pulsa
 		EntryId:    &entryID,
 		BatchIndex: &batchIdx,
 	}
+
 	msg, err := proto.Marshal(id)
 	if err != nil {
 		panic(err)

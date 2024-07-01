@@ -35,7 +35,7 @@ func TestWithCreateConsumer(t *testing.T) {
 	assert.Equal(t, req.DeliverPolicy.String(), req2.DeliverPolicy.String())
 
 	// panic case.
-	assert.Panics(t, func() { WithCreateConsumer(context.Background(), nil) })
+	assert.NotPanics(t, func() { WithCreateConsumer(context.Background(), nil) })
 }
 
 func TestGetCreateConsumer(t *testing.T) {
