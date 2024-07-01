@@ -114,7 +114,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.collectionName = collectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 
 	t.SearchRequest.DbID = 0 // todo
@@ -135,8 +135,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
-			"because the mustUsePartitionKey config is true")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
+			"because the mustUsePartitionKey config is true"))
 	}
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
