@@ -51,6 +51,8 @@ func NewIvfFlatIndex(metricType MetricType, nlist int) Index {
 	}
 }
 
+var _ Index = ivfPQIndex{}
+
 type ivfPQIndex struct {
 	baseIndex
 
@@ -82,6 +84,8 @@ func NewIvfPQIndex(metricType MetricType, nlist int, m int, nbits int) Index {
 	}
 }
 
+var _ Index = ivfSQ8Index{}
+
 type ivfSQ8Index struct {
 	baseIndex
 
@@ -101,6 +105,33 @@ func NewIvfSQ8Index(metricType MetricType, nlist int) Index {
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  IvfSQ8,
+		},
+
+		nlist: nlist,
+	}
+}
+
+var _ Index = binIvfFlat{}
+
+type binIvfFlat struct {
+	baseIndex
+
+	nlist int
+}
+
+func (idx binIvfFlat) Params() map[string]string {
+	return map[string]string{
+		MetricTypeKey: string(idx.metricType),
+		IndexTypeKey:  string(IvfSQ8),
+		ivfNlistKey:   strconv.Itoa(idx.nlist),
+	}
+}
+
+func NewBinIvfFlat(metricType MetricType, nlist int) Index {
+	return ivfPQIndex{
+		baseIndex: baseIndex{
+			metricType: metricType,
+			indexType:  BinIvfFlat,
 		},
 
 		nlist: nlist,
