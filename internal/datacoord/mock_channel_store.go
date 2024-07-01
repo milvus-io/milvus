@@ -238,50 +238,6 @@ func (_c *MockRWChannelStore_GetNodeChannelsBy_Call) RunAndReturn(run func(NodeS
 	return _c
 }
 
-// GetNodeChannelsByCollectionID provides a mock function with given fields: collectionID
-func (_m *MockRWChannelStore) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
-	ret := _m.Called(collectionID)
-
-	var r0 map[int64][]string
-	if rf, ok := ret.Get(0).(func(int64) map[int64][]string); ok {
-		r0 = rf(collectionID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64][]string)
-		}
-	}
-
-	return r0
-}
-
-// MockRWChannelStore_GetNodeChannelsByCollectionID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeChannelsByCollectionID'
-type MockRWChannelStore_GetNodeChannelsByCollectionID_Call struct {
-	*mock.Call
-}
-
-// GetNodeChannelsByCollectionID is a helper method to define mock.On call
-//   - collectionID int64
-func (_e *MockRWChannelStore_Expecter) GetNodeChannelsByCollectionID(collectionID interface{}) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
-	return &MockRWChannelStore_GetNodeChannelsByCollectionID_Call{Call: _e.mock.On("GetNodeChannelsByCollectionID", collectionID)}
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Run(run func(collectionID int64)) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Return(_a0 map[int64][]string) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) RunAndReturn(run func(int64) map[int64][]string) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetNodes provides a mock function with given fields:
 func (_m *MockRWChannelStore) GetNodes() []int64 {
 	ret := _m.Called()
