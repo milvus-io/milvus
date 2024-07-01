@@ -238,6 +238,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	}
 
 	err = retry.Do(context.Background(), func() error {
+		// doesn't set timeout
 		resp, err := cli.SyncSegments(context.Background(), req)
 		if err := VerifyResponse(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
