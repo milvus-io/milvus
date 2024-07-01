@@ -656,4 +656,347 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.True(exist)
 		s.NotNil(info)
 	})
+
+	s.Run("dc growing/flushing dn flushed", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
+			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				100: {
+					SegmentId: 100,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Growing,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+				101: {
+					SegmentId: 101,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushing,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.True(exist)
+		s.NotNil(info)
+	})
+
+	s.Run("dc flushed dn growing/flushing", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushing,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
+			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				100: {
+					SegmentId: 100,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+				101: {
+					SegmentId: 101,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.True(exist)
+		s.NotNil(info)
+	})
+
+	s.Run("dc dropped dn growing/flushing", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushing,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            102,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
+			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				102: {
+					SegmentId: 102,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(102)
+		s.True(exist)
+		s.NotNil(info)
+	})
+
+	s.Run("dc dropped dn flushed", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushing,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
+			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				102: {
+					SegmentId: 102,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1025,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.False(exist)
+		s.Nil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(102)
+		s.True(exist)
+		s.NotNil(info)
+	})
 }
