@@ -123,11 +123,6 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, fieldID, int64(40))
 	pos += int(unsafe.Sizeof(fieldID))
 
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
-
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -378,11 +373,6 @@ func TestDeleteBinlog(t *testing.T) {
 	fieldID := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
-
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
 
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
@@ -635,11 +625,6 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
 
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
-
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -890,11 +875,6 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
 
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
-
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -1140,11 +1120,6 @@ func TestIndexFileBinlog(t *testing.T) {
 	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
 
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
-
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(timestamp))
@@ -1273,11 +1248,6 @@ func TestIndexFileBinlogV2(t *testing.T) {
 	fID := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
-
-	// descriptor data fix, nullable
-	nullable := UnsafeReadBool(buf, pos)
-	assert.Equal(t, nullable, false)
-	pos += int(unsafe.Sizeof(nullable))
 
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
