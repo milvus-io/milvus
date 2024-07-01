@@ -16,36 +16,24 @@
 
 package index
 
-import "strconv"
+var _ Index = autoIndex{}
 
-const (
-	scannNlistKey       = `nlist`
-	scannWithRawDataKey = `with_raw_data`
-)
-
-type scannIndex struct {
+type autoIndex struct {
 	baseIndex
-
-	nlist       int
-	withRawData bool
 }
 
-func (idx scannIndex) Params() map[string]string {
+func (idx autoIndex) Params() map[string]string {
 	return map[string]string{
-		MetricTypeKey:       string(idx.metricType),
-		IndexTypeKey:        string(SCANN),
-		scannNlistKey:       strconv.Itoa(idx.nlist),
-		scannWithRawDataKey: strconv.FormatBool(idx.withRawData),
+		MetricTypeKey: string(idx.metricType),
+		IndexTypeKey:  string(AUTOINDEX),
 	}
 }
 
-func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
-	return ivfFlatIndex{
+func NewAutoIndex(metricType MetricType) Index {
+	return autoIndex{
 		baseIndex: baseIndex{
+			indexType:  AUTOINDEX,
 			metricType: metricType,
-			indexType:  SCANN,
 		},
-
-		nlist: nlist,
 	}
 }
