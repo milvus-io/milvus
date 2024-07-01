@@ -455,7 +455,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 				FieldsData: []*schemapb.FieldData{fieldData},
 			}
 
-			_, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result},
+			_, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result, result},
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
 			suite.Error(err)
 			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
