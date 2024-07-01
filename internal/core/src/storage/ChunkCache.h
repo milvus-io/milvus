@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <future>
+#include <unordered_map>
 #include "mmap/Column.h"
 
 namespace milvus::storage {
@@ -59,8 +61,10 @@ class ChunkCache {
     CachePath(const std::string& filepath);
 
  private:
-    using ColumnTable =
-        std::unordered_map<std::string, std::shared_ptr<ColumnBase>>;
+    using ColumnTable = std::unordered_map<
+        std::string,
+        std::pair<std::promise<std::shared_ptr<ColumnBase>>,
+                  std::shared_future<std::shared_ptr<ColumnBase>>>>;
 
  private:
     mutable std::shared_mutex mutex_;
