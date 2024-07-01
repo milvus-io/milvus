@@ -677,18 +677,6 @@ func withDataCoord(dc types.DataCoordClient) Opt {
 	}
 }
 
-func withUnhealthyDataCoord() Opt {
-	dc := newMockDataCoord()
-	err := errors.New("mock error")
-	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: merr.Status(err),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
-	}
-	return withDataCoord(dc)
-}
-
 func withInvalidDataCoord() Opt {
 	dc := newMockDataCoord()
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
