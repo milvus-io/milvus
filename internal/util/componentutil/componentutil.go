@@ -84,3 +84,17 @@ func WaitForComponentHealthy[T interface {
 }](ctx context.Context, client T, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, client, serviceName, []commonpb.StateCode{commonpb.StateCode_Healthy}, attempts, sleep)
 }
+
+func CheckHealthRespWithErr(err error) *milvuspb.CheckHealthResponse {
+	if err != nil {
+		return CheckHealthRespWithErrMsg(err.Error())
+	}
+	return CheckHealthRespWithErrMsg()
+}
+
+func CheckHealthRespWithErrMsg(errMsg ...string) *milvuspb.CheckHealthResponse {
+	if len(errMsg) != 0 {
+		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errMsg}
+	}
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}
+}

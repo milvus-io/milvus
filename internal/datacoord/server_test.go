@@ -3134,6 +3134,51 @@ func closeTestServer(t *testing.T, svr *Server) {
 }
 
 func Test_CheckHealth(t *testing.T) {
+	getSessionManager := func(isHealthy bool) *SessionManagerImpl {
+		var client *mockDataNodeClient
+		if isHealthy {
+			client = &mockDataNodeClient{
+				id:    1,
+				state: commonpb.StateCode_Healthy,
+			}
+		} else {
+			client = &mockDataNodeClient{
+				id:    1,
+				state: commonpb.StateCode_Abnormal,
+			}
+		}
+
+		sm := NewSessionManagerImpl()
+		sm.sessions = struct {
+			lock.RWMutex
+			data map[int64]*Session
+		}{data: map[int64]*Session{1: {
+			client: client,
+			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+				return client, nil
+			},
+		}}}
+		return sm
+	}
+
+	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
+		channelManager := NewMockChannelManager(t)
+		if findWatcherOk {
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
+		} else {
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
+		}
+		return channelManager
+	}
+
+	collections := map[UniqueID]*collectionInfo{
+		1: {
+			ID:            1,
+			VChannelNames: []string{"ch1", "ch2"},
+		},
+		2: nil,
+	}
+
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
 		s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
@@ -3144,55 +3189,75 @@ func Test_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 
-	t.Run("data node health check is ok", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		healthClient := &mockDataNodeClient{
-			id:    1,
-			state: commonpb.StateCode_Healthy,
-		}
-		sm := NewSessionManagerImpl()
-		sm.sessions = struct {
-			lock.RWMutex
-			data map[int64]*Session
-		}{data: map[int64]*Session{1: {
-			client: healthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-				return healthClient, nil
-			},
-		}}}
-
-		svr.sessionManager = sm
-		ctx := context.Background()
-		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, true, resp.IsHealthy)
-		assert.Empty(t, resp.Reasons)
-	})
-
 	t.Run("data node health check is fail", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		unhealthClient := &mockDataNodeClient{
-			id:    1,
-			state: commonpb.StateCode_Abnormal,
-		}
-		sm := NewSessionManagerImpl()
-		sm.sessions = struct {
-			lock.RWMutex
-			data map[int64]*Session
-		}{data: map[int64]*Session{1: {
-			client: unhealthClient,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-				return unhealthClient, nil
-			},
-		}}}
-		svr.sessionManager = sm
+		svr.sessionManager = getSessionManager(false)
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("check channel watched fail", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, false)
+		svr.meta = &meta{collections: collections}
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("check checkpoint fail", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
+			collections: collections,
+			channelCPs: &channelCPs{
+				checkpoints: map[string]*msgpb.MsgPosition{
+					"ch1": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+				},
+			},
+		}
+
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
+			collections: collections,
+			channelCPs: &channelCPs{
+				checkpoints: map[string]*msgpb.MsgPosition{
+					"ch1": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
 	})
 }
 
