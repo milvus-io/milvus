@@ -847,7 +847,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
                                             retrieve_result.proto_size);
     ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
     DeleteRetrieveResult(&retrieve_result);
 
     // delete data pks = {1, 2, 3}

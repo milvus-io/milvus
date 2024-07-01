@@ -146,7 +146,10 @@ class OffsetOrderedMap : public OffsetMap {
         seg_offsets.reserve(limit);
         auto it = map_.begin();
         for (; hit_num < limit && it != map_.end(); it++) {
-            for (auto seg_offset : it->second) {
+            // Offsets in the growing segment are ordered by timestamp,
+            // so traverse from back to front to obtain the latest offset.
+            for (int i = it->second.size() - 1; i >= 0; --i) {
+                auto seg_offset = it->second[i];
                 if (seg_offset >= size) {
                     // Frequently concurrent insert/query will cause this case.
                     continue;
@@ -155,9 +158,8 @@ class OffsetOrderedMap : public OffsetMap {
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
-                    if (hit_num >= limit) {
-                        break;
-                    }
+                    // PK hit, no need to continue traversing offsets with the same PK.
+                    break;
                 }
             }
         }
