@@ -61,7 +61,7 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 			Ts:     1000,
 			Schema: schema,
 		},
-		allocator: allocator.NewStaticAllocator(0, count*2),
+		allocator: allocator.NewLocalAllocator(0, count*2),
 	}
 
 	pkField.DataType = schemapb.DataType_Int64

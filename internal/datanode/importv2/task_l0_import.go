@@ -62,7 +62,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Setting end as math.MaxInt64 to incrementally allocate logID.
-	alloc := allocator.NewStaticAllocator(req.GetAutoIDRange().GetBegin(), math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(req.GetAutoIDRange().GetBegin(), math.MaxInt64)
 	task := &L0ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),
