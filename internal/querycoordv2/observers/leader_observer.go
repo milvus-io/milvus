@@ -96,7 +96,7 @@ func (o *LeaderObserver) observe(ctx context.Context) {
 
 func (o *LeaderObserver) readyToObserve(collectionID int64) bool {
 	metaExist := (o.meta.GetCollection(collectionID) != nil)
-	targetExist := o.target.IsNextTargetExist(collectionID) || o.target.IsCurrentTargetExist(collectionID)
+	targetExist := o.target.IsNextTargetExist(collectionID) || o.target.IsCurrentTargetExist(collectionID, -1)
 
 	return metaExist && targetExist
 }
