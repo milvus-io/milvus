@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"reflect"
 	"strconv"
 	"testing"
@@ -52,6 +53,35 @@ func Test_CheckGrpcReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
 	CheckGrpcReady(ctx, errChan)
 	cancel()
+}
+
+func Test_GetValidLocalIPNoValid(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(127, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "", ip)
+}
+
+func Test_GetValidLocalIPIPv4(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "100.1.1.1", ip)
+}
+
+func Test_GetValidLocalIPIPv6(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "[800::]", ip)
+}
+
+func Test_GetValidLocalIPIPv4Priority(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "100.1.1.1", ip)
 }
 
 func Test_GetLocalIP(t *testing.T) {
