@@ -237,7 +237,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		return err
 	}
 
-	partitionIDs := make([]int64, len(colMeta.Partitions))
+	partitionIDs := make([]int64, 0, len(colMeta.Partitions))
 	for _, p := range colMeta.Partitions {
 		partitionIDs = append(partitionIDs, p.PartitionID)
 	}
