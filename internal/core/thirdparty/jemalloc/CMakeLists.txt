@@ -27,13 +27,6 @@ message(STATUS "Building (vendored) jemalloc from source")
 # installations.
 # find_package(jemalloc)
 
-include(CheckSymbolExists)
-
-macro(detect_aarch64_target_arch)
-  check_symbol_exists(__aarch64__ "" __AARCH64)
-endmacro()
-detect_aarch64_target_arch()
-
 set(JEMALLOC_PREFIX "${CMAKE_INSTALL_PREFIX}")
 set(JEMALLOC_LIB_DIR "${JEMALLOC_PREFIX}/lib")
 set(JEMALLOC_STATIC_LIB "${JEMALLOC_LIB_DIR}/libjemalloc_pic${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -44,9 +37,10 @@ if (CMAKE_OSX_SYSROOT)
     list(APPEND JEMALLOC_CONFIGURE_COMMAND "SDKROOT=${CMAKE_OSX_SYSROOT}")
 endif ()
 
-if (DEFINED __AARCH64)
-    #aarch64 platform use 64k pagesize.
-    list(APPEND JEMALLOC_CONFIGURE_COMMAND "--with-lg-page=16")
+if (DEFINED MILVUS_JEMALLOC_LG_PAGE)
+    # Used for arm64 manylinux wheels in order to make the wheel work on both
+    # 4k and 64k page arm64 systems.
+    list(APPEND JEMALLOC_CONFIGURE_COMMAND "--with-lg-page=${MILVUS_JEMALLOC_LG_PAGE}")
 endif ()
 
 list(APPEND

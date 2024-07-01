@@ -164,6 +164,15 @@ func (_c *MockCache_GetCollectionID_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// GetCollectionIDByCache provides a mock function with given fields: ctx, database, collectionName
+func (_m *MockCache) GetCollectionIDByCache(ctx context.Context, database string, collectionName string) int64 {
+	collID, err := _m.GetCollectionID(ctx, database, collectionName)
+	if err != nil {
+		return InvalidCollectionID
+	}
+	return collID
+}
+
 // GetCollectionInfo provides a mock function with given fields: ctx, database, collectionName, collectionID
 func (_m *MockCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
 	ret := _m.Called(ctx, database, collectionName, collectionID)
@@ -1239,6 +1248,50 @@ func (_c *MockCache_UpdateCredential_Call) Return() *MockCache_UpdateCredential_
 }
 
 func (_c *MockCache_UpdateCredential_Call) RunAndReturn(run func(*internalpb.CredentialInfo)) *MockCache_UpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsCollectionTruncating provides a mock function with given fields: ctx, database
+func (_m *MockCache) IsCollectionTruncating(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	ret := _m.Called(ctx, database, collectionID)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context, string, typeutil.UniqueID) bool); ok {
+		r0 = rf(ctx, database, collectionID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCache_IsCollectionTruncating_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsCollectionTruncating'
+type MockCache_IsCollectionTruncating_Call struct {
+	*mock.Call
+}
+
+// IsCollectionTruncating is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionID typeutil.UniqueID
+func (_e *MockCache_Expecter) IsCollectionTruncating(ctx interface{}, database interface{}, collectionID interface{}) *MockCache_IsCollectionTruncating_Call {
+	return &MockCache_IsCollectionTruncating_Call{Call: _e.mock.On("IsCollectionTruncating", ctx, database, collectionID)}
+}
+
+func (_c *MockCache_IsCollectionTruncating_Call) Run(run func(ctx context.Context, database string, collectionID typeutil.UniqueID)) *MockCache_IsCollectionTruncating_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(typeutil.UniqueID))
+	})
+	return _c
+}
+
+func (_c *MockCache_IsCollectionTruncating_Call) Return(_a0 bool) *MockCache_IsCollectionTruncating_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCache_IsCollectionTruncating_Call) RunAndReturn(run func(context.Context, string) bool) *MockCache_IsCollectionTruncating_Call {
 	_c.Call.Return(run)
 	return _c
 }

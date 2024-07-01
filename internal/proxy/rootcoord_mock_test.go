@@ -1119,6 +1119,17 @@ func (coord *RootCoordMock) AlterDatabase(ctx context.Context, in *rootcoordpb.A
 	return &commonpb.Status{}, nil
 }
 
+func (coord *RootCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	// todo
+	return merr.Success(), nil
+}
+
+func (coord *RootCoordMock) DescribeCollectionWithState(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+	return &rootcoordpb.DescribeCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
@@ -1214,6 +1225,11 @@ func (m *mockRootCoord) DropDatabase(ctx context.Context, in *milvuspb.DropDatab
 
 func (m *mockRootCoord) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
 	return &milvuspb.ListDatabasesResponse{}, nil
+}
+
+func (m *mockRootCoord) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	// todo
+	return &commonpb.Status{}, nil
 }
 
 func newMockRootCoord() *mockRootCoord {

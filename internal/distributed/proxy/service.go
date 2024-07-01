@@ -1242,3 +1242,9 @@ func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.In
 func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
 	return s.proxy.DescribeDatabase(ctx, req)
 }
+
+func (s *Server) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+	// todo milvuspb.MilvusServiceServer
+	// return s.proxy.TruncateCollection(ctx, request)
+}

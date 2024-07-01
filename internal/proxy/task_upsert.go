@@ -238,6 +238,9 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		log.Info("Failed to get collection id", zap.Error(err))
 		return err
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, it.req.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", it.req.GetDbName(), collName)
+	}
 	it.upsertMsg.DeleteMsg.CollectionID = collID
 	it.collectionID = collID
 
@@ -550,4 +553,13 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 
 func (it *upsertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (it *upsertTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if it.req.GetDbName() == database {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, it.req.GetDbName(), it.req.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }

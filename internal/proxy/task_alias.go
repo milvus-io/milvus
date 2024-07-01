@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // CreateAliasTask contains task information of CreateAlias
@@ -114,6 +115,15 @@ func (t *CreateAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func (t *CreateAliasTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if t.GetDbName() == database {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.GetDbName(), t.CreateAliasRequest.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
+}
+
 // DropAliasTask is the task to drop alias
 type DropAliasTask struct {
 	baseTask
@@ -185,6 +195,15 @@ func (t *DropAliasTask) Execute(ctx context.Context) error {
 
 func (t *DropAliasTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (t *DropAliasTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if t.GetDbName() == database {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.GetDbName(), t.GetAlias()) {
+			return true
+		}
+	}
+	return false
 }
 
 // AlterAliasTask is the task to alter alias
@@ -262,6 +281,18 @@ func (t *AlterAliasTask) Execute(ctx context.Context) error {
 
 func (t *AlterAliasTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (t *AlterAliasTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if t.GetDbName() == database {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.GetDbName(), t.GetCollectionName()) {
+			return true
+		}
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.GetDbName(), t.GetAlias()) {
+			return true
+		}
+	}
+	return false
 }
 
 // DescribeAliasTask is the task to describe alias

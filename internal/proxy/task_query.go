@@ -271,6 +271,15 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
 
+func (t *queryTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if t.request.GetDbName() == database {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.request.GetDbName(), t.request.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -292,6 +301,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	if globalMetaCache.IsCollectionTruncating(ctx, t.request.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", t.request.GetDbName(), collectionName)
 	}
 	t.CollectionID = collID
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))

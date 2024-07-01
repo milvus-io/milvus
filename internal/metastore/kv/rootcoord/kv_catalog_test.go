@@ -2570,3 +2570,27 @@ func TestCatalog_AlterDatabase(t *testing.T) {
 	err = c.AlterDatabase(ctx, newDB, typeutil.ZeroTimestamp)
 	assert.ErrorIs(t, err, mockErr)
 }
+
+func TestCatalog_UpdateCollectionAndAlias(t *testing.T) {
+	kvmock := mocks.NewSnapShotKV(t)
+	kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	c := &Catalog{Snapshot: kvmock}
+	ctx := context.Background()
+	err := c.UpdateCollectionAndAlias(ctx, []*model.Collection{}, []*model.Alias{}, uint64(1))
+	assert.NoError(t, err)
+	err = c.UpdateCollectionAndAlias(ctx, []*model.Collection{
+		{
+			CollectionID: 1,
+			Name:         "tempColl",
+			State:        pb.CollectionState_CollectionDropping,
+		},
+		{
+			CollectionID: 0,
+			Name:         "coll",
+			State:        pb.CollectionState_CollectionCreated,
+		},
+	}, []*model.Alias{
+		{Name: "collAlias0"},
+	}, uint64(1))
+	assert.NoError(t, err)
+}
