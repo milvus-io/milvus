@@ -20,6 +20,7 @@ require (
 	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/samber/lo v1.27.0
 	github.com/sasha-s/go-deadlock v0.3.1
 	github.com/shirou/gopsutil/v3 v3.22.9

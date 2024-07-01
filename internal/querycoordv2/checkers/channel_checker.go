@@ -38,7 +38,7 @@ type ChannelChecker struct {
 	*checkerActivation
 	meta            *meta.Meta
 	dist            *meta.DistributionManager
-	targetMgr       *meta.TargetManager
+	targetMgr       meta.TargetManagerInterface
 	nodeMgr         *session.NodeManager
 	getBalancerFunc GetBalancerFunc
 }
@@ -46,7 +46,7 @@ type ChannelChecker struct {
 func NewChannelChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	getBalancerFunc GetBalancerFunc,
 ) *ChannelChecker {

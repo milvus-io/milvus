@@ -43,6 +43,16 @@ type ResultSet struct {
 // DataSet is an alias type for column slice.
 type DataSet []column.Column
 
+// GetColumn returns column with provided field name.
+func (rs ResultSet) GetColumn(fieldName string) column.Column {
+	for _, column := range rs.Fields {
+		if column.Name() == fieldName {
+			return column
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
 	req := option.Request()
 	collection, err := c.getCollection(ctx, req.GetCollectionName())

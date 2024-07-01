@@ -49,8 +49,11 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.eventReader != nil {
 		reader.eventReader.Close()
 	}
-	var err error
-	reader.eventReader, err = newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer, reader.descriptorEvent.Nullable)
+	nullable, err := reader.descriptorEvent.GetNullable()
+	if err != nil {
+		return nil, err
+	}
+	reader.eventReader, err = newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer, nullable)
 	if err != nil {
 		return nil, err
 	}

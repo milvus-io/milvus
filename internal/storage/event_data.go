@@ -27,10 +27,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const originalSizeKey = "original_size"
+const nullableKey = "nullable"
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
@@ -46,7 +48,6 @@ type DescriptorEventDataFixPart struct {
 	PartitionID     int64
 	SegmentID       int64
 	FieldID         int64
-	Nullable        bool
 	StartTimestamp  typeutil.Timestamp
 	EndTimestamp    typeutil.Timestamp
 	PayloadDataType schemapb.DataType
@@ -61,6 +62,20 @@ func (data *descriptorEventData) SetEventTimeStamp(start typeutil.Timestamp, end
 // GetEventDataFixPartSize returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
 	return int32(binary.Size(data.DescriptorEventDataFixPart))
+}
+
+func (data *descriptorEventData) GetNullable() (bool, error) {
+	nullableStore, ok := data.Extras[nullableKey]
+	// previous descriptorEventData not store nullable
+	if !ok {
+		return false, nil
+	}
+	nullable, ok := nullableStore.(bool)
+	// will not happend, has checked bool format when FinishExtra
+	if !ok {
+		return false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
+	}
+	return nullable, nil
 }
 
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
@@ -92,6 +107,14 @@ func (data *descriptorEventData) FinishExtra() error {
 	_, err = strconv.Atoi(sizeStr)
 	if err != nil {
 		return fmt.Errorf("value of %v must be able to be converted into int format", originalSizeKey)
+	}
+
+	nullableStore, existed := data.Extras[nullableKey]
+	if existed {
+		_, ok := nullableStore.(bool)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
+		}
 	}
 
 	data.ExtraBytes, err = json.Marshal(data.Extras)
@@ -351,7 +374,6 @@ func newDescriptorEventData() *descriptorEventData {
 			StartTimestamp:  0,
 			EndTimestamp:    0,
 			PayloadDataType: -1,
-			Nullable:        false,
 		},
 		PostHeaderLengths: []uint8{},
 		Extras:            make(map[string]interface{}),

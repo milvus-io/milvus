@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -43,6 +44,8 @@ type IndexChecker struct {
 	dist    *meta.DistributionManager
 	broker  meta.Broker
 	nodeMgr *session.NodeManager
+
+	targetMgr meta.TargetManagerInterface
 }
 
 func NewIndexChecker(
@@ -50,6 +53,7 @@ func NewIndexChecker(
 	dist *meta.DistributionManager,
 	broker meta.Broker,
 	nodeMgr *session.NodeManager,
+	targetMgr meta.TargetManagerInterface,
 ) *IndexChecker {
 	return &IndexChecker{
 		checkerActivation: newCheckerActivation(),
@@ -57,6 +61,7 @@ func NewIndexChecker(
 		dist:              dist,
 		broker:            broker,
 		nodeMgr:           nodeMgr,
+		targetMgr:         targetMgr,
 	}
 }
 
@@ -112,6 +117,13 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
+
+		// skip update index for l0 segment
+		segmentInTarget := c.targetMgr.GetSealedSegment(collection.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst)
+		if segmentInTarget == nil || segmentInTarget.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+
 		missing := c.checkSegment(segment, indexInfos)
 		if len(missing) > 0 {
 			targets[segment.GetID()] = missing

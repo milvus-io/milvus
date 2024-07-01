@@ -209,8 +209,16 @@ func GetAvailablePort() int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
+// IsPhysicalChannel checks if the channel is a physical channel
+func IsPhysicalChannel(channel string) bool {
+	return strings.Count(channel, "_") == 1
+}
+
 // ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
+	if IsPhysicalChannel(vchannel) {
+		return vchannel
+	}
 	index := strings.LastIndex(vchannel, "_")
 	if index < 0 {
 		return vchannel

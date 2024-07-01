@@ -1858,7 +1858,9 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	log.Debug(
 		rpcDone(method),
-		zap.Any("request", request))
+		zap.Any("request", request),
+		zap.Int64("loadProgress", loadProgress),
+		zap.Int64("refreshProgress", refreshProgress))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.GetLoadingProgressResponse{
@@ -2550,7 +2552,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		log.Warn("Failed to enqueue insert task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-		return constructFailedResponse(err), nil
+		return constructFailedResponse(merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)), nil
 	}
 
 	log.Debug("Detail of insert request in Proxy")

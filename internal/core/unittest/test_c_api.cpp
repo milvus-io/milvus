@@ -1958,8 +1958,8 @@ TEST(CApiTest, LoadIndexInfo) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
     knowhere::BinarySet binary_set;
@@ -2009,8 +2009,8 @@ TEST(CApiTest, LoadIndexSearch) {
                        {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(*database, conf);
-    indexing.Add(*database, conf);
+    indexing.Train(database, conf);
+    indexing.Add(database, conf);
 
     EXPECT_EQ(indexing.Count(), N);
     EXPECT_EQ(indexing.Dim(), DIM);
@@ -2033,7 +2033,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto query_dataset =
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
-    auto result = indexing.Search(*query_dataset, conf, nullptr);
+    auto result = indexing.Search(query_dataset, conf, nullptr);
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {
@@ -4225,7 +4225,7 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     int64_t total_size = 0;
     for (int i = 0; i < N; ++i) {
         auto str = "string_data_" + std::to_string(i);
-        total_size += str.size();
+        total_size += str.size() + sizeof(uint32_t);
         str_datas.emplace_back(str);
     }
     auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);

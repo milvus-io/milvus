@@ -36,9 +36,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/pipeline"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -52,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -62,8 +64,6 @@ const (
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
 )
-
-var getFlowGraphServiceAttempts = uint(50)
 
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
@@ -88,21 +88,19 @@ type DataNode struct {
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
-	flowgraphManager FlowgraphManager
+	flowgraphManager pipeline.FlowgraphManager
 
-	eventManager   *EventManager
-	channelManager ChannelManager
+	channelManager channel.ChannelManager
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
 	importTaskMgr      importv2.TaskManager
 	importScheduler    importv2.Scheduler
 
-	clearSignal              chan string // vchannel name
-	segmentCache             *Cache
+	segmentCache             *util.Cache
 	compactionExecutor       compaction.Executor
-	timeTickSender           *timeTickSender
-	channelCheckpointUpdater *channelCheckpointUpdater
+	timeTickSender           *util.TimeTickSender
+	channelCheckpointUpdater *util.ChannelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -114,7 +112,6 @@ type DataNode struct {
 	initOnce     sync.Once
 	startOnce    sync.Once
 	stopOnce     sync.Once
-	stopWaiter   sync.WaitGroup
 	sessionMu    sync.Mutex // to fix data race
 	session      *sessionutil.Session
 	watchKv      kv.WatchKV
@@ -139,14 +136,11 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		cancel: cancel2,
 		Role:   typeutil.DataNodeRole,
 
-		rootCoord:          nil,
-		dataCoord:          nil,
-		factory:            factory,
-		segmentCache:       newCache(),
-		compactionExecutor: compaction.NewExecutor(),
-
-		clearSignal: make(chan string, 100),
-
+		rootCoord:              nil,
+		dataCoord:              nil,
+		factory:                factory,
+		segmentCache:           util.NewCache(),
+		compactionExecutor:     compaction.NewExecutor(),
 		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -215,17 +209,6 @@ func (node *DataNode) initSession() error {
 	return nil
 }
 
-// initRateCollector creates and starts rateCollector in QueryNode.
-func (node *DataNode) initRateCollector() error {
-	err := initGlobalRateCollector()
-	if err != nil {
-		return err
-	}
-	rateCol.Register(metricsinfo.InsertConsumeThroughput)
-	rateCol.Register(metricsinfo.DeleteConsumeThroughput)
-	return nil
-}
-
 func (node *DataNode) GetNodeID() int64 {
 	if node.session != nil {
 		return node.session.ServerID
@@ -250,7 +233,7 @@ func (node *DataNode) Init() error {
 
 		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
 
-		err := node.initRateCollector()
+		err := util.InitGlobalRateCollector()
 		if err != nil {
 			log.Error("DataNode server init rateCollector failed", zap.Error(err))
 			initError = err
@@ -292,36 +275,12 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
-		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node.broker)
-		node.flowgraphManager = newFlowgraphManager()
+		node.channelCheckpointUpdater = util.NewChannelCheckpointUpdater(node.broker)
+		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
-		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-			node.channelManager = NewChannelManager(node)
-		} else {
-			node.eventManager = NewEventManager()
-		}
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
-}
-
-// handleChannelEvt handles event from kv watch event
-func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
-	var e *event
-	switch evt.Type {
-	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		e = &event{
-			eventType: putEventType,
-			version:   evt.Kv.Version,
-		}
-
-	case clientv3.EventTypeDelete:
-		e = &event{
-			eventType: deleteEventType,
-			version:   evt.Kv.Version,
-		}
-	}
-	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
@@ -338,22 +297,6 @@ func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 	}
 }
 
-// BackGroundGC runs in background to release datanode resources
-// GOOSE TODO: remove background GC, using ToRelease for drop-collection after #15846
-func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
-	defer node.stopWaiter.Done()
-	log.Info("DataNode Background GC Start")
-	for {
-		select {
-		case vchanName := <-vChannelCh:
-			node.tryToReleaseFlowgraph(vchanName)
-		case <-node.ctx.Done():
-			log.Warn("DataNode context done, exiting background GC")
-			return
-		}
-	}
-}
-
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	var startErr error
@@ -364,21 +307,6 @@ func (node *DataNode) Start() error {
 			return
 		}
 		log.Info("start id allocator done", zap.String("role", typeutil.DataNodeRole))
-
-		/*
-			rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
-					commonpbutil.WithMsgID(0),
-					commonpbutil.WithSourceID(node.GetNodeID()),
-				),
-				Count: 1,
-			})
-			if err != nil || rep.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
-				startErr = errors.New("DataNode fail to alloc timestamp")
-				return
-			}*/
 
 		connectEtcdFn := func() error {
 			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
@@ -394,27 +322,20 @@ func (node *DataNode) Start() error {
 
 		node.writeBufferManager.Start()
 
-		node.stopWaiter.Add(1)
-		go node.BackGroundGC(node.clearSignal)
-
 		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
+			node.timeTickSender = util.NewTimeTickSender(node.broker, node.session.ServerID,
 				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
-			node.timeTickSender.start()
+			node.timeTickSender.Start()
 		}
 
-		go node.channelCheckpointUpdater.start()
+		go node.channelCheckpointUpdater.Start()
 
-		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-			node.channelManager.Start()
-		} else {
-			// Start node watch node
-			node.startWatchChannelsAtBackground(node.ctx)
-		}
+		node.channelManager = channel.NewChannelManager(getPipelineParams(node), node.flowgraphManager)
+		node.channelManager.Start()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
@@ -452,10 +373,6 @@ func (node *DataNode) Stop() error {
 			node.channelManager.Close()
 		}
 
-		if node.eventManager != nil {
-			node.eventManager.CloseAll()
-		}
-
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()
 		}
@@ -478,7 +395,7 @@ func (node *DataNode) Stop() error {
 		}
 
 		if node.channelCheckpointUpdater != nil {
-			node.channelCheckpointUpdater.close()
+			node.channelCheckpointUpdater.Close()
 		}
 
 		if node.importScheduler != nil {
@@ -487,21 +404,37 @@ func (node *DataNode) Stop() error {
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
-		node.stopWaiter.Wait()
 	})
 	return nil
 }
 
-// to fix data race
+// SetSession to fix data race
 func (node *DataNode) SetSession(session *sessionutil.Session) {
 	node.sessionMu.Lock()
 	defer node.sessionMu.Unlock()
 	node.session = session
 }
 
-// to fix data race
+// GetSession to fix data race
 func (node *DataNode) GetSession() *sessionutil.Session {
 	node.sessionMu.Lock()
 	defer node.sessionMu.Unlock()
 	return node.session
+}
+
+func getPipelineParams(node *DataNode) *util.PipelineParams {
+	return &util.PipelineParams{
+		Ctx:                node.ctx,
+		Broker:             node.broker,
+		SyncMgr:            node.syncMgr,
+		TimeTickSender:     node.timeTickSender,
+		CompactionExecutor: node.compactionExecutor,
+		MsgStreamFactory:   node.factory,
+		DispClient:         node.dispClient,
+		ChunkManager:       node.chunkManager,
+		Session:            node.session,
+		WriteBufferManager: node.writeBufferManager,
+		CheckpointUpdater:  node.channelCheckpointUpdater,
+		Allocator:          node.allocator,
+	}
 }

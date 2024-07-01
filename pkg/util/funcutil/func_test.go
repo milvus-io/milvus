@@ -174,11 +174,17 @@ func TestCheckPortAvailable(t *testing.T) {
 }
 
 func Test_ToPhysicalChannel(t *testing.T) {
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_"))
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_123"))
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_defgsg"))
+	assert.Equal(t, "abc_", ToPhysicalChannel("abc_"))
+	assert.Equal(t, "abc_123", ToPhysicalChannel("abc_123"))
+	assert.Equal(t, "abc_defgsg", ToPhysicalChannel("abc_defgsg"))
+	assert.Equal(t, "abc_123", ToPhysicalChannel("abc_123_456"))
 	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
 	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
+	channel := "by-dev-rootcoord-dml_3_449883080965365748v0"
+	for i := 0; i < 10; i++ {
+		channel = ToPhysicalChannel(channel)
+		assert.Equal(t, "by-dev-rootcoord-dml_3", channel)
+	}
 }
 
 func Test_ConvertChannelName(t *testing.T) {

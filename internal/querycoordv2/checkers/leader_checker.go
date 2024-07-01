@@ -37,14 +37,14 @@ type LeaderChecker struct {
 	*checkerActivation
 	meta    *meta.Meta
 	dist    *meta.DistributionManager
-	target  *meta.TargetManager
+	target  meta.TargetManagerInterface
 	nodeMgr *session.NodeManager
 }
 
 func NewLeaderChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	target *meta.TargetManager,
+	target meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 ) *LeaderChecker {
 	return &LeaderChecker{

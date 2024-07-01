@@ -2,7 +2,7 @@ package adaptor
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walimpls"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
 
 var _ wal.OpenerBuilder = (*builderAdaptorImpl)(nil)
