@@ -22,11 +22,15 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+const InputErrorFlagKey string = "is_input_error"
 
 // Code returns the error code of the given error,
 // WARN: DO NOT use this for now
@@ -71,7 +75,8 @@ func Status(err error) *commonpb.Status {
 	}
 
 	code := Code(err)
-	return &commonpb.Status{
+
+	status := &commonpb.Status{
 		Code:   code,
 		Reason: previousLastError(err).Error(),
 		// Deprecated, for compatibility
@@ -79,6 +84,11 @@ func Status(err error) *commonpb.Status {
 		Retriable: IsRetryableErr(err),
 		Detail:    err.Error(),
 	}
+
+	if GetErrorType(err) == InputError {
+		status.ExtraInfo = map[string]string{InputErrorFlagKey: "true"}
+	}
+	return status
 }
 
 func previousLastError(err error) error {
@@ -233,12 +243,18 @@ func Error(status *commonpb.Status) error {
 		return nil
 	}
 
+	var eType ErrorType
+	_, ok := status.GetExtraInfo()[InputErrorFlagKey]
+	if ok {
+		eType = InputError
+	}
+
 	// use code first
 	code := status.GetCode()
 	if code == 0 {
-		return newMilvusErrorWithDetail(status.GetReason(), status.GetDetail(), Code(OldCodeToMerr(status.GetErrorCode())), false)
+		return newMilvusError(status.GetReason(), Code(OldCodeToMerr(status.GetErrorCode())), false, WithDetail(status.GetDetail()), WithErrorType(eType))
 	}
-	return newMilvusErrorWithDetail(status.GetReason(), status.GetDetail(), code, status.GetRetriable())
+	return newMilvusError(status.GetReason(), code, status.GetRetriable(), WithDetail(status.GetDetail()), WithErrorType(eType))
 }
 
 // SegcoreError returns a merr according to the given segcore error code and message
@@ -291,6 +307,36 @@ func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) er
 	}
 
 	return nil
+}
+
+func WrapErrAsInputError(err error) error {
+	if merr, ok := err.(milvusError); ok {
+		WithErrorType(InputError)(&merr)
+		return merr
+	}
+	return err
+}
+
+func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
+	if merr, ok := err.(milvusError); ok {
+		for _, target := range targets {
+			if target.errCode == merr.errCode {
+				log.Info("mark error as input error", zap.Error(err))
+				WithErrorType(InputError)(&merr)
+				log.Info("test--", zap.String("type", merr.errType.String()))
+				return merr
+			}
+		}
+	}
+	return err
+}
+
+func GetErrorType(err error) ErrorType {
+	if merr, ok := err.(milvusError); ok {
+		return merr.errType
+	}
+
+	return SystemError
 }
 
 // Service related

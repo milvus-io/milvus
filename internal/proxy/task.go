@@ -622,6 +622,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			// nolint
 			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
+			t.result.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
 		}
 		return nil
 	}
@@ -1439,7 +1440,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
 		if err != nil {
-			return err
+			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 		flushReq := &datapb.FlushRequest{
 			Base: commonpbutil.UpdateMsgBase(
