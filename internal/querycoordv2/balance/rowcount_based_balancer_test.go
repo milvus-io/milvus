@@ -78,6 +78,9 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
+
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -461,7 +464,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -675,7 +677,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInNext, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -780,7 +781,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 		},
 	}
 
-	suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupSuite()
@@ -1052,7 +1052,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
-			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}

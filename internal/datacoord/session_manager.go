@@ -217,7 +217,8 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	timeout := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second) * time.Duration(max(len(req.GetSegmentInfos())/10, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -226,7 +227,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	}
 
 	err = retry.Do(context.Background(), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		resp, err := cli.SyncSegments(ctx, req)
