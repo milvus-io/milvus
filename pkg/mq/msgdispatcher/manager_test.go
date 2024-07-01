@@ -46,14 +46,16 @@ func TestManager(t *testing.T) {
 			r := rand.Intn(10) + 1
 			for j := 0; j < r; j++ {
 				offset++
-				t.Logf("dyh add, %s", fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
-				_, err := c.Add(context.Background(), fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset), nil, mqwrapper.SubscriptionPositionUnknown)
+				vchannel := fmt.Sprintf("mock-pchannel-dml_0_vchannelv%d", offset)
+				t.Logf("add vchannel, %s", vchannel)
+				_, err := c.Add(context.Background(), vchannel, nil, common.SubscriptionPositionUnknown)
 				assert.NoError(t, err)
 				assert.Equal(t, offset, c.Num())
 			}
 			for j := 0; j < rand.Intn(r); j++ {
-				t.Logf("dyh remove, %s", fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
-				c.Remove(fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
+				vchannel := fmt.Sprintf("mock-pchannel-dml_0_vchannelv%d", offset)
+				t.Logf("remove vchannel, %s", vchannel)
+				c.Remove(vchannel)
 				offset--
 				assert.Equal(t, offset, c.Num())
 			}
@@ -178,7 +180,7 @@ func (suite *SimulationSuite) SetupSuite() {
 }
 
 func (suite *SimulationSuite) SetupTest() {
-	suite.pchannel = fmt.Sprintf("by-dev-rootcoord-dispatcher-simulation-dml-%d-%d", rand.Int(), time.Now().UnixNano())
+	suite.pchannel = fmt.Sprintf("by-dev-rootcoord-dispatcher-simulation-dml_%d", time.Now().UnixNano())
 	producer, err := newMockProducer(suite.factory, suite.pchannel)
 	assert.NoError(suite.T(), err)
 	suite.producer = producer
