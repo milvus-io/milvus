@@ -234,9 +234,14 @@ func (d *Dispatcher) work() {
 					}
 				}
 				if err != nil {
-					t.pos = pack.StartPositions[0]
-					// replace the pChannel with vChannel
-					t.pos.ChannelName = t.vchannel
+					// can't directly use the t.pos, since it's shared by all the targets and may be modified
+					t.pos = &Pos{
+						// replace the pChannel with vChannel
+						ChannelName: t.vchannel,
+						MsgID:       t.pos.MsgID,
+						MsgGroup:    t.pos.MsgGroup,
+						Timestamp:   t.pos.Timestamp,
+					}
 					d.lagTargets.Insert(t.vchannel, t)
 					d.nonBlockingNotify()
 					delete(d.targets, vchannel)
