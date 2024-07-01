@@ -49,7 +49,7 @@ ChunkCache::Read(const std::string& filepath) {
 
     std::promise<std::shared_ptr<ColumnBase>> p;
     std::shared_future<std::shared_ptr<ColumnBase>> f = p.get_future();
-    columns_.emplace(filepath, std::make_pair(std::move(p), f));
+    columns_.emplace(path, std::make_pair(std::move(p), f));
     lck.unlock();
 
     // release lock and perform download and decode
