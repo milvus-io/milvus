@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -220,5 +221,17 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			Key:   common.CollectionAutoCompactionKey,
 			Value: "true",
 		})
+
+		updateProps3 := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "",
+			},
+		}
+		updateCollectionProperties(coll, updateProps3)
+
+		propertiesMap := funcutil.KeyValuePair2Map(coll.Properties)
+		_, exist := propertiesMap[common.CollectionTTLConfigKey]
+		assert.False(t, exist)
 	})
 }
