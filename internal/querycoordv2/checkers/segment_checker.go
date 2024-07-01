@@ -43,7 +43,7 @@ type SegmentChecker struct {
 	*checkerActivation
 	meta            *meta.Meta
 	dist            *meta.DistributionManager
-	targetMgr       *meta.TargetManager
+	targetMgr       meta.TargetManagerInterface
 	nodeMgr         *session.NodeManager
 	getBalancerFunc GetBalancerFunc
 }
@@ -51,7 +51,7 @@ type SegmentChecker struct {
 func NewSegmentChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	getBalancerFunc GetBalancerFunc,
 ) *SegmentChecker {
