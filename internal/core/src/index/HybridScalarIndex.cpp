@@ -244,6 +244,8 @@ void
 HybridScalarIndex<T>::BuildInternal(
     const std::vector<FieldDataPtr>& field_datas) {
     auto index = GetInternalIndex();
+    LOG_INFO("build bitmap index with internal index:{}",
+             ToString(internal_index_type_));
     index->BuildWithFieldData(field_datas);
 }
 
@@ -404,6 +406,8 @@ HybridScalarIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
+    LOG_INFO("load bitmap index with internal index:{}",
+             ToString(internal_index_type_));
     index->Load(binary_set, config);
 
     is_built_ = true;
@@ -435,6 +439,8 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
+    LOG_INFO("load bitmap index with internal index:{}",
+             ToString(internal_index_type_));
     index->Load(ctx, config);
 
     is_built_ = true;

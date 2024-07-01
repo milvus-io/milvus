@@ -189,6 +189,32 @@ class SegmentExpr : public Expr {
                    : batch_size_;
     }
 
+    // used for processing raw data expr for sealed segments.
+    // now only used for std::string_view && json
+    // TODO: support more types
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessChunkForSealedSeg(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        ValTypes... values) {
+        // For sealed segment, only single chunk
+        Assert(num_data_chunk_ == 1);
+        auto need_size =
+            std::min(active_count_ - current_data_chunk_pos_, batch_size_);
+
+        auto& skip_index = segment_->GetSkipIndex();
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+            auto data_vec = segment_->get_batch_views<T>(
+                field_id_, 0, current_data_chunk_pos_, need_size);
+
+            func(data_vec.data(), need_size, res, values...);
+        }
+        current_data_chunk_pos_ += need_size;
+        return need_size;
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
     ProcessDataChunks(
@@ -197,6 +223,15 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         ValTypes... values) {
         int64_t processed_size = 0;
+
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, Json>) {
+            if (segment_->type() == SegmentType::Sealed) {
+                return ProcessChunkForSealedSeg<T>(
+                    func, skip_func, res, values...);
+            }
+        }
+
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
