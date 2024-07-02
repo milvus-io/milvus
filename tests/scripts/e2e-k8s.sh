@@ -203,13 +203,13 @@ Use \"$0  --help\" for more information about a given command.
 done
 
 if [[ -n "${GPU_BUILD:-}" ]]; then
-  export BUILD_COMMAND="${BUILD_COMMAND:-make gpu-install}"
+  export BUILD_COMMAND="${BUILD_COMMAND:-make gpu-install ENABLE_AZURE=false}"
   export BUILD_SCRIPT="builder_gpu.sh"
   export BUILD_IMAGE_SCRIPT="build_image_gpu.sh"
   export TAG="${TAG:-gpu-latest}"
   export MODE="gpu"
 else
-  export BUILD_COMMAND="${BUILD_COMMAND:-make install use_disk_index=ON}"
+  export BUILD_COMMAND="${BUILD_COMMAND:-make install use_disk_index=ON ENABLE_AZURE=false}"
   export BUILD_SCRIPT="builder.sh"
   export BUILD_IMAGE_SCRIPT="build_image.sh"
   export TAG="${TAG:-latest}"
