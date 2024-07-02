@@ -72,7 +72,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		return err
 	}
 	s.taskScheduler.enqueue(&indexBuildTask{
-		buildID: buildID,
+		taskID: buildID,
 		taskInfo: &indexpb.IndexTaskInfo{
 			BuildID: buildID,
 			State:   commonpb.IndexState_Unissued,
