@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 )
 
 type createAliasTask struct {
@@ -37,5 +38,8 @@ func (t *createAliasTask) Prepare(ctx context.Context) error {
 
 func (t *createAliasTask) Execute(ctx context.Context) error {
 	// create alias is atomic enough.
+	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_CreateAlias)); err != nil {
+		return err
+	}
 	return t.core.meta.CreateAlias(ctx, t.Req.GetDbName(), t.Req.GetAlias(), t.Req.GetCollectionName(), t.GetTs())
 }

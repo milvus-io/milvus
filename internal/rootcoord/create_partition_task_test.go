@@ -86,7 +86,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 	t.Run("create duplicate partition", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		task := &createPartitionTask{
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
@@ -103,7 +103,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		}
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: partitions}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: partitions}
 		task := &createPartitionTask{
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
@@ -115,7 +115,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to allocate partition id", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{}}
 		core := newTestCore(withInvalidIDAllocator())
 		task := &createPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -129,7 +129,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{}}
 		core := newTestCore(withValidIDAllocator(), withInvalidProxyManager())
 		task := &createPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -143,7 +143,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to add partition meta", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{}}
 		core := newTestCore(withValidIDAllocator(), withValidProxyManager(), withInvalidMeta())
 		task := &createPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -157,7 +157,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{}}
 		meta := newMockMetaTable()
 		meta.AddPartitionFunc = func(ctx context.Context, partition *model.Partition) error {
 			return nil

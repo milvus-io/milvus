@@ -78,6 +78,29 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("expire proxy cache step failed", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+
+		core := newTestCore(withMeta(meta), withInvalidProxyManager())
+		task := &alterCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+				CollectionName: "cn",
+				Properties:     properties,
+			},
+		}
+
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+	})
+
 	t.Run("alter step failed", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
@@ -93,7 +116,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("err"))
 
-		core := newTestCore(withMeta(meta))
+		core := newTestCore(withMeta(meta), withValidProxyManager())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -127,7 +150,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return errors.New("err")
 		}
 
-		core := newTestCore(withMeta(meta), withBroker(broker))
+		core := newTestCore(withMeta(meta), withBroker(broker), withValidProxyManager())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -161,7 +184,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return nil
 		}
 
-		core := newTestCore(withMeta(meta), withBroker(broker))
+		core := newTestCore(withMeta(meta), withBroker(broker), withValidProxyManager())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{

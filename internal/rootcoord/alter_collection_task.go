@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -58,23 +59,16 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	newColl := oldColl.Clone()
 	updateCollectionProperties(newColl, a.Req.GetProperties())
 
-	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
-	redoTask.AddSyncStep(&AlterCollectionStep{
-		baseStep: baseStep{core: a.core},
-		oldColl:  oldColl,
-		newColl:  newColl,
-		ts:       ts,
-	})
+	if err := a.core.ExpireMetaCache(ctx, a.Req.GetDbName(), []string{}, oldColl.CollectionID, "", a.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)); err != nil {
+		return err
+	}
+
+	if err := a.core.meta.AlterCollection(ctx, oldColl, newColl, a.GetTs()); err != nil {
+		return err
+	}
 
 	a.Req.CollectionID = oldColl.CollectionID
-	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
-		baseStep: baseStep{core: a.core},
-		req:      a.Req,
-		core:     a.core,
-	})
-
-	return redoTask.Execute(ctx)
+	return a.core.broker.BroadcastAlteredCollection(ctx, a.Req)
 }
 
 func updateCollectionProperties(coll *model.Collection, updatedProps []*commonpb.KeyValuePair) {

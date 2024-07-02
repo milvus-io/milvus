@@ -70,13 +70,12 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	redoTask := newBaseRedoTask(t.core.stepExecutor)
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: []string{t.collMeta.Name},
-		collectionID:    t.collMeta.CollectionID,
-		partitionName:   t.Req.GetPartitionName(),
-		ts:              t.GetTs(),
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropPartition)},
+		baseStep:      baseStep{core: t.core},
+		dbName:        t.Req.GetDbName(),
+		collectionID:  t.collMeta.CollectionID,
+		partitionName: t.Req.GetPartitionName(),
+		ts:            t.GetTs(),
+		opts:          []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropPartition)},
 	})
 	redoTask.AddSyncStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},

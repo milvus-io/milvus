@@ -95,7 +95,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 	t.Run("drop non-existent partition", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{}}
 		task := &dropPartitionTask{
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
@@ -111,7 +111,6 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withInvalidProxyManager())
 		task := &dropPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -120,7 +119,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 				CollectionName: collectionName,
 				PartitionName:  partitionName,
 			},
-			collMeta: coll.Clone(),
+			collMeta: &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{{PartitionName: partitionName}}},
 		}
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
@@ -129,7 +128,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to change partition state", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		task := &dropPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -150,7 +149,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		removePartitionMetaCalled := false
 		removePartitionMetaChan := make(chan struct{}, 1)
 

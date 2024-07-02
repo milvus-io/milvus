@@ -53,7 +53,6 @@ func (t *dropDatabaseTask) Execute(ctx context.Context) error {
 		ts:       ts,
 		// make sure to send the "expire cache" request
 		// because it won't send this request when the length of collection names array is zero
-		collectionNames: []string{""},
 		opts: []proxyutil.ExpireCacheOpt{
 			proxyutil.SetMsgType(commonpb.MsgType_DropDatabase),
 		},
