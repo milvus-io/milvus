@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -70,6 +71,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -82,6 +85,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -91,6 +96,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		defer suite.resetMock()
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -618,7 +625,7 @@ func TestMeta_Basic(t *testing.T) {
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMetaTable(&datacoord.Catalog{})
+		meta := createMeta(&datacoord.Catalog{}, nil, createIndexMeta(&datacoord.Catalog{}))
 		ret := meta.GetCollectionIndexFilesSize()
 		assert.Equal(t, uint64(0), ret)
 
@@ -689,7 +696,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1), LogID: 2}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -830,7 +837,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1), LogID: 2}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -982,6 +989,97 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, expected, gotInfo.GetState())
 	}
+
+	got = m.GetSegmentsOfCollection(-1)
+	assert.Equal(t, 3, len(got))
+
+	got = m.GetSegmentsOfCollection(10)
+	assert.Equal(t, 0, len(got))
+}
+
+func Test_meta_GetSegmentsWithChannel(t *testing.T) {
+	storedSegments := NewSegmentsInfo()
+	for segID, segment := range map[int64]*SegmentInfo{
+		1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				InsertChannel: "h1",
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				InsertChannel: "h2",
+				State:         commonpb.SegmentState_Growing,
+			},
+		},
+		3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  2,
+				State:         commonpb.SegmentState_Flushed,
+				InsertChannel: "h1",
+			},
+		},
+	} {
+		storedSegments.SetSegment(segID, segment)
+	}
+	m := &meta{segments: storedSegments}
+	got := m.GetSegmentsByChannel("h1")
+	assert.Equal(t, 2, len(got))
+	assert.ElementsMatch(t, []int64{1, 3}, lo.Map(
+		got,
+		func(s *SegmentInfo, i int) int64 {
+			return s.ID
+		},
+	))
+
+	got = m.GetSegmentsByChannel("h3")
+	assert.Equal(t, 0, len(got))
+
+	got = m.SelectSegments(WithCollection(1), WithChannel("h1"), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return segment != nil && segment.GetState() == commonpb.SegmentState_Flushed
+	}))
+	assert.Equal(t, 1, len(got))
+	assert.ElementsMatch(t, []int64{1}, lo.Map(
+		got,
+		func(s *SegmentInfo, i int) int64 {
+			return s.ID
+		},
+	))
+
+	m.segments.DropSegment(3)
+	_, ok := m.segments.secondaryIndexes.coll2Segments[2]
+	assert.False(t, ok)
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
+	assert.Equal(t, 2, len(m.segments.secondaryIndexes.channel2Segments))
+
+	segments, ok := m.segments.secondaryIndexes.channel2Segments["h1"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	segments, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(2), segments[2].ID)
+
+	m.segments.DropSegment(2)
+	segments, ok = m.segments.secondaryIndexes.coll2Segments[1]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.channel2Segments))
+
+	segments, ok = m.segments.secondaryIndexes.channel2Segments["h1"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	_, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
+	assert.False(t, ok)
 }
 
 func TestMeta_HasSegments(t *testing.T) {

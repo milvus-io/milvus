@@ -32,10 +32,15 @@ import (
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
-	segments     map[UniqueID]*SegmentInfo
-	collSegments map[UniqueID]*CollectionSegments
-	compactionTo map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
+	segments         map[UniqueID]*SegmentInfo
+	secondaryIndexes segmentInfoIndexes
+	compactionTo     map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
 	// A segment can be compacted to only one segment finally in meta.
+}
+
+type segmentInfoIndexes struct {
+	coll2Segments    map[UniqueID]map[UniqueID]*SegmentInfo
+	channel2Segments map[string]map[UniqueID]*SegmentInfo
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -69,14 +74,13 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 // note that no mutex is wrapped so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{
-		segments:     make(map[UniqueID]*SegmentInfo),
-		collSegments: make(map[UniqueID]*CollectionSegments),
+		segments: make(map[UniqueID]*SegmentInfo),
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments:    make(map[UniqueID]map[UniqueID]*SegmentInfo),
+			channel2Segments: make(map[string]map[UniqueID]*SegmentInfo),
+		},
 		compactionTo: make(map[UniqueID]UniqueID),
 	}
-}
-
-type CollectionSegments struct {
-	segments map[int64]*SegmentInfo
 }
 
 // GetSegment returns SegmentInfo
@@ -96,24 +100,42 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return lo.Values(s.segments)
 }
 
+func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*SegmentInfo {
+	if criterion.collectionID > 0 {
+		collSegments, ok := s.secondaryIndexes.coll2Segments[criterion.collectionID]
+		if !ok {
+			return nil
+		}
+
+		// both collection id and channel are filters of criterion
+		if criterion.channel != "" {
+			return lo.OmitBy(collSegments, func(k UniqueID, v *SegmentInfo) bool {
+				return v.InsertChannel != criterion.channel
+			})
+		}
+		return collSegments
+	}
+
+	if criterion.channel != "" {
+		channelSegments, ok := s.secondaryIndexes.channel2Segments[criterion.channel]
+		if !ok {
+			return nil
+		}
+		return channelSegments
+	}
+
+	return s.segments
+}
+
 func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
 	}
-	var result []*SegmentInfo
-	var candidates []*SegmentInfo
+
 	// apply criterion
-	switch {
-	case criterion.collectionID > 0:
-		collSegments, ok := s.collSegments[criterion.collectionID]
-		if !ok {
-			return nil
-		}
-		candidates = lo.Values(collSegments.segments)
-	default:
-		candidates = lo.Values(s.segments)
-	}
+	candidates := s.getCandidates(criterion)
+	var result []*SegmentInfo
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
 			result = append(result, segment)
@@ -144,22 +166,22 @@ func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool)
 func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.deleteCompactTo(segment)
-		s.delCollection(segment)
+		s.removeSecondaryIndex(segment)
 		delete(s.segments, segmentID)
 	}
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
-// set the logPath of segement in meta empty, to save space
+// set the logPath of segment in meta empty, to save space
 // if segment has logPath, make it empty
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	if segment, ok := s.segments[segmentID]; ok {
 		// Remove old segment compact to relation first.
 		s.deleteCompactTo(segment)
-		s.delCollection(segment)
+		s.removeSecondaryIndex(segment)
 	}
 	s.segments[segmentID] = segment
-	s.addCollection(segment)
+	s.addSecondaryIndex(segment)
 	s.addCompactTo(segment)
 }
 
@@ -296,27 +318,35 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	return cloned
 }
 
-func (s *SegmentsInfo) addCollection(segment *SegmentInfo) {
+func (s *SegmentsInfo) addSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
-	collSegment, ok := s.collSegments[collID]
-	if !ok {
-		collSegment = &CollectionSegments{
-			segments: make(map[UniqueID]*SegmentInfo),
-		}
-		s.collSegments[collID] = collSegment
+	channel := segment.GetInsertChannel()
+	if _, ok := s.secondaryIndexes.coll2Segments[collID]; !ok {
+		s.secondaryIndexes.coll2Segments[collID] = make(map[UniqueID]*SegmentInfo)
 	}
-	collSegment.segments[segment.GetID()] = segment
+	s.secondaryIndexes.coll2Segments[collID][segment.ID] = segment
+
+	if _, ok := s.secondaryIndexes.channel2Segments[channel]; !ok {
+		s.secondaryIndexes.channel2Segments[channel] = make(map[UniqueID]*SegmentInfo)
+	}
+	s.secondaryIndexes.channel2Segments[channel][segment.ID] = segment
 }
 
-func (s *SegmentsInfo) delCollection(segment *SegmentInfo) {
+func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
-	collSegment, ok := s.collSegments[collID]
-	if !ok {
-		return
+	channel := segment.GetInsertChannel()
+	if segments, ok := s.secondaryIndexes.coll2Segments[collID]; ok {
+		delete(segments, segment.ID)
+		if len(segments) == 0 {
+			delete(s.secondaryIndexes.coll2Segments, collID)
+		}
 	}
-	delete(collSegment.segments, segment.GetID())
-	if len(collSegment.segments) == 0 {
-		delete(s.collSegments, segment.GetCollectionID())
+
+	if segments, ok := s.secondaryIndexes.channel2Segments[channel]; ok {
+		delete(segments, segment.ID)
+		if len(segments) == 0 {
+			delete(s.secondaryIndexes.channel2Segments, channel)
+		}
 	}
 }
 

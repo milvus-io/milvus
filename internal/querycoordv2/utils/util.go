@@ -82,12 +82,12 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, leader *meta.LeaderView,
 	return nil
 }
 
-func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
+func checkLoadStatus(m *meta.Meta, collectionID int64) error {
 	percentage := m.CollectionManager.CalculateLoadPercentage(collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Warn("failed to GetShardLeaders", zap.Error(err))
-		return nil, err
+		return err
 	}
 	collection := m.CollectionManager.GetCollection(collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
@@ -99,17 +99,14 @@ func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.Dis
 		err := merr.WrapErrCollectionNotFullyLoaded(collectionID)
 		msg := fmt.Sprintf("collection %v is not fully loaded", collectionID)
 		log.Warn(msg)
-		return nil, err
+		return err
 	}
+	return nil
+}
 
-	channels := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
-	if len(channels) == 0 {
-		msg := "loaded collection do not found any channel in target, may be in recovery"
-		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
-		log.Warn("failed to get channels", zap.Error(err))
-		return nil, err
-	}
-
+func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager, collectionID int64, channels map[string]*meta.DmChannel,
+) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 	currentTargets := targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
 	for _, channel := range channels {
@@ -164,6 +161,49 @@ func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.Dis
 	}
 
 	return ret, nil
+}
+
+func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
+	if err := checkLoadStatus(m, collectionID); err != nil {
+		return nil, err
+	}
+
+	channels := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		msg := "loaded collection do not found any channel in target, may be in recovery"
+		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
+		log.Warn("failed to get channels", zap.Error(err))
+		return nil, err
+	}
+	return GetShardLeadersWithChannels(m, targetMgr, dist, nodeMgr, collectionID, channels)
+}
+
+// CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
+func CheckCollectionsQueryable(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager, nodeMgr *session.NodeManager) error {
+	for _, coll := range m.GetAllCollections() {
+		collectionID := coll.GetCollectionID()
+		if err := checkLoadStatus(m, collectionID); err != nil {
+			return err
+		}
+
+		channels := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+		if len(channels) == 0 {
+			msg := "loaded collection do not found any channel in target, may be in recovery"
+			err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
+			log.Warn("failed to get channels", zap.Error(err))
+			return err
+		}
+
+		shardList, err := GetShardLeadersWithChannels(m, targetMgr, dist, nodeMgr, collectionID, channels)
+		if err != nil {
+			return err
+		}
+
+		if len(channels) != len(shardList) {
+			return merr.WrapErrCollectionNotFullyLoaded(collectionID, "still have unwatched channels or loaded segments")
+		}
+	}
+	return nil
 }
 
 func filterDupLeaders(replicaManager *meta.ReplicaManager, leaders map[int64]*meta.LeaderView) map[int64]*meta.LeaderView {

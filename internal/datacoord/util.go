@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -26,12 +27,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -195,6 +199,10 @@ func isFlatIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
 }
 
+func isOptionalScalarFieldSupported(indexType string) bool {
+	return indexType == indexparamcheck.IndexHNSW
+}
+
 func isDiskANNIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexDISKANN
 }
@@ -236,4 +244,67 @@ func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
 		}
 	}
 	return float64(size)
+}
+
+func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMergeInfo {
+	/*
+		segments := task.GetPlan().GetSegmentBinlogs()
+		var sources []int64
+		for _, s := range segments {
+			sources = append(sources, s.GetSegmentID())
+		}
+	*/
+	var target int64 = -1
+	if len(task.GetResultSegments()) > 0 {
+		target = task.GetResultSegments()[0]
+	}
+	return &milvuspb.CompactionMergeInfo{
+		Sources: task.GetInputSegments(),
+		Target:  target,
+	}
+}
+
+func CheckCheckPointsHealth(meta *meta) error {
+	for channel, cp := range meta.GetChannelCheckpoints() {
+		ts, _ := tsoutil.ParseTS(cp.Timestamp)
+		lag := time.Since(ts)
+		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
+			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
+		}
+	}
+	return nil
+}
+
+func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
+	collIDs := meta.ListCollections()
+	for _, collID := range collIDs {
+		collInfo := meta.GetCollection(collID)
+		if collInfo == nil {
+			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
+			continue
+		}
+
+		for _, channelName := range collInfo.VChannelNames {
+			_, err := channelManager.FindWatcher(channelName)
+			if err != nil {
+				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
+					zap.String("channelName", channelName), zap.Error(err))
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
+	binlogIDs := make([]int64, 0)
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				binlogIDs = append(binlogIDs, binLog.GetLogID())
+			}
+			break
+		}
+	}
+	return binlogIDs
 }

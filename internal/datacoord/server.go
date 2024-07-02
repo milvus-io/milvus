@@ -124,12 +124,12 @@ type Server struct {
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
 
-	compactionTrigger     trigger
-	compactionHandler     compactionPlanContext
-	compactionViewManager *CompactionViewManager
-	syncSegmentsScheduler *SyncSegmentsScheduler
+	compactionTrigger        trigger
+	compactionHandler        compactionPlanContext
+	compactionTriggerManager *CompactionTriggerManager
 
-	metricsCacheManager *metricsinfo.MetricsCacheManager
+	syncSegmentsScheduler *SyncSegmentsScheduler
+	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
 	buildIndexCh    chan UniqueID
@@ -152,9 +152,10 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexBuilder              *indexBuilder
 	indexNodeManager          *IndexNodeManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	taskScheduler *taskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -373,6 +374,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initTaskScheduler(storageCli)
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
@@ -385,7 +387,6 @@ func (s *Server) initDataCoord() error {
 	log.Info("init segment manager done")
 
 	s.initGarbageCollection(storageCli)
-	s.initIndexBuilder(storageCli)
 
 	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
@@ -419,10 +420,11 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
+	s.taskScheduler.Start()
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
 		s.compactionTrigger.start()
-		s.compactionViewManager.Start()
+		s.compactionTriggerManager.Start()
 	}
 	s.startServerLoop()
 
@@ -527,13 +529,12 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 
 func (s *Server) createCompactionHandler() {
 	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
-	triggerv2 := NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler)
-	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 }
 
 func (s *Server) stopCompactionHandler() {
 	s.compactionHandler.stop()
-	s.compactionViewManager.Close()
+	s.compactionTriggerManager.Close()
 }
 
 func (s *Server) createCompactionTrigger() {
@@ -690,9 +691,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
-	if s.indexBuilder == nil {
-		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
+	if s.taskScheduler == nil {
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
 	}
 }
 
@@ -1114,7 +1115,7 @@ func (s *Server) Stop() error {
 	}
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
-	s.indexBuilder.Stop()
+	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
 
 	s.cluster.Close()

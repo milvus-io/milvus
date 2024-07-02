@@ -53,11 +53,13 @@ type SessionManager interface {
 	DeleteSession(node *NodeInfo)
 	GetSessionIDs() []int64
 	GetSessions() []*Session
+	GetSession(int64) (*Session, bool)
 
 	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
+	GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error)
 	GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
@@ -118,6 +120,14 @@ func (c *SessionManagerImpl) AddSession(node *NodeInfo) {
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
 	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
+}
+
+// GetSession return a Session related to nodeID
+func (c *SessionManagerImpl) GetSession(nodeID int64) (*Session, bool) {
+	c.sessions.RLock()
+	defer c.sessions.RUnlock()
+	s, ok := c.sessions.data[nodeID]
+	return s, ok
 }
 
 // DeleteSession removes the node session
@@ -217,7 +227,9 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	ratio := (1 + len(req.GetSegmentInfos())/10)
+	timeout := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second) * time.Duration(ratio)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -226,7 +238,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	}
 
 	err = retry.Do(context.Background(), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		resp, err := cli.SyncSegments(ctx, req)
@@ -245,7 +257,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	return nil
 }
 
-// GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
+// GetCompactionPlansResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
 func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ctx := context.Background()
 	errorGroup, ctx := errgroup.WithContext(ctx)
@@ -296,6 +308,50 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pa
 	})
 
 	return rst, nil
+}
+
+func (c *SessionManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error) {
+	ctx := context.Background()
+	c.sessions.RLock()
+	s, ok := c.sessions.data[nodeID]
+	if !ok {
+		c.sessions.RUnlock()
+		return nil, merr.WrapErrNodeNotFound(nodeID)
+	}
+	c.sessions.RUnlock()
+	cli, err := s.GetOrCreateClient(ctx)
+	if err != nil {
+		log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	resp, err2 := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		PlanID: planID,
+	})
+
+	if err2 != nil {
+		return nil, err2
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Info("GetCompactionState state is not", zap.Error(err))
+		return nil, fmt.Errorf("GetCopmactionState failed")
+	}
+	var result *datapb.CompactionPlanResult
+	for _, rst := range resp.GetResults() {
+		if rst.GetPlanID() != planID {
+			continue
+		}
+		binlog.CompressCompactionBinlogs(rst.GetSegments())
+		result = rst
+		break
+	}
+
+	return result, nil
 }
 
 func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {

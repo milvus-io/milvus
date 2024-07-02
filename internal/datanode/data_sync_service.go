@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
@@ -65,7 +66,7 @@ type dataSyncService struct {
 	flushCh          chan flushMsg
 	resendTTCh       chan resendTTMsg    // chan to ask for resending DataNode time tick message.
 	timetickSender   *timeTickSender     // reference to timeTickSender
-	compactor        *compactionExecutor // reference to compaction executor
+	compactor        compaction.Executor // reference to compaction executor
 	flushingSegCache *Cache              // a guarding cache stores currently flushing segment ids
 
 	clearSignal  chan<- string       // signal channel to notify flowgraph close for collection/partition drop msg consumed
