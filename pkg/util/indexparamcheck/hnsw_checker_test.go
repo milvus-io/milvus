@@ -180,15 +180,15 @@ func Test_hnswChecker_SetDefaultMetricType(t *testing.T) {
 	}{
 		{
 			dType:      schemapb.DataType_FloatVector,
-			metricType: metric.IP,
+			metricType: metric.COSINE,
 		},
 		{
 			dType:      schemapb.DataType_Float16Vector,
-			metricType: metric.IP,
+			metricType: metric.COSINE,
 		},
 		{
 			dType:      schemapb.DataType_BFloat16Vector,
-			metricType: metric.IP,
+			metricType: metric.COSINE,
 		},
 		{
 			dType:      schemapb.DataType_SparseFloatVector,
@@ -196,7 +196,7 @@ func Test_hnswChecker_SetDefaultMetricType(t *testing.T) {
 		},
 		{
 			dType:      schemapb.DataType_BinaryVector,
-			metricType: metric.JACCARD,
+			metricType: metric.HAMMING,
 		},
 	}
 
