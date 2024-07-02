@@ -410,24 +410,27 @@ func (t *clusteringCompactionTask) doCompact() error {
 	if t.NeedReAssignNodeID() {
 		return errors.New("not assign nodeID")
 	}
+
+	// todo refine this logic: GetCompactionPlanResult return a fail result when this is no compaction in datanode which is weird
 	// check whether the compaction plan is already submitted considering
 	// datacoord may crash between call sessions.Compaction and updateTaskState to executing
-	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
-	if err != nil {
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
-			// setNodeID(NullNodeID) to trigger reassign node ID
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
-			return nil
-		}
-		return merr.WrapErrGetCompactionPlanResultFail(err)
-	}
-	if result != nil {
-		log.Info("compaction already submitted")
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
-		return nil
-	}
+	// result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
+	// if err != nil {
+	//	if errors.Is(err, merr.ErrNodeNotFound) {
+	//		log.Warn("GetCompactionPlanResult fail", zap.Error(err))
+	//		// setNodeID(NullNodeID) to trigger reassign node ID
+	//		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+	//		return nil
+	//	}
+	//	return merr.WrapErrGetCompactionPlanResultFail(err)
+	// }
+	// if result != nil {
+	//	log.Info("compaction already submitted")
+	//	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
+	//	return nil
+	// }
 
+	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
