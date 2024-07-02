@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -488,6 +487,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
 			)
+			continue
 		}
 
 		log.Info("Reassign standby channels to node",
@@ -523,7 +523,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 		)
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
-			tmpWatchInfo := proto.Clone(innerCh.GetWatchInfo()).(*datapb.ChannelWatchInfo)
+			tmpWatchInfo := typeutil.Clone(innerCh.GetWatchInfo())
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
