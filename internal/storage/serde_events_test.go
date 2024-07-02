@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strconv"
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow"
@@ -342,4 +343,220 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 			assertTestDeltalogData(t, i, value)
 		}
 	})
+}
+
+func TestDeltalogPkTsSeparateFormat(t *testing.T) {
+	t.Run("test empty data", func(t *testing.T) {
+		reader, err := NewDeltalogDeserializeReader(nil)
+		assert.NoError(t, err)
+		defer reader.Close()
+		err = reader.Next()
+		assert.Equal(t, io.EOF, err)
+
+		eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, nil)
+		writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, 7)
+		assert.NoError(t, err)
+		defer writer.Close()
+		err = writer.Close()
+		assert.NoError(t, err)
+		blob, err := eventWriter.Finalize()
+		assert.NoError(t, err)
+		assert.NotNil(t, blob)
+	})
+
+	testCases := []struct {
+		name     string
+		pkType   schemapb.DataType
+		newPk    func(int) interface{}
+		assertPk func(t *testing.T, i int, value *DeleteLog)
+	}{
+		{
+			name:   "test int64 pk",
+			pkType: schemapb.DataType_Int64,
+			newPk:  func(i int) interface{} { return NewInt64PrimaryKey(int64(i)) },
+			assertPk: func(t *testing.T, i int, value *DeleteLog) {
+				assert.Equal(t, &Int64PrimaryKey{int64(i)}, value.Pk)
+				assert.Equal(t, uint64(i+1), value.Ts)
+			},
+		},
+		{
+			name:   "test varchar pk",
+			pkType: schemapb.DataType_VarChar,
+			newPk:  func(i int) interface{} { return NewVarCharPrimaryKey(strconv.Itoa(i)) },
+			assertPk: func(t *testing.T, i int, value *DeleteLog) {
+				assert.Equal(t, &VarCharPrimaryKey{strconv.Itoa(i)}, value.Pk)
+				assert.Equal(t, uint64(i+1), value.Ts)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, []*schemapb.FieldSchema{
+				{FieldID: common.RowIDField, Name: "pk", DataType: tc.pkType},
+				{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+			})
+			writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, 7)
+			assert.NoError(t, err)
+
+			size := 10
+			pks := make([]interface{}, size)
+			tss := make([]uint64, size)
+			for i := 0; i < size; i++ {
+				pks[i] = tc.newPk(i)
+				tss[i] = uint64(i + 1)
+			}
+			data := make([]*DeleteLog, size)
+			for i := range pks {
+				pk, ok := pks[i].(PrimaryKey)
+				assert.True(t, ok)
+				data[i] = NewDeleteLog(pk, tss[i])
+			}
+
+			// Serialize the data
+			for i := 0; i < size; i++ {
+				err := writer.Write(data[i])
+				assert.NoError(t, err)
+			}
+			err = writer.Close()
+			assert.NoError(t, err)
+
+			blob, err := eventWriter.Finalize()
+			assert.NoError(t, err)
+			assert.NotNil(t, blob)
+			blobs := []*Blob{blob}
+
+			// Deserialize the data
+			reader, err := NewDeltalogDeserializeReader(blobs)
+			assert.NoError(t, err)
+			defer reader.Close()
+			for i := 0; i < size; i++ {
+				err = reader.Next()
+				assert.NoError(t, err)
+
+				value := reader.Value()
+				tc.assertPk(t, i, value)
+			}
+		})
+	}
+}
+
+func BenchmarkDeltalogFormat(b *testing.B) {
+	size := 10000000
+	blob, err := generateTestDeltalogData(size)
+	assert.NoError(b, err)
+
+	// Benchmark DeserializeReader
+	b.Run("one string format reader", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+			assert.NoError(b, err)
+			defer reader.Close()
+			for j := 0; j < size; j++ {
+				err = reader.Next()
+				_ = reader.Value()
+				assert.NoError(b, err)
+			}
+			err = reader.Next()
+			assert.Equal(b, io.EOF, err)
+		}
+		b.ReportAllocs()
+	})
+
+	blob, err = generateTestDeltalogNewFormatData(size)
+	assert.NoError(b, err)
+
+	// Benchmark DeltalogPkTsSeparateFormat
+	b.Run("pk ts separate format reader", func(b *testing.B) {
+		// Deserialize the data
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+			assert.NoError(b, err)
+			defer reader.Close()
+			for j := 0; j < size; j++ {
+				err = reader.Next()
+				_ = reader.Value()
+				assert.NoError(b, err)
+			}
+			err = reader.Next()
+			assert.Equal(b, io.EOF, err)
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("one string format writer", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			eventWriter := NewDeltalogStreamWriter(0, 0, 0)
+			writer, _ := NewDeltalogSerializeWriter(0, 0, eventWriter, size)
+
+			for j := 0; j < size; j++ {
+				value := NewDeleteLog(&Int64PrimaryKey{int64(j)}, uint64(j+1))
+				writer.Write(value)
+			}
+			writer.Close()
+			eventWriter.Finalize()
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("pk and ts separate format writer", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, []*schemapb.FieldSchema{
+				{FieldID: common.RowIDField, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+			})
+			writer, _ := NewDeltalogMultiFieldWriter(0, 0, eventWriter, size)
+
+			for j := 0; j < size; j++ {
+				value := NewDeleteLog(&Int64PrimaryKey{int64(j)}, uint64(j+1))
+				writer.Write(value)
+			}
+			writer.Close()
+			eventWriter.Finalize()
+		}
+		b.ReportAllocs()
+	})
+}
+
+func generateTestDeltalogNewFormatData(size int) (*Blob, error) {
+	eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+	})
+	writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, size)
+	if err != nil {
+		return nil, err
+	}
+	pks := make([]interface{}, size)
+	tss := make([]uint64, size)
+	for i := 0; i < size; i++ {
+		pks[i] = NewInt64PrimaryKey(int64(i))
+		tss[i] = uint64(i + 1)
+	}
+	data := make([]*DeleteLog, size)
+	for i := range pks {
+		pk, ok := pks[i].(PrimaryKey)
+		if !ok {
+			return nil, err
+		}
+		data[i] = NewDeleteLog(pk, tss[i])
+	}
+
+	// Serialize the data
+	for i := 0; i < size; i++ {
+		writer.Write(data[i])
+	}
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+	blob, err := eventWriter.Finalize()
+	if err != nil {
+		return nil, err
+	}
+	return blob, nil
 }
