@@ -39,6 +39,26 @@ import (
 
 var _ PayloadWriterInterface = (*NativePayloadWriter)(nil)
 
+type PayloadWriterOptions func(*NativePayloadWriter)
+
+func WithNullable(nullable bool) PayloadWriterOptions {
+	return func(w *NativePayloadWriter) {
+		w.nullable = nullable
+	}
+}
+
+func WithWriterProps(writerProps *parquet.WriterProperties) PayloadWriterOptions {
+	return func(w *NativePayloadWriter) {
+		w.writerProps = writerProps
+	}
+}
+
+func WithDim(dim int) PayloadWriterOptions {
+	return func(w *NativePayloadWriter) {
+		w.dim = dim
+	}
+}
+
 type NativePayloadWriter struct {
 	dataType    schemapb.DataType
 	arrowType   arrow.DataType
@@ -49,41 +69,43 @@ type NativePayloadWriter struct {
 	releaseOnce sync.Once
 	dim         int
 	nullable    bool
+	writerProps *parquet.WriterProperties
 }
 
-func NewPayloadWriter(colType schemapb.DataType, nullable bool, dim ...int) (PayloadWriterInterface, error) {
-	var arrowType arrow.DataType
-	var dimension int
-	// writer for sparse float vector doesn't require dim
-	if typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
-		if len(dim) != 1 {
-			return nil, merr.WrapErrParameterInvalidMsg("incorrect input numbers")
-		}
-		if nullable {
-			return nil, merr.WrapErrParameterInvalidMsg("vector type not supprot nullable")
-		}
-		arrowType = milvusDataTypeToArrowType(colType, dim[0])
-		dimension = dim[0]
-	} else {
-		if len(dim) != 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("incorrect input numbers")
-		}
-		arrowType = milvusDataTypeToArrowType(colType, 1)
-		dimension = 1
-	}
-
-	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
-
-	return &NativePayloadWriter{
+func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions) (PayloadWriterInterface, error) {
+	w := &NativePayloadWriter{
 		dataType:    colType,
-		arrowType:   arrowType,
-		builder:     builder,
 		finished:    false,
 		flushedRows: 0,
 		output:      new(bytes.Buffer),
-		dim:         dimension,
-		nullable:    nullable,
-	}, nil
+		nullable:    false,
+		writerProps: parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3),
+		),
+		dim: 0,
+	}
+	for _, o := range options {
+		o(w)
+	}
+
+	// writer for sparse float vector doesn't require dim
+	if typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
+		if w.dim <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("dimension not provided or invalid for vector type")
+		}
+		if w.nullable {
+			return nil, merr.WrapErrParameterInvalidMsg("vector type does not support nullable")
+		}
+	} else {
+		if w.dim != 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("dimension should not be provided for non-vector type")
+		}
+		w.dim = 1
+	}
+	w.arrowType = milvusDataTypeToArrowType(colType, w.dim)
+	w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
+	return w, nil
 }
 
 func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []bool) error {
@@ -674,14 +696,10 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	table := array.NewTable(schema, []arrow.Column{column}, int64(column.Len()))
 	defer table.Release()
 
-	props := parquet.NewWriterProperties(
-		parquet.WithCompression(compress.Codecs.Zstd),
-		parquet.WithCompressionLevel(3),
-	)
 	return pqarrow.WriteTable(table,
 		w.output,
 		1024*1024*1024,
-		props,
+		w.writerProps,
 		pqarrow.DefaultWriterProps(),
 	)
 }
