@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // BinlogType is to distinguish different files saving different data.
@@ -150,21 +149,12 @@ type InsertBinlogWriter struct {
 }
 
 // NextInsertEventWriter returns an event writer to write insert data to an event.
-func (writer *InsertBinlogWriter) NextInsertEventWriter(nullable bool, dim ...int) (*insertEventWriter, error) {
+func (writer *InsertBinlogWriter) NextInsertEventWriter(opts ...PayloadWriterOptions) (*insertEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
 	}
 
-	var event *insertEventWriter
-	var err error
-	if typeutil.IsVectorType(writer.PayloadDataType) && !typeutil.IsSparseFloatVectorType(writer.PayloadDataType) {
-		if len(dim) != 1 {
-			return nil, fmt.Errorf("incorrect input numbers")
-		}
-		event, err = newInsertEventWriter(writer.PayloadDataType, nullable, dim[0])
-	} else {
-		event, err = newInsertEventWriter(writer.PayloadDataType, nullable)
-	}
+	event, err := newInsertEventWriter(writer.PayloadDataType, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,11 +169,11 @@ type DeleteBinlogWriter struct {
 }
 
 // NextDeleteEventWriter returns an event writer to write delete data to an event.
-func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, error) {
+func (writer *DeleteBinlogWriter) NextDeleteEventWriter(opts ...PayloadWriterOptions) (*deleteEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
 	}
-	event, err := newDeleteEventWriter(writer.PayloadDataType)
+	event, err := newDeleteEventWriter(writer.PayloadDataType, opts...)
 	if err != nil {
 		return nil, err
 	}

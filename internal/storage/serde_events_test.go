@@ -141,6 +141,11 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
+		for _, f := range schema.Fields {
+			props := writers[f.FieldID].rw.writerProps
+			assert.Equal(t, !f.IsPrimaryKey, props.DictionaryEnabled())
+		}
+
 		err = reader.Next()
 		assert.Equal(t, io.EOF, err)
 		err = writer.Close()
@@ -158,8 +163,13 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			newblobs[i] = blob
 			i++
 		}
+		// Both field pk and field 17 are with datatype string and auto id
+		// in test data. Field pk uses delta byte array encoding, while
+		// field 17 uses dict encoding.
+		assert.Less(t, writers[16].buf.Len(), writers[17].buf.Len())
+
 		// assert.Equal(t, blobs[0].Value, newblobs[0].Value)
-		reader, err = NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err = NewBinlogDeserializeReader(newblobs, common.RowIDField)
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 1; i <= size; i++ {

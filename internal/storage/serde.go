@@ -521,6 +521,23 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	return m
 }()
 
+// Since parquet does not support custom fallback encoding for now,
+// we disable dict encoding for primary key.
+// It can be scale to all fields once parquet fallback encoding is available.
+func getFieldWriterProps(field *schemapb.FieldSchema) *parquet.WriterProperties {
+	if field.GetIsPrimaryKey() {
+		return parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3),
+			parquet.WithDictionaryDefault(false),
+		)
+	}
+	return parquet.NewWriterProperties(
+		parquet.WithCompression(compress.Codecs.Zstd),
+		parquet.WithCompressionLevel(3),
+	)
+}
+
 type DeserializeReader[T any] struct {
 	rr           RecordReader
 	deserializer Deserializer[T]
@@ -654,12 +671,21 @@ func newCompositeRecordWriter(writers map[FieldID]RecordWriter) *compositeRecord
 
 var _ RecordWriter = (*singleFieldRecordWriter)(nil)
 
+type RecordWriterOptions func(*singleFieldRecordWriter)
+
+func WithRecordWriterProps(writerProps *parquet.WriterProperties) RecordWriterOptions {
+	return func(w *singleFieldRecordWriter) {
+		w.writerProps = writerProps
+	}
+}
+
 type singleFieldRecordWriter struct {
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
 	schema  *arrow.Schema
 
-	numRows int
+	numRows     int
+	writerProps *parquet.WriterProperties
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
@@ -674,23 +700,24 @@ func (sfw *singleFieldRecordWriter) Close() {
 	sfw.fw.Close()
 }
 
-func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer) (*singleFieldRecordWriter, error) {
-	schema := arrow.NewSchema([]arrow.Field{field}, nil)
-
-	// use writer properties as same as payload writer's for now
-	fw, err := pqarrow.NewFileWriter(schema, writer,
-		parquet.NewWriterProperties(
+func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer, opts ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
+	w := &singleFieldRecordWriter{
+		fieldId: fieldId,
+		schema:  arrow.NewSchema([]arrow.Field{field}, nil),
+		writerProps: parquet.NewWriterProperties(
+			parquet.WithMaxRowGroupLength(math.MaxInt64), // No additional grouping for now.
 			parquet.WithCompression(compress.Codecs.Zstd),
 			parquet.WithCompressionLevel(3)),
-		pqarrow.DefaultWriterProps())
+	}
+	for _, o := range opts {
+		o(w)
+	}
+	fw, err := pqarrow.NewFileWriter(w.schema, writer, w.writerProps, pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
-	return &singleFieldRecordWriter{
-		fw:      fw,
-		fieldId: fieldId,
-		schema:  schema,
-	}, nil
+	w.fw = fw
+	return w, nil
 }
 
 var _ RecordWriter = (*multiFieldRecordWriter)(nil)
