@@ -111,7 +111,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
-	allocatedTarget := NewCollectionTarget(nil, nil)
+	allocatedTarget := NewCollectionTarget(nil, nil, partitionIDs)
 	mgr.rwMutex.Unlock()
 
 	log := log.With(zap.Int64("collectionID", collectionID),
@@ -339,8 +339,11 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 	for _, channel := range oldTarget.GetAllDmChannels() {
 		channels[channel.GetChannelName()] = channel
 	}
+	partitions := lo.Filter(oldTarget.partitions.Collect(), func(partitionID int64, _ int) bool {
+		return !partitionSet.Contain(partitionID)
+	})
 
-	return NewCollectionTarget(segments, channels)
+	return NewCollectionTarget(segments, channels, partitions)
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -570,10 +573,13 @@ func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope T
 	return 0
 }
 
-func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {
-	newChannels := mgr.GetDmChannelsByCollection(collectionID, CurrentTarget)
+func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64, partitionID int64) bool {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
 
-	return len(newChannels) > 0
+	targets := mgr.getCollectionTarget(CurrentTarget, collectionID)
+
+	return len(targets) > 0 && (targets[0].partitions.Contain(partitionID) || partitionID == -1) && len(targets[0].dmChannels) > 0
 }
 
 func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {

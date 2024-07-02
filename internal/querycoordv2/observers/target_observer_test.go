@@ -284,7 +284,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 }
 
 func (s *TargetObserverCheckSuite) TestCheck() {
-	r := s.observer.Check(context.Background(), s.collectionID)
+	r := s.observer.Check(context.Background(), s.collectionID, -1)
 	s.False(r)
 	s.True(s.observer.dispatcher.tasks.Contain(s.collectionID))
 }

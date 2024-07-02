@@ -73,7 +73,7 @@ func (b *BalanceChecker) Description() string {
 
 func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (b.meta.GetCollection(collectionID) != nil)
-	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID, -1)
 
 	return metaExist && targetExist
 }
