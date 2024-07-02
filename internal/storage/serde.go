@@ -94,6 +94,10 @@ type serdeEntry struct {
 	serialize func(array.Builder, any) bool
 	// sizeof returns the size in bytes of the value
 	sizeof func(any) uint64
+	// fallbackEncoding returns the fallback encode method if parquet
+	// dictionary encoding is disabled, or it fallbacks if the dictionary
+	// grew too large.
+	fallbackEncoding func() parquet.Encoding
 }
 
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
@@ -127,6 +131,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(any) uint64 {
 			return 1
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_Int8] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -156,6 +163,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		func(any) uint64 {
 			return 1
+		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
 		},
 	}
 	m[schemapb.DataType_Int16] = serdeEntry{
@@ -187,6 +197,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(any) uint64 {
 			return 2
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_Int32] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -216,6 +229,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		func(any) uint64 {
 			return 4
+		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
 		},
 	}
 	m[schemapb.DataType_Int64] = serdeEntry{
@@ -247,6 +263,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(any) uint64 {
 			return 8
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.RLE
+		},
 	}
 	m[schemapb.DataType_Float] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -277,6 +296,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(any) uint64 {
 			return 4
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_Double] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -306,6 +328,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		func(any) uint64 {
 			return 8
+		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
 		},
 	}
 	stringEntry := serdeEntry{
@@ -339,6 +364,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return 8
 			}
 			return uint64(len(v.(string)))
+		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
 		},
 	}
 
@@ -381,6 +409,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return uint64(v.(*schemapb.ScalarField).XXX_Size())
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 
 	sizeOfBytes := func(v any) uint64 {
@@ -417,6 +448,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		sizeOfBytes,
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 
 	m[schemapb.DataType_JSON] = byteEntry
@@ -451,6 +485,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
 		sizeOfBytes,
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_Float16Vector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -459,6 +496,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
 		sizeOfBytes,
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_BFloat16Vector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -467,6 +507,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
 		sizeOfBytes,
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -507,10 +550,21 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return uint64(len(v.([]float32)) * 4)
 		},
+		func() parquet.Encoding {
+			return parquet.Encodings.Plain
+		},
 	}
 	m[schemapb.DataType_SparseFloatVector] = byteEntry
 	return m
 }()
+
+func GetWriterPropertiesByDataType(dt schemapb.DataType) *parquet.WriterProperties {
+	return parquet.NewWriterProperties(
+		parquet.WithCompression(compress.Codecs.Zstd),
+		parquet.WithCompressionLevel(3),
+		parquet.WithEncoding(serdeMap[dt].fallbackEncoding()),
+	)
+}
 
 type DeserializeReader[T any] struct {
 	rr           RecordReader
@@ -641,12 +695,21 @@ func newCompositeRecordWriter(writers map[FieldID]RecordWriter) *compositeRecord
 
 var _ RecordWriter = (*singleFieldRecordWriter)(nil)
 
+type RecordWriterOptions func(*singleFieldRecordWriter)
+
+func WithRecordWriterProps(writerProps *parquet.WriterProperties) RecordWriterOptions {
+	return func(w *singleFieldRecordWriter) {
+		w.writerProps = writerProps
+	}
+}
+
 type singleFieldRecordWriter struct {
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
 	schema  *arrow.Schema
 
-	numRows int
+	numRows     int
+	writerProps *parquet.WriterProperties
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
@@ -661,22 +724,24 @@ func (sfw *singleFieldRecordWriter) Close() {
 	sfw.fw.Close()
 }
 
-func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer) (*singleFieldRecordWriter, error) {
-	schema := arrow.NewSchema([]arrow.Field{field}, nil)
-	fw, err := pqarrow.NewFileWriter(schema, writer,
-		parquet.NewWriterProperties(
+func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer, options ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
+	w := &singleFieldRecordWriter{
+		fieldId: fieldId,
+		schema:  arrow.NewSchema([]arrow.Field{field}, nil),
+		writerProps: parquet.NewWriterProperties(
 			parquet.WithMaxRowGroupLength(math.MaxInt64), // No additional grouping for now.
 			parquet.WithCompression(compress.Codecs.Zstd),
 			parquet.WithCompressionLevel(3)),
-		pqarrow.DefaultWriterProps())
+	}
+	for _, o := range options {
+		o(w)
+	}
+	fw, err := pqarrow.NewFileWriter(w.schema, writer, w.writerProps, pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
-	return &singleFieldRecordWriter{
-		fw:      fw,
-		fieldId: fieldId,
-		schema:  schema,
-	}, nil
+	w.fw = fw
+	return w, nil
 }
 
 type SerializeWriter[T any] struct {

@@ -243,31 +243,18 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
-		var eventWriter *insertEventWriter
-		var err error
-		var dim int64
-		if typeutil.IsVectorType(field.DataType) {
-			if field.GetNullable() {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vectorType not support null, fieldName: %s", field.GetName()))
+
+		// get payload writing configs, including nullable and fallback encoding method
+		options := []PayloadWriterOptions{WithNullable(field.Nullable), WithWriterProps(GetWriterPropertiesByDataType(field.DataType))}
+
+		if typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+			dim, err := typeutil.GetDim(field)
+			if err != nil {
+				return nil, err
 			}
-			switch field.DataType {
-			case schemapb.DataType_FloatVector,
-				schemapb.DataType_BinaryVector,
-				schemapb.DataType_Float16Vector,
-				schemapb.DataType_BFloat16Vector:
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return nil, err
-				}
-				eventWriter, err = writer.NextInsertEventWriter(field.GetNullable(), int(dim))
-			case schemapb.DataType_SparseFloatVector:
-				eventWriter, err = writer.NextInsertEventWriter(field.GetNullable())
-			default:
-				return nil, fmt.Errorf("undefined data type %d", field.DataType)
-			}
-		} else {
-			eventWriter, err = writer.NextInsertEventWriter(field.GetNullable())
+			options = append(options, WithDim(int(dim)))
 		}
+		eventWriter, err := writer.NextInsertEventWriter(options...)
 		if err != nil {
 			writer.Close()
 			return nil, err
