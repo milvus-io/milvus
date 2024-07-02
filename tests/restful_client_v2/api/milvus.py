@@ -59,24 +59,25 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
 
     data_dict = json.loads(data) if data else {}
     data_dict_simple = simplify_dict(data_dict)
-    if ENABLE_LOG_SAVE:
-        with open('request_response.jsonl', 'a') as f:
-            f.write(json.dumps({
-                "method": method,
-                "url": url,
-                "headers": headers,
-                "params": params,
-                "data": data_dict_simple,
-                "response": response.json()
-            }) + "\n")
     data = json.dumps(data_dict_simple, indent=4)
     try:
         if response.status_code == 200:
             if ('code' in response.json() and response.json()["code"] == 0) or (
                     'Code' in response.json() and response.json()["Code"] == 0):
+                response_dict_simple = simplify_dict(response.json())
+                response_data = json.dumps(response_dict_simple, indent=4)
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {str_response}")
-
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response_data}")
+                if ENABLE_LOG_SAVE:
+                    with open('request_response.jsonl', 'a') as f:
+                        f.write(json.dumps({
+                            "method": method,
+                            "url": url,
+                            "headers": headers,
+                            "params": params,
+                            "data": data_dict_simple,
+                            "response": response_dict_simple
+                        }) + "\n")
             else:
                 logger.debug(
                     f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
