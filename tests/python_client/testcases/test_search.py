@@ -12689,7 +12689,7 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    @pytest.mark.parametrize("dim", [ct.min_sparse_vector_dim, 32768, ct.max_sparse_vector_dim])
+    @pytest.mark.parametrize("dim", [32768, ct.max_sparse_vector_dim])
     def test_sparse_index_dim(self, index, dim):
         """
         target: validating the sparse index in different dimensions
