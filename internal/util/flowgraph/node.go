@@ -83,16 +83,14 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 	inputNode := nodeCtxManager.inputNodeCtx
 	curNode := inputNode
 	// tt checker start
-	var checker *timerecord.Checker
 	if enableTtChecker {
 		manager := timerecord.GetCheckerManger("fgNode", nodeCtxTtInterval, func(list []string) {
 			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeCtxTtInterval))
 		})
 		for curNode != nil {
 			name := fmt.Sprintf("nodeCtxTtChecker-%s", curNode.node.Name())
-			checker = timerecord.NewChecker(name, manager)
+			curNode.checker = timerecord.NewChecker(name, manager)
 			curNode = curNode.downstream
-			defer checker.Close()
 		}
 	}
 
@@ -137,8 +135,8 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 				if curNode.downstream != nil {
 					curNode.downstream.inputChannel <- output
 				}
-				if enableTtChecker {
-					checker.Check()
+				if enableTtChecker && curNode.checker != nil {
+					curNode.checker.Check()
 				}
 				curNode = curNode.downstream
 			}
@@ -157,6 +155,7 @@ type nodeCtx struct {
 	node         Node
 	inputChannel chan []Msg
 	downstream   *nodeCtx
+	checker      *timerecord.Checker
 
 	blockMutex sync.RWMutex
 }
@@ -192,6 +191,9 @@ func (nodeCtx *nodeCtx) Close() {
 	if nodeCtx.node.IsInputNode() {
 		for nodeCtx != nil {
 			nodeCtx.node.Close()
+			if nodeCtx.checker != nil {
+				nodeCtx.checker.Close()
+			}
 			log.Debug("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
 			nodeCtx = nodeCtx.downstream
 		}

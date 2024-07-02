@@ -62,7 +62,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 		log.Info("datanode consume successfully when register to msgDispatcher")
 	}
 
-	name := fmt.Sprintf("dmInputNode-data-%d-%s", dmNodeConfig.collectionID, dmNodeConfig.vChannelName)
+	name := fmt.Sprintf("dmInputNode-data-%s", dmNodeConfig.vChannelName)
 	node := flowgraph.NewInputNode(
 		input,
 		name,
