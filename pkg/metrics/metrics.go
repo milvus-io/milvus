@@ -29,6 +29,7 @@ const (
 	AbandonLabel = "abandon"
 	SuccessLabel = "success"
 	FailLabel    = "fail"
+	CancelLabel  = "cancel"
 	TotalLabel   = "total"
 
 	HybridSearchLabel = "hybrid_search"
