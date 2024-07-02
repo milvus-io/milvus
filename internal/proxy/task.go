@@ -268,6 +268,25 @@ func (t *createCollectionTask) validateClusteringKey() error {
 	return nil
 }
 
+func (t *createCollectionTask) validatePartitionKeyIsolation() error {
+	if !t.schema.PartitionKeyIsolation {
+		return nil
+	}
+
+	if !hasParitionKeyModeField(t.schema) {
+		return merr.WrapErrCollectionIllegalSchema(t.CollectionName, "partition key isolation mode is enabled but no partition key field is set")
+	}
+
+	if !paramtable.Get().CommonCfg.EnableMaterializedView.GetAsBool() {
+		return merr.WrapErrCollectionIllegalSchema(t.CollectionName, "partition key isolation mode is enabled but current Milvus does not support it")
+	}
+
+	log.Info("create collection with partition key isolation",
+		zap.String("collectionName", t.CollectionName))
+
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -333,6 +352,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate clustering key
 	if err := t.validateClusteringKey(); err != nil {
+		return err
+	}
+
+	if err := t.validatePartitionKeyIsolation(); err != nil {
 		return err
 	}
 

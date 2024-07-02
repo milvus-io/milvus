@@ -217,6 +217,8 @@ VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
     if (opt_fields.has_value() && index_.IsAdditionalScalarSupported()) {
         build_config[VEC_OPT_FIELDS_PATH] =
             file_manager_->CacheOptFieldToDisk(opt_fields.value());
+        // `partition_key_isolation` is already in the config, so it falls through
+        // into the index Build call directly
     }
 
     build_config.erase("insert_files");

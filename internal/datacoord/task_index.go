@@ -105,6 +105,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	}
 	// vector index build needs information of optional scalar fields data
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
+	partitionKeyIsolation := false
 	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
 		collInfo, err := dependency.handler.GetCollection(ctx, segIndex.CollectionID)
 		if err != nil || collInfo == nil {
@@ -124,6 +125,9 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 					FieldType: int32(partitionKeyField.DataType),
 					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
 				})
+				if colSchema.PartitionKeyIsolation {
+					partitionKeyIsolation = true
+				}
 			}
 		}
 	}
@@ -205,48 +209,50 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		}
 
 		req = &indexpb.CreateJobRequest{
-			ClusterID:            Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:      path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:              it.buildID,
-			IndexVersion:         segIndex.IndexVersion,
-			StorageConfig:        storageConfig,
-			IndexParams:          indexParams,
-			TypeParams:           typeParams,
-			NumRows:              segIndex.NumRows,
-			CollectionID:         segment.GetCollectionID(),
-			PartitionID:          segment.GetPartitionID(),
-			SegmentID:            segment.GetID(),
-			FieldID:              fieldID,
-			FieldName:            field.Name,
-			FieldType:            field.DataType,
-			StorePath:            storePath,
-			StoreVersion:         segment.GetStorageVersion(),
-			IndexStorePath:       indexStorePath,
-			Dim:                  int64(dim),
-			CurrentIndexVersion:  dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-			DataIds:              binlogIDs,
-			OptionalScalarFields: optionalFields,
-			Field:                field,
+			ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
+			IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
+			BuildID:               it.buildID,
+			IndexVersion:          segIndex.IndexVersion,
+			StorageConfig:         storageConfig,
+			IndexParams:           indexParams,
+			TypeParams:            typeParams,
+			NumRows:               segIndex.NumRows,
+			CollectionID:          segment.GetCollectionID(),
+			PartitionID:           segment.GetPartitionID(),
+			SegmentID:             segment.GetID(),
+			FieldID:               fieldID,
+			FieldName:             field.Name,
+			FieldType:             field.DataType,
+			StorePath:             storePath,
+			StoreVersion:          segment.GetStorageVersion(),
+			IndexStorePath:        indexStorePath,
+			Dim:                   int64(dim),
+			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			DataIds:               binlogIDs,
+			OptionalScalarFields:  optionalFields,
+			Field:                 field,
+			PartitionKeyIsolation: partitionKeyIsolation,
 		}
 	} else {
 		req = &indexpb.CreateJobRequest{
-			ClusterID:            Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:      path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:              it.buildID,
-			IndexVersion:         segIndex.IndexVersion,
-			StorageConfig:        storageConfig,
-			IndexParams:          indexParams,
-			TypeParams:           typeParams,
-			NumRows:              segIndex.NumRows,
-			CurrentIndexVersion:  dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-			DataIds:              binlogIDs,
-			CollectionID:         segment.GetCollectionID(),
-			PartitionID:          segment.GetPartitionID(),
-			SegmentID:            segment.GetID(),
-			FieldID:              fieldID,
-			OptionalScalarFields: optionalFields,
-			Dim:                  int64(dim),
-			Field:                field,
+			ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
+			IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
+			BuildID:               it.buildID,
+			IndexVersion:          segIndex.IndexVersion,
+			StorageConfig:         storageConfig,
+			IndexParams:           indexParams,
+			TypeParams:            typeParams,
+			NumRows:               segIndex.NumRows,
+			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			DataIds:               binlogIDs,
+			CollectionID:          segment.GetCollectionID(),
+			PartitionID:           segment.GetPartitionID(),
+			SegmentID:             segment.GetID(),
+			FieldID:               fieldID,
+			OptionalScalarFields:  optionalFields,
+			Dim:                   int64(dim),
+			Field:                 field,
+			PartitionKeyIsolation: partitionKeyIsolation,
 		}
 	}
 
