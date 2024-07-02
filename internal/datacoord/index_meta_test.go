@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func TestReloadFromKV(t *testing.T) {
@@ -264,7 +264,7 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		RWMutex:              sync.RWMutex{},
+		RWMutex:              lock.RWMutex{},
 		ctx:                  context.Background(),
 		catalog:              catalog,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),

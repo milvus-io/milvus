@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -62,7 +63,7 @@ type SubCluster interface {
 
 type ChannelManagerImplV2 struct {
 	cancel context.CancelFunc
-	mu     sync.RWMutex
+	mu     lock.RWMutex
 	wg     sync.WaitGroup
 
 	h          Handler
