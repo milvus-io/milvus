@@ -80,7 +80,7 @@ ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0,
                "medium type must be parsed from stream header");
     int32_t magic_num;
-    auto ret = reader->Read(sizeof(magic_num), &magic_num);
+    auto ret = reader->ReadInt<int32_t>(magic_num);
     AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
     if (magic_num == MAGIC_NUM) {
         return StorageType::Remote;

@@ -212,3 +212,56 @@ TEST(Util, get_common_prefix) {
     common_prefix = milvus::GetCommonPrefix(str1, str2);
     EXPECT_STREQ(common_prefix.c_str(), "");
 }
+
+TEST(Util, test_serialize_int) {
+    using namespace milvus;
+    int8_t val = 120;
+    auto buffer = std::shared_ptr<uint8_t[]>(new uint8_t[1024]);
+    auto buffer_ptr = buffer.get();
+    SerializeToBuffer<int8_t>(buffer_ptr, val);
+    EXPECT_EQ(buffer[0], 120);
+    val = DeserializeFromBuffer<int8_t>(buffer_ptr);
+    EXPECT_EQ(val, 120);
+
+    int16_t val1 = 0x1234;
+    // convert to little endian
+    SerializeToBuffer<int16_t>(buffer_ptr, val1);
+    EXPECT_EQ(buffer[0], 0x34);
+    EXPECT_EQ(buffer[1], 0x12);
+    val1 = DeserializeFromBuffer<int16_t>(buffer_ptr);
+    EXPECT_EQ(val1, 0x1234);
+
+    int32_t val2 = 0x12345678;
+    // convert to little endian
+    SerializeToBuffer<int32_t>(buffer_ptr, val2);
+    EXPECT_EQ(buffer[0], 0x78);
+    EXPECT_EQ(buffer[1], 0x56);
+    EXPECT_EQ(buffer[2], 0x34);
+    EXPECT_EQ(buffer[3], 0x12);
+    val2 = DeserializeFromBuffer<int32_t>(buffer_ptr);
+    EXPECT_EQ(val2, 0x12345678);
+
+    uint32_t val3 = 0x12345678;
+    // convert to little endian
+    SerializeToBuffer<uint32_t>(buffer_ptr, val3);
+    EXPECT_EQ(buffer[0], 0x78);
+    EXPECT_EQ(buffer[1], 0x56);
+    EXPECT_EQ(buffer[2], 0x34);
+    EXPECT_EQ(buffer[3], 0x12);
+    val3 = DeserializeFromBuffer<uint32_t>(buffer_ptr);
+    EXPECT_EQ(val3, 0x12345678);
+
+    int64_t val4 = 0x1234567812345678;
+    // convert to little endian
+    SerializeToBuffer<int64_t>(buffer_ptr, val4);
+    EXPECT_EQ(buffer[0], 0x78);
+    EXPECT_EQ(buffer[1], 0x56);
+    EXPECT_EQ(buffer[2], 0x34);
+    EXPECT_EQ(buffer[3], 0x12);
+    EXPECT_EQ(buffer[4], 0x78);
+    EXPECT_EQ(buffer[5], 0x56);
+    EXPECT_EQ(buffer[6], 0x34);
+    EXPECT_EQ(buffer[7], 0x12);
+    val4 = DeserializeFromBuffer<int64_t>(buffer_ptr);
+    EXPECT_EQ(val4, 0x1234567812345678);
+}
