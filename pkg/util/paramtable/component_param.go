@@ -4061,8 +4061,8 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap.Init(base.mgr)
 
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
-		Key:          "datanode.clusteringCompaction.memoryBufferRatio",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
+		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
@@ -4071,8 +4071,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio.Init(base.mgr)
 
 	p.ClusteringCompactionWorkerPoolSize = ParamItem{
-		Key:          "datanode.clusteringCompaction.cpu",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.workPoolSize",
+		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,
@@ -4081,7 +4081,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyBatchSize",
+		Key:          "dataNode.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
