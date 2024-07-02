@@ -62,20 +62,20 @@ class SegmentInterface {
     virtual std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
-           Timestamp timestamp) const = 0;
+           Timestamp timestamp) = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
-             bool ignore_non_pk) const = 0;
+             bool ignore_non_pk) = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const = 0;
+             int64_t size) = 0;
 
     virtual size_t
     GetMemoryUsageInBytes() const = 0;
@@ -90,7 +90,7 @@ class SegmentInterface {
     get_deleted_count() const = 0;
 
     virtual int64_t
-    get_real_count() const = 0;
+    get_real_count() = 0;
 
     virtual int64_t
     get_field_avg_size(FieldId field_id) const = 0;
@@ -193,7 +193,7 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
-           Timestamp timestamp) const override;
+           Timestamp timestamp) override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -208,13 +208,13 @@ class SegmentInternalInterface : public SegmentInterface {
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
-             bool ignore_non_pk) const override;
+             bool ignore_non_pk) override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const override;
+             int64_t size) override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
@@ -226,7 +226,7 @@ class SegmentInternalInterface : public SegmentInterface {
     debug() const = 0;
 
     int64_t
-    get_real_count() const override;
+    get_real_count() override;
 
     int64_t
     get_field_avg_size(FieldId field_id) const override;
@@ -385,7 +385,10 @@ class SegmentInternalInterface : public SegmentInterface {
                    int64_t count) const = 0;
 
     virtual void
-    check_search(const query::Plan* plan) const = 0;
+    check_search(const query::Plan* plan) = 0;
+
+    virtual void
+    check_retrieve(const query::RetrievePlan* plan) = 0;
 
     virtual const ConcurrentVector<Timestamp>&
     get_timestamps() const = 0;

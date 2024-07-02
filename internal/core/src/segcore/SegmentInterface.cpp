@@ -68,7 +68,7 @@ std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group,
-    Timestamp timestamp) const {
+    Timestamp timestamp) {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
@@ -84,9 +84,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* plan,
                                    Timestamp timestamp,
                                    int64_t limit_size,
-                                   bool ignore_non_pk) const {
+                                   bool ignore_non_pk) {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", trace_ctx, false);
+    check_retrieve(plan);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
@@ -217,16 +218,17 @@ std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* Plan,
                                    const int64_t* offsets,
-                                   int64_t size) const {
+                                   int64_t size) {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", trace_ctx, false);
+    check_retrieve(Plan);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
     return results;
 }
 
 int64_t
-SegmentInternalInterface::get_real_count() const {
+SegmentInternalInterface::get_real_count() {
 #if 0
     auto insert_cnt = get_row_count();
     BitsetType bitset_holder;

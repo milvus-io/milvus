@@ -325,7 +325,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    check_search(const query::Plan* plan) const override {
+    check_search(const query::Plan* plan) override {
+        Assert(plan);
+    }
+
+    void
+    check_retrieve(const query::RetrievePlan* plan) override {
         Assert(plan);
     }
 
