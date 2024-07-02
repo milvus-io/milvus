@@ -146,8 +146,10 @@ const (
 	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
 
 	// database level properties
-	DatabaseReplicaNumber  = "database.replica.number"
-	DatabaseResourceGroups = "database.resource_groups"
+	DatabaseReplicaNumber     = "database.replica.number"
+	DatabaseResourceGroups    = "database.resource_groups"
+	DatabaseDiskQuotaKey      = "database.diskQuota.mb"
+	DatabaseMaxCollectionsKey = "database.max.collections"
 )
 
 // common properties

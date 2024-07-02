@@ -56,6 +56,15 @@ func (c *Database) Equal(other Database) bool {
 		checkParamsEqual(c.Properties, other.Properties)
 }
 
+func (c *Database) GetProperty(key string) string {
+	for _, e := range c.Properties {
+		if e.GetKey() == key {
+			return e.GetValue()
+		}
+	}
+	return ""
+}
+
 func MarshalDatabaseModel(db *Database) *pb.DatabaseInfo {
 	if db == nil {
 		return nil
