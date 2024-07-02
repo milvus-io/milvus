@@ -157,11 +157,13 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		serializer, err = syncmgr.NewStorageV2Serializer(
 			storageV2Cache,
+			option.idAllocator,
 			metacache,
 			option.metaWriter,
 		)
 	} else {
 		serializer, err = syncmgr.NewStorageSerializer(
+			option.idAllocator,
 			metacache,
 			option.metaWriter,
 		)

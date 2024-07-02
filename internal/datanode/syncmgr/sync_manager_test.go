@@ -145,7 +145,8 @@ func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
 		WithSchema(s.schema).
 		WithChunkManager(s.chunkManager).
 		WithAllocator(s.allocator).
-		WithMetaCache(s.metacache)
+		WithMetaCache(s.metacache).
+		WithAllocator(s.allocator)
 
 	return task
 }
@@ -159,7 +160,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
@@ -189,7 +190,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
@@ -209,7 +210,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 }
 
 func (s *SyncManagerSuite) TestResizePool() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	syncMgr, ok := manager.(*syncManager)
@@ -245,7 +246,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 }
 
 func (s *SyncManagerSuite) TestNewSyncManager() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	_, ok := manager.(*syncManager)
@@ -257,12 +258,12 @@ func (s *SyncManagerSuite) TestNewSyncManager() {
 
 	params.Save(configKey, "0")
 
-	_, err = NewSyncManager(s.chunkManager, s.allocator)
+	_, err = NewSyncManager(s.chunkManager)
 	s.Error(err)
 }
 
 func (s *SyncManagerSuite) TestUnexpectedError() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	task := NewMockTask(s.T())
@@ -277,7 +278,7 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 }
 
 func (s *SyncManagerSuite) TestTargetUpdateSameID() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	task := NewMockTask(s.T())

@@ -33,6 +33,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -51,6 +52,7 @@ type StorageV2SerializerSuite struct {
 
 	schema         *schemapb.CollectionSchema
 	storageCache   *metacache.StorageV2Cache
+	mockAllocator  *allocator.MockAllocator
 	mockCache      *metacache.MockMetaCache
 	mockMetaWriter *MockMetaWriter
 
@@ -86,6 +88,7 @@ func (s *StorageV2SerializerSuite) SetupSuite() {
 		},
 	}
 
+	s.mockAllocator = allocator.NewMockAllocator(s.T())
 	s.mockCache = metacache.NewMockMetaCache(s.T())
 	s.mockMetaWriter = NewMockMetaWriter(s.T())
 }
@@ -98,7 +101,7 @@ func (s *StorageV2SerializerSuite) SetupTest() {
 	s.mockCache.EXPECT().Collection().Return(s.collectionID)
 	s.mockCache.EXPECT().Schema().Return(s.schema)
 
-	s.serializer, err = NewStorageV2Serializer(storageCache, s.mockCache, s.mockMetaWriter)
+	s.serializer, err = NewStorageV2Serializer(storageCache, s.mockAllocator, s.mockCache, s.mockMetaWriter)
 	s.Require().NoError(err)
 }
 
@@ -354,7 +357,7 @@ func (s *StorageV2SerializerSuite) TestBadSchema() {
 	mockCache := metacache.NewMockMetaCache(s.T())
 	mockCache.EXPECT().Collection().Return(s.collectionID).Once()
 	mockCache.EXPECT().Schema().Return(&schemapb.CollectionSchema{}).Once()
-	_, err := NewStorageV2Serializer(s.storageCache, mockCache, s.mockMetaWriter)
+	_, err := NewStorageV2Serializer(s.storageCache, s.mockAllocator, mockCache, s.mockMetaWriter)
 	s.Error(err)
 }
 

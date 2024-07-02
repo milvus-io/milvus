@@ -85,66 +85,66 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 	}
 }
 
-func (p *PreImportTask) GetPartitionIDs() []int64 {
-	return p.partitionIDs
+func (t *PreImportTask) GetPartitionIDs() []int64 {
+	return t.partitionIDs
 }
 
-func (p *PreImportTask) GetVchannels() []string {
-	return p.vchannels
+func (t *PreImportTask) GetVchannels() []string {
+	return t.vchannels
 }
 
-func (p *PreImportTask) GetType() TaskType {
+func (t *PreImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
 
-func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
-	return p.schema
+func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
+	return t.schema
 }
 
-func (p *PreImportTask) Cancel() {
-	p.cancel()
+func (t *PreImportTask) Cancel() {
+	t.cancel()
 }
 
-func (p *PreImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(p.ctx)
+func (t *PreImportTask) Clone() Task {
+	ctx, cancel := context.WithCancel(t.ctx)
 	return &PreImportTask{
-		PreImportTask: typeutil.Clone(p.PreImportTask),
+		PreImportTask: typeutil.Clone(t.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
-		partitionIDs:  p.GetPartitionIDs(),
-		vchannels:     p.GetVchannels(),
-		schema:        p.GetSchema(),
-		options:       p.options,
+		partitionIDs:  t.GetPartitionIDs(),
+		vchannels:     t.GetVchannels(),
+		schema:        t.GetSchema(),
+		options:       t.options,
 	}
 }
 
-func (p *PreImportTask) Execute() []*conc.Future[any] {
+func (t *PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
-	log.Info("start to preimport", WrapLogFields(p,
+	log.Info("start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
-		zap.Any("schema", p.GetSchema()))...)
-	p.manager.Update(p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
-	files := lo.Map(p.GetFileStats(),
+		zap.Any("schema", t.GetSchema()))...)
+	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(p.ctx, p.cm, p.GetSchema(), file, p.options, bufferSize)
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize)
 		if err != nil {
-			log.Warn("new reader failed", WrapLogFields(p, zap.String("file", file.String()), zap.Error(err))...)
-			p.manager.Update(p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 			return err
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = p.readFileStat(reader, p, i)
+		err = t.readFileStat(reader, i)
 		if err != nil {
-			log.Warn("preimport failed", WrapLogFields(p, zap.String("file", file.String()), zap.Error(err))...)
-			p.manager.Update(p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			log.Warn("preimport failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 			return err
 		}
-		log.Info("read file stat done", WrapLogFields(p, zap.Strings("files", file.GetPaths()),
+		log.Info("read file stat done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
 	}
@@ -162,7 +162,7 @@ func (p *PreImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (p *PreImportTask) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
+func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) error {
 	fileSize, err := reader.Size()
 	if err != nil {
 		return err
@@ -185,11 +185,11 @@ func (p *PreImportTask) readFileStat(reader importutilv2.Reader, task Task, file
 			}
 			return err
 		}
-		err = CheckRowsEqual(task.GetSchema(), data)
+		err = CheckRowsEqual(t.GetSchema(), data)
 		if err != nil {
 			return err
 		}
-		rowsCount, err := GetRowsStats(task, data)
+		rowsCount, err := GetRowsStats(t, data)
 		if err != nil {
 			return err
 		}
@@ -198,7 +198,7 @@ func (p *PreImportTask) readFileStat(reader importutilv2.Reader, task Task, file
 		size := data.GetMemorySize()
 		totalRows += rows
 		totalSize += size
-		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows), zap.Int("readSize", size))...)
+		log.Info("reading file stat...", WrapLogFields(t, zap.Int("readRows", rows), zap.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{
@@ -207,6 +207,6 @@ func (p *PreImportTask) readFileStat(reader importutilv2.Reader, task Task, file
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	p.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
+	t.manager.Update(t.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
 }

@@ -165,6 +165,10 @@ func (s *L0ImportSuite) TestL0Import() {
 				Vchannel:    s.channel,
 			},
 		},
+		AutoIDRange: &datapb.AutoIDRange{
+			Begin: 0,
+			End:   int64(s.delCnt),
+		},
 	}
 	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(task)
