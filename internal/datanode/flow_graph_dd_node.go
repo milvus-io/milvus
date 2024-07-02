@@ -75,7 +75,7 @@ type ddNode struct {
 
 // Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
-	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
+	return fmt.Sprintf("ddNode-%s", ddn.vChannelName)
 }
 
 func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
