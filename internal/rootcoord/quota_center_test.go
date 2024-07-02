@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1706,15 +1707,16 @@ func TestCheckDiskQuota(t *testing.T) {
 	})
 
 	t.Run("disk quota check enable", func(t *testing.T) {
+		diskQuotaStr := "10"
 		Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
 		defer Params.Reset(Params.QuotaConfig.DiskProtectionEnabled.Key)
 		Params.Save(Params.QuotaConfig.DiskQuota.Key, "150")
 		defer Params.Reset(Params.QuotaConfig.DiskQuota.Key)
-		Params.Save(Params.QuotaConfig.DiskQuotaPerDB.Key, "10")
+		Params.Save(Params.QuotaConfig.DiskQuotaPerDB.Key, diskQuotaStr)
 		defer Params.Reset(Params.QuotaConfig.DiskQuotaPerDB.Key)
-		Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "10")
+		Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, diskQuotaStr)
 		defer Params.Reset(Params.QuotaConfig.DiskQuotaPerCollection.Key)
-		Params.Save(Params.QuotaConfig.DiskQuotaPerPartition.Key, "10")
+		Params.Save(Params.QuotaConfig.DiskQuotaPerPartition.Key, diskQuotaStr)
 		defer Params.Reset(Params.QuotaConfig.DiskQuotaPerPartition.Key)
 
 		Params.Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
@@ -1735,6 +1737,7 @@ func TestCheckDiskQuota(t *testing.T) {
 		core, _ := NewCore(ctx, nil)
 		core.tsoAllocator = newMockTsoAllocator()
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Maybe()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		quotaCenter.rateLimiter.GetRootLimiters().GetLimiters().Insert(internalpb.RateType_DMLInsert, ratelimitutil.NewLimiter(500, 500))
@@ -1790,7 +1793,9 @@ func TestCheckDiskQuota(t *testing.T) {
 			assert.EqualValues(t, expectValue, insertRate.Limit())
 		}
 
-		configQuotaValue := float64(10 * 1024 * 1024)
+		diskQuota, err := strconv.ParseFloat(diskQuotaStr, 64)
+		assert.NoError(t, err)
+		configQuotaValue := 1024 * 1024 * diskQuota
 
 		{
 			err := quotaCenter.checkDiskQuota()
@@ -1803,6 +1808,38 @@ func TestCheckDiskQuota(t *testing.T) {
 			err := quotaCenter.checkDiskQuota()
 			assert.NoError(t, err)
 			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), 0)
+			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), 0)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), 0)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 30), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 100), 0)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 101), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 20, 200), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 30, 300), configQuotaValue)
+		}
+
+		{
+			Params.Save(Params.QuotaConfig.DiskQuotaPerDB.Key, "20")
+			meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(ctx context.Context, i int64, u uint64) (*model.Database, error) {
+					if i == 1 {
+						return &model.Database{
+							ID:   1,
+							Name: "db1",
+							Properties: []*commonpb.KeyValuePair{
+								{
+									Key:   common.DatabaseDiskQuotaKey,
+									Value: "14",
+								},
+							},
+						}, nil
+					}
+					return nil, errors.New("not found db id")
+				}).Maybe()
+
+			err := quotaCenter.checkDiskQuota()
+			assert.NoError(t, err)
+			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), configQuotaValue)
 			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), 0)
 			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), 0)
 			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), configQuotaValue)

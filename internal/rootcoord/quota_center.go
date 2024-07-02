@@ -1298,6 +1298,7 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		return nil
 	}
 
+	// check disk quota of cluster level
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
@@ -1329,16 +1330,34 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		dbSizeInfo[dbID] += binlogSize
 	}
 
+	// cluster quota configuration take precedence over DB properties for disk quota.
 	dbs := make([]int64, 0)
-	dbDiskQuota := Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat()
-	for dbID, binlogSize := range dbSizeInfo {
-		if float64(binlogSize) >= dbDiskQuota {
+	checkDiskQuota := func(dbID, binlogSize int64, quota float64) bool {
+		if float64(binlogSize) >= quota {
 			log.RatedWarn(10, "db disk quota exceeded",
 				zap.Int64("db", dbID),
 				zap.Int64("db disk usage", binlogSize),
-				zap.Float64("db disk quota", dbDiskQuota))
+				zap.Float64("db disk quota", quota))
 			dbs = append(dbs, dbID)
+			return true
 		}
+		return false
+	}
+
+	clusterDiskQuota := Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat()
+	for dbID, binlogSize := range dbSizeInfo {
+		db, err := q.meta.GetDatabaseByID(q.ctx, dbID, typeutil.MaxTimestamp)
+		if err == nil {
+			databaseDiskQuotaStr := db.GetProperty(common.DatabaseDiskQuotaKey)
+			if databaseDiskQuotaStr != "" {
+				databaseDiskQuota, err := strconv.ParseFloat(databaseDiskQuotaStr, 64)
+				if err == nil {
+					checkDiskQuota(dbID, binlogSize, databaseDiskQuota)
+					continue
+				}
+			}
+		}
+		checkDiskQuota(dbID, binlogSize, clusterDiskQuota)
 	}
 
 	col2partitions := make(map[int64][]int64)
@@ -1356,6 +1375,7 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		}
 	}
 
+	// check disk quota of db, partition and collection level
 	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbs, collections, col2partitions)
 	if err != nil {
 		log.Warn("fail to force deny writing", zap.Error(err))
