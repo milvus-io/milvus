@@ -156,9 +156,10 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 "group_by: "
                 "group_by operation will be terminated",
                 e.what());
-            throw std::runtime_error(
+            PanicInfo(
+                ErrorCode::Unsupported,
                 "Failed to groupBy, current index:" + index.GetIndexType() +
-                " doesn't support search_group_by");
+                    " doesn't support search_group_by");
         }
         return true;
     }

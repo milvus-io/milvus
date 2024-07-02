@@ -82,8 +82,7 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "ScalarIndexSort cannot build null values!");
+        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(total_num_rows);
@@ -122,8 +121,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "ScalarIndexSort cannot build null values!");
+        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(total_num_rows);
@@ -379,8 +377,8 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
                 data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
     }
     for (; lb < ub; ++lb) {
         bitset[lb->idx_] = true;
@@ -468,11 +466,10 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                throw SegcoreError(
-                    OpTypeInvalid,
-                    fmt::format("Invalid OperatorType for "
-                                "checking scalar index optimization: {}",
-                                op));
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType for "
+                                      "checking scalar index optimization: {}",
+                                      op));
         }
         return shouldSkip;
     }
