@@ -96,6 +96,11 @@ message SubSearchRequest {
   string metricType = 9;
 }
 
+message ExtraSearchParam {
+  int64 group_by_field_id = 1;
+  int64 group_size = 2;
+}
+
 message SearchRequest {
   common.MsgBase base = 1;
   int64 reqID = 2;
@@ -120,6 +125,7 @@ message SearchRequest {
   bool   is_advanced = 20;
   int64 offset = 21;
   common.ConsistencyLevel consistency_level = 22;
+  ExtraSearchParam extra_search_param = 23;
 }
 
 message SubSearchResults {
