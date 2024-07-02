@@ -39,6 +39,17 @@ type FieldStats struct {
 	Centroids []VectorFieldValue `json:"centroids"` // for vector field
 }
 
+func (stats *FieldStats) Clone() FieldStats {
+	return FieldStats{
+		FieldID:   stats.FieldID,
+		Type:      stats.Type,
+		Max:       stats.Max,
+		Min:       stats.Min,
+		BF:        stats.BF,
+		Centroids: stats.Centroids,
+	}
+}
+
 // UnmarshalJSON unmarshal bytes to FieldStats
 func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 	var messageMap map[string]*json.RawMessage

@@ -182,6 +182,8 @@ var (
 	ErrClusteringCompactionNotSupportVector       = newMilvusError("vector field clustering compaction is not supported", 2306, false)
 	ErrClusteringCompactionSubmitTaskFail         = newMilvusError("fail to submit task", 2307, true)
 	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2308, true)
+	ErrClusteringCompactionGetCollectionFail      = newMilvusError("fail to get collection in compaction", 2309, true)
+	ErrCompactionResultNotFound                   = newMilvusError("compaction result not found", 2310, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

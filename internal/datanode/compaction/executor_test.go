@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -136,14 +135,14 @@ func TestCompactionExecutor(t *testing.T) {
 		ex.completedCompactor.Insert(int64(2), mockC)
 		ex.completed.Insert(int64(2), &datapb.CompactionPlanResult{
 			PlanID: 2,
-			State:  commonpb.CompactionState_Completed,
+			State:  datapb.CompactionTaskState_completed,
 			Type:   datapb.CompactionType_MixCompaction,
 		})
 
 		ex.completedCompactor.Insert(int64(3), mockC)
 		ex.completed.Insert(int64(3), &datapb.CompactionPlanResult{
 			PlanID: 3,
-			State:  commonpb.CompactionState_Completed,
+			State:  datapb.CompactionTaskState_completed,
 			Type:   datapb.CompactionType_Level0DeleteCompaction,
 		})
 
@@ -156,9 +155,9 @@ func TestCompactionExecutor(t *testing.T) {
 
 		for _, res := range result {
 			if res.PlanID == int64(1) {
-				assert.Equal(t, res.GetState(), commonpb.CompactionState_Executing)
+				assert.Equal(t, res.GetState(), datapb.CompactionTaskState_executing)
 			} else {
-				assert.Equal(t, res.GetState(), commonpb.CompactionState_Completed)
+				assert.Equal(t, res.GetState(), datapb.CompactionTaskState_completed)
 			}
 		}
 

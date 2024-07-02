@@ -144,6 +144,17 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 	return result
 }
 
+func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	channelSegments := s.secondaryIndexes.channel2Segments[channel]
+	var result []*SegmentInfo
+	for _, segment := range channelSegments {
+		if !segment.GetIsFake() {
+			result = append(result, segment)
+		}
+	}
+	return result
+}
+
 // GetCompactionTo returns the segment that the provided segment is compacted to.
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
@@ -280,6 +291,13 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 		}
 	}
 	return false
+}
+
+// SetLevel sets level for segment
+func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
+	}
 }
 
 // Clone deep clone the segment info and return a new instance
@@ -436,6 +454,13 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
+	}
+}
+
+// SetLevel is the option to set level for segment info
+func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.Level = level
 	}
 }
 
