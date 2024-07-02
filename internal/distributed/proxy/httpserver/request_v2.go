@@ -104,7 +104,7 @@ type QueryReqV2 struct {
 	CollectionName string   `json:"collectionName" binding:"required"`
 	PartitionNames []string `json:"partitionNames"`
 	OutputFields   []string `json:"outputFields"`
-	Filter         string   `json:"filter" binding:"required"`
+	Filter         string   `json:"filter"`
 	Limit          int32    `json:"limit"`
 	Offset         int32    `json:"offset"`
 }
