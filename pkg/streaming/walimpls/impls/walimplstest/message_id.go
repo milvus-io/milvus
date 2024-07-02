@@ -39,7 +39,7 @@ type testMessageID int64
 
 // WALName returns the name of message id related wal.
 func (id testMessageID) WALName() string {
-	return walName
+	return WALName
 }
 
 // LT less than.
