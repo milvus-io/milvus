@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -64,7 +65,7 @@ type ddNode struct {
 	vChannelName string
 
 	dropMode           atomic.Value
-	compactionExecutor *compactionExecutor
+	compactionExecutor compaction.Executor
 
 	// for recovery
 	growingSegInfo    map[UniqueID]*datapb.SegmentInfo // segmentID
@@ -149,8 +150,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("Receiving DropCollection msg")
 				ddn.dropMode.Store(true)
 
-				log.Info("Stop compaction for dropped channel")
-				ddn.compactionExecutor.discardByDroppedChannel(ddn.vChannelName)
+				log.Info("Stop compaction for dropped channel", zap.String("channel", ddn.vChannelName))
+				ddn.compactionExecutor.DiscardByDroppedChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
 			}
 
@@ -277,7 +278,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppedSegmentIDs []UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -291,7 +292,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 		growingSegInfo:     make(map[UniqueID]*datapb.SegmentInfo, len(growingSegments)),
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
-		compactionExecutor: compactor,
+		compactionExecutor: executor,
 	}
 
 	dd.dropMode.Store(false)
