@@ -315,6 +315,47 @@ func (_c *MockImmutableMessage_TimeTick_Call) RunAndReturn(run func() uint64) *M
 	return _c
 }
 
+// VChannel provides a mock function with given fields:
+func (_m *MockImmutableMessage) VChannel() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_VChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'VChannel'
+type MockImmutableMessage_VChannel_Call struct {
+	*mock.Call
+}
+
+// VChannel is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) VChannel() *MockImmutableMessage_VChannel_Call {
+	return &MockImmutableMessage_VChannel_Call{Call: _e.mock.On("VChannel")}
+}
+
+func (_c *MockImmutableMessage_VChannel_Call) Run(run func()) *MockImmutableMessage_VChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_VChannel_Call) Return(_a0 string) *MockImmutableMessage_VChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_VChannel_Call) RunAndReturn(run func() string) *MockImmutableMessage_VChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Version provides a mock function with given fields:
 func (_m *MockImmutableMessage) Version() message.Version {
 	ret := _m.Called()

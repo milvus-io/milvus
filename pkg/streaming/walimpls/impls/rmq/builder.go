@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	walName = "rmq"
+	walName = "rocksmq"
 )
 
 func init() {
