@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
@@ -129,6 +128,10 @@ func (i *GrpcAccessInfo) TraceID() string {
 	}
 
 	traceID := trace.SpanFromContext(i.ctx).SpanContext().TraceID()
+	if !traceID.IsValid() {
+		return Unknown
+	}
+
 	return traceID.String()
 }
 
@@ -252,14 +255,18 @@ func (i *GrpcAccessInfo) SdkVersion() string {
 	return getSdkVersionByUserAgent(i.ctx)
 }
 
-func (i *GrpcAccessInfo) ClusterPrefix() string {
-	return paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-}
-
 func (i *GrpcAccessInfo) OutputFields() string {
 	fields, ok := requestutil.GetOutputFieldsFromRequest(i.req)
 	if ok {
 		return fmt.Sprint(fields.([]string))
+	}
+	return Unknown
+}
+
+func (i *GrpcAccessInfo) ConsistencyLevel() string {
+	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
+	if ok {
+		return level.String()
 	}
 	return Unknown
 }

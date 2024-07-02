@@ -22,12 +22,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 )
 
 type AccessKey struct{}
+
+const ContextLogKey = "accesslog"
 
 func UnaryAccessLogInterceptor(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	accessInfo := info.NewGrpcAccessInfo(ctx, rpcInfo, req)
@@ -42,6 +45,24 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 	accessInfo := ctx.Value(AccessKey{}).(*info.GrpcAccessInfo)
 	accessInfo.UpdateCtx(ctx)
 	return handler(ctx, req)
+}
+
+func AccessLogMiddleware(ctx *gin.Context) {
+	accessInfo := info.NewRestfulInfo()
+	ctx.Set(ContextLogKey, accessInfo)
+	ctx.Next()
+	accessInfo.InitReq()
+	_globalL.Write(accessInfo)
+}
+
+func SetHTTPParams(p *gin.LogFormatterParams) {
+	value, ok := p.Keys[ContextLogKey]
+	if !ok {
+		return
+	}
+
+	info := value.(*info.RestfulInfo)
+	info.SetParams(p)
 }
 
 func join(path1, path2 string) string {
