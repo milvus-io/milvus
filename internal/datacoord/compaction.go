@@ -275,8 +275,37 @@ func (c *compactionPlanHandler) loadMeta() {
 	triggers := c.meta.(*meta).compactionTaskMeta.GetCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
-			if task.State != datapb.CompactionTaskState_completed && task.State != datapb.CompactionTaskState_cleaned {
-				c.enqueueCompaction(task)
+			state := task.GetState()
+			if state == datapb.CompactionTaskState_completed ||
+				state == datapb.CompactionTaskState_cleaned ||
+				state == datapb.CompactionTaskState_unknown {
+				log.Info("compactionPlanHandler loadMeta abandon compactionTask",
+					zap.Int64("planID", task.GetPlanID()),
+					zap.String("State", task.GetState().String()))
+				continue
+			} else {
+				t, err := c.createCompactTask(task)
+				if err != nil {
+					log.Warn("compactionPlanHandler loadMeta create compactionTask failed",
+						zap.Int64("planID", task.GetPlanID()),
+						zap.String("State", task.GetState().String()))
+					continue
+				}
+				if t.NeedReAssignNodeID() {
+					c.submitTask(t)
+					log.Info("compactionPlanHandler loadMeta submitTask",
+						zap.Int64("planID", t.GetPlanID()),
+						zap.Int64("triggerID", t.GetTriggerID()),
+						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.String("state", t.GetState().String()))
+				} else {
+					c.restoreTask(t)
+					log.Info("compactionPlanHandler loadMeta restoreTask",
+						zap.Int64("planID", t.GetPlanID()),
+						zap.Int64("triggerID", t.GetTriggerID()),
+						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.String("state", t.GetState().String()))
+				}
 			}
 		}
 	}
@@ -467,6 +496,8 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 }
 
 func (c *compactionPlanHandler) submitTask(t CompactionTask) {
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
+	t.SetSpan(span)
 	c.mu.Lock()
 	c.queueTasks[t.GetPlanID()] = t
 	c.mu.Unlock()
@@ -475,6 +506,8 @@ func (c *compactionPlanHandler) submitTask(t CompactionTask) {
 
 // restoreTask used to restore Task from etcd
 func (c *compactionPlanHandler) restoreTask(t CompactionTask) {
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
+	t.SetSpan(span)
 	c.executingMu.Lock()
 	c.executingTasks[t.GetPlanID()] = t
 	c.executingMu.Unlock()
@@ -505,38 +538,23 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	if c.isFull() {
 		return errCompactionBusy
 	}
-	// TODO change to set this on scheduling task
-	exist, succeed := c.checkAndSetSegmentsCompacting(task)
-	if !exist {
-		return merr.WrapErrIllegalCompactionPlan("segment not exist")
+	t, err := c.createCompactTask(task)
+	if err != nil {
+		return err
 	}
-	if !succeed {
-		return merr.WrapErrCompactionPlanConflict("segment is compacting")
+	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
+	err = t.SaveTaskMeta()
+	if err != nil {
+		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
+		return err
 	}
-
-	// TODO change to set this on scheduling task
-	t := c.createCompactTask(task)
-	if t == nil {
-		return merr.WrapErrIllegalCompactionPlan("illegal compaction type")
-	}
-	if task.StartTime != 0 {
-		t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
-		err := t.SaveTaskMeta()
-		if err != nil {
-			return err
-		}
-	}
-
-	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", task.GetType()))
-	t.SetSpan(span)
-
 	c.submitTask(t)
 	log.Info("Compaction plan submitted")
 	return nil
 }
 
 // set segments compacting, one segment can only participate one compactionTask
-func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) CompactionTask {
+func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
@@ -559,19 +577,17 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) Comp
 			handler:          c.handler,
 			analyzeScheduler: c.analyzeScheduler,
 		}
+	default:
+		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
-	return task
-}
-
-// set segments compacting, one segment can only participate one compactionTask
-func (c *compactionPlanHandler) setSegmentsCompacting(task CompactionTask, compacting bool) {
-	for _, segmentID := range task.GetInputSegments() {
-		c.meta.SetSegmentCompacting(segmentID, compacting)
+	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(t.GetInputSegments())
+	if !exist {
+		return nil, merr.WrapErrIllegalCompactionPlan("segment not exist")
 	}
-}
-
-func (c *compactionPlanHandler) checkAndSetSegmentsCompacting(task *datapb.CompactionTask) (bool, bool) {
-	return c.meta.CheckAndSetSegmentsCompacting(task.GetInputSegments())
+	if !succeed {
+		return nil, merr.WrapErrCompactionPlanConflict("segment is compacting")
+	}
+	return task, nil
 }
 
 func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {

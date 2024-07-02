@@ -209,31 +209,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	}
 
 	mockChMgr := mocks.NewChunkManager(suite.T())
-	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
-	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
-	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-
 	m := &meta{
 		catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments:     latestSegments,
 		chunkManager: mockChMgr,
-	}
-
-	plan := &datapb.CompactionPlan{
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID:           1,
-				FieldBinlogs:        m.GetSegment(1).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(1).GetStatslogs(),
-				Deltalogs:           m.GetSegment(1).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-			{
-				SegmentID:           2,
-				FieldBinlogs:        m.GetSegment(2).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(2).GetStatslogs(),
-				Deltalogs:           m.GetSegment(2).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-		},
 	}
 
 	compactToSeg := &datapb.CompactionSegment{
@@ -246,8 +225,13 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	result := &datapb.CompactionPlanResult{
 		Segments: []*datapb.CompactionSegment{compactToSeg},
 	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+	}
 
-	infos, mutation, err := m.CompleteCompactionMutation(plan, result)
+	infos, mutation, err := m.CompleteCompactionMutation(task, result)
+	assert.NoError(suite.T(), err)
 	suite.Equal(1, len(infos))
 	info := infos[0]
 	suite.NoError(err)
@@ -274,16 +258,6 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.EqualValues(50001, blog.GetLogID())
 		}
 	}
-
-	deltalogs := info.GetDeltalogs()
-	deltalogIDs := []int64{}
-	for _, fbinlog := range deltalogs {
-		for _, blog := range fbinlog.GetBinlogs() {
-			suite.Empty(blog.GetLogPath())
-			deltalogIDs = append(deltalogIDs, blog.GetLogID())
-		}
-	}
-	suite.ElementsMatch([]int64{30001, 31001}, deltalogIDs)
 
 	// check compactFrom segments
 	for _, segID := range []int64{1, 2} {
@@ -856,7 +830,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 	})
 }
 
-func Test_meta_SetSegmentCompacting(t *testing.T) {
+func Test_meta_SetSegmentsCompacting(t *testing.T) {
 	type fields struct {
 		client   kv.MetaKv
 		segments *SegmentsInfo
@@ -899,58 +873,9 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
+			m.SetSegmentsCompacting([]UniqueID{tt.args.segmentID}, tt.args.compacting)
 			segment := m.GetHealthySegment(tt.args.segmentID)
 			assert.Equal(t, tt.args.compacting, segment.isCompacting)
-		})
-	}
-}
-
-func Test_meta_SetSegmentImporting(t *testing.T) {
-	type fields struct {
-		client   kv.MetaKv
-		segments *SegmentsInfo
-	}
-	type args struct {
-		segmentID UniqueID
-		importing bool
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-	}{
-		{
-			"test set segment importing",
-			fields{
-				NewMetaMemoryKV(),
-				&SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:          1,
-								State:       commonpb.SegmentState_Flushed,
-								IsImporting: false,
-							},
-						},
-					},
-				},
-			},
-			args{
-				segmentID: 1,
-				importing: true,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &meta{
-				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
-				segments: tt.fields.segments,
-			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)
-			segment := m.GetHealthySegment(tt.args.segmentID)
-			assert.Equal(t, tt.args.importing, segment.isCompacting)
 		})
 	}
 }

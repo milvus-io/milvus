@@ -8,6 +8,9 @@ run:
     - scripts
     - internal/core
     - cmake_build
+    - mmap
+    - data
+    - ci
   skip-files:
     - partial_search_test.go
 

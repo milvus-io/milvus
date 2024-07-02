@@ -74,7 +74,7 @@ func (t *l0CompactionTask) processPipelining() bool {
 	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
 		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
@@ -85,7 +85,7 @@ func (t *l0CompactionTask) processExecuting() bool {
 	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		}
 		return false
 	}
@@ -186,7 +186,7 @@ func (t *l0CompactionTask) SetStartTime(startTime int64) {
 }
 
 func (t *l0CompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == 0
+	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == NullNodeID
 }
 
 func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
@@ -250,7 +250,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			//!info.isCompacting &&
 			!info.GetIsImporting() &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			info.GetDmlPosition().GetTimestamp() < t.GetPos().GetTimestamp()
+			info.GetStartPosition().GetTimestamp() < t.GetPos().GetTimestamp()
 	}))
 
 	if len(sealedSegments) == 0 {
@@ -307,9 +307,11 @@ func (t *l0CompactionTask) processCompleted() bool {
 }
 
 func (t *l0CompactionTask) resetSegmentCompacting() {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
+	var segmentIDs []UniqueID
+	for _, binLogs := range t.GetPlan().GetSegmentBinlogs() {
+		segmentIDs = append(segmentIDs, binLogs.GetSegmentID())
 	}
+	t.meta.SetSegmentsCompacting(segmentIDs, false)
 }
 
 func (t *l0CompactionTask) processTimeout() bool {

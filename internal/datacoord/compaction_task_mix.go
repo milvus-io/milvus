@@ -32,6 +32,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 	}
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
+	// Segment not found
 	if err != nil {
 		err2 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		return err2 == nil
@@ -39,7 +40,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
 		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
@@ -59,7 +60,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		}
 		return false
 	}
@@ -82,13 +83,20 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 			return t.processFailed()
 		}
-		saveSuccess := t.saveSegmentMeta()
-		if !saveSuccess {
+		err2 := t.saveSegmentMeta()
+		if err2 != nil {
+			if errors.Is(err2, merr.ErrIllegalCompactionPlan) {
+				err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+				if err3 != nil {
+					log.Warn("fail to updateAndSaveTaskMeta")
+				}
+				return true
+			}
 			return false
 		}
 		segments := []UniqueID{t.newSegment.GetID()}
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
-		if err == nil {
+		err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
+		if err3 == nil {
 			return t.processMetaSaved()
 		}
 		return false
@@ -110,18 +118,18 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 	return t.saveTaskMeta(t.CompactionTask)
 }
 
-func (t *mixCompactionTask) saveSegmentMeta() bool {
+func (t *mixCompactionTask) saveSegmentMeta() error {
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
 	// Also prepare metric updates.
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.GetPlan(), t.result)
+	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.CompactionTask, t.result)
 	if err != nil {
-		return false
+		return err
 	}
 	// Apply metrics after successful meta update.
 	t.newSegment = newSegments[0]
 	metricMutation.commit()
 	log.Info("mixCompactionTask success to save segment meta")
-	return true
+	return nil
 }
 
 func (t *mixCompactionTask) Process() bool {
@@ -161,7 +169,7 @@ func (t *mixCompactionTask) GetLabel() string {
 }
 
 func (t *mixCompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == 0
+	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == NullNodeID
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
@@ -178,9 +186,11 @@ func (t *mixCompactionTask) processCompleted() bool {
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
+	var segmentIDs []UniqueID
+	for _, binLogs := range t.GetPlan().GetSegmentBinlogs() {
+		segmentIDs = append(segmentIDs, binLogs.GetSegmentID())
 	}
+	t.meta.SetSegmentsCompacting(segmentIDs, false)
 }
 
 func (t *mixCompactionTask) processTimeout() bool {
