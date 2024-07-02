@@ -107,6 +107,8 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		// If the time tick message incoming,
 		// the reorder buffer can be consumed into a pending queue with latest timetick.
+
+		// TODO: !!! should we drop the unexpected broken timetick rule message.
 		s.pendingQueue.Add(s.reorderBuffer.PopUtilTimeTick(msg.TimeTick()))
 		return
 	}

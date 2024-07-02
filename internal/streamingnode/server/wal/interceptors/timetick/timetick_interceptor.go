@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
 
 var _ interceptors.AppendInterceptor = (*timeTickAppendInterceptor)(nil)
@@ -65,31 +66,10 @@ func (impl *timeTickAppendInterceptor) executeSyncTimeTick(interval time.Duratio
 	logger.Info("start to sync time tick...")
 	defer logger.Info("sync time tick stopped")
 
-	// Send first timetick message to wal before interceptor is ready.
-	for count := 0; ; count++ {
-		// Sent first timetick message to wal before ready.
-		// New TT is always greater than all tt on previous streamingnode.
-		// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
-		// Otherwise, the TT principle may be violated.
-		// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
-		// !!! Send a timetick message into walimpls directly is safe.
-		select {
-		case <-impl.ctx.Done():
-			return
-		default:
-		}
-		if err := impl.sendTsMsg(impl.ctx, underlyingWALImpls.Append); err != nil {
-			log.Warn("send first timestamp message failed", zap.Error(err), zap.Int("retryCount", count))
-			// TODO: exponential backoff.
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		break
+	if err := impl.blockUntilSyncTimeTickReady(underlyingWALImpls); err != nil {
+		logger.Warn("sync first time tick failed", zap.Error(err))
+		return
 	}
-
-	// interceptor is ready now.
-	close(impl.ready)
-	logger.Info("start to sync time ready")
 
 	// interceptor is ready, wait for the final wal object is ready to use.
 	wal := param.WAL.Get()
@@ -109,6 +89,38 @@ func (impl *timeTickAppendInterceptor) executeSyncTimeTick(interval time.Duratio
 			}
 		}
 	}
+}
+
+// blockUntilSyncTimeTickReady blocks until the first time tick message is sent.
+func (impl *timeTickAppendInterceptor) blockUntilSyncTimeTickReady(underlyingWALImpls walimpls.WALImpls) error {
+	logger := log.With(zap.Any("channel", underlyingWALImpls.Channel()))
+	logger.Info("start to sync first time tick")
+	defer logger.Info("sync first time tick done")
+
+	// Send first timetick message to wal before interceptor is ready.
+	for count := 0; ; count++ {
+		// Sent first timetick message to wal before ready.
+		// New TT is always greater than all tt on previous streamingnode.
+		// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
+		// Otherwise, the TT principle may be violated.
+		// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
+		// !!! Send a timetick message into walimpls directly is safe.
+		select {
+		case <-impl.ctx.Done():
+			return impl.ctx.Err()
+		default:
+		}
+		if err := impl.sendTsMsg(impl.ctx, underlyingWALImpls.Append); err != nil {
+			logger.Warn("send first timestamp message failed", zap.Error(err), zap.Int("retryCount", count))
+			// TODO: exponential backoff.
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		break
+	}
+	// interceptor is ready now.
+	close(impl.ready)
+	return nil
 }
 
 // syncAcknowledgedDetails syncs the timestamp acknowledged details.
