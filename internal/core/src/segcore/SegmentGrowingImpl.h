@@ -299,12 +299,30 @@ class SegmentGrowingImpl : public SegmentGrowing {
             limit, bitset, false_filtered_out);
     }
 
+    bool
+    is_mmap_field(FieldId id) const override {
+        return false;
+    }
+
  protected:
     int64_t
     num_chunk() const override;
 
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::vector<std::string_view>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    BufferView
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const override {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "get_chunk_buffer interface not supported for growing segment");
+    }
 
     void
     check_search(const query::Plan* plan) const override {
