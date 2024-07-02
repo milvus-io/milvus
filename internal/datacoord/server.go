@@ -481,16 +481,9 @@ func (s *Server) initCluster() error {
 	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
 
 	var err error
-	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
-		if err != nil {
-			return err
-		}
-	} else {
-		s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker(), withBgChecker())
-		if err != nil {
-			return err
-		}
+	s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+	if err != nil {
+		return err
 	}
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil

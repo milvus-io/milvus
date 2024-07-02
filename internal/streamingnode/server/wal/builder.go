@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walimpls"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
 
 // OpenerBuilder is the interface for build wal opener.

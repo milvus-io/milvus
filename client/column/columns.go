@@ -305,7 +305,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		vector := make([][]byte, 0, end-begin) // shall not have remanunt
 		for i := begin; i < end; i++ {
-			v := make([]byte, dim)
+			v := make([]byte, dim*2)
 			copy(v, data[i*dim*2:(i+1)*dim*2])
 			vector = append(vector, v)
 		}

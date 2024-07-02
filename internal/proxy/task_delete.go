@@ -264,13 +264,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 
 	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
 	if err != nil {
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
 	}
 	dr.dbID = db.dbID
 
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get collection id", err)
+		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
 	}
 
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
@@ -316,11 +316,11 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 func (dr *deleteRunner) Run(ctx context.Context) error {
 	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr())
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err)
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
 	}
 
 	if planparserv2.IsAlwaysTruePlan(plan) {
-		return merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr())
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)

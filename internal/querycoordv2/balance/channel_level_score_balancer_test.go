@@ -73,6 +73,9 @@ func (suite *ChannelLevelScoreBalancerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.balancer = NewChannelLevelScoreBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
+
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TearDownTest() {
@@ -685,11 +688,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 	}
-	for i, c := range cases {
+	for _, c := range cases {
 		suite.Run(c.name, func() {
-			if i == 0 {
-				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
-			}
 			suite.SetupSuite()
 			defer suite.TearDownTest()
 			balancer := suite.balancer

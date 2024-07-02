@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -38,7 +39,7 @@ type ChannelChecker struct {
 	*checkerActivation
 	meta            *meta.Meta
 	dist            *meta.DistributionManager
-	targetMgr       *meta.TargetManager
+	targetMgr       meta.TargetManagerInterface
 	nodeMgr         *session.NodeManager
 	getBalancerFunc GetBalancerFunc
 }
@@ -46,7 +47,7 @@ type ChannelChecker struct {
 func NewChannelChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	getBalancerFunc GetBalancerFunc,
 ) *ChannelChecker {
@@ -70,7 +71,7 @@ func (c *ChannelChecker) Description() string {
 
 func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
-	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
