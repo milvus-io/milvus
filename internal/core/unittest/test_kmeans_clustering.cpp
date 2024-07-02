@@ -78,10 +78,35 @@ transforConfigToPB(const Config& config) {
     return analyze_info;
 }
 
+// when we skip clustering, nothing uploaded
+template <typename T>
+void
+CheckResultEmpty(const milvus::clustering::KmeansClusteringPtr& clusteringJob,
+                 const milvus::storage::ChunkManagerPtr cm,
+                 int64_t segment_id,
+                 int64_t segment_id2) {
+    std::string centroids_path_prefix =
+        clusteringJob->GetRemoteCentroidsObjectPrefix();
+    std::string centroid_path =
+        centroids_path_prefix + "/" + std::string(CENTROIDS_NAME);
+    ASSERT_FALSE(cm->Exist(centroid_path));
+    std::string offset_mapping_name = std::string(OFFSET_MAPPING_NAME);
+    std::string centroid_id_mapping_path =
+        clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id) +
+        "/" + offset_mapping_name;
+    milvus::proto::clustering::ClusteringCentroidIdMappingStats mapping_stats;
+    std::string centroid_id_mapping_path2 =
+        clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id2) +
+        "/" + offset_mapping_name;
+    ASSERT_FALSE(cm->Exist(centroid_id_mapping_path));
+    ASSERT_FALSE(cm->Exist(centroid_id_mapping_path2));
+}
+
 template <typename T>
 void
 CheckResultCorrectness(
     const milvus::clustering::KmeansClusteringPtr& clusteringJob,
+    const milvus::storage::ChunkManagerPtr cm,
     int64_t segment_id,
     int64_t segment_id2,
     int64_t dim,
@@ -137,6 +162,10 @@ CheckResultCorrectness(
             ASSERT_EQ(mapping_stats2.num_in_centroid(i), num_in_centroid[i]);
         }
     }
+    // remove files
+    cm->Remove(centroid_path);
+    cm->Remove(centroid_id_mapping_path);
+    cm->Remove(centroid_id_mapping_path2);
 }
 
 template <typename T, DataType dtype>
@@ -196,7 +225,7 @@ test_run() {
     Config config;
     config["max_cluster_ratio"] = 10.0;
     config["max_cluster_size"] = 5L * 1024 * 1024 * 1024;
-
+    auto clusteringJob = std::make_unique<clustering::KmeansClustering>(ctx);
     // no need to sample train data
     {
         config["min_cluster_ratio"] = 0.01;
@@ -205,10 +234,9 @@ test_run() {
         config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
-        auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering>(ctx);
         clusteringJob->Run<T>(transforConfigToPB(config));
         CheckResultCorrectness<T>(clusteringJob,
+                                  cm,
                                   segment_id,
                                   segment_id2,
                                   dim,
@@ -223,10 +251,9 @@ test_run() {
         config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
-        auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering>(ctx);
         clusteringJob->Run<T>(transforConfigToPB(config));
         CheckResultCorrectness<T>(clusteringJob,
+                                  cm,
                                   segment_id,
                                   segment_id2,
                                   dim,
@@ -244,11 +271,10 @@ test_run() {
                 config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
                 config["dim"] = dim;
                 config["num_rows"] = num_rows;
-                auto clusteringJob =
-                    std::make_unique<clustering::KmeansClustering>(ctx);
                 clusteringJob->Run<T>(transforConfigToPB(config));
             } catch (SegcoreError& e) {
                 ASSERT_EQ(e.get_error_code(), ErrorCode::ClusterSkip);
+                CheckResultEmpty<T>(clusteringJob, cm, segment_id, segment_id2);
                 throw e;
             },
             SegcoreError);
@@ -264,11 +290,10 @@ test_run() {
                 config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
                 config["dim"] = dim;
                 config["num_rows"] = num_rows;
-                auto clusteringJob =
-                    std::make_unique<clustering::KmeansClustering>(ctx);
                 clusteringJob->Run<T>(transforConfigToPB(config));
             } catch (SegcoreError& e) {
                 ASSERT_EQ(e.get_error_code(), ErrorCode::ClusterSkip);
+                CheckResultEmpty<T>(clusteringJob, cm, segment_id, segment_id2);
                 throw e;
             },
             SegcoreError);
@@ -282,11 +307,9 @@ test_run() {
         config["train_size"] = 1536L * 1024;  // 1.5MB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
-        auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering>(ctx);
-
         clusteringJob->Run<T>(transforConfigToPB(config));
         CheckResultCorrectness<T>(clusteringJob,
+                                  cm,
                                   segment_id,
                                   segment_id2,
                                   dim,
@@ -302,11 +325,9 @@ test_run() {
         config["train_size"] = 6L * 1024 * 1024;  // 6MB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
-        auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering>(ctx);
-
         clusteringJob->Run<T>(transforConfigToPB(config));
         CheckResultCorrectness<T>(clusteringJob,
+                                  cm,
                                   segment_id,
                                   segment_id2,
                                   dim,
