@@ -220,6 +220,10 @@ type ParseContext struct {
 	dataType          schemapb.DataType
 }
 
+func NewParseContext(keyField FieldID, dType schemapb.DataType) *ParseContext {
+	return &ParseContext{keyField, dType}
+}
+
 func ParseExpr(exprPb *planpb.Expr, parseCtx *ParseContext) Expr {
 	var res Expr
 	switch exp := exprPb.GetExpr().(type) {
