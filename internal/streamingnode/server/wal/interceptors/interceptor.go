@@ -1,17 +1,23 @@
-package walimpls
+package interceptors
 
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 type (
 	// Append is the common function to append a msg to the wal.
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
-	// Read is the common function to read a msg from the wal.
-	Read = func(ctx context.Context, opt ReadOption) (ScannerImpls, error)
 )
+
+type InterceptorBuildParam struct {
+	WALImpls walimpls.WALImpls         // The underlying walimpls implementation, can be used anytime.
+	WAL      *syncutil.Future[wal.WAL] // The wal final object, can be used after interceptor is ready.
+}
 
 // InterceptorBuilder is the interface to build a interceptor.
 // 1. InterceptorBuilder is concurrent safe.
@@ -19,7 +25,7 @@ type (
 type InterceptorBuilder interface {
 	// Build build a interceptor with wal that interceptor will work on.
 	// the wal object will be sent to the interceptor builder when the wal is constructed with all interceptors.
-	Build(wal <-chan WALImpls) BasicInterceptor
+	Build(param InterceptorBuildParam) BasicInterceptor
 }
 
 type BasicInterceptor interface {

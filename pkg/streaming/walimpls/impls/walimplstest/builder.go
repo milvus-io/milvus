@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	walName = "test"
+	WALName = "test"
 )
 
 func init() {
 	// register the builder to the registry.
 	registry.RegisterBuilder(&openerBuilder{})
-	message.RegisterMessageIDUnmsarshaler(walName, UnmarshalTestMessageID)
+	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalTestMessageID)
 }
 
 var _ walimpls.OpenerBuilderImpls = &openerBuilder{}
@@ -24,7 +24,7 @@ var _ walimpls.OpenerBuilderImpls = &openerBuilder{}
 type openerBuilder struct{}
 
 func (o *openerBuilder) Name() string {
-	return walName
+	return WALName
 }
 
 func (o *openerBuilder) Build() (walimpls.OpenerImpls, error) {
