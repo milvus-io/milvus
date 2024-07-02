@@ -6,23 +6,19 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
-func PruneByScalarField(expr *planpb.Expr, partStats []*storage.PartitionStatsSnapshot) {
-	/*switch exprType := expr.GetExpr().(type) {
-	case *planpb.Expr_BinaryExpr:
-		res, matchALL = ParseRangesFromBinaryExpr(expr.BinaryExpr, kType)
-	case *planpb.Expr_UnaryRangeExpr:
-		res, matchALL = ParseRangesFromUnaryRangeExpr(expr.UnaryRangeExpr, kType)
-	case *planpb.Expr_TermExpr:
-		res, matchALL = ParseRangesFromTermExpr(expr.TermExpr, kType)
-	case *planpb.Expr_UnaryExpr:
-		res, matchALL = nil, true
-	}*/
-}
-
 type Expr interface {
 	Inputs() []Expr
 	Eval(segmentStats []*storage.SegmentStats, bitset **bitset.BitSet)
 	Size() uint
+}
+
+func PruneByScalarField(expr Expr, segmentStats []*storage.SegmentStats, segmentIDs []UniqueID, filteredSegments map[UniqueID]struct{}) {
+	var bst **bitset.BitSet
+	expr.Eval(segmentStats, bst)
+	(*bst).FlipRange(0, (*bst).Len())
+	for i, e := (*bst).NextSet(0); e; i, e = (*bst).NextSet(i + 1) {
+		filteredSegments[segmentIDs[i]] = struct{}{}
+	}
 }
 
 type ExprImpl struct {
@@ -203,5 +199,45 @@ func (te *TermExpr) Eval(segmentStats []*storage.SegmentStats,
 }
 
 func (te *TermExpr) Inputs() []Expr {
+	return nil
+}
+
+func ParseExpr(exprPb *planpb.Expr, size uint) Expr {
+	var res Expr
+	switch exp := exprPb.GetExpr().(type) {
+	case *planpb.Expr_BinaryExpr:
+		res = ParseLogicalBinaryExpr(exp.BinaryExpr)
+	case *planpb.Expr_UnaryExpr:
+		res = ParseLogicalUnaryExpr(exp.UnaryExpr)
+	case *planpb.Expr_BinaryRangeExpr:
+		res = ParseBinaryRangeExpr(exp.BinaryRangeExpr)
+	case *planpb.Expr_UnaryRangeExpr:
+		res = ParseUnaryRangeExpr(exp.UnaryRangeExpr)
+	case *planpb.Expr_TermExpr:
+		res = ParseTermExpr(exp.TermExpr)
+	}
+	return res
+}
+
+func ParseLogicalBinaryExpr(exprPb *planpb.BinaryExpr) *LogicalBinaryExpr {
+	leftExpr := ParseExpr(exprPb.Left)
+	rightExpr := ParseExpr(exprPb.Right)
+	NewLogicalBinaryExpr()
+	return nil
+}
+
+func ParseLogicalUnaryExpr(exprPb *planpb.UnaryExpr) *LogicalUnaryExpr {
+	return nil
+}
+
+func ParseBinaryRangeExpr(exprPb *planpb.BinaryRangeExpr) *BinaryRangeExpr {
+	return nil
+}
+
+func ParseUnaryRangeExpr(exprPb *planpb.UnaryRangeExpr) *UnaryRangeExpr {
+	return nil
+}
+
+func ParseTermExpr(exprPb *planpb.TermExpr) *TermExpr {
 	return nil
 }
