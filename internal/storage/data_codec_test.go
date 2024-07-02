@@ -918,3 +918,51 @@ func TestDeleteData(t *testing.T) {
 		assert.EqualValues(t, dData.Size(), 72)
 	})
 }
+
+func TestAddFieldDataToPayload(t *testing.T) {
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	e, _ := w.NextInsertEventWriter()
+	var err error
+	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{[]int8{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{[]int16{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{[]int32{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{[]int64{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{[]float32{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{[]string{"test"}, schemapb.DataType_VarChar})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Array, &ArrayFieldData{
+		ElementType: schemapb.DataType_VarChar,
+		Data: []*schemapb.ScalarField{{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+			},
+		}},
+	})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{[]byte{}, 8})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_FloatVector, &FloatVectorFieldData{[]float32{}, 4})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float16Vector, &Float16VectorFieldData{[]byte{}, 4})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_BFloat16Vector, &BFloat16VectorFieldData{[]byte{}, 8})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_SparseFloatVector, &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim:      0,
+			Contents: [][]byte{},
+		},
+	})
+	assert.Error(t, err)
+}
