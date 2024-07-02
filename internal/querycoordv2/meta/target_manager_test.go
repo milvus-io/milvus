@@ -346,7 +346,7 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	t1 := time.Now().UnixNano()
-	target := NewCollectionTarget(nil, nil)
+	target := NewCollectionTarget(nil, nil, nil)
 	t2 := time.Now().UnixNano()
 
 	version := target.GetTargetVersion()
