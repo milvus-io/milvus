@@ -17,22 +17,31 @@ import (
 
 var hoo hook.Hook
 
+type restfulHandler func(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error)
+
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
-	hookutil.InitOnceHook()
-	hoo = hookutil.Hoo
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		return RestfulHookInterceptor()(ctx, req, getCurrentUser(ctx), info.FullMethod, handler)
+	}
+}
+
+func RestfulHookInterceptor() restfulHandler {
+	return func(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error) {
+		if hoo == nil {
+			hookutil.InitOnceHook()
+			hoo = hookutil.Hoo
+		}
 		var (
-			fullMethod = info.FullMethod
-			newCtx     context.Context
-			isMock     bool
-			mockResp   interface{}
-			realResp   interface{}
-			realErr    error
-			err        error
+			newCtx   context.Context
+			isMock   bool
+			mockResp interface{}
+			realResp interface{}
+			realErr  error
+			err      error
 		)
 
 		if isMock, mockResp, err = hoo.Mock(ctx, req, fullMethod); isMock {
-			log.Info("hook mock", zap.String("user", getCurrentUser(ctx)),
+			log.Info("hook mock", zap.String("user", userName),
 				zap.String("full method", fullMethod), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
 			updateProxyFunctionCallMetric(fullMethod)
@@ -40,7 +49,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
-			log.Warn("hook before error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
+			log.Warn("hook before error", zap.String("user", userName), zap.String("full method", fullMethod),
 				zap.Any("request", req), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 			updateProxyFunctionCallMetric(fullMethod)
@@ -48,7 +57,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 		}
 		realResp, realErr = handler(newCtx, req)
 		if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
-			log.Warn("hook after error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
+			log.Warn("hook after error", zap.String("user", userName), zap.String("full method", fullMethod),
 				zap.Any("request", req), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 			updateProxyFunctionCallMetric(fullMethod)
