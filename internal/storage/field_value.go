@@ -39,15 +39,15 @@ type ScalarFieldValue interface {
 	Size() int64
 }
 
-func MaxScalar(val1 *ScalarFieldValue, val2 *ScalarFieldValue) *ScalarFieldValue {
-	if (*val1).GE(*val2) {
+func MaxScalar(val1 ScalarFieldValue, val2 ScalarFieldValue) ScalarFieldValue {
+	if val1.GE(val2) {
 		return val1
 	}
 	return val2
 }
 
-func MinScalar(val1 *ScalarFieldValue, val2 *ScalarFieldValue) *ScalarFieldValue {
-	if (*val1).LE(*val2) {
+func MinScalar(val1 ScalarFieldValue, val2 ScalarFieldValue) ScalarFieldValue {
+	if (val1).LE(val2) {
 		return val1
 	}
 	return val2
