@@ -133,8 +133,10 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         // method must handle this case themselves and must not pass
         // VECTOR_SPARSE_FLOAT data_type.
         default: {
-            throw SegcoreError(DataTypeInvalid,
-                               fmt::format("invalid type is {}", data_type));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("failed to get data type size, invalid type {}",
+                            data_type));
         }
     }
 }

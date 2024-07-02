@@ -172,10 +172,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         default: {
-            throw SegcoreError(DataTypeInvalid,
-                               GetName() + "::FillFieldData" +
-                                   " not support data type " +
-                                   GetDataTypeName(data_type_));
+            PanicInfo(DataTypeInvalid,
+                      GetName() + "::FillFieldData" +
+                          " not support data type " +
+                          GetDataTypeName(data_type_));
         }
     }
 }
@@ -223,9 +223,9 @@ InitScalarFieldData(const DataType& type, int64_t cap_rows) {
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, cap_rows);
         default:
-            throw NotSupportedDataTypeException(
-                "InitScalarFieldData not support data type " +
-                GetDataTypeName(type));
+            PanicInfo(DataTypeInvalid,
+                      "InitScalarFieldData not support data type " +
+                          GetDataTypeName(type));
     }
 }
 
