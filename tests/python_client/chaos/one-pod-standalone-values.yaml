@@ -13,6 +13,13 @@ minio:
 pulsar:
   enabled: false
 standalone:
+  resources:
+    limits:
+      cpu: 8
+      memory: 32Gi
+    requests:
+      cpu: 4
+      memory: 8Gi  
   extraEnv:
   - name: ETCD_CONFIG_PATH
     value: /milvus/configs/advanced/etcd.yaml

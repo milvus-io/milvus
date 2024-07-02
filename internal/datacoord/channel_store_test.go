@@ -22,90 +22,14 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
-
-func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
-	channels := make([]RWChannel, 0, num)
-	for i := 0; i < num; i++ {
-		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channelMeta{Name: name, CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
-	}
-	return NewNodeChannelInfo(id, channels...)
-}
-
-func genChannelOperationsV1(from, to int64, num int) *ChannelOpSet {
-	channels := make([]RWChannel, 0, num)
-	for i := 0; i < num; i++ {
-		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channelMeta{Name: name, CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
-	}
-
-	ops := NewChannelOpSet(
-		NewAddOp(to, channels...),
-		NewDeleteOp(from, channels...),
-	)
-	return ops
-}
-
-func TestChannelStore_Update(t *testing.T) {
-	enableRPCK := paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.Key
-	paramtable.Get().Save(enableRPCK, "false")
-	defer paramtable.Get().Reset(enableRPCK)
-	txnKv := mocks.NewTxnKV(t)
-	txnKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
-		assert.False(t, len(saves)+len(removals) > 64, "too many operations")
-	}).Return(nil)
-
-	type fields struct {
-		store        kv.TxnKV
-		channelsInfo map[int64]*NodeChannelInfo
-	}
-	type args struct {
-		opSet *ChannelOpSet
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
-	}{
-		{
-			"test more than 128 operations",
-			fields{
-				txnKv,
-				map[int64]*NodeChannelInfo{
-					1: genNodeChannelInfos(1, 500),
-					2: NewNodeChannelInfo(2),
-				},
-			},
-			args{
-				genChannelOperationsV1(1, 2, 250),
-			},
-			false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := &ChannelStore{
-				store:        tt.fields.store,
-				channelsInfo: tt.fields.channelsInfo,
-			}
-			err := c.Update(tt.args.opSet)
-			assert.Equal(t, tt.wantErr, err != nil)
-		})
-	}
-}
 
 type ChannelStoreReloadSuite struct {
 	testutils.PromMetricsSuite

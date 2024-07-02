@@ -529,27 +529,17 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
+    FieldDataPtr field_data;
+    uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
-    FieldDataPtr field_data;
-    size_t total_written = 0;
     while (data.channel->pop(field_data)) {
-        auto written =
-            WriteFieldData(file, data_type, field_data, element_indices);
-
-        AssertInfo(written == field_data->Size(),
-                   fmt::format("failed to write data file {}, written {} but "
-                               "total {}, err: {}",
-                               filepath.c_str(),
-                               written,
-                               field_data->Size(),
-                               strerror(errno)));
-
-        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-            auto size = field_data->Size(i);
-            indices.emplace_back(total_written);
-            total_written += size;
-        }
+        WriteFieldData(file,
+                       data_type,
+                       field_data,
+                       total_written,
+                       indices,
+                       element_indices);
     }
 
     auto num_rows = data.row_count;
@@ -599,6 +589,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     {
         std::unique_lock lck(mutex_);
         fields_.emplace(field_id, column);
+        mmap_fields_.insert(field_id);
     }
 
     auto ok = unlink(filepath.c_str());
@@ -670,6 +661,29 @@ SegmentSealedImpl::size_per_chunk() const {
     return get_row_count();
 }
 
+BufferView
+SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
+                                    int64_t chunk_id,
+                                    int64_t start_offset,
+                                    int64_t length) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto& field_meta = schema_->operator[](field_id);
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->GetBatchBuffer(start_offset, length);
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "get_chunk_buffer only used for  variable column field");
+}
+
+bool
+SegmentSealedImpl::is_mmap_field(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    return mmap_fields_.find(field_id) != mmap_fields_.end();
+}
+
 SpanBase
 SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
@@ -684,6 +698,20 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
+}
+
+std::vector<std::string_view>
+SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto& field_meta = schema_->operator[](field_id);
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->StringViews();
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_view_impl only used for variable column field ");
 }
 
 const index::IndexBase*

@@ -3,16 +3,15 @@ package wal
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
 	// Channel returns the channel assignment info of the wal.
-	// Should be read-only.
-	Channel() *streamingpb.PChannelInfo
+	Channel() types.PChannelInfo
 
 	// Append writes a record to the log.
 	Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)

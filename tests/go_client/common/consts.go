@@ -46,7 +46,7 @@ const (
 
 // const default value from milvus config
 const (
-	MaxPartitionNum         = 4096
+	MaxPartitionNum         = 1024
 	DefaultDynamicFieldName = "$meta"
 	QueryCountFieldName     = "count(*)"
 	DefaultPartition        = "_default"

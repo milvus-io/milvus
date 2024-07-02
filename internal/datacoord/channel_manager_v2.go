@@ -384,20 +384,19 @@ func (m *ChannelManagerImplV2) FindWatcher(channel string) (UniqueID, error) {
 
 	infos := m.store.GetNodesChannels()
 	for _, info := range infos {
-		for _, channelInfo := range info.Channels {
-			if channelInfo.GetName() == channel {
-				return info.NodeID, nil
-			}
+		_, ok := info.Channels[channel]
+		if ok {
+			return info.NodeID, nil
 		}
 	}
 
 	// channel in buffer
 	bufferInfo := m.store.GetBufferChannelInfo()
-	for _, channelInfo := range bufferInfo.Channels {
-		if channelInfo.GetName() == channel {
-			return bufferID, errChannelInBuffer
-		}
+	_, ok := bufferInfo.Channels[channel]
+	if ok {
+		return bufferID, errChannelInBuffer
 	}
+
 	return 0, errChannelNotWatched
 }
 

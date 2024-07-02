@@ -498,7 +498,8 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -624,7 +625,8 @@ TEST(Sealed, ClearData) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -726,7 +728,8 @@ TEST(Sealed, LoadFieldDataMmap) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto chunk_span3 =
+        segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
