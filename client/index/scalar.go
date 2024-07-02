@@ -16,36 +16,41 @@
 
 package index
 
-import "strconv"
-
-const (
-	scannNlistKey       = `nlist`
-	scannWithRawDataKey = `with_raw_data`
-)
-
-type scannIndex struct {
-	baseIndex
-
-	nlist       int
-	withRawData bool
+type scalarIndex struct {
+	name      string
+	indexType IndexType
 }
 
-func (idx scannIndex) Params() map[string]string {
+func (idx scalarIndex) Name() string {
+	return idx.name
+}
+
+func (idx scalarIndex) IndexType() IndexType {
+	return idx.indexType
+}
+
+func (idx scalarIndex) Params() map[string]string {
 	return map[string]string{
-		MetricTypeKey:       string(idx.metricType),
-		IndexTypeKey:        string(SCANN),
-		scannNlistKey:       strconv.Itoa(idx.nlist),
-		scannWithRawDataKey: strconv.FormatBool(idx.withRawData),
+		IndexTypeKey: string(idx.indexType),
 	}
 }
 
-func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
-	return ivfFlatIndex{
-		baseIndex: baseIndex{
-			metricType: metricType,
-			indexType:  SCANN,
-		},
+var _ Index = scalarIndex{}
 
-		nlist: nlist,
+func NewTrieIndex() Index {
+	return scalarIndex{
+		indexType: Trie,
+	}
+}
+
+func NewInvertedIndex() Index {
+	return scalarIndex{
+		indexType: Inverted,
+	}
+}
+
+func NewSortedIndex() Index {
+	return scalarIndex{
+		indexType: Sorted,
 	}
 }
