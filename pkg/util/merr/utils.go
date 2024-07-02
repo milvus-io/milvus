@@ -437,8 +437,8 @@ func WrapErrCollectionNotLoaded(collection any, msg ...string) error {
 	return err
 }
 
-func WrapErrCollectionNumLimitExceeded(limit int, msg ...string) error {
-	err := wrapFields(ErrCollectionNumLimitExceeded, value("limit", limit))
+func WrapErrCollectionNumLimitExceeded(db string, limit int, msg ...string) error {
+	err := wrapFields(ErrCollectionNumLimitExceeded, value("dbName", db), value("limit", limit))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
