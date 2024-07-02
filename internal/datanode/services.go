@@ -559,7 +559,7 @@ func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCo
 		return merr.Status(err), nil
 	}
 
-	node.compactionExecutor.removeTask(req.GetPlanID())
+	node.compactionExecutor.RemoveTask(req.GetPlanID())
 	log.Ctx(ctx).Info("DropCompactionPlans success", zap.Int64("planID", req.GetPlanID()))
 	return merr.Success(), nil
 }
