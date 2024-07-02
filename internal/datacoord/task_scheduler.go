@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 const (
@@ -34,7 +35,7 @@ const (
 )
 
 type taskScheduler struct {
-	sync.RWMutex
+	lock.RWMutex
 
 	ctx    context.Context
 	cancel context.CancelFunc

@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -946,7 +946,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 				},
 			},
 			&indexMeta{
-				RWMutex: sync.RWMutex{},
+				RWMutex: lock.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
 			})
@@ -990,7 +990,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager := NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog, s.createAnalyzeMeta(catalog), &indexMeta{
-			RWMutex: sync.RWMutex{},
+			RWMutex: lock.RWMutex{},
 			ctx:     ctx,
 			catalog: catalog,
 		})
@@ -1229,7 +1229,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 				catalog: catalog,
 			},
 			&indexMeta{
-				RWMutex: sync.RWMutex{},
+				RWMutex: lock.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{

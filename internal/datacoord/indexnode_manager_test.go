@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -108,7 +108,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	t.Run("support", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
-			lock: sync.RWMutex{},
+			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Success(),
@@ -126,7 +126,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	t.Run("not support", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
-			lock: sync.RWMutex{},
+			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Success(),
@@ -144,7 +144,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	t.Run("no indexnode", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:         context.Background(),
-			lock:        sync.RWMutex{},
+			lock:        lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{},
 		}
 
@@ -155,7 +155,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
-			lock: sync.RWMutex{},
+			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(nil, err),
 			},
@@ -168,7 +168,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	t.Run("fail reason", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
-			lock: sync.RWMutex{},
+			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Status(err),

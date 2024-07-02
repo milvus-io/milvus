@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -182,7 +183,7 @@ func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) err
 func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 	nodeIDs := c.sessionManager.GetSessionIDs()
 	nodeSlots := make(map[int64]int64)
-	mu := &sync.Mutex{}
+	mu := &lock.Mutex{}
 	wg := &sync.WaitGroup{}
 	for _, nodeID := range nodeIDs {
 		wg.Add(1)

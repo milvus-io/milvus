@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -26,11 +25,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type compactionTaskMeta struct {
-	sync.RWMutex
+	lock.RWMutex
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 	// currently only clustering compaction task is stored in persist meta
@@ -39,7 +39,7 @@ type compactionTaskMeta struct {
 
 func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTaskMeta, error) {
 	csm := &compactionTaskMeta{
-		RWMutex:         sync.RWMutex{},
+		RWMutex:         lock.RWMutex{},
 		ctx:             ctx,
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),

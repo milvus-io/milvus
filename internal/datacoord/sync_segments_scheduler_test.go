@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type SyncSegmentsSchedulerSuite struct {
@@ -259,7 +259,7 @@ func (s *SyncSegmentsSchedulerSuite) initParams() {
 		},
 	}
 	s.m = &meta{
-		RWMutex: sync.RWMutex{},
+		RWMutex: lock.RWMutex{},
 		collections: map[UniqueID]*collectionInfo{
 			1: {
 				ID: 1,

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -45,7 +46,7 @@ type WorkerManager interface {
 type IndexNodeManager struct {
 	nodeClients      map[UniqueID]types.IndexNodeClient
 	stoppingNodes    map[UniqueID]struct{}
-	lock             sync.RWMutex
+	lock             lock.RWMutex
 	ctx              context.Context
 	indexNodeCreator indexNodeCreatorFunc
 }
@@ -55,7 +56,7 @@ func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) 
 	return &IndexNodeManager{
 		nodeClients:      make(map[UniqueID]types.IndexNodeClient),
 		stoppingNodes:    make(map[UniqueID]struct{}),
-		lock:             sync.RWMutex{},
+		lock:             lock.RWMutex{},
 		ctx:              ctx,
 		indexNodeCreator: indexNodeCreator,
 	}
@@ -114,7 +115,7 @@ func (nm *IndexNodeManager) PickClient() (UniqueID, types.IndexNodeClient) {
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
 		pickNodeID = UniqueID(0)
-		nodeMutex  = sync.Mutex{}
+		nodeMutex  = lock.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
 
@@ -170,7 +171,7 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
 		enableDisk = false
-		nodeMutex  = sync.Mutex{}
+		nodeMutex  = lock.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
 

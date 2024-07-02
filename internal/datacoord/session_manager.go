@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -78,7 +78,7 @@ var _ SessionManager = (*SessionManagerImpl)(nil)
 // SessionManagerImpl provides the grpc interfaces of cluster
 type SessionManagerImpl struct {
 	sessions struct {
-		sync.RWMutex
+		lock.RWMutex
 		data map[int64]*Session
 	}
 	sessionCreator dataNodeCreatorFunc
@@ -101,7 +101,7 @@ func defaultSessionCreator() dataNodeCreatorFunc {
 func NewSessionManagerImpl(options ...SessionOpt) *SessionManagerImpl {
 	m := &SessionManagerImpl{
 		sessions: struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[int64]*Session
 		}{data: make(map[int64]*Session)},
 		sessionCreator: defaultSessionCreator(),

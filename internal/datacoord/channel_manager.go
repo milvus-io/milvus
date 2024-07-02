@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -33,13 +32,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
 // ChannelManagerImpl manages the allocation and the balance between channels and data nodes.
 type ChannelManagerImpl struct {
 	ctx              context.Context
-	mu               sync.RWMutex
+	mu               lock.RWMutex
 	h                Handler
 	store            RWChannelStore
 	factory          ChannelPolicyFactory

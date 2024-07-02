@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -3111,7 +3112,7 @@ func Test_CheckHealth(t *testing.T) {
 
 		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: client,
