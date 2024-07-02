@@ -27,7 +27,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -156,7 +155,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 
 	result := &datapb.CompactionPlanResult{
 		PlanID:   t.plan.GetPlanID(),
-		State:    commonpb.CompactionState_Completed,
+		State:    datapb.CompactionTaskState_completed,
 		Segments: resultSegments,
 		Channel:  t.plan.GetChannel(),
 		Type:     t.plan.GetType(),

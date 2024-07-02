@@ -1061,6 +1061,18 @@ func WrapErrCompactionPlanConflict(msg ...string) error {
 	return err
 }
 
+func WrapErrCompactionResultNotFound(msg ...string) error {
+	err := error(ErrCompactionResultNotFound)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrClusteringCompactionGetCollectionFail(collectionID int64, err error) error {
+	return wrapFieldsWithDesc(ErrClusteringCompactionGetCollectionFail, err.Error(), value("collectionID", collectionID))
+}
+
 func WrapErrClusteringCompactionClusterNotSupport(msg ...string) error {
 	err := error(ErrClusteringCompactionClusterNotSupport)
 	if len(msg) > 0 {

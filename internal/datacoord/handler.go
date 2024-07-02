@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -103,113 +102,132 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
-	segmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
-	indexed := make(typeutil.UniqueSet)
-	for _, segment := range indexedSegments {
-		indexed.Insert(segment.GetID())
+	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
+	if len(validPartitions) <= 0 {
+		collInfo, err := h.s.handler.GetCollection(h.s.ctx, channel.GetCollectionID())
+		if err != nil || collInfo == nil {
+			log.Warn("collectionInfo is nil")
+			return nil
+		}
+		validPartitions = collInfo.Partitions
 	}
-	log.Info("GetQueryVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("indexed segment", len(indexedSegments)),
-	)
+	partStatsVersionsMap := make(map[int64]int64)
 	var (
 		indexedIDs   = make(typeutil.UniqueSet)
-		unIndexedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
 		growingIDs   = make(typeutil.UniqueSet)
 		levelZeroIDs = make(typeutil.UniqueSet)
 	)
 
-	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
-	partitionSet := typeutil.NewUniqueSet(validPartitions...)
-	for _, s := range segments {
-		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID) && s.GetPartitionID() != common.AllPartitionsID) ||
-			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
-			continue
+	for _, partitionID := range validPartitions {
+		segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+		currentPartitionStatsVersion := h.s.meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(channel.GetCollectionID(), partitionID, channel.GetName())
+
+		segmentInfos := make(map[int64]*SegmentInfo)
+		indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
+		indexed := make(typeutil.UniqueSet)
+		for _, segment := range indexedSegments {
+			indexed.Insert(segment.GetID())
 		}
-		if s.GetIsImporting() {
-			// Skip bulk insert segments.
-			continue
-		}
-		segmentInfos[s.GetID()] = s
-		switch {
-		case s.GetState() == commonpb.SegmentState_Dropped:
-			droppedIDs.Insert(s.GetID())
-		case !isFlushState(s.GetState()):
-			growingIDs.Insert(s.GetID())
-		case s.GetLevel() == datapb.SegmentLevel_L0:
-			levelZeroIDs.Insert(s.GetID())
-		case indexed.Contain(s.GetID()):
-			indexedIDs.Insert(s.GetID())
-		case s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(): // treat small flushed segment as indexed
-			indexedIDs.Insert(s.GetID())
-		default:
-			unIndexedIDs.Insert(s.GetID())
-		}
-	}
-	// ================================================
-	// Segments blood relationship:
-	//          a   b
-	//           \ /
-	//            c   d
-	//             \ /
-	//              e
-	//
-	// GC:        a, b
-	// Indexed:   c, d, e
-	//              ||
-	//              || (Index dropped and creating new index and not finished)
-	//              \/
-	// UnIndexed: c, d, e
-	//
-	// Retrieve unIndexed expected result:
-	// unIndexed: c, d
-	// ================================================
-	isValid := func(ids ...UniqueID) bool {
-		for _, id := range ids {
-			if seg, ok := segmentInfos[id]; !ok || seg == nil {
-				return false
+		log.Info("GetQueryVChanPositions",
+			zap.Int64("collectionID", channel.GetCollectionID()),
+			zap.String("channel", channel.GetName()),
+			zap.Int("numOfSegments", len(segments)),
+			zap.Int("indexed segment", len(indexedSegments)),
+		)
+		unIndexedIDs := make(typeutil.UniqueSet)
+
+		for _, s := range segments {
+			if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+				continue
+			}
+			if s.GetIsImporting() {
+				// Skip bulk insert segments.
+				continue
+			}
+			if s.GetLevel() == datapb.SegmentLevel_L2 && s.PartitionStatsVersion > currentPartitionStatsVersion {
+				// skip major compaction not fully completed.
+				continue
+			}
+			segmentInfos[s.GetID()] = s
+			switch {
+			case s.GetState() == commonpb.SegmentState_Dropped:
+				droppedIDs.Insert(s.GetID())
+			case !isFlushState(s.GetState()):
+				growingIDs.Insert(s.GetID())
+			case s.GetLevel() == datapb.SegmentLevel_L0:
+				levelZeroIDs.Insert(s.GetID())
+			case indexed.Contain(s.GetID()):
+				indexedIDs.Insert(s.GetID())
+			case s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(): // treat small flushed segment as indexed
+				indexedIDs.Insert(s.GetID())
+			default:
+				unIndexedIDs.Insert(s.GetID())
 			}
 		}
-		return true
-	}
-	retrieveUnIndexed := func() bool {
-		continueRetrieve := false
-		for id := range unIndexedIDs {
-			compactionFrom := segmentInfos[id].GetCompactionFrom()
-			if len(compactionFrom) > 0 && isValid(compactionFrom...) {
-				for _, fromID := range compactionFrom {
-					if indexed.Contain(fromID) {
-						indexedIDs.Insert(fromID)
-					} else {
-						unIndexedIDs.Insert(fromID)
-						continueRetrieve = true
-					}
+
+		// ================================================
+		// Segments blood relationship:
+		//          a   b
+		//           \ /
+		//            c   d
+		//             \ /
+		//              e
+		//
+		// GC:        a, b
+		// Indexed:   c, d, e
+		//              ||
+		//              || (Index dropped and creating new index and not finished)
+		//              \/
+		// UnIndexed: c, d, e
+		//
+		// Retrieve unIndexed expected result:
+		// unIndexed: c, d
+		// ================================================
+		isValid := func(ids ...UniqueID) bool {
+			for _, id := range ids {
+				if seg, ok := segmentInfos[id]; !ok || seg == nil {
+					return false
 				}
-				unIndexedIDs.Remove(id)
-				droppedIDs.Remove(compactionFrom...)
 			}
+			return true
 		}
-		return continueRetrieve
-	}
-	for retrieveUnIndexed() {
-	}
+		retrieveUnIndexed := func() bool {
+			continueRetrieve := false
+			for id := range unIndexedIDs {
+				compactionFrom := segmentInfos[id].GetCompactionFrom()
+				if len(compactionFrom) > 0 && isValid(compactionFrom...) {
+					for _, fromID := range compactionFrom {
+						if indexed.Contain(fromID) {
+							indexedIDs.Insert(fromID)
+						} else {
+							unIndexedIDs.Insert(fromID)
+							continueRetrieve = true
+						}
+					}
+					unIndexedIDs.Remove(id)
+					droppedIDs.Remove(compactionFrom...)
+				}
+			}
+			return continueRetrieve
+		}
+		for retrieveUnIndexed() {
+		}
 
-	// unindexed is flushed segments as well
-	indexedIDs.Insert(unIndexedIDs.Collect()...)
+		// unindexed is flushed segments as well
+		indexedIDs.Insert(unIndexedIDs.Collect()...)
 
+		partStatsVersionsMap[partitionID] = currentPartitionStatsVersion
+	}
 	return &datapb.VchannelInfo{
-		CollectionID:        channel.GetCollectionID(),
-		ChannelName:         channel.GetName(),
-		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
-		FlushedSegmentIds:   indexedIDs.Collect(),
-		UnflushedSegmentIds: growingIDs.Collect(),
-		DroppedSegmentIds:   droppedIDs.Collect(),
-		LevelZeroSegmentIds: levelZeroIDs.Collect(),
+		CollectionID:           channel.GetCollectionID(),
+		ChannelName:            channel.GetName(),
+		SeekPosition:           h.GetChannelSeekPosition(channel, partitionIDs...),
+		FlushedSegmentIds:      indexedIDs.Collect(),
+		UnflushedSegmentIds:    growingIDs.Collect(),
+		DroppedSegmentIds:      droppedIDs.Collect(),
+		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
+		PartitionStatsVersions: partStatsVersionsMap,
 	}
 }
 

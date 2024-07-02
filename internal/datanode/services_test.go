@@ -172,7 +172,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 1,
-			State:  commonpb.CompactionState_Completed,
+			State:  datapb.CompactionTaskState_completed,
 		}, nil)
 		s.node.compactionExecutor.Execute(mockC)
 
@@ -183,7 +183,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC2.EXPECT().Complete().Return()
 		mockC2.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 2,
-			State:  commonpb.CompactionState_Executing,
+			State:  datapb.CompactionTaskState_executing,
 		}, nil)
 		s.node.compactionExecutor.Execute(mockC2)
 
@@ -194,10 +194,10 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			doneCnt := 0
 			execCnt := 0
 			for _, res := range stat.GetResults() {
-				if res.GetState() == commonpb.CompactionState_Completed {
+				if res.GetState() == datapb.CompactionTaskState_completed {
 					doneCnt++
 				}
-				if res.GetState() == commonpb.CompactionState_Executing {
+				if res.GetState() == datapb.CompactionTaskState_executing {
 					execCnt++
 				}
 			}
@@ -248,6 +248,25 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+	})
+
+	s.Run("compact_clustering", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type: datapb.CompactionType_ClusteringCompaction,
+		}
+
+		_, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
 	})
 }
 

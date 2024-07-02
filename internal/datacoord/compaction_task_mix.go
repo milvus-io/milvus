@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -67,7 +66,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		return false
 	}
 	switch result.GetState() {
-	case commonpb.CompactionState_Executing:
+	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err == nil {
@@ -75,7 +74,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 		}
 		return false
-	case commonpb.CompactionState_Completed:
+	case datapb.CompactionTaskState_completed:
 		t.result = result
 		result := t.result
 		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
@@ -91,6 +90,12 @@ func (t *mixCompactionTask) processExecuting() bool {
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
 		if err == nil {
 			return t.processMetaSaved()
+		}
+		return false
+	case datapb.CompactionTaskState_failed:
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		if err != nil {
+			log.Warn("fail to updateAndSaveTaskMeta")
 		}
 		return false
 	}
