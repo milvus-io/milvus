@@ -389,7 +389,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		}
 	}
 
-	if err := checker.CheckValidDataType(field.GetDataType()); err != nil {
+	if err := checker.CheckValidDataType(field); err != nil {
 		log.Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}

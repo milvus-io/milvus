@@ -36,7 +36,7 @@ func (c baseChecker) CheckTrain(params map[string]string) error {
 }
 
 // CheckValidDataType check whether the field data type is supported for the index type
-func (c baseChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c baseChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
 	return nil
 }
 
