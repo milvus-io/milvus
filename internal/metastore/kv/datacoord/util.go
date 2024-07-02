@@ -328,3 +328,7 @@ func buildImportTaskKey(taskID int64) string {
 func buildPreImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", PreImportTaskPrefix, taskID)
 }
+
+func buildAnalyzeTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", AnalyzeTaskPrefix, taskID)
+}

@@ -693,7 +693,8 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)
@@ -1075,18 +1076,18 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID+1, nodeID)
+		err := m.UpdateVersion(buildID + 1)
 		assert.Error(t, err)
 	})
 }
@@ -1143,18 +1144,18 @@ func TestMeta_BuildIndex(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.BuildIndex(buildID)
+		err := m.BuildIndex(buildID, nodeID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.BuildIndex(buildID)
+		err := m.BuildIndex(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.BuildIndex(buildID + 1)
+		err := m.BuildIndex(buildID+1, nodeID)
 		assert.Error(t, err)
 	})
 }
@@ -1330,7 +1331,8 @@ func TestRemoveSegmentIndex(t *testing.T) {
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

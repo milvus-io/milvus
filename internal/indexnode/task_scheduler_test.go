@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -72,8 +72,8 @@ type fakeTask struct {
 	ctx           context.Context
 	state         fakeTaskState
 	reterr        map[fakeTaskState]error
-	retstate      commonpb.IndexState
-	expectedState commonpb.IndexState
+	retstate      indexpb.JobState
+	expectedState indexpb.JobState
 	failReason    string
 }
 
@@ -94,7 +94,7 @@ func (t *fakeTask) OnEnqueue(ctx context.Context) error {
 	return t.reterr[t.state]
 }
 
-func (t *fakeTask) Prepare(ctx context.Context) error {
+func (t *fakeTask) PreExecute(ctx context.Context) error {
 	t.state = fakeTaskPrepared
 	t.ctx.(*stagectx).setState(t.state)
 	return t.reterr[t.state]
@@ -106,13 +106,13 @@ func (t *fakeTask) LoadData(ctx context.Context) error {
 	return t.reterr[t.state]
 }
 
-func (t *fakeTask) BuildIndex(ctx context.Context) error {
+func (t *fakeTask) Execute(ctx context.Context) error {
 	t.state = fakeTaskBuiltIndex
 	t.ctx.(*stagectx).setState(t.state)
 	return t.reterr[t.state]
 }
 
-func (t *fakeTask) SaveIndexFiles(ctx context.Context) error {
+func (t *fakeTask) PostExecute(ctx context.Context) error {
 	t.state = fakeTaskSavedIndexes
 	t.ctx.(*stagectx).setState(t.state)
 	return t.reterr[t.state]
@@ -122,12 +122,12 @@ func (t *fakeTask) Reset() {
 	_taskwg.Done()
 }
 
-func (t *fakeTask) SetState(state commonpb.IndexState, failReason string) {
+func (t *fakeTask) SetState(state indexpb.JobState, failReason string) {
 	t.retstate = state
 	t.failReason = failReason
 }
 
-func (t *fakeTask) GetState() commonpb.IndexState {
+func (t *fakeTask) GetState() indexpb.JobState {
 	return t.retstate
 }
 
@@ -136,7 +136,7 @@ var (
 	id     = 0
 )
 
-func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expectedState commonpb.IndexState) task {
+func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expectedState indexpb.JobState) task {
 	idLock.Lock()
 	newID := id
 	id++
@@ -151,7 +151,7 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 			ch:           make(chan struct{}),
 		},
 		state:         fakeTaskInited,
-		retstate:      commonpb.IndexState_IndexStateNone,
+		retstate:      indexpb.JobState_JobStateNone,
 		expectedState: expectedState,
 	}
 }
@@ -165,14 +165,14 @@ func TestIndexTaskScheduler(t *testing.T) {
 	tasks := make([]task, 0)
 
 	tasks = append(tasks,
-		newTask(fakeTaskEnqueued, nil, commonpb.IndexState_Retry),
-		newTask(fakeTaskPrepared, nil, commonpb.IndexState_Retry),
-		newTask(fakeTaskBuiltIndex, nil, commonpb.IndexState_Retry),
-		newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished),
-		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, commonpb.IndexState_Retry))
+		newTask(fakeTaskEnqueued, nil, indexpb.JobState_JobStateRetry),
+		newTask(fakeTaskPrepared, nil, indexpb.JobState_JobStateRetry),
+		newTask(fakeTaskBuiltIndex, nil, indexpb.JobState_JobStateRetry),
+		newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished),
+		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, indexpb.JobState_JobStateRetry))
 
 	for _, task := range tasks {
-		assert.Nil(t, scheduler.IndexBuildQueue.Enqueue(task))
+		assert.Nil(t, scheduler.TaskQueue.Enqueue(task))
 	}
 	_taskwg.Wait()
 	scheduler.Close()
@@ -189,11 +189,11 @@ func TestIndexTaskScheduler(t *testing.T) {
 	scheduler = NewTaskScheduler(context.TODO())
 	tasks = make([]task, 0, 1024)
 	for i := 0; i < 1024; i++ {
-		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished))
-		assert.Nil(t, scheduler.IndexBuildQueue.Enqueue(tasks[len(tasks)-1]))
+		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished))
+		assert.Nil(t, scheduler.TaskQueue.Enqueue(tasks[len(tasks)-1]))
 	}
-	failTask := newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished)
-	err := scheduler.IndexBuildQueue.Enqueue(failTask)
+	failTask := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished)
+	err := scheduler.TaskQueue.Enqueue(failTask)
 	assert.Error(t, err)
 	failTask.Reset()
 
@@ -202,6 +202,6 @@ func TestIndexTaskScheduler(t *testing.T) {
 	scheduler.Close()
 	scheduler.wg.Wait()
 	for _, task := range tasks {
-		assert.Equal(t, task.GetState(), commonpb.IndexState_Finished)
+		assert.Equal(t, task.GetState(), indexpb.JobState_JobStateFinished)
 	}
 }

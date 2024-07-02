@@ -58,6 +58,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = NewNMockAllocator(s.T())

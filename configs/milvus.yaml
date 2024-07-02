@@ -455,6 +455,30 @@ dataCoord:
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
+    clustering:
+      enable: true
+      autoEnable: false
+      triggerInterval: 600
+      stateCheckInterval: 10
+      gcInterval: 600
+      minInterval: 3600
+      maxInterval: 259200
+      newDataRatioThreshold: 0.2
+      newDataSizeThreshold: 512m
+      timeout: 7200
+      dropTolerance: 86400
+      # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
+      # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
+      # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
+      preferSegmentSize: 512m       
+      maxSegmentSize: 1024m
+      maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
+      maxCentroidsNum: 10240
+      minCentroidsNum: 16
+      minClusterSizeRatio: 0.01
+      maxClusterSizeRatio: 10
+      maxClusterSize: 5g
+
     levelzero:
       forceTrigger:
         minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
@@ -542,6 +566,9 @@ dataNode:
   slot:
     slotCap: 2 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
 
+  clusteringCompaction:
+    memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.
+
 # Configures the system log output.
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
@@ -622,6 +649,8 @@ common:
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
+  usePartitionKeyAsClusteringKey: false
+  useVectorAsClusteringKey: false
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
