@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -48,7 +49,7 @@ func PruneSegments(ctx context.Context,
 		// no need to prune
 		return
 	}
-
+	tr := timerecord.NewTimeRecorder("PruneSegments")
 	var collectionID int64
 	var expr []byte
 	if searchReq != nil {
@@ -120,16 +121,23 @@ func PruneSegments(ctx context.Context,
 			item.Segments = newSegments
 			sealedSegments[idx] = item
 		}
+		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
 			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
-			Observe(float64(realFilteredSegments / totalSegNum))
+			Observe(float64(filterRatio))
 		log.Ctx(ctx).Debug("Pruned segment for search/query",
 			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_ratio", float32(realFilteredSegments)/float32(totalSegNum)),
+			zap.Float32("filtered_ratio", filterRatio),
 		)
 	}
+
+	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(fmt.Sprint(collectionID),
+		fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Ctx(ctx).Debug("Pruned segment for search/query",
+		zap.Duration("duration", tr.ElapseSpan()))
 }
 
 type segmentDisStruct struct {
