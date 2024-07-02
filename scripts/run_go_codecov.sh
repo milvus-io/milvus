@@ -42,6 +42,8 @@ for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/g
         rm profile.out
     fi
 done
+
+git config --global --add safe.directory '*'
 for d in $(go list ./cmd/tools/... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
     $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then
