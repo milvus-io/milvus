@@ -14,35 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+//go:build !test
 
-import (
-	"testing"
+package lock
 
-	"github.com/stretchr/testify/suite"
+import "sync"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/tests/integration"
-)
+// use `sync.Mutex` for production build
+type Mutex = sync.Mutex
 
-type CompactionSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *CompactionSuite) SetupSuite() {
-	s.MiniClusterSuite.SetupSuite()
-
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
-}
-
-func (s *CompactionSuite) TearDownSuite() {
-	s.MiniClusterSuite.TearDownSuite()
-
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
-}
-
-func TestCompaction(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33716")
-	suite.Run(t, new(CompactionSuite))
-}
+// use `sync.RWMutex` for production build
+type RWMutex = sync.RWMutex

@@ -45,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var maxEtcdTxnNum = 128
-
 var paginationSize = 2000
 
 type Catalog struct {
@@ -335,32 +333,10 @@ func (kc *Catalog) SaveByBatch(kvs map[string]string) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if len(kvs) <= maxEtcdTxnNum {
-		if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
-			log.Error("failed to save by batch", zap.Error(err))
-			return err
-		}
-	} else {
-		// Split kvs into multiple operations to avoid over-sized operations.
-		// Also make sure kvs of the same segment are not split into different operations.
-		batch := make(map[string]string)
-		for k, v := range kvs {
-			if len(batch) == maxEtcdTxnNum {
-				if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-					log.Error("failed to save by batch", zap.Error(err))
-					return err
-				}
-				maps.Clear(batch)
-			}
-			batch[k] = v
-		}
-
-		if len(batch) > 0 {
-			if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-				log.Error("failed to save by batch", zap.Error(err))
-				return err
-			}
-		}
+	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
+	if err != nil {
+		log.Error("failed to save by batch", zap.Error(err))
+		return err
 	}
 	return nil
 }
@@ -428,7 +404,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn); err != nil {
 		return err
 	}
 
@@ -814,4 +790,41 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 		return false
 	}
 	return len(keys) == 0 && len(values) == 0
+}
+
+func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
+	tasks := make([]*datapb.CompactionTask, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(CompactionTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		info := &datapb.CompactionTask{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, info)
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveCompactionTask(ctx context.Context, coll *datapb.CompactionTask) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.CompactionTask)
+	k, v, err := buildCompactionTaskKV(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	key := buildCompactionTaskPath(task)
+	return kc.MetaKv.Remove(key)
 }

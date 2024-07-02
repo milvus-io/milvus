@@ -2799,6 +2799,7 @@ type dataCoordConfig struct {
 	SegmentCompactableProportion      ParamItem `refreshable:"true"`
 	SegmentExpansionRate              ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
+	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -2871,8 +2872,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
-		Version:      "2.4.0",
-		DefaultValue: "2.4.0",
+		Version:      "2.4.1",
+		DefaultValue: "2.4.1",
 		Doc:          "Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels",
 		Export:       true,
 	}
@@ -3096,6 +3097,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "900",
 	}
 	p.CompactionTimeoutInSeconds.Init(base.mgr)
+
+	p.CompactionDropToleranceInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.dropTolerance",
+		Version:      "2.4.2",
+		Doc:          "If compaction job is finished for a long time, gc it",
+		DefaultValue: "86400",
+	}
+	p.CompactionDropToleranceInSeconds.Init(base.mgr)
 
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",

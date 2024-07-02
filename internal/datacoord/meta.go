@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -49,8 +49,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
+type CompactionMeta interface {
+	GetSegment(segID UniqueID) *SegmentInfo
+	SelectSegments(filters ...SegmentFilter) []*SegmentInfo
+	GetHealthySegment(segID UniqueID) *SegmentInfo
+	UpdateSegmentsInfo(operators ...UpdateOperator) error
+	SetSegmentCompacting(segmentID int64, compacting bool)
+	CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool)
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+	SaveCompactionTask(task *datapb.CompactionTask) error
+	DropCompactionTask(task *datapb.CompactionTask) error
+	GetCompactionTasks() map[int64][]*datapb.CompactionTask
+	GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
+}
+
+var _ CompactionMeta = (*meta)(nil)
+
 type meta struct {
-	sync.RWMutex
+	lock.RWMutex
 	ctx          context.Context
 	catalog      metastore.DataCoordCatalog
 	collections  map[UniqueID]*collectionInfo // collection id to collection info
@@ -58,11 +74,12 @@ type meta struct {
 	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta *indexMeta
+	indexMeta          *indexMeta
+	compactionTaskMeta *compactionTaskMeta
 }
 
 type channelCPs struct {
-	sync.RWMutex
+	lock.RWMutex
 	checkpoints map[string]*msgpb.MsgPosition
 }
 
@@ -98,14 +115,20 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return nil, err
 	}
 
+	ctm, err := newCompactionTaskMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
+
 	mt := &meta{
-		ctx:          ctx,
-		catalog:      catalog,
-		collections:  make(map[UniqueID]*collectionInfo),
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
-		indexMeta:    indexMeta,
-		chunkManager: chunkManager,
+		ctx:                ctx,
+		catalog:            catalog,
+		collections:        make(map[UniqueID]*collectionInfo),
+		segments:           NewSegmentsInfo(),
+		channelCPs:         newChannelCps(),
+		indexMeta:          indexMeta,
+		chunkManager:       chunkManager,
+		compactionTaskMeta: ctm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -160,6 +183,7 @@ func (m *meta) reloadFromKV() error {
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
 	}
+
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -233,6 +257,17 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	return collection
 }
 
+// GetCollections returns collections from local cache
+func (m *meta) GetCollections() []*collectionInfo {
+	m.RLock()
+	defer m.RUnlock()
+	collections := make([]*collectionInfo, 0)
+	for _, coll := range m.collections {
+		collections = append(collections, coll)
+	}
+	return collections
+}
+
 func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -264,6 +299,7 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 	defer m.RUnlock()
 	mDimEntry := make(map[string]*chanPartSegments)
 
+	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
 	for _, segmentInfo := range m.segments.segments {
 		if !selector(segmentInfo) {
 			continue
@@ -369,8 +405,6 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
 				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
-		} else {
-			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
 		}
 	}
 	return total
@@ -1174,6 +1208,37 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
+// CheckAndSetSegmentsCompacting check all segments are not compacting
+// if true, set them compacting and return true
+// if false, skip setting and
+func (m *meta) CheckAndSetSegmentsCompacting(segmentIDs []UniqueID) (exist, hasCompactingSegment bool) {
+	m.Lock()
+	defer m.Unlock()
+	for _, segmentID := range segmentIDs {
+		seg := m.segments.GetSegment(segmentID)
+		if seg != nil {
+			hasCompactingSegment = seg.isCompacting
+		} else {
+			return false, false
+		}
+	}
+	if hasCompactingSegment {
+		return true, false
+	}
+	for _, segmentID := range segmentIDs {
+		m.segments.SetIsCompacting(segmentID, true)
+	}
+	return true, true
+}
+
+func (m *meta) SetSegmentsCompacting(segmentIDs []UniqueID, compacting bool) {
+	m.Lock()
+	defer m.Unlock()
+	for _, segmentID := range segmentIDs {
+		m.segments.SetIsCompacting(segmentID, compacting)
+	}
+}
+
 func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -1248,7 +1313,7 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      plan.GetStartTime(),
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(plan.GetStartTime(), 0), 0),
 			Level:               datapb.SegmentLevel_L1,
 
 			StartPosition: getMinPosition(lo.Map(latestCompactFromSegments, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
@@ -1579,9 +1644,6 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
 	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
-	if targetState == commonpb.SegmentState_Dropped {
-		segToUpdate.DroppedAt = uint64(time.Now().UnixNano())
-	}
 }
 
 func (m *meta) ListCollections() []int64 {
@@ -1589,4 +1651,20 @@ func (m *meta) ListCollections() []int64 {
 	defer m.RUnlock()
 
 	return lo.Keys(m.collections)
+}
+
+func (m *meta) DropCompactionTask(task *datapb.CompactionTask) error {
+	return m.compactionTaskMeta.DropCompactionTask(task)
+}
+
+func (m *meta) SaveCompactionTask(task *datapb.CompactionTask) error {
+	return m.compactionTaskMeta.SaveCompactionTask(task)
+}
+
+func (m *meta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
+	return m.compactionTaskMeta.GetCompactionTasks()
+}
+
+func (m *meta) GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask {
+	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
 }

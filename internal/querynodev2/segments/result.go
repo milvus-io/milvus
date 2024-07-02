@@ -427,7 +427,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		loopEnd = int(param.limit)
 	}
 
-	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].Result.GetFieldsData()))
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	idTsMap := make(map[interface{}]int64)
 	cursors := make([]int64, len(validRetrieveResults))
 
@@ -556,6 +556,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		limit = int(param.limit)
 	}
 
+	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
 	idTsMap := make(map[any]int64)
 

@@ -14,35 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+//go:build test
+
+package lock
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/sasha-s/go-deadlock"
 )
 
-type CompactionSuite struct {
-	integration.MiniClusterSuite
-}
+// use `deadlock.Mutex` for test build
+type Mutex = deadlock.Mutex
 
-func (s *CompactionSuite) SetupSuite() {
-	s.MiniClusterSuite.SetupSuite()
-
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
-}
-
-func (s *CompactionSuite) TearDownSuite() {
-	s.MiniClusterSuite.TearDownSuite()
-
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
-}
-
-func TestCompaction(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33716")
-	suite.Run(t, new(CompactionSuite))
-}
+// use `deadlock.RWMutex` for test build
+type RWMutex = deadlock.RWMutex

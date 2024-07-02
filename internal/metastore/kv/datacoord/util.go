@@ -169,6 +169,9 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 			if binlog.GetLogID() == 0 {
 				return fmt.Errorf("invalid log id, binlog:%v", binlog)
 			}
+			if binlog.GetLogPath() != "" {
+				return fmt.Errorf("fieldBinlog no need to store logpath, binlog:%v", binlog)
+			}
 		}
 		return nil
 	}
@@ -243,6 +246,19 @@ func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
 	}
 	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	return key, segBytes, nil
+}
+
+func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) {
+	valueBytes, err := proto.Marshal(task)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal CompactionTask: %d/%d/%d, err: %w", task.TriggerID, task.PlanID, task.CollectionID, err)
+	}
+	key := buildCompactionTaskPath(task)
+	return key, string(valueBytes), nil
+}
+
+func buildCompactionTaskPath(task *datapb.CompactionTask) string {
+	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
