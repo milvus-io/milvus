@@ -53,15 +53,12 @@ func (s *BalanceTestSuit) SetupSuite() {
 
 	// disable compaction
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
-	// todo @wayblink repair this test
-	// paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSyncPartitionStats.Key, "false")
 
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
 func (s *BalanceTestSuit) TearDownSuite() {
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-	// defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.EnableSyncPartitionStats.Key)
 
 	s.MiniClusterSuite.TearDownSuite()
 }

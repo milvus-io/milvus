@@ -30,7 +30,7 @@ const (
 	CompactionTaskPrefix               = MetaPrefix + "/compaction-task"
 	AnalyzeTaskPrefix                  = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix           = MetaPrefix + "/partition-stats"
-	PartitionStatsCurrentVersionPrefix = MetaPrefix + "/partition-stats-current-version"
+	PartitionStatsCurrentVersionPrefix = MetaPrefix + "/current-partition-stats-version"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

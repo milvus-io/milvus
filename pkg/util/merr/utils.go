@@ -489,6 +489,16 @@ func WrapErrCollectionOnRecovering(collection any, msgAndArgs ...any) error {
 	return err
 }
 
+// WrapErrCollectionVectorClusteringKeyNotAllowed wraps ErrCollectionVectorClusteringKeyNotAllowed with collection
+func WrapErrCollectionVectorClusteringKeyNotAllowed(collection any, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionVectorClusteringKeyNotAllowed, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),

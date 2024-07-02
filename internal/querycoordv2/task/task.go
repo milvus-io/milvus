@@ -280,15 +280,8 @@ func (task *baseTask) SetReason(reason string) {
 
 func (task *baseTask) String() string {
 	var actionsStr string
-	for i, action := range task.actions {
-		if realAction, ok := action.(*SegmentAction); ok {
-			actionsStr += fmt.Sprintf(`{[type=%v][node=%d][streaming=%v]}`, action.Type(), action.Node(), realAction.Scope() == querypb.DataScope_Streaming)
-		} else {
-			actionsStr += fmt.Sprintf(`{[type=%v][node=%d]}`, action.Type(), action.Node())
-		}
-		if i != len(task.actions)-1 {
-			actionsStr += ", "
-		}
+	for _, action := range task.actions {
+		actionsStr += action.String() + ","
 	}
 	return fmt.Sprintf(
 		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [resourceGroup=%s] [priority=%s] [actionsCount=%d] [actions=%s]",

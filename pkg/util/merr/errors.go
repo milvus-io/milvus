@@ -46,13 +46,14 @@ var (
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
 
 	// Collection related
-	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
-	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
-	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
-	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
-	ErrCollectionLoaded           = newMilvusError("collection already loaded", 104, false)
-	ErrCollectionIllegalSchema    = newMilvusError("illegal collection schema", 105, false)
-	ErrCollectionOnRecovering     = newMilvusError("collection on recovering", 106, true)
+	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false)
+	ErrCollectionNotLoaded                     = newMilvusError("collection not loaded", 101, false)
+	ErrCollectionNumLimitExceeded              = newMilvusError("exceeded the limit number of collections", 102, false)
+	ErrCollectionNotFullyLoaded                = newMilvusError("collection not fully loaded", 103, true)
+	ErrCollectionLoaded                        = newMilvusError("collection already loaded", 104, false)
+	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
+	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
+	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)

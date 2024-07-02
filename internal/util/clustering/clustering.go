@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func CalcVectorDistance(dim int64, dataType schemapb.DataType, left []byte, right []float32, metric string) ([]float32, error) {
@@ -70,10 +71,16 @@ func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemap
 	// in some server mode, we regard partition key field or vector field as clustering key by default.
 	// here is the priority: clusteringKey > partitionKey > vector field(only single vector)
 	if clusteringKeyField != nil {
+		if typeutil.IsVectorType(clusteringKeyField.GetDataType()) &&
+			!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
+			return nil
+		}
 		return clusteringKeyField
 	} else if paramtable.Get().CommonCfg.UsePartitionKeyAsClusteringKey.GetAsBool() && partitionKeyField != nil {
 		return partitionKeyField
-	} else if paramtable.Get().CommonCfg.UseVectorAsClusteringKey.GetAsBool() && len(vectorFields) == 1 {
+	} else if paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() &&
+		paramtable.Get().CommonCfg.UseVectorAsClusteringKey.GetAsBool() &&
+		len(vectorFields) == 1 {
 		return vectorFields[0]
 	}
 	return nil

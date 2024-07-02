@@ -177,6 +177,8 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 
 func (t *clusteringCompactionTask) processPipelining() error {
 	log := log.With(zap.Int64("triggerID", t.TriggerID), zap.Int64("collectionID", t.GetCollectionID()), zap.Int64("planID", t.GetPlanID()))
+	ts := time.Now().UnixMilli()
+	t.updateAndSaveTaskMeta(setStartTime(ts))
 	var operators []UpdateOperator
 	for _, segID := range t.InputSegments {
 		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L2))

@@ -85,12 +85,12 @@ func PruneSegments(ctx context.Context,
 		plan := planpb.PlanNode{}
 		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
-			log.Error("failed to unmarshall serialized expr from bytes, failed the operation")
+			log.Ctx(ctx).Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return
 		}
 		expr, err := exprutil.ParseExprFromPlan(&plan)
 		if err != nil {
-			log.Error("failed to parse expr from plan, failed the operation")
+			log.Ctx(ctx).Error("failed to parse expr from plan, failed the operation")
 			return
 		}
 		targetRanges, matchALL := exprutil.ParseRanges(expr, exprutil.ClusteringKey)
@@ -123,7 +123,8 @@ func PruneSegments(ctx context.Context,
 		metrics.QueryNodeSegmentPruneRatio.
 			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
 			Observe(float64(realFilteredSegments / totalSegNum))
-		log.Debug("Pruned segment for search/query",
+		log.Ctx(ctx).Debug("Pruned segment for search/query",
+			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
 			zap.Float32("filtered_ratio", float32(realFilteredSegments)/float32(totalSegNum)),
