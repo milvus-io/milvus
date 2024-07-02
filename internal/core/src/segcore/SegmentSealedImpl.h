@@ -110,6 +110,10 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
 
+    // erase duplicate records when sealed segment loaded done
+    void
+    remove_duplicate_pk_record();
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -181,7 +185,13 @@ class SegmentSealedImpl : public SegmentSealed {
                    void* output) const override;
 
     void
-    check_search(const query::Plan* plan) const override;
+    check_search(const query::Plan* plan) override;
+
+    void
+    check_retrieve(const query::RetrievePlan* plan) override {
+        Assert(plan);
+        check_pk_index();
+    }
 
     int64_t
     get_active_count(Timestamp ts) const override;
@@ -290,6 +300,13 @@ class SegmentSealedImpl : public SegmentSealed {
     bool
     generate_interim_index(const FieldId field_id);
 
+    void
+    check_pk_index() {
+        if (!is_pk_index_valid_) {
+            remove_duplicate_pk_record();
+        }
+    }
+
  private:
     // mmap descriptor, used in chunk cache
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
@@ -332,6 +349,9 @@ class SegmentSealedImpl : public SegmentSealed {
     // for sparse vector unit test only! Once a type of sparse index that
     // doesn't has raw data is added, this should be removed.
     bool TEST_skip_index_for_retrieve_ = false;
+
+    // for pk index, when loaded done, need to compact to erase duplicate records
+    bool is_pk_index_valid_ = false;
 };
 
 inline SegmentSealedUPtr

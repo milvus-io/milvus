@@ -741,6 +741,19 @@ SegmentSealedImpl::get_schema() const {
 }
 
 void
+SegmentSealedImpl::remove_duplicate_pk_record() {
+    std::unique_lock lck(mutex_);
+    // remove pk index duplicate pks
+    if (!is_pk_index_valid_) {
+        Assert(!insert_record_.timestamps_.empty());
+        auto removed_pks = insert_record_.remove_duplicate_pks();
+        insert_record_.seal_pks();
+        is_pk_index_valid_ = true;
+        deleted_record_.push(removed_pks.first, removed_pks.second.data());
+    }
+}
+
+void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
@@ -1016,7 +1029,7 @@ SegmentSealedImpl::DropIndex(const FieldId field_id) {
 }
 
 void
-SegmentSealedImpl::check_search(const query::Plan* plan) const {
+SegmentSealedImpl::check_search(const query::Plan* plan) {
     AssertInfo(plan, "Search plan is null");
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
@@ -1046,6 +1059,8 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
             FieldNotLoaded,
             "User Field(" + field_meta.get_name().get() + ") is not loaded");
     }
+
+    check_pk_index();
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
