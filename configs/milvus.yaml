@@ -226,7 +226,8 @@ proxy:
     localPath: /tmp/milvus_access
     filename:  # Log filename, leave empty to use stdout.
     maxSize: 64 # Max size for a single file, in MB.
-    cacheSize: 10240 # Size of log of memory cache, in B
+    cacheSize: 0 # Size of log write cache, in B
+    cacheFlushInterval: 3 # time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)
     rotatedTime: 0 # Max time for single access log file in seconds
     remotePath: access_log/ # File path in minIO
     remoteMaxTime: 0 # Max time for log file in minIO, in hours

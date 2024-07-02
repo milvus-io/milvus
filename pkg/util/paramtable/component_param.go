@@ -1325,17 +1325,17 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.CacheSize = ParamItem{
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
-		DefaultValue: "10240",
-		Doc:          "Size of log of memory cache, in B. (Close write cache if szie was 0",
+		DefaultValue: "0",
+		Doc:          "Size of log of write cache, in B. (Close write cache if size was 0",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
 
 	p.AccessLog.CacheFlushInterval = ParamItem{
-		Key:          "proxy.accessLog.cacheSize",
+		Key:          "proxy.accessLog.cacheFlushInterval",
 		Version:      "2.4.0",
 		DefaultValue: "3",
-		Doc:          "time interval of auto flush memory cache, in Seconds. (Close auto flush if interval was 0)",
+		Doc:          "time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)",
 	}
 	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
