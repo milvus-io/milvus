@@ -3,8 +3,7 @@ package wal
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 // OpenerBuilder is the interface for build wal opener.
@@ -17,8 +16,7 @@ type OpenerBuilder interface {
 
 // OpenOption is the option for allocating wal instance.
 type OpenOption struct {
-	Channel             *streamingpb.PChannelInfo
-	InterceptorBuilders []walimpls.InterceptorBuilder // Interceptor builders to build when open.
+	Channel types.PChannelInfo
 }
 
 // Opener is the interface for build wal instance.

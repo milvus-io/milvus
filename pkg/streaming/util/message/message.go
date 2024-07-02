@@ -11,6 +11,11 @@ type BasicMessage interface {
 	// MessageType returns the type of message.
 	MessageType() MessageType
 
+	// Version returns the message version.
+	// 0: old version before streamingnode.
+	// from 1: new version after streamingnode.
+	Version() Version
+
 	// Message payload.
 	Payload() []byte
 
@@ -47,6 +52,11 @@ type ImmutableMessage interface {
 	// WALName returns the name of message related wal.
 	WALName() string
 
+	// VChannel returns the virtual channel of current message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	VChannel() string
+
 	// TimeTick returns the time tick of current message.
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
@@ -64,9 +74,4 @@ type ImmutableMessage interface {
 
 	// Properties returns the message read only properties.
 	Properties() RProperties
-
-	// Version returns the message format version.
-	// 0: old version before streamingnode.
-	// from 1: new version after streamingnode.
-	Version() Version
 }

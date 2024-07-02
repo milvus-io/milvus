@@ -82,16 +82,14 @@ func (_c *MockWALImpls_Append_Call) RunAndReturn(run func(context.Context, messa
 }
 
 // Channel provides a mock function with given fields:
-func (_m *MockWALImpls) Channel() *types.PChannelInfo {
+func (_m *MockWALImpls) Channel() types.PChannelInfo {
 	ret := _m.Called()
 
-	var r0 *types.PChannelInfo
-	if rf, ok := ret.Get(0).(func() *types.PChannelInfo); ok {
+	var r0 types.PChannelInfo
+	if rf, ok := ret.Get(0).(func() types.PChannelInfo); ok {
 		r0 = rf()
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.PChannelInfo)
-		}
+		r0 = ret.Get(0).(types.PChannelInfo)
 	}
 
 	return r0
@@ -114,12 +112,12 @@ func (_c *MockWALImpls_Channel_Call) Run(run func()) *MockWALImpls_Channel_Call 
 	return _c
 }
 
-func (_c *MockWALImpls_Channel_Call) Return(_a0 *types.PChannelInfo) *MockWALImpls_Channel_Call {
+func (_c *MockWALImpls_Channel_Call) Return(_a0 types.PChannelInfo) *MockWALImpls_Channel_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALImpls_Channel_Call) RunAndReturn(run func() *types.PChannelInfo) *MockWALImpls_Channel_Call {
+func (_c *MockWALImpls_Channel_Call) RunAndReturn(run func() types.PChannelInfo) *MockWALImpls_Channel_Call {
 	_c.Call.Return(run)
 	return _c
 }

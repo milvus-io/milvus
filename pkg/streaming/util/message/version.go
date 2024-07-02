@@ -23,3 +23,7 @@ func newMessageVersionFromString(s string) Version {
 func (v Version) String() string {
 	return strconv.FormatInt(int64(v), 10)
 }
+
+func (v Version) GT(v2 Version) bool {
+	return v > v2
+}
