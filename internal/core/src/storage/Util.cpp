@@ -819,9 +819,9 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
             return std::make_shared<FieldData<SparseFloatVector>>(
                 type, total_num_rows);
         default:
-            throw SegcoreError(DataTypeInvalid,
-                               "CreateFieldData not support data type " +
-                                   GetDataTypeName(type));
+            PanicInfo(DataTypeInvalid,
+                      "CreateFieldData not support data type " +
+                          GetDataTypeName(type));
     }
 }
 

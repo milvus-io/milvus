@@ -65,9 +65,10 @@ class VectorIndex : public IndexBase {
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const {
-        throw std::runtime_error("VectorIndex:" + this->GetIndexType() +
-                                 " didn't implement VectorIterator interface, "
-                                 "there must be sth wrong in the code");
+        PanicInfo(NotImplemented,
+                  "VectorIndex:" + this->GetIndexType() +
+                      " didn't implement VectorIterator interface, "
+                      "there must be sth wrong in the code");
     }
 
     virtual const bool

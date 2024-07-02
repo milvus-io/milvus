@@ -77,9 +77,9 @@ VectorMemIndex<T>::VectorMemIndex(
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -110,9 +110,9 @@ VectorMemIndex<T>::VectorMemIndex(
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
