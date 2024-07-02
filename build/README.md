@@ -85,11 +85,11 @@ Enter root path of Milvus project on your host machine, execute the following co
 $ ./scripts/devcontainer.sh up
 
 Creating network "milvus-dev" with the default driver
-Creating milvus_jaeger_1  ... done
-Creating milvus_minio_1   ... done
-Creating milvus_pulsar_1  ... done
-Creating milvus_etcd_1    ... done
-Creating milvus_builder_1 ... done
+Creating milvus-jaeger-1  ... done
+Creating milvus-minio-1   ... done
+Creating milvus-pulsar-1  ... done
+Creating milvus-etcd-1    ... done
+Creating milvus-builder-1 ... done
 ```
 
 Check running state of Dev Container:
@@ -99,18 +99,18 @@ $ docker-compose -f docker-compose-devcontainer.yml ps
 
       Name                    Command                  State                                      Ports
 ---------------------------------------------------------------------------------------------------------------------------------------
-milvus_builder_1   /tini -- autouseradd --use ...   Up
-milvus_etcd_1      etcd -advertise-client-url ...   Up             2379/tcp, 2380/tcp
-milvus_jaeger_1    /go/bin/all-in-one-linux         Up             14250/tcp, 14268/tcp, 16686/tcp, 5775/udp, 5778/tcp, 6831/udp,
+milvus-builder-1   /tini -- autouseradd --use ...   Up
+milvus-etcd-1      etcd -advertise-client-url ...   Up             2379/tcp, 2380/tcp
+milvus-jaeger-1    /go/bin/all-in-one-linux         Up             14250/tcp, 14268/tcp, 16686/tcp, 5775/udp, 5778/tcp, 6831/udp,
                                                                    6832/udp
-milvus_minio_1     /usr/bin/docker-entrypoint ...   Up (healthy)   9000/tcp
-milvus_pulsar_1    bin/pulsar standalone --no ...   Up
+milvus-minio-1     /usr/bin/docker-entrypoint ...   Up (healthy)   9000/tcp
+milvus-pulsar-1    bin/pulsar standalone --no ...   Up
 ```
 
-`milvus_builder_1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compilation and unit test inside the container, enter it:
+`milvus-builder-1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compilation and unit test inside the container, enter it:
 
 ```shell
-docker exec -ti milvus_builder_1 bash
+docker exec -ti milvus-builder-1 bash
 ```
 
 Compile the project and run unit test, see details at the [DEVELOPMENT.md](../DEVELOPMENT.md)
