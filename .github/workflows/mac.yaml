@@ -86,7 +86,7 @@ jobs:
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
-          make milvus
+          make milvus ENABLE_AZURE=false
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
         if: ${{ failure() }}
