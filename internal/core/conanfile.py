@@ -1,4 +1,4 @@
-from conans import ConanFile
+from conan import ConanFile
 
 
 class MilvusConan(ConanFile):
@@ -6,7 +6,7 @@ class MilvusConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     requires = (
         "rocksdb/6.29.5@milvus/dev",
-        "boost/1.82.0",
+        "boost/1.84.0",
         "onetbb/2021.9.0",
         "nlohmann_json/3.11.2",
         "zstd/1.5.4",
@@ -46,41 +46,39 @@ class MilvusConan(ConanFile):
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
-        "libevent:shared": True,
-        "double-conversion:shared": True,
-        "folly:shared": True,
-        "librdkafka:shared": True,
-        "librdkafka:zstd": True,
-        "librdkafka:ssl": True,
-        "librdkafka:sasl": True,
-        "rocksdb:shared": True,
-        "rocksdb:with_zstd": True,
-        "arrow:filesystem_layer": True,
-        "arrow:parquet": True,
-        "arrow:compute": True,
-        "arrow:with_re2": True,
-        "arrow:with_zstd": True,
-        "arrow:with_boost": True,
-        "arrow:with_thrift": True,
-        "arrow:with_jemalloc": True,
-        "arrow:shared": False,
-        "arrow:with_s3": True,
-        "aws-sdk-cpp:config": True,
-        "aws-sdk-cpp:text-to-speech": False,
-        "aws-sdk-cpp:transfer": False,
-        "gtest:build_gmock": False,
-        "boost:without_locale": False,
-        "glog:with_gflags": True,
-        "glog:shared": True,
-        "prometheus-cpp:with_pull": False,
-        "fmt:header_only": True,
-        "onetbb:tbbmalloc": False,
-        "onetbb:tbbproxy": False,
+        "libevent/*:shared": True,
+        "double-conversion/*:shared": True,
+        "folly/*:shared": True,
+        "librdkafka/*:shared": True,
+        "librdkafka/*:zstd": True,
+        "librdkafka/*:ssl": True,
+        "librdkafka/*:sasl": True,
+        "rocksdb/*:shared": True,
+        "rocksdb/*:with_zstd": True,
+        "arrow/*:filesystem_layer": True,
+        "arrow/*:parquet": True,
+        "arrow/*:compute": True,
+        "arrow/*:with_re2": True,
+        "arrow/*:with_zstd": True,
+        "arrow/*:with_boost": True,
+        "arrow/*:with_thrift": True,
+        "arrow/*:with_jemalloc": True,
+        "arrow/*:shared": False,
+        "arrow/*:with_s3": True,
+        "aws-sdk-cpp/*:config": True,
+        "aws-sdk-cpp/*:text-to-speech": False,
+        "aws-sdk-cpp/*:transfer": False,
+        "gtest/*:build_gmock": False,
+        "boost/*:without_locale": False,
+        "glog/*:with_gflags": True,
+        "glog/*:shared": True,
+        "prometheus-cpp/*:with_pull": False,
+        "fmt/*:header_only": True,
+        "onetbb/*:tbbmalloc": False,
+        "onetbb/*:tbbproxy": False,
     }
 
     def configure(self):
-        if self.settings.arch not in ("x86_64", "x86"):
-            del self.options["folly"].use_sse4_2
         if self.settings.os == "Macos":
             # By default abseil use static link but can not be compatible with macos X86
             self.options["abseil"].shared = True
