@@ -159,7 +159,7 @@ func Test_scaNNChecker_CheckValidDataType(t *testing.T) {
 
 	c := newScaNNChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		err := c.CheckValidDataType(test.dType, schemapb.DataType_None)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

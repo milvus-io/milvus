@@ -32,7 +32,7 @@ func (c hnswChecker) CheckTrain(params map[string]string) error {
 	return c.baseChecker.CheckTrain(params)
 }
 
-func (c hnswChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c hnswChecker) CheckValidDataType(dType schemapb.DataType, elemType schemapb.DataType) error {
 	if !typeutil.IsVectorType(dType) {
 		return fmt.Errorf("can't build hnsw in not vector type.")
 	}

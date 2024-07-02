@@ -32,7 +32,7 @@ func (c sparseFloatVectorBaseChecker) CheckTrain(params map[string]string) error
 	return nil
 }
 
-func (c sparseFloatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c sparseFloatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType, elemType schemapb.DataType) error {
 	if !typeutil.IsSparseFloatVectorType(dType) {
 		return fmt.Errorf("only sparse float vector is supported for the specified index tpye")
 	}
