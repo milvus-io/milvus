@@ -47,10 +47,9 @@ const (
 
 type clusteringCompactionTask struct {
 	*datapb.CompactionTask
-	plan                *datapb.CompactionPlan
-	result              *datapb.CompactionPlanResult
-	span                trace.Span
-	lastUpdateStateTime int64
+	plan   *datapb.CompactionPlan
+	result *datapb.CompactionPlanResult
+	span   trace.Span
 
 	meta             CompactionMeta
 	sessions         SessionManager
@@ -66,24 +65,22 @@ func (t *clusteringCompactionTask) Process() bool {
 		log.Warn("fail in process task", zap.Error(err))
 		if merr.IsRetryableErr(err) && t.RetryTimes < taskMaxRetryTimes {
 			// retry in next Process
-			t.RetryTimes = t.RetryTimes + 1
+			t.updateAndSaveTaskMeta(setRetryTimes(t.RetryTimes + 1))
 		} else {
 			log.Error("task fail with unretryable reason or meet max retry times", zap.Error(err))
-			t.State = datapb.CompactionTaskState_failed
-			t.FailReason = err.Error()
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		}
 	}
 	// task state update, refresh retry times count
 	currentState := t.State.String()
 	if currentState != lastState {
-		t.RetryTimes = 0
 		ts := time.Now().UnixMilli()
-		lastStateDuration := ts - t.lastUpdateStateTime
+		t.updateAndSaveTaskMeta(setRetryTimes(0), setLastStateStartTime(ts))
+		lastStateDuration := ts - t.GetLastStateStartTime()
 		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration))
-		t.lastUpdateStateTime = ts
 
 		if t.State == datapb.CompactionTaskState_completed {
 			t.updateAndSaveTaskMeta(setEndTime(ts))
