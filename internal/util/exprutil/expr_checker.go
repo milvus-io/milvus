@@ -509,3 +509,95 @@ func maxGenericValue(left *planpb.GenericValue, right *planpb.GenericValue) *pla
 	}
 	return right
 }
+
+func ValidatePartitionKeyIsolation(expr *planpb.Expr) error {
+	found_partition_key, err := validatePartitionKeyIsolationFromExpr(expr)
+	if err != nil {
+		return err
+	}
+	if !found_partition_key {
+		return errors.New("partition key not found in expr when validating parititon key isolation")
+	}
+	return nil
+}
+
+func validatePartitionKeyIsolationFromExpr(expr *planpb.Expr) (bool, error) {
+	switch expr := expr.GetExpr().(type) {
+	case *planpb.Expr_BinaryExpr:
+		return validatePartitionKeyIsolationFromBinaryExpr(expr.BinaryExpr)
+	case *planpb.Expr_UnaryExpr:
+		return validatePartitionKeyIsolationFromUnaryExpr(expr.UnaryExpr)
+	case *planpb.Expr_TermExpr:
+		return validatePartitionKeyIsolationFromTermExpr(expr.TermExpr)
+	case *planpb.Expr_UnaryRangeExpr:
+		return validatePartitionKeyIsolationFromRangeExpr(expr.UnaryRangeExpr)
+	}
+	return false, nil
+}
+
+func validatePartitionKeyIsolationFromBinaryExpr(expr *planpb.BinaryExpr) (bool, error) {
+	// return directly if has errors on either or both sides
+	leftRes, leftErr := validatePartitionKeyIsolationFromExpr(expr.Left)
+	if leftErr != nil {
+		return leftRes, leftErr
+	}
+	rightRes, rightErr := validatePartitionKeyIsolationFromExpr(expr.Right)
+	if rightErr != nil {
+		return rightRes, rightErr
+	}
+
+	// the following deals with no error on either side
+	if expr.Op == planpb.BinaryExpr_LogicalAnd {
+		// if one of them is partition key
+		// e.g. partition_key_field == 1 && other_field > 10
+		if leftRes || rightRes {
+			return true, nil
+		}
+		// if none of them is partition key
+		return false, nil
+	}
+
+	if expr.Op == planpb.BinaryExpr_LogicalOr {
+		// if either side has partition key, but OR them
+		// e.g. partition_key_field == 1 || other_field > 10
+		if leftRes || rightRes {
+			return true, errors.New("partition key isolation does not support OR")
+		}
+		// if none of them has partition key
+		return false, nil
+	}
+	return false, nil
+}
+
+func validatePartitionKeyIsolationFromUnaryExpr(expr *planpb.UnaryExpr) (bool, error) {
+	res, err := validatePartitionKeyIsolationFromExpr(expr.GetChild())
+	if err != nil {
+		return res, err
+	}
+	if expr.Op == planpb.UnaryExpr_Not {
+		if res {
+			return true, errors.New("partition key isolation does not support NOT")
+		}
+		return false, nil
+	}
+	return res, err
+}
+
+func validatePartitionKeyIsolationFromTermExpr(expr *planpb.TermExpr) (bool, error) {
+	if expr.GetColumnInfo().GetIsPartitionKey() {
+		// e.g. partition_key_field in [1, 2, 3]
+		return true, errors.New("partition key isolation does not support IN")
+	}
+	return false, nil
+}
+
+func validatePartitionKeyIsolationFromRangeExpr(expr *planpb.UnaryRangeExpr) (bool, error) {
+	if expr.GetColumnInfo().GetIsPartitionKey() {
+		if expr.GetOp() == planpb.OpType_Equal {
+			// e.g. partition_key_field == 1
+			return true, nil
+		}
+		return true, errors.Newf("partition key isolation does not support %s", expr.GetOp().String())
+	}
+	return false, nil
+}

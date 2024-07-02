@@ -286,6 +286,7 @@ message CreateJobRequest {
     repeated int64 data_ids = 23;
     repeated OptionalFieldInfo optional_scalar_fields = 24;
     schema.FieldSchema field = 25;
+    bool partition_key_isolation = 26;
 }
 
 message QueryJobsRequest {

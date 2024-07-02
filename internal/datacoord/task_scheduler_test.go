@@ -1591,11 +1591,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
-			fmt.Println("wait for read lock")
 			sche.RLock()
-			fmt.Println("after read lock")
 			taskNum := len(sche.tasks)
-			fmt.Println("taskNum: ", taskNum)
 			sche.RUnlock()
 
 			if taskNum == 0 {
@@ -1765,5 +1762,83 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		waitTaskDoneFunc(scheduler)
 		resetMetaFunc()
 	})
+	s.Run("enqueue partitionKeyIsolation is false when schema is not set", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			buildID: buildID,
+			nodeID:  nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler.enqueue(t)
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
 	scheduler.Stop()
+
+	handler_isolation := NewNMockHandler(s.T())
+	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:                  "coll",
+			Fields:                fieldsSchema,
+			EnableDynamicField:    false,
+			Properties:            nil,
+			PartitionKeyIsolation: true,
+		},
+	}, nil)
+
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
+	scheduler_isolation.Start()
+
+	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			buildID: buildID,
+			nodeID:  nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is true when MV enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, true)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			buildID: buildID,
+			nodeID:  nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+	scheduler_isolation.Stop()
 }

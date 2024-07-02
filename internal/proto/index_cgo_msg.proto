@@ -79,4 +79,5 @@ message BuildIndexInfo {
   int64 store_version = 17;
   string index_store_path = 18;
   repeated OptionalFieldInfo opt_fields = 19;
+  bool partition_key_isolation = 20;
 }
