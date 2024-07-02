@@ -1,0 +1,9 @@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: Milvus Futures
+Description: Futures modules for Milvus
+Version: @MILVUS_VERSION@
+
+Libs: -L${libdir} -lmilvus_futures
+Cflags: -I${includedir}

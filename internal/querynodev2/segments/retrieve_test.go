@@ -163,6 +163,10 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
+
+	resultByOffsets, err := suite.sealed.RetrieveByOffsets(context.Background(), plan, []int64{0, 1})
+	suite.NoError(err)
+	suite.Len(resultByOffsets.Offset, 0)
 }
 
 func (suite *RetrieveSuite) TestRetrieveGrowing() {
@@ -182,6 +186,10 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
+
+	resultByOffsets, err := suite.growing.RetrieveByOffsets(context.Background(), plan, []int64{0, 1})
+	suite.NoError(err)
+	suite.Len(resultByOffsets.Offset, 0)
 }
 
 func (suite *RetrieveSuite) TestRetrieveStreamSealed() {

@@ -10,6 +10,9 @@ run:
     - cmake_build
   skip-files:
     - partial_search_test.go
+  build-tags:
+    - dynamic
+    - test
 
 linters:
   disable-all: true

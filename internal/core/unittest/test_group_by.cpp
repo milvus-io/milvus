@@ -609,10 +609,10 @@ TEST(GroupBY, Reduce) {
     CSearchResult c_search_res_1;
     CSearchResult c_search_res_2;
     auto status =
-        Search({}, c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
+        CSearch(c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
     ASSERT_EQ(status.error_code, Success);
     status =
-        Search({}, c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
+        CSearch(c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
     ASSERT_EQ(status.error_code, Success);
     std::vector<CSearchResult> results;
     results.push_back(c_search_res_1);
