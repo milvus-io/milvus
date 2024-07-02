@@ -323,6 +323,10 @@ func (c *mockDataNodeClient) QuerySlot(ctx context.Context, req *datapb.QuerySlo
 	return &datapb.QuerySlotResponse{Status: merr.Success()}, nil
 }
 
+func (c *mockDataNodeClient) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil
