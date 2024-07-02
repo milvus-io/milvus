@@ -27,7 +27,7 @@ func (c binaryVectorBaseChecker) CheckTrain(params map[string]string) error {
 	return c.staticCheck(params)
 }
 
-func (c binaryVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c binaryVectorBaseChecker) CheckValidDataType(dType schemapb.DataType, elemType schemapb.DataType) error {
 	if dType != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("binary vector is only supported")
 	}
