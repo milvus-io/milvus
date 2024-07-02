@@ -55,6 +55,30 @@ struct VectorizedNeon {
     template <typename T, ArithOpType AOp, CompareOpType CmpOp>
     static constexpr inline auto op_arith_compare =
         neon::OpArithCompareImpl<T, AOp, CmpOp>::op_arith_compare;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and =
+        neon::ForwardOpsImpl<ElementT>::op_and;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_and_multiple =
+        neon::ForwardOpsImpl<ElementT>::op_and_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or =
+        neon::ForwardOpsImpl<ElementT>::op_or;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_or_multiple =
+        neon::ForwardOpsImpl<ElementT>::op_or_multiple;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_xor =
+        neon::ForwardOpsImpl<ElementT>::op_xor;
+
+    template <typename ElementT>
+    static constexpr inline auto forward_op_sub =
+        neon::ForwardOpsImpl<ElementT>::op_sub;
 };
 
 }  // namespace arm
