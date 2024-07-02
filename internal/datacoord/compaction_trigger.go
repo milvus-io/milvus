@@ -403,7 +403,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		plans := t.generatePlans(group.segments, signal, ct)
-		currentID, _, err := t.allocator.allocN(int64(len(plans)))
+		currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
 		if err != nil {
 			return err
 		}
@@ -419,6 +419,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			start := time.Now()
 			planID := currentID
 			currentID++
+			targetSegmentID := currentID
+			currentID++
 			pts, _ := tsoutil.ParseTS(ct.startTime)
 			task := &datapb.CompactionTask{
 				PlanID:           planID,
@@ -432,6 +434,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				PartitionID:      group.partitionID,
 				Channel:          group.channelName,
 				InputSegments:    segIDs,
+				ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
 				TotalRows:        totalRows,
 				Schema:           coll.Schema,
 			}
@@ -515,7 +518,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 
 	plans := t.generatePlans(segments, signal, ct)
-	currentID, _, err := t.allocator.allocN(int64(len(plans)))
+	currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
 	if err != nil {
 		log.Warn("fail to allocate id", zap.Error(err))
 		return
@@ -530,6 +533,8 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		start := time.Now()
 		planID := currentID
 		currentID++
+		targetSegmentID := currentID
+		currentID++
 		pts, _ := tsoutil.ParseTS(ct.startTime)
 		if err := t.compactionHandler.enqueueCompaction(&datapb.CompactionTask{
 			PlanID:           planID,
@@ -543,6 +548,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			PartitionID:      partitionID,
 			Channel:          channel,
 			InputSegments:    segmentIDS,
+			ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
 			TotalRows:        totalRows,
 			Schema:           coll.Schema,
 		}); err != nil {

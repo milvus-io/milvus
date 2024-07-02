@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -41,7 +40,6 @@ type ClusteringCompactionTaskSuite struct {
 	suite.Suite
 
 	mockBinlogIO *io.MockBinlogIO
-	mockAlloc    *allocator.MockAllocator
 
 	task *clusteringCompactionTask
 
@@ -54,9 +52,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 
 func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
 
-	s.task = NewClusteringCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil)
+	s.task = NewClusteringCompactionTask(context.Background(), s.mockBinlogIO, nil)
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
 

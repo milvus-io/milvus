@@ -24,7 +24,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -130,7 +130,7 @@ func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 	return deltaPaths, allPath, nil
 }
 
-func serializeWrite(ctx context.Context, allocator allocator.Allocator, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
+func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
 	defer span.End()
 
@@ -166,7 +166,7 @@ func serializeWrite(ctx context.Context, allocator allocator.Allocator, writer *
 	return
 }
 
-func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Allocator, writer *SegmentWriter, finalRowCount int64) (*datapb.FieldBinlog, error) {
+func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter, finalRowCount int64) (*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
 	sblob, err := writer.Finish(finalRowCount)
