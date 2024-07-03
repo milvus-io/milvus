@@ -1117,3 +1117,23 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
 }
+
+func WrapErrAnalyzeTaskNotFound(id int64) error {
+	return wrapFields(ErrAnalyzeTaskNotFound, value("analyzeId", id))
+}
+
+func WrapErrBuildCompactionRequestFail(err error) error {
+	return wrapFieldsWithDesc(ErrBuildCompactionRequestFail, err.Error())
+}
+
+func WrapErrGetCompactionPlanResultFail(err error) error {
+	return wrapFieldsWithDesc(ErrGetCompactionPlanResultFail, err.Error())
+}
+
+func WrapErrCompactionResult(msg ...string) error {
+	err := error(ErrCompactionResult)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
