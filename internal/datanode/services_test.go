@@ -1022,6 +1022,71 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.True(exist)
 		s.NotNil(info)
 	})
+
+	s.Run("dc growing/flushing dn dropped", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).Return(&dataSyncService{
+			metacache: cache,
+		}, true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				100: {
+					SegmentId: 100,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Growing,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+				101: {
+					SegmentId: 101,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushing,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.False(exist)
+		s.Nil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.False(exist)
+		s.Nil(info)
+	})
 }
 
 func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
