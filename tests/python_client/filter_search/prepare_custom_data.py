@@ -15,7 +15,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir="./"):
+def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir="."):
 
     connections.connect(
         host=host,
@@ -39,6 +39,17 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     logger.info(f"collection {collection_name} created: {collection.describe()}")
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
+    # create test data
+    t0 = time.time()
+    test_data_size = 1000
+    data = {
+        "id": [i for i in range(test_data_size)],
+        "emb": [[random.random() for _ in range(768)] for _ in range(test_data_size)]
+    }
+    df = pd.DataFrame(data)
+    logger.info(f"generate test data {test_data_size} cost time {time.time() - t0}")
+    df.to_parquet(f"{data_dir}/test.parquet")
+
     t0 = time.time()
     data = {
         "id": [i for i in range(data_size)],
@@ -120,6 +131,6 @@ if __name__ == "__main__":
     parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
     parser.add_argument("--insert_mode", type=str, default="insert")
-    parser.add_argument("--data_dir", type=str, default="./")
+    parser.add_argument("--data_dir", type=str, default=".")
     args = parser.parse_args()
     prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir)
