@@ -49,6 +49,66 @@ TEST(Growing, DeleteCount) {
     ASSERT_EQ(cnt, c);
 }
 
+TEST(Growing, RemoveDuplicatedRecords) {
+    {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+        int64_t c = 1000;
+        auto offset = 0;
+
+        auto dataset = DataGen(schema, c, 42, 0, 1, 10, true);
+        auto pks = dataset.get_col<int64_t>(pk);
+        segment->Insert(offset,
+                        c,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+
+        BitsetType bits(c);
+        std::map<int64_t, std::vector<int64_t>> different_pks;
+        for (int i = 0; i < pks.size(); i++) {
+            if (different_pks.find(pks[i]) != different_pks.end()) {
+                different_pks[pks[i]].push_back(i);
+            } else {
+                different_pks[pks[i]] = {i};
+            }
+        }
+
+        for (auto& [k, v] : different_pks) {
+            if (v.size() > 1) {
+                for (int i = 0; i < v.size() - 1; i++) {
+                    bits.set(v[i]);
+                }
+            }
+        }
+
+        BitsetType bitset(c);
+        std::cout << "start to search delete" << std::endl;
+        segment->mask_with_delete(bitset, c, 1003);
+
+        for (int i = 0; i < bitset.size(); i++) {
+            ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;
+        }
+
+        for (auto& [k, v] : different_pks) {
+            //std::cout << "k:" << k << "v:" << join(v, ",") << std::endl;
+            auto res = segment->SearchPk(k, Timestamp(1003));
+            ASSERT_EQ(res.size(), v.size());
+        }
+
+        segment->RemoveDuplicatePkRecords();
+
+        for (auto& [k, v] : different_pks) {
+            //std::cout << "k:" << k << "v:" << join(v, ",") << std::endl;
+            auto res = segment->SearchPk(k, Timestamp(1003));
+            ASSERT_EQ(res.size(), 1);
+        }
+    }
+}
+
 TEST(Growing, RealCount) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
