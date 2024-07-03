@@ -13,7 +13,7 @@
 
 # Update KNOWHERE_VERSION for the first occurrence
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION 0d4834f )
+set( KNOWHERE_VERSION 20caafd6 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
