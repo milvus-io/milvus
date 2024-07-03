@@ -11,7 +11,8 @@ import (
 
 var _ error = (*StreamingError)(nil)
 
-// StreamingError is the error type for log internal module.
+// StreamingError is the error type for streaming internal module.
+// Should be used at logic layer.
 type (
 	StreamingError streamingpb.StreamingError
 	StreamingCode  streamingpb.StreamingCode
@@ -89,25 +90,6 @@ func New(code streamingpb.StreamingCode, format string, args ...interface{}) *St
 	}
 }
 
-// getCause returns the cause of the StreamingError.
-func getCause(cause ...interface{}) string {
-	if len(cause) == 0 {
-		return ""
-	}
-	switch c := cause[0].(type) {
-	case string:
-		return c
-	case *string:
-		return *c
-	case fmt.Stringer:
-		return c.String()
-	case error:
-		return c.Error()
-	default:
-		return fmt.Sprintf("%+v", c)
-	}
-}
-
 // As implements StreamingError as error.
 func AsStreamingError(err error) *StreamingError {
 	if err == nil {
@@ -121,7 +103,7 @@ func AsStreamingError(err error) *StreamingError {
 	}
 
 	// If the error is StreamingStatus,
-	var st *StreamingStatus
+	var st *StreamingClientStatus
 	if errors.As(err, &st) {
 		e = st.TryIntoStreamingError()
 		if e != nil {

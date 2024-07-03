@@ -15,6 +15,7 @@ func NewClientStreamWrapper(method string, stream grpc.ClientStream) grpc.Client
 	}
 }
 
+// clientStreamWrapper wraps a grpc.ClientStream and converts errors to Status.
 type clientStreamWrapper struct {
 	method string
 	grpc.ClientStream

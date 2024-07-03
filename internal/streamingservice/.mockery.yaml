@@ -16,3 +16,6 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
+  google.golang.org/grpc:
+    interfaces:
+      ClientStream:
