@@ -25,6 +25,10 @@ auto-compaction-mode: revision
 auto-compaction-retention: '1000'
 EOF
 
+    cat << EOF > user.yaml
+# Extra config to override default milvus.yaml
+EOF
+
     sudo docker run -d \
         --name milvus-standalone \
         --security-opt seccomp:unconfined \
@@ -34,6 +38,7 @@ EOF
         -e COMMON_STORAGETYPE=local \
         -v $(pwd)/volumes/milvus:/var/lib/milvus \
         -v $(pwd)/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml \
+        -v $(pwd)/user.yaml:/milvus/configs/user.yaml \
         -p 19530:19530 \
         -p 9091:9091 \
         -p 2379:2379 \
@@ -54,6 +59,7 @@ wait_for_milvus_running() {
         if [ $res -eq 1 ]
         then
             echo "Start successfully."
+            echo "To change the default Milvus configuration, add your settings to the user.yaml file and then restart the service."
             break
         fi
         sleep 1
@@ -112,11 +118,16 @@ delete() {
     fi
     sudo rm -rf $(pwd)/volumes
     sudo rm -rf $(pwd)/embedEtcd.yaml
+    sudo rm -rf $(pwd)/user.yaml
     echo "Delete successfully."
 }
 
 
 case $1 in
+    restart)
+        stop
+        start
+        ;;
     start)
         start
         ;;
@@ -127,6 +138,6 @@ case $1 in
         delete
         ;;
     *)
-        echo "please use bash standalone_embed.sh start|stop|delete"
+        echo "please use bash standalone_embed.sh restart|start|stop|delete"
         ;;
 esac
