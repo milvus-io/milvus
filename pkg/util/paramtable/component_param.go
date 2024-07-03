@@ -461,7 +461,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
-		Version:      "2.5.0",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 	}
 	p.EnableMaterializedView.Init(base.mgr)
