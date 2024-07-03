@@ -217,20 +217,18 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	}
 
 	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
-		// when replica number or resource groups is not set, use database level config
+		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to get data base level load info", zap.Error(err))
-		}
+			log.Warn("failed to get pre-defined load info", zap.Error(err))
+		} else {
+			if req.GetReplicaNumber() <= 0 && replicas > 0 {
+				req.ReplicaNumber = int32(replicas)
+			}
 
-		if req.GetReplicaNumber() <= 0 {
-			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
-			req.ReplicaNumber = int32(replicas)
-		}
-
-		if len(req.GetResourceGroups()) == 0 {
-			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
-			req.ResourceGroups = rgs
+			if len(req.GetResourceGroups()) == 0 && len(rgs) > 0 {
+				req.ResourceGroups = rgs
+			}
 		}
 	}
 
