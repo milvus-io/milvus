@@ -14,7 +14,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition_key="scalar_3"):
+def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition_key="scalar_3", data_dir="/root/dataset/laion_with_scalar_medium_10m"):
 
     connections.connect(
         host=host,
@@ -39,7 +39,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
 
-    batch_files = glob.glob("/root/dataset/laion_with_scalar_medium_10m/train*.parquet")
+    batch_files = glob.glob(f"{data_dir}/train*.parquet")
     logger.info(f"files {batch_files}")
     # copy file to minio
     client = Minio(
@@ -91,5 +91,6 @@ if __name__ == "__main__":
     parser.add_argument("--minio_host", type=str, default="10.104.18.174")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
+    parser.add_argument("--data_dir", type=str, default="/root/dataset/laion_with_scalar_medium_10m")
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, partition_key=args.partition_key)
+    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, partition_key=args.partition_key, data_dir=args.data_dir)

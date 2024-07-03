@@ -121,5 +121,6 @@ if __name__ == "__main__":
     parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
     parser.add_argument("--insert_mode", type=str, default="insert")
+    parser.add_argument("--data_dir", type=str, default="./")
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode)
+    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir)

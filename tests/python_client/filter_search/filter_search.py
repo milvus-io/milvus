@@ -17,7 +17,7 @@ def _(parser):
     parser.add_argument("--filter_field", type=str, env_var="LOCUST_FILTER", default="", help="filter field")
     parser.add_argument("--filter_op", type=str, env_var="LOCUST_FILTER", default="==", help="filter op")
     parser.add_argument("--filter_value", type=str, env_var="LOCUST_FILTER", default="0", help="filter value")
-    parser.add_argument("--data_dir", type=str, env_var="DATA_DIR", default="", help="data dir")
+    parser.add_argument("--data_dir", type=str, env_var="DATA_DIR", default="/root/dataset/laion_with_scalar_medium_10m", help="data dir")
 
 
 @events.test_start.add_listener
