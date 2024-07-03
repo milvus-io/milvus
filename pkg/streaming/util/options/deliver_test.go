@@ -3,8 +3,9 @@ package options
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 )
 
 func TestDeliver(t *testing.T) {
