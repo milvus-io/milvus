@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -221,7 +222,7 @@ func (ob *CollectionObserver) observeTimeout() {
 
 func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 	metaExist := (ob.meta.GetCollection(collectionID) != nil)
-	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -332,7 +333,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadPercentage == 100 {
-		if !ob.targetObserver.Check(ctx, partition.GetCollectionID()) {
+		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
 			log.Warn("failed to manual check current target, skip update load status")
 			return
 		}

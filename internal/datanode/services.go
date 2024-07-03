@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -313,7 +312,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		allSegments[segID] = struct{}{}
 	}
 
-	missingSegments := ds.metacache.DetectMissingSegments(allSegments)
+	missingSegments := ds.GetMetaCache().DetectMissingSegments(allSegments)
 
 	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
 	futures := make([]*conc.Future[any], 0, len(missingSegments))
@@ -330,7 +329,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 				log.Warn("failed to DecompressBinLog", zap.Error(err))
 				return val, err
 			}
-			pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+			pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return val, err
@@ -350,7 +349,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return future.Value().(*metacache.BloomFilterSet)
 	})
 
-	ds.metacache.UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
+	ds.GetMetaCache().UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
 }
 

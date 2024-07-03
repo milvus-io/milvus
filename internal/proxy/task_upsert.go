@@ -187,14 +187,14 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
 			zap.Error(err))
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
 	if err != nil {
 		log.Warn("insert set fieldID to fieldData failed when upsert",
 			zap.Error(err))
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 
 	if it.partitionKeyMode {

@@ -12,8 +12,9 @@ import (
 )
 
 func TestMessage(t *testing.T) {
-	b := message.NewBuilder()
-	mutableMessage := b.WithMessageType(message.MessageTypeTimeTick).
+	b := message.NewMutableMessageBuilder()
+	mutableMessage := b.
+		WithMessageType(message.MessageTypeTimeTick).
 		WithPayload([]byte("payload")).
 		WithProperties(map[string]string{"key": "value"}).
 		BuildMutable()
@@ -49,17 +50,15 @@ func TestMessage(t *testing.T) {
 		panic(fmt.Sprintf("unexpected data: %s", data))
 	})
 
-	b = message.NewBuilder()
-	immutableMessage := b.WithMessageID(msgID).
-		WithPayload([]byte("payload")).
-		WithProperties(map[string]string{
+	immutableMessage := message.NewImmutableMesasge(msgID,
+		[]byte("payload"),
+		map[string]string{
 			"key": "value",
 			"_t":  "1",
 			"_tt": string(proto.EncodeVarint(456)),
 			"_v":  "1",
 			"_lc": "lcMsgID",
-		}).
-		BuildImmutable()
+		})
 
 	assert.True(t, immutableMessage.MessageID().EQ(msgID))
 	assert.Equal(t, "payload", string(immutableMessage.Payload()))
@@ -73,12 +72,13 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, uint64(456), immutableMessage.TimeTick())
 	assert.NotNil(t, immutableMessage.LastConfirmedMessageID())
 
-	b = message.NewBuilder()
-	immutableMessage = b.WithMessageID(msgID).
-		WithPayload([]byte("payload")).
-		WithProperty("key", "value").
-		WithProperty("_t", "1").
-		BuildImmutable()
+	immutableMessage = message.NewImmutableMesasge(
+		msgID,
+		[]byte("payload"),
+		map[string]string{
+			"key": "value",
+			"_t":  "1",
+		})
 
 	assert.True(t, immutableMessage.MessageID().EQ(msgID))
 	assert.Equal(t, "payload", string(immutableMessage.Payload()))
@@ -97,9 +97,6 @@ func TestMessage(t *testing.T) {
 	})
 
 	assert.Panics(t, func() {
-		message.NewBuilder().WithMessageID(msgID).BuildMutable()
-	})
-	assert.Panics(t, func() {
-		message.NewBuilder().BuildImmutable()
+		message.NewMutableMessageBuilder().BuildMutable()
 	})
 }

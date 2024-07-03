@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <any>
 #include <string>
 #include <memory>
 #include <vector>
@@ -46,8 +47,6 @@ struct DescriptorEventDataFixPart {
     int64_t partition_id;
     int64_t segment_id;
     int64_t field_id;
-    //(todo:smellthemoon) set nullable false temporarily, will change it
-    bool nullable = false;
     Timestamp start_timestamp;
     Timestamp end_timestamp;
     milvus::proto::schema::DataType data_type;
@@ -63,7 +62,7 @@ struct DescriptorEventData {
     DescriptorEventDataFixPart fix_part;
     int32_t extra_length;
     std::vector<uint8_t> extra_bytes;
-    std::unordered_map<std::string, std::string> extras;
+    std::unordered_map<std::string, std::any> extras;
     std::vector<uint8_t> post_header_lengths;
 
     DescriptorEventData() = default;

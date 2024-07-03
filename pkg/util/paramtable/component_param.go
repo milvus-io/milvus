@@ -461,7 +461,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
-		Version:      "2.5.0",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 	}
 	p.EnableMaterializedView.Init(base.mgr)
@@ -2833,7 +2833,6 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
-	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
@@ -2947,15 +2946,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
-
-	p.EnableBalanceChannelWithRPC = ParamItem{
-		Key:          "dataCoord.channel.balanceWithRpc",
-		Version:      "2.4.0",
-		DefaultValue: "true",
-		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
-		Export:       true,
-	}
-	p.EnableBalanceChannelWithRPC.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
@@ -3244,10 +3234,10 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.ChannelCheckpointMaxLag.Init(base.mgr)
 
 	p.SyncSegmentsInterval = ParamItem{
-		Key:          "dataCoord.sync.interval",
-		Version:      "2.4.3",
+		Key:          "dataCoord.syncSegmentsInterval",
+		Version:      "2.4.6",
 		Doc:          "The time interval for regularly syncing segments",
-		DefaultValue: "600", // 10 * 60 seconds
+		DefaultValue: "300", // 5 * 60 seconds
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
 
@@ -4071,8 +4061,8 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap.Init(base.mgr)
 
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
-		Key:          "datanode.clusteringCompaction.memoryBufferRatio",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
+		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
@@ -4081,8 +4071,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio.Init(base.mgr)
 
 	p.ClusteringCompactionWorkerPoolSize = ParamItem{
-		Key:          "datanode.clusteringCompaction.cpu",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.workPoolSize",
+		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,
@@ -4091,7 +4081,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyBatchSize",
+		Key:          "dataNode.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",

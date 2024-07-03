@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "common/FieldMeta.h"
@@ -51,6 +52,8 @@ namespace milvus {
 */
 constexpr size_t STRING_PADDING = 1;
 constexpr size_t ARRAY_PADDING = 1;
+
+constexpr size_t BLOCK_SIZE = 8192;
 
 class ColumnBase {
  public:
@@ -222,6 +225,19 @@ class ColumnBase {
 
     virtual SpanBase
     Span() const = 0;
+
+    // used for sequential access for search
+    virtual BufferView
+    GetBatchBuffer(int64_t start_offset, int64_t length) {
+        PanicInfo(ErrorCode::Unsupported,
+                  "GetBatchBuffer only supported for VariableColumn");
+    }
+
+    virtual std::vector<std::string_view>
+    StringViews() const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "StringViews only supported for VariableColumn");
+    }
 
     virtual void
     AppendBatch(const FieldDataPtr data) {
@@ -557,40 +573,94 @@ class VariableColumn : public ColumnBase {
     }
 
     VariableColumn(VariableColumn&& column) noexcept
-        : ColumnBase(std::move(column)),
-          indices_(std::move(column.indices_)),
-          views_(std::move(column.views_)) {
+        : ColumnBase(std::move(column)), indices_(std::move(column.indices_)) {
     }
 
     ~VariableColumn() override = default;
 
     SpanBase
     Span() const override {
-        return SpanBase(views_.data(), views_.size(), sizeof(ViewType));
+        PanicInfo(ErrorCode::NotImplemented,
+                  "span() interface is not implemented for variable column");
     }
 
-    [[nodiscard]] const std::vector<ViewType>&
+    std::vector<std::string_view>
+    StringViews() const override {
+        std::vector<std::string_view> res;
+        char* pos = data_;
+        for (size_t i = 0; i < num_rows_; ++i) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t);
+            res.emplace_back(std::string_view(pos, size));
+            pos += size;
+        }
+        return res;
+    }
+
+    [[nodiscard]] std::vector<ViewType>
     Views() const {
-        return views_;
+        std::vector<ViewType> res;
+        char* pos = data_;
+        for (size_t i = 0; i < num_rows_; ++i) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t);
+            res.emplace_back(ViewType(pos, size));
+            pos += size;
+        }
+        return res;
+    }
+
+    BufferView
+    GetBatchBuffer(int64_t start_offset, int64_t length) override {
+        if (start_offset < 0 || start_offset > num_rows_ ||
+            start_offset + length > num_rows_) {
+            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        }
+
+        char* pos = data_ + indices_[start_offset / BLOCK_SIZE];
+        for (size_t j = 0; j < start_offset % BLOCK_SIZE; j++) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t) + size;
+        }
+
+        return BufferView{pos, size_ - (pos - data_)};
     }
 
     ViewType
     operator[](const int i) const {
-        return views_[i];
+        if (i < 0 || i > num_rows_) {
+            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        }
+        size_t batch_id = i / BLOCK_SIZE;
+        size_t offset = i % BLOCK_SIZE;
+
+        // located in batch start location
+        char* pos = data_ + indices_[batch_id];
+        for (size_t j = 0; j < offset; j++) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t) + size;
+        }
+
+        uint32_t size;
+        size = *reinterpret_cast<uint32_t*>(pos);
+        return ViewType(pos + sizeof(uint32_t), size);
     }
 
     std::string_view
     RawAt(const int i) const {
-        return std::string_view(views_[i]);
+        return std::string_view((*this)[i]);
     }
 
     void
     Append(FieldDataPtr chunk) {
         for (auto i = 0; i < chunk->get_num_rows(); i++) {
-            auto data = static_cast<const T*>(chunk->RawValue(i));
-
             indices_.emplace_back(size_);
-            size_ += data->size();
+            auto data = static_cast<const T*>(chunk->RawValue(i));
+            size_ += sizeof(uint32_t) + data->size();
         }
         load_buf_.emplace(std::move(chunk));
     }
@@ -613,40 +683,42 @@ class VariableColumn : public ColumnBase {
                 auto chunk = std::move(load_buf_.front());
                 load_buf_.pop();
 
+                // data_ as: |size|data|size|data......
                 for (auto i = 0; i < chunk->get_num_rows(); i++) {
+                    auto current_size = (uint32_t)chunk->Size(i);
+                    std::memcpy(data_ + size_, &current_size, sizeof(uint32_t));
+                    size_ += sizeof(uint32_t);
                     auto data = static_cast<const T*>(chunk->RawValue(i));
-                    std::copy_n(data->c_str(), data->size(), data_ + size_);
+                    std::memcpy(data_ + size_, data->c_str(), data->size());
                     size_ += data->size();
                 }
             }
         }
 
-        ConstructViews();
-
-        // Not need indices_ after
-        indices_.clear();
-        std::vector<uint64_t>().swap(indices_);
+        shrink_indice();
     }
 
  protected:
     void
-    ConstructViews() {
-        views_.reserve(indices_.size());
-        for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i],
-                                indices_[i + 1] - indices_[i]);
+    shrink_indice() {
+        std::vector<uint64_t> tmp_indices;
+        tmp_indices.reserve((indices_.size() + BLOCK_SIZE - 1) / BLOCK_SIZE);
+
+        for (size_t i = 0; i < indices_.size();) {
+            tmp_indices.push_back(indices_[i]);
+            i += BLOCK_SIZE;
         }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
+
+        indices_.swap(tmp_indices);
     }
 
  private:
     // loading states
     std::queue<FieldDataPtr> load_buf_{};
 
+    // raw data index, record indices located 0, interval, 2 * interval, 3 * interval
+    // ... just like page index, interval set to 8192 that matches search engine's batch size
     std::vector<uint64_t> indices_{};
-
-    // Compatible with current Span type
-    std::vector<ViewType> views_{};
 };
 
 class ArrayColumn : public ColumnBase {

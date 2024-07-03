@@ -32,6 +32,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -284,7 +285,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 }
 
 func (s *TargetObserverCheckSuite) TestCheck() {
-	r := s.observer.Check(context.Background(), s.collectionID)
+	r := s.observer.Check(context.Background(), s.collectionID, common.AllPartitionsID)
 	s.False(r)
 	s.True(s.observer.dispatcher.tasks.Contain(s.collectionID))
 }
