@@ -315,7 +315,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		newSeg := req.GetSegmentInfos()[segID]
 		switch newSeg.GetLevel() {
 		case datapb.SegmentLevel_L0:
-			log.Warn("segment level is legacy, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
+			log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
 		case datapb.SegmentLevel_Legacy:
 			log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
 		default:
