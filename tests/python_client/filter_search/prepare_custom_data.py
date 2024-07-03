@@ -6,7 +6,6 @@ from pymilvus import (
     Collection, BulkInsertState, utility
 )
 import pandas as pd
-import dask.dataframe as dd
 
 import time
 import argparse
