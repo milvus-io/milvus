@@ -75,13 +75,7 @@ func (nodeCtxManager *nodeCtxManager) Start() {
 	// in dmInputNode, message from mq to channel, alloc goroutines
 	// limit the goroutines in other node to prevent huge goroutines numbers
 	nodeCtxManager.closeWg.Add(1)
-	go nodeCtxManager.workNodeStart()
-}
-
-func (nodeCtxManager *nodeCtxManager) workNodeStart() {
-	defer nodeCtxManager.closeWg.Done()
-	inputNode := nodeCtxManager.inputNodeCtx
-	curNode := inputNode
+	curNode := nodeCtxManager.inputNodeCtx
 	// tt checker start
 	if enableTtChecker {
 		manager := timerecord.GetCheckerManger("fgNode", nodeCtxTtInterval, func(list []string) {
@@ -93,7 +87,11 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 			curNode = curNode.downstream
 		}
 	}
+	go nodeCtxManager.workNodeStart()
+}
 
+func (nodeCtxManager *nodeCtxManager) workNodeStart() {
+	defer nodeCtxManager.closeWg.Done()
 	for {
 		select {
 		case <-nodeCtxManager.closeCh:
@@ -103,7 +101,8 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 		// 2. invoke node.Operate
 		// 3. deliver the Operate result to downstream nodes
 		default:
-			curNode = inputNode
+			inputNode := nodeCtxManager.inputNodeCtx
+			curNode := inputNode
 			for curNode != nil {
 				// inputs from inputsMessages for Operate
 				var input, output []Msg
