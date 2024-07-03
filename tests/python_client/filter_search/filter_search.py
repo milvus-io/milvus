@@ -32,12 +32,14 @@ def _(environment, **kw):
 class MilvusUser(HttpUser):
     host = "http://10.104.13.233:19530"
     df = None
+    data_dir = ""
     recall_list = []
     ts_list = []
     recall = 0
 
     @classmethod
     def initialize(cls, data_dir, filter_field, filter_op, filter_value):
+        cls.data_dir = data_dir
         if cls.df is None:
             test_data_file_name = f"{data_dir}/test.parquet"
             cls.df = pd.read_parquet(test_data_file_name)
@@ -60,9 +62,9 @@ class MilvusUser(HttpUser):
         ascii_codes = [str(ord(char)) for char in expr]
         expr_ascii = "".join(ascii_codes)
         if filter_field:
-            ground_truth_file_name = f"/root/dataset/laion_with_scalar_medium_10m/neighbors-{expr_ascii}.parquet"
+            ground_truth_file_name = f"{self.data_dir}/neighbors-{expr_ascii}.parquet"
         else:
-            ground_truth_file_name = f"/root/dataset/laion_with_scalar_medium_10m/neighbors.parquet"
+            ground_truth_file_name = f"{self.data_dir}/neighbors.parquet"
         df_neighbors = pd.read_parquet(ground_truth_file_name)
         self.gt = df_neighbors["neighbors_id"].tolist()
 

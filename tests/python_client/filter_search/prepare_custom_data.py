@@ -11,7 +11,7 @@ import time
 import argparse
 from loguru import logger
 import faker
-
+import glob
 fake = faker.Faker()
 
 
@@ -51,21 +51,29 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     df.to_parquet(f"{data_dir}/test.parquet")
 
     t0 = time.time()
-    data = {
-        "id": [i for i in range(data_size)],
-        "scalar_3": [str(i%3) for i in range(data_size)],
-        "scalar_6": [str(i%6) for i in range(data_size)],
-        "scalar_9": [str(i%9) for i in range(data_size)],
-        "scalar_12": [str(i%12) for i in range(data_size)],
-        "scalar_5_linear": [str(i%5) for i in range(data_size)],
-        "emb": [[random.random() for _ in range(768)] for _ in range(data_size)]
-    }
-    logger.info(f"generate data {data_size} cost time {time.time() - t0}")
-    df = pd.DataFrame(data)
-    logger.info(f"data frame \n{df.head()}")
+    batch_size = 1000000
+    epoch = data_size // batch_size
+    remainder = data_size % batch_size
+    for i in range(epoch+1):
+        if i == epoch:
+            if remainder == 0:
+                break
+            batch_size = remainder
+        data = {
+            "id": [i for i in range((i-1)*batch_size, i*batch_size)],
+            "scalar_3": [str(i%3) for i in range((i-1)*batch_size, i*batch_size)],
+            "scalar_6": [str(i%6) for i in range((i-1)*batch_size, i*batch_size)],
+            "scalar_9": [str(i%9) for i in range((i-1)*batch_size, i*batch_size)],
+            "scalar_12": [str(i%12) for i in range((i-1)*batch_size, i*batch_size)],
+            "scalar_5_linear": [str(i%5) for i in range((i-1)*batch_size, i*batch_size)],
+            "emb": [[random.random() for _ in range(768)] for _ in range(batch_size)]
+        }
+        df = pd.DataFrame(data)
+        df.to_parquet(f"{data_dir}/train_{i}.parquet")
 
-    df.to_parquet(f"{data_dir}/train.parquet")
-    batch_files = [f"{data_dir}/train.parquet"]
+
+    logger.info(f"generate data {data_size} cost time {time.time() - t0}")
+    batch_files = glob.glob(f"{data_dir}/train*.parquet")
     logger.info(f"files {batch_files}")
     if insert_mode == "import":
         # copy file to minio
