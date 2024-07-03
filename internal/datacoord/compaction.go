@@ -535,9 +535,6 @@ func (c *compactionPlanHandler) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
-	if c.isFull() {
-		return errCompactionBusy
-	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		return err
