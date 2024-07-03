@@ -68,6 +68,8 @@ class MilvusUser(HttpUser):
         df_neighbors = pd.read_parquet(ground_truth_file_name)
         self.gt = df_neighbors["neighbors_id"].tolist()
 
+
+
     @task
     def search(self):
         filter =f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} '{self.environment.parsed_options.filter_value}'"
@@ -91,6 +93,8 @@ class MilvusUser(HttpUser):
             else:
                 # compute recall
                 result_ids = [item["id"] for item in resp.json()["data"]]
+                print(f"result_ids: {result_ids}")
+                print(f"true_ids: {self.gt[random_id]}")
                 true_ids = [item for item in self.gt[random_id]]
                 tmp = set(true_ids).intersection(set(result_ids))
                 self.recall = len(tmp) / len(result_ids)
