@@ -93,8 +93,8 @@ class MilvusUser(HttpUser):
             else:
                 # compute recall
                 result_ids = [item["id"] for item in resp.json()["data"]]
-                print(f"result_ids: {result_ids}")
-                print(f"true_ids: {self.gt[random_id]}")
+                # print(f"result_ids: {result_ids}")
+                # print(f"true_ids: {self.gt[random_id]}")
                 true_ids = [item for item in self.gt[random_id]]
                 tmp = set(true_ids).intersection(set(result_ids))
                 self.recall = len(tmp) / len(result_ids)
