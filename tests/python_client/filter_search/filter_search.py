@@ -1,6 +1,4 @@
 from locust import HttpUser, task, events, LoadTestShape
-from locust.runners import STATE_STOPPING, STATE_STOPPED, STATE_CLEANUP
-import threading
 
 import random
 import pandas as pd
