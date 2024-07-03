@@ -159,12 +159,27 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     ParsePksFromFieldData(
         pks, insert_record_proto->fields_data(field_id_to_offset[field_id]));
     for (int i = 0; i < num_rows; ++i) {
-        insert_record_.insert_pk(pks[i], reserved_offset + i);
+        auto exist_pk = insert_record_.insert_with_check_existence(
+            pks[i], reserved_offset + i);
+        // if pk exist duplicate record, remove last pk under current insert timestamp
+        // means last pk is invisibale for current insert timestamp
+        if (exist_pk) {
+            auto remove_timestamp = timestamps_raw[i];
+            deleted_record_.push({pks[i]}, &remove_timestamp);
+        }
     }
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+}
+
+void
+SegmentGrowingImpl::RemoveDuplicatePkRecords() {
+    std::unique_lock lck(mutex_);
+    //Assert(!insert_record_.timestamps_.empty());
+    auto removed_pks = insert_record_.remove_duplicate_pks();
+    deleted_record_.push(removed_pks.first, removed_pks.second.data());
 }
 
 void

@@ -67,6 +67,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     LoadFieldDataV2(const LoadFieldDataInfo& info) override;
 
+    void
+    RemoveDuplicatePkRecords() override;
+
     std::string
     debug() const override;
 
@@ -326,6 +329,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     check_search(const query::Plan* plan) const override {
+        Assert(plan);
+    }
+
+    void
+    check_retrieve(const query::RetrievePlan* plan) const override {
         Assert(plan);
     }
 

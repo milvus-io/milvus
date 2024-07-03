@@ -333,6 +333,20 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
                  field_id.get());
     }
 }
+
+void
+SegmentSealedImpl::RemoveDuplicatePkRecords() {
+    std::unique_lock lck(mutex_);
+    // remove pk index duplicate pks
+    if (!is_pk_index_valid_) {
+        // Assert(!insert_record_.timestamps_.empty());
+        auto removed_pks = insert_record_.remove_duplicate_pks();
+        insert_record_.seal_pks();
+        is_pk_index_valid_ = true;
+        deleted_record_.push(removed_pks.first, removed_pks.second.data());
+    }
+}
+
 void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
