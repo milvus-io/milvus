@@ -386,6 +386,7 @@ queryNode:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   enableSegmentPrune: false # use partition prune function on shard delegator
+  queryStreamBatchSize: 4194304 # return batch size of stream query
   ip:  # if not specified, use the first unicastable address
   port: 21123
   grpc:
