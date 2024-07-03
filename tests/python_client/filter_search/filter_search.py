@@ -17,6 +17,7 @@ def _(parser):
     parser.add_argument("--filter_field", type=str, env_var="LOCUST_FILTER", default="", help="filter field")
     parser.add_argument("--filter_op", type=str, env_var="LOCUST_FILTER", default="==", help="filter op")
     parser.add_argument("--filter_value", type=str, env_var="LOCUST_FILTER", default="0", help="filter value")
+    parser.add_argument("--data_dir", type=str, env_var="DATA_DIR", default="", help="data dir")
 
 
 @events.test_start.add_listener
@@ -24,16 +25,35 @@ def _(environment, **kw):
     print(f"Custom argument supplied: {environment.parsed_options.filter_field}")
     print(f"Custom argument supplied: {environment.parsed_options.filter_op}")
     print(f"Custom argument supplied: {environment.parsed_options.filter_value}")
+    print(f"Custom argument supplied: {environment.parsed_options.data_dir}")
+    data_dir = environment.parsed_options.data_dir
+    MilvusUser.initialize(data_dir, environment.parsed_options.filter_field,
+                          environment.parsed_options.filter_op, environment.parsed_options.filter_value)
 
 
 class MilvusUser(HttpUser):
     host = "http://10.104.13.233:19530"
-    test_data_file_name = "/root/dataset/laion_with_scalar_medium_10m/test.parquet"
-    df = pd.read_parquet(test_data_file_name)
-    vectors_to_search = df["emb"].tolist()
+    df = None
     recall_list = []
     ts_list = []
     recall = 0
+
+    @classmethod
+    def initialize(cls, data_dir, filter_field, filter_op, filter_value):
+        if cls.df is None:
+            test_data_file_name = f"{data_dir}/test.parquet"
+            cls.df = pd.read_parquet(test_data_file_name)
+            cls.vectors_to_search = cls.df["emb"].tolist()
+
+            expr = f"{filter_field} {filter_op} {filter_value}"
+            ascii_codes = [str(ord(char)) for char in expr]
+            expr_ascii = "".join(ascii_codes)
+            if filter_field:
+                ground_truth_file_name = f"{data_dir}/neighbors-{expr_ascii}.parquet"
+            else:
+                ground_truth_file_name = f"{data_dir}/neighbors.parquet"
+            df_neighbors = pd.read_parquet(ground_truth_file_name)
+            cls.gt = df_neighbors["neighbors_id"].tolist()
 
     def on_start(self):
         # print("X. Here's where you would put things you want to run the first time a User is started")

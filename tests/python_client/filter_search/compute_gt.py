@@ -130,11 +130,12 @@ if __name__ == "__main__":
     parser.add_argument("--filter_field", type=str, default="")
     parser.add_argument("--filter_op", type=str, default="==")
     parser.add_argument("--filter_value", type=str, default="")
+    parser.add_argument("--data_dir", type=str, default="/root/dataset/laion_with_scalar_medium_10m")
     args = parser.parse_args()
-    train_data_file_name = glob.glob('/root/dataset/laion_with_scalar_medium_10m/train*.parquet')
-    test_data_file_name = "/root/dataset/laion_with_scalar_medium_10m/test.parquet"
-    neighbor_dir = "/root/dataset/laion_with_scalar_medium_10m"
-
+    data_dir = args.data_dir
+    train_data_file_name = glob.glob(f'{data_dir}/train*.parquet')
+    test_data_file_name = f"{data_dir}/test.parquet"
+    neighbor_dir = f"{data_dir}"
     filter_field = args.filter_field
     filter_op = args.filter_op
     filter_value = args.filter_value

@@ -6,7 +6,7 @@ from pymilvus import (
     Collection, BulkInsertState, utility
 )
 import pandas as pd
-
+import dask.dataframe as dd
 
 import time
 import argparse
@@ -16,7 +16,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import"):
+def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir="./"):
 
     connections.connect(
         host=host,
@@ -53,8 +53,9 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     logger.info(f"generate data {data_size} cost time {time.time() - t0}")
     df = pd.DataFrame(data)
     logger.info(f"data frame \n{df.head()}")
-    df.to_parquet("train.parquet")
-    batch_files = ["train.parquet"]
+
+    df.to_parquet(f"{data_dir}/train.parquet")
+    batch_files = [f"{data_dir}/train.parquet"]
     logger.info(f"files {batch_files}")
     if insert_mode == "import":
         # copy file to minio
