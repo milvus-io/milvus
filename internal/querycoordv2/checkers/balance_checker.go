@@ -129,7 +129,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
-			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
+			log.Debug("ScoreBasedBalancer is balancing this collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}
