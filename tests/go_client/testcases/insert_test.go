@@ -166,7 +166,7 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 	require.Equal(t, common.DefaultNb, int(insertRes2.InsertCount))
 
 	// index
-	it, _ := mc.CreateIndex(ctx, clientv2.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewSCANNIndex(entity.COSINE, 32)))
+	it, _ := mc.CreateIndex(ctx, clientv2.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewSCANNIndex(entity.COSINE, 32, false)))
 	err := it.Await(ctx)
 	common.CheckErr(t, err, true)
 
