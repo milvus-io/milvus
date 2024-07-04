@@ -545,7 +545,7 @@ func TestSearchInvalidScannReorderK(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
-		common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16),
+		common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16, false),
 	}))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 

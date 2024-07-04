@@ -915,6 +915,7 @@ message CompactionTask{
   int64 prefer_segment_rows = 22;
   int64 analyzeTaskID = 23;
   int64 analyzeVersion = 24;
+  int64 lastStateStartTime = 25;
 }
 
 message PartitionStatsInfo {
