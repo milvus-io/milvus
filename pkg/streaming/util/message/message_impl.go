@@ -20,6 +20,15 @@ func (m *messageImpl) MessageType() MessageType {
 	return unmarshalMessageType(val)
 }
 
+// Version returns the message format version.
+func (m *messageImpl) Version() Version {
+	value, ok := m.properties.Get(messageVersion)
+	if !ok {
+		return VersionOld
+	}
+	return newMessageVersionFromString(value)
+}
+
 // Payload returns payload of current message.
 func (m *messageImpl) Payload() []byte {
 	return m.payload
@@ -98,16 +107,15 @@ func (m *immutableMessageImpl) MessageID() MessageID {
 	return m.id
 }
 
+func (m *immutableMessageImpl) VChannel() string {
+	value, ok := m.properties.Get(messageVChannel)
+	if !ok {
+		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message, id: %+v", m.id))
+	}
+	return value
+}
+
 // Properties returns the message read only properties.
 func (m *immutableMessageImpl) Properties() RProperties {
 	return m.properties
-}
-
-// Version returns the message format version.
-func (m *immutableMessageImpl) Version() Version {
-	value, ok := m.properties.Get(messageVersion)
-	if !ok {
-		return VersionOld
-	}
-	return newMessageVersionFromString(value)
 }

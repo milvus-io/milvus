@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
@@ -18,12 +19,27 @@ func Test_baseChecker_CheckTrain(t *testing.T) {
 	paramsWithoutDim := map[string]string{
 		Metric: metric.L2,
 	}
+	sparseParamsWithoutDim := map[string]string{
+		Metric:             metric.IP,
+		common.IsSparseKey: "tRue",
+	}
+	sparseParamsWrongMetric := map[string]string{
+		Metric:             metric.L2,
+		common.IsSparseKey: "True",
+	}
+	badSparseParams := map[string]string{
+		Metric:             metric.IP,
+		common.IsSparseKey: "ds",
+	}
 	cases := []struct {
 		params   map[string]string
 		errIsNil bool
 	}{
 		{validParams, true},
 		{paramsWithoutDim, false},
+		{sparseParamsWithoutDim, true},
+		{sparseParamsWrongMetric, false},
+		{badSparseParams, false},
 	}
 
 	c := newBaseChecker()
