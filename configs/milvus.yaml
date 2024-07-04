@@ -489,11 +489,11 @@ dataCoord:
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   enableGarbageCollection: true
   gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 3600
+    interval: 3600 # meta-based gc scanning interval in seconds
+    missingTolerance: 86400 # orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)
+    dropTolerance: 10800 # meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
-    scanInterval: 168 # garbage collection scan residue interval in hours
+    scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
