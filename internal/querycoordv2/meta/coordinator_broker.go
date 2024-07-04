@@ -112,14 +112,17 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		return nil, 0, err
 	}
 
-	log.Info("collection props", zap.Any("xxx", collectionInfo.GetProperties()))
 	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
-	if replicaNum > 0 {
+	if err != nil {
+		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+	} else if replicaNum > 0 {
 		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
 	}
 
 	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.GetProperties())
-	if len(rgs) > 0 {
+	if err != nil {
+		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+	} else if len(rgs) > 0 {
 		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
 	}
 
@@ -128,19 +131,21 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		if err != nil {
 			return nil, 0, err
 		}
-		log.Info("database props", zap.Any("xxx", dbInfo.GetProperties()))
-		log.Info("xxx", zap.Int64("replicaNumber", replicaNum))
-		log.Info("xxx", zap.Strings("rgs", rgs))
+
 		if replicaNum <= 0 {
 			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
-			if replicaNum > 0 {
+			if err != nil {
+				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+			} else if replicaNum > 0 {
 				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
 			}
 		}
 
 		if len(rgs) == 0 {
 			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
-			if len(rgs) > 0 {
+			if err != nil {
+				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+			} else if len(rgs) > 0 {
 				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
 			}
 		}
