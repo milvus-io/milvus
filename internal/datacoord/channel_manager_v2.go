@@ -488,6 +488,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
 			)
+			continue
 		}
 
 		log.Info("Reassign standby channels to node",
