@@ -109,17 +109,17 @@ func (_c *MockManager_GetAllAvailableChannels_Call) RunAndReturn(run func() ([]t
 	return _c
 }
 
-// GetAvailableWAL provides a mock function with given fields: channel
-func (_m *MockManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
-	ret := _m.Called(channel)
+// GetAvailableWAL provides a mock function with given fields: _a0
+func (_m *MockManager) GetAvailableWAL(_a0 types.PChannelInfo) (wal.WAL, error) {
+	ret := _m.Called(_a0)
 
 	var r0 wal.WAL
 	var r1 error
 	if rf, ok := ret.Get(0).(func(types.PChannelInfo) (wal.WAL, error)); ok {
-		return rf(channel)
+		return rf(_a0)
 	}
 	if rf, ok := ret.Get(0).(func(types.PChannelInfo) wal.WAL); ok {
-		r0 = rf(channel)
+		r0 = rf(_a0)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(wal.WAL)
@@ -127,7 +127,7 @@ func (_m *MockManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, err
 	}
 
 	if rf, ok := ret.Get(1).(func(types.PChannelInfo) error); ok {
-		r1 = rf(channel)
+		r1 = rf(_a0)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -141,12 +141,12 @@ type MockManager_GetAvailableWAL_Call struct {
 }
 
 // GetAvailableWAL is a helper method to define mock.On call
-//   - channel types.PChannelInfo
-func (_e *MockManager_Expecter) GetAvailableWAL(channel interface{}) *MockManager_GetAvailableWAL_Call {
-	return &MockManager_GetAvailableWAL_Call{Call: _e.mock.On("GetAvailableWAL", channel)}
+//   - _a0 types.PChannelInfo
+func (_e *MockManager_Expecter) GetAvailableWAL(_a0 interface{}) *MockManager_GetAvailableWAL_Call {
+	return &MockManager_GetAvailableWAL_Call{Call: _e.mock.On("GetAvailableWAL", _a0)}
 }
 
-func (_c *MockManager_GetAvailableWAL_Call) Run(run func(channel types.PChannelInfo)) *MockManager_GetAvailableWAL_Call {
+func (_c *MockManager_GetAvailableWAL_Call) Run(run func(_a0 types.PChannelInfo)) *MockManager_GetAvailableWAL_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(types.PChannelInfo))
 	})

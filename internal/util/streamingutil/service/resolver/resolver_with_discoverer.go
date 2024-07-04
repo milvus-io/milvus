@@ -160,9 +160,11 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				// Update all grpc resolver.
 				r.logger.Info("service discover update, update resolver", zap.Any("state", state), zap.Int("resolver_count", len(grpcResolvers)))
 				for watcher := range grpcResolvers {
-					// update operation do not block.
+					// Update operation do not block.
+					// Only return error if the resolver is closed, so just print a info log and delete the resolver.
 					if err := watcher.Update(state); err != nil {
-						r.logger.Info("resolver is closed, unregister the resolver", zap.Error(err))
+						// updateError is always context.Canceled.
+						r.logger.Info("resolver is closed, unregister the resolver", zap.NamedError("updateError", err))
 						delete(grpcResolvers, watcher)
 					}
 				}
