@@ -62,7 +62,7 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 }
 
 // Remove removes the wal instance for the channel.
-func (m *managerImpl) Remove(ctx context.Context, channel string, term int64) (err error) {
+func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (err error) {
 	// reject operation if manager is closing.
 	if m.lifetime.Add(lifetime.IsWorking) != nil {
 		return status.NewOnShutdownError("wal manager is closed")
@@ -70,12 +70,12 @@ func (m *managerImpl) Remove(ctx context.Context, channel string, term int64) (e
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			log.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel), zap.Int64("term", term))
+			log.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 		}
-		log.Info("remove wal success", zap.String("channel", channel), zap.Int64("term", term))
+		log.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
-	return m.getWALLifetime(channel).Remove(ctx, term)
+	return m.getWALLifetime(channel.Name).Remove(ctx, channel.Term)
 }
 
 // GetAvailableWAL returns a available wal instance for the channel.

@@ -42,7 +42,7 @@ func TestManager(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, h, 0)
 
-	err = m.Remove(context.Background(), channelName, 1)
+	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 1})
 	assert.NoError(t, err)
 
 	l, err = m.GetAvailableWAL(channelName, 1)
@@ -61,7 +61,7 @@ func TestManager(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	err = m.Remove(context.Background(), channelName, 1)
+	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 1})
 	assertErrorTermExpired(t, err)
 
 	l, err = m.GetAvailableWAL(channelName, 1)
@@ -98,7 +98,7 @@ func TestManager(t *testing.T) {
 	})
 	assertShutdownError(t, err)
 
-	err = m.Remove(context.Background(), channelName, 2)
+	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 2})
 	assertShutdownError(t, err)
 
 	l, err = m.GetAvailableWAL(channelName, 2)

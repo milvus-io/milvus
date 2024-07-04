@@ -22,7 +22,7 @@ type Manager interface {
 	GetAllAvailableChannels() ([]types.PChannelInfo, error)
 
 	// Remove removes the wal instance for the channel.
-	Remove(ctx context.Context, channel string, term int64) error
+	Remove(ctx context.Context, channel types.PChannelInfo) error
 
 	// Close these manager and release all managed WAL.
 	Close()
