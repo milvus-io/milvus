@@ -289,6 +289,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
 		AnalyzeTaskID:      taskID + 1,
+		LastStateStartTime: time.Now().UnixMilli(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
