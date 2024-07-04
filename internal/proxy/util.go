@@ -646,10 +646,10 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 				StrId: scalarField.GetStringData(),
 			}
 		default:
-			return nil, errors.New("currently only support DataType Int64 or VarChar as PrimaryField")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as PrimaryField")
 		}
 	default:
-		return nil, errors.New("currently not support vector field as PrimaryField")
+		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as PrimaryField")
 	}
 
 	return primaryData, nil

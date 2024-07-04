@@ -181,22 +181,44 @@ func (i *GrpcAccessInfo) ErrorCode() string {
 	return fmt.Sprint(merr.Code(i.err))
 }
 
+func (i *GrpcAccessInfo) respStatus() *commonpb.Status {
+	baseResp, ok := i.resp.(BaseResponse)
+	if ok {
+		return baseResp.GetStatus()
+	}
+
+	status, ok := i.resp.(*commonpb.Status)
+	if ok {
+		return status
+	}
+	return nil
+}
+
 func (i *GrpcAccessInfo) ErrorMsg() string {
 	if i.err != nil {
 		return i.err.Error()
 	}
 
-	baseResp, ok := i.resp.(BaseResponse)
-	if ok {
-		status := baseResp.GetStatus()
+	if status := i.respStatus(); status != nil {
 		return status.GetReason()
 	}
 
-	status, ok := i.resp.(*commonpb.Status)
-	if ok {
-		return status.GetReason()
-	}
 	return Unknown
+}
+
+func (i *GrpcAccessInfo) ErrorType() string {
+	if i.err != nil {
+		return merr.GetErrorType(i.err).String()
+	}
+
+	if status := i.respStatus(); status.GetCode() > 0 {
+		if _, ok := status.ExtraInfo[merr.InputErrorFlagKey]; ok {
+			return merr.InputError.String()
+		}
+		return merr.SystemError.String()
+	}
+
+	return ""
 }
 
 func (i *GrpcAccessInfo) DbName() string {
