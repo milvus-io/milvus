@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -51,12 +50,6 @@ type compactionPlanContext interface {
 	getCompactionInfo(signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
 }
-
-var (
-	errChannelNotWatched = errors.New("channel is not watched")
-	errChannelInBuffer   = errors.New("channel is in buffer")
-	errCompactionBusy    = errors.New("compaction task queue is full")
-)
 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 

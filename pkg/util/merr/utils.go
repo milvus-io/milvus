@@ -714,6 +714,14 @@ func WrapErrChannelNotAvailable(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelNotAvailable, name, msg...)
 }
 
+func WrapErrChannelNotWatched(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelNotWatched, name, msg...)
+}
+
+func WrapErrChannelInBuffer(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelInBuffer, name, msg...)
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotFound, value("segment", id))

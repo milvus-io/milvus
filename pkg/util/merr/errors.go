@@ -98,6 +98,8 @@ var (
 	ErrChannelReduplicate      = newMilvusError("channel reduplicates", 502, false)
 	ErrChannelNotAvailable     = newMilvusError("channel not available", 503, false)
 	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
+	ErrChannelNotWatched       = newMilvusError("channel is not watched", 505, false)
+	ErrChannelInBuffer         = newMilvusError("channel is in buffer", 506, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
