@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -148,6 +149,22 @@ type DataCoordCatalog interface {
 	DropImportTask(taskID int64) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
+
+	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
+	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+
+	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
+	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
+	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
+	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+
+	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
+	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
+	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error
 }
 
 type QueryCoordCatalog interface {

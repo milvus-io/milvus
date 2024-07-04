@@ -2104,6 +2104,26 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+	t.Run("check iterator and topK", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		resetSearchParamsValue(normalParam, TopKKey, `1024000`)
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema, false)
+		assert.NotNil(t, info)
+		assert.NoError(t, err)
+		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {

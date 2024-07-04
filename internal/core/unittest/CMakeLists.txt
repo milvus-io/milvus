@@ -71,6 +71,12 @@ set(MILVUS_TEST_FILES
         test_mmap_chunk_manager.cpp
         )
 
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set(MILVUS_TEST_FILES
+        ${MILVUS_TEST_FILES}
+        test_kmeans_clustering.cpp)
+endif()
+
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
@@ -123,6 +129,7 @@ if (LINUX)
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
+            milvus_clustering
             milvus_common
             )
     install(TARGETS index_builder_test DESTINATION unittest)
@@ -137,6 +144,7 @@ target_link_libraries(all_tests
         milvus_segcore
         milvus_storage
         milvus_indexbuilder
+        milvus_clustering
         pthread
         milvus_common
         milvus_exec

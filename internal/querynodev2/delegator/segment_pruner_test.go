@@ -44,7 +44,7 @@ func (sps *SegmentPrunerSuite) SetupForClustering(clusterKeyFieldName string,
 	fieldName2DataType[sps.primaryFieldName] = schemapb.DataType_Int64
 	fieldName2DataType[sps.clusterKeyFieldName] = clusterKeyFieldType
 	fieldName2DataType["info"] = schemapb.DataType_VarChar
-	fieldName2DataType["age"] = schemapb.DataType_Int32
+	fieldName2DataType["age"] = schemapb.DataType_Int64
 	fieldName2DataType["vec"] = schemapb.DataType_FloatVector
 
 	sps.schema = testutil.ConstructCollectionSchemaWithKeys(sps.collectionName,
@@ -380,6 +380,7 @@ func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
 	sps.SetupForClustering("vec", schemapb.DataType_FloatVector)
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
@@ -399,21 +400,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 		Topk:             100,
 	}
 
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
-	sps.Equal(1, len(sps.sealedSegments[0].Segments))
-	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
-	sps.Equal(1, len(sps.sealedSegments[1].Segments))
-	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
-
-	// test for IP metrics
-	req = &internalpb.SearchRequest{
-		MetricType:       "IP",
-		PlaceholderGroup: bs,
-		PartitionIDs:     []UniqueID{sps.targetPartition},
-		Topk:             100,
-	}
-
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
+	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{1})
 	sps.Equal(1, len(sps.sealedSegments[0].Segments))
 	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
 	sps.Equal(1, len(sps.sealedSegments[1].Segments))

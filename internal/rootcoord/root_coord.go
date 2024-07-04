@@ -2773,9 +2773,8 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	mu := &sync.Mutex{}
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
+	errs := typeutil.NewConcurrentSet[error]()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
@@ -2784,28 +2783,41 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		group.Go(func() error {
 			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
+				errs.Insert(err)
 				return err
 			}
 
 			err = merr.AnalyzeState("Proxy", nodeID, sta)
 			if err != nil {
-				mu.Lock()
-				defer mu.Unlock()
-				errReasons = append(errReasons, err.Error())
+				errs.Insert(err)
 			}
-			return nil
+
+			return err
 		})
 		return true
 	})
 
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	if maxDelay > 0 {
+		group.Go(func() error {
+			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
+			if err != nil {
+				errs.Insert(err)
+			}
+			return err
+		})
+	}
+
 	err := group.Wait()
-	if err != nil || len(errReasons) != 0 {
+	if err != nil {
 		return &milvuspb.CheckHealthResponse{
 			Status:    merr.Success(),
 			IsHealthy: false,
-			Reasons:   errReasons,
+			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
+				return err.Error()
+			}),
 		}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }

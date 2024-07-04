@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -33,13 +32,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
 // ChannelManagerImpl manages the allocation and the balance between channels and data nodes.
 type ChannelManagerImpl struct {
 	ctx              context.Context
-	mu               sync.RWMutex
+	mu               lock.RWMutex
 	h                Handler
 	store            RWChannelStore
 	factory          ChannelPolicyFactory
@@ -494,17 +494,9 @@ func (c *ChannelManagerImpl) GetBufferChannels() *NodeChannelInfo {
 
 // GetNodeChannelsByCollectionID gets all node channels map of the collection
 func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
-	nodeChs := make(map[UniqueID][]string)
-	for _, nodeChannels := range c.GetAssignedChannels() {
-		var channelNames []string
-		for name, ch := range nodeChannels.Channels {
-			if ch.GetCollectionID() == collectionID {
-				channelNames = append(channelNames, name)
-			}
-		}
-		nodeChs[nodeChannels.NodeID] = channelNames
-	}
-	return nodeChs
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.store.GetNodeChannelsByCollectionID(collectionID)
 }
 
 // Get all channels belong to the collection
@@ -889,15 +881,6 @@ func (c *ChannelManagerImpl) GetCollectionIDByChannel(channelName string) (bool,
 		}
 	}
 	return false, 0
-}
-
-func (c *ChannelManagerImpl) GetNodeIDByChannelName(channelName string) (UniqueID, bool) {
-	for _, nodeChannel := range c.GetAssignedChannels() {
-		if _, ok := nodeChannel.Channels[channelName]; ok {
-			return nodeChannel.NodeID, true
-		}
-	}
-	return 0, false
 }
 
 func (c *ChannelManagerImpl) GetChannel(nodeID int64, channelName string) (RWChannel, bool) {

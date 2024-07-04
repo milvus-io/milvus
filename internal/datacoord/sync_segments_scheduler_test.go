@@ -17,17 +17,18 @@
 package datacoord
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type SyncSegmentsSchedulerSuite struct {
@@ -43,8 +44,222 @@ func Test_SyncSegmentsSchedulerSuite(t *testing.T) {
 }
 
 func (s *SyncSegmentsSchedulerSuite) initParams() {
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            5,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "channel1",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Dropped,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 1,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 2,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:            6,
+			CollectionID:  1,
+			PartitionID:   3,
+			InsertChannel: "channel1",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Dropped,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 3,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 4,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:            9,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "channel1",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Flushed,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 9,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 10,
+						},
+					},
+				},
+			},
+			CompactionFrom: []int64{5},
+		},
+		{
+			ID:            10,
+			CollectionID:  1,
+			PartitionID:   3,
+			InsertChannel: "channel1",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Flushed,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 7,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 8,
+						},
+					},
+				},
+			},
+			CompactionFrom: []int64{6},
+		},
+		{
+			ID:            7,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "channel2",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Dropped,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 5,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 6,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:            8,
+			CollectionID:  1,
+			PartitionID:   3,
+			InsertChannel: "channel2",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Dropped,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 7,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 8,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:            11,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "channel2",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Flushed,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 5,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 6,
+						},
+					},
+				},
+			},
+			CompactionFrom: []int64{7},
+		},
+		{
+			ID:            12,
+			CollectionID:  1,
+			PartitionID:   3,
+			InsertChannel: "channel2",
+			NumOfRows:     3000,
+			State:         commonpb.SegmentState_Flushed,
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 7,
+						},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 8,
+						},
+					},
+				},
+			},
+			CompactionFrom: []int64{8},
+		},
+	}
 	s.m = &meta{
-		RWMutex: sync.RWMutex{},
+		RWMutex: lock.RWMutex{},
 		collections: map[UniqueID]*collectionInfo{
 			1: {
 				ID: 1,
@@ -72,243 +287,12 @@ func (s *SyncSegmentsSchedulerSuite) initParams() {
 			},
 			2: nil,
 		},
-		segments: &SegmentsInfo{
-			collSegments: map[UniqueID]*CollectionSegments{
-				1: {
-					segments: map[UniqueID]*SegmentInfo{
-						5: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            5,
-								CollectionID:  1,
-								PartitionID:   2,
-								InsertChannel: "channel1",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Dropped,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 1,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 2,
-											},
-										},
-									},
-								},
-							},
-						},
-						6: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            6,
-								CollectionID:  1,
-								PartitionID:   3,
-								InsertChannel: "channel1",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Dropped,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 3,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 4,
-											},
-										},
-									},
-								},
-							},
-						},
-						9: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            9,
-								CollectionID:  1,
-								PartitionID:   2,
-								InsertChannel: "channel1",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Flushed,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 9,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 10,
-											},
-										},
-									},
-								},
-								CompactionFrom: []int64{5},
-							},
-						},
-						10: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            10,
-								CollectionID:  1,
-								PartitionID:   3,
-								InsertChannel: "channel1",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Flushed,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 7,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 8,
-											},
-										},
-									},
-								},
-								CompactionFrom: []int64{6},
-							},
-						},
-						7: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            7,
-								CollectionID:  1,
-								PartitionID:   2,
-								InsertChannel: "channel2",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Dropped,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 5,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 6,
-											},
-										},
-									},
-								},
-							},
-						},
-						8: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            8,
-								CollectionID:  1,
-								PartitionID:   3,
-								InsertChannel: "channel2",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Dropped,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 7,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 8,
-											},
-										},
-									},
-								},
-							},
-						},
-						11: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            11,
-								CollectionID:  1,
-								PartitionID:   2,
-								InsertChannel: "channel2",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Flushed,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 5,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 6,
-											},
-										},
-									},
-								},
-								CompactionFrom: []int64{7},
-							},
-						},
-						12: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            12,
-								CollectionID:  1,
-								PartitionID:   3,
-								InsertChannel: "channel2",
-								NumOfRows:     3000,
-								State:         commonpb.SegmentState_Flushed,
-								Statslogs: []*datapb.FieldBinlog{
-									{
-										FieldID: 100,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 7,
-											},
-										},
-									},
-									{
-										FieldID: 101,
-										Binlogs: []*datapb.Binlog{
-											{
-												LogID: 8,
-											},
-										},
-									},
-								},
-								CompactionFrom: []int64{8},
-							},
-						},
-					},
-				},
-			},
-		},
+		segments: NewSegmentsInfo(),
 	}
+
+	lo.ForEach(segments, func(ds *datapb.SegmentInfo, i int) {
+		s.m.segments.SetSegment(ds.ID, &SegmentInfo{SegmentInfo: ds})
+	})
 }
 
 func (s *SyncSegmentsSchedulerSuite) SetupTest() {

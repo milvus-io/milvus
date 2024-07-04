@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
@@ -98,7 +99,7 @@ type DataNode struct {
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache
-	compactionExecutor       *compactionExecutor
+	compactionExecutor       compaction.Executor
 	timeTickSender           *timeTickSender
 	channelCheckpointUpdater *channelCheckpointUpdater
 
@@ -140,7 +141,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		dataCoord:          nil,
 		factory:            factory,
 		segmentCache:       newCache(),
-		compactionExecutor: newCompactionExecutor(),
+		compactionExecutor: compaction.NewExecutor(),
 
 		clearSignal: make(chan string, 100),
 
@@ -326,7 +327,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 	log.Info("try to release flowgraph", zap.String("channel", channel))
 	if node.compactionExecutor != nil {
-		node.compactionExecutor.discardPlan(channel)
+		node.compactionExecutor.DiscardPlan(channel)
 	}
 	if node.flowgraphManager != nil {
 		node.flowgraphManager.RemoveFlowgraph(channel)
@@ -395,7 +396,7 @@ func (node *DataNode) Start() error {
 		node.stopWaiter.Add(1)
 		go node.BackGroundGC(node.clearSignal)
 
-		go node.compactionExecutor.start(node.ctx)
+		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
 

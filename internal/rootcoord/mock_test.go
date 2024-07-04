@@ -677,18 +677,6 @@ func withDataCoord(dc types.DataCoordClient) Opt {
 	}
 }
 
-func withUnhealthyDataCoord() Opt {
-	dc := newMockDataCoord()
-	err := errors.New("mock error")
-	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: merr.Status(err),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
-	}
-	return withDataCoord(dc)
-}
-
 func withInvalidDataCoord() Opt {
 	dc := newMockDataCoord()
 	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -899,7 +887,6 @@ type mockBroker struct {
 	FlushFunc             func(ctx context.Context, cID int64, segIDs []int64) error
 
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
 	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
@@ -933,10 +920,6 @@ func (b mockBroker) SyncNewCreatedPartition(ctx context.Context, collectionID Un
 
 func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
-}
-
-func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-	return b.DescribeIndexFunc(ctx, colID)
 }
 
 func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {

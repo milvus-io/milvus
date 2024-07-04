@@ -248,19 +248,13 @@ func (t *createCollectionTask) validateClusteringKey() error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
+			if typeutil.IsVectorType(field.GetDataType()) &&
+				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
+				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName)
+			}
 			if idx != -1 {
 				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
 					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name))
-			}
-
-			if field.GetIsPrimaryKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be primary key field, field name = %s", field.Name))
-			}
-
-			if field.GetIsPartitionKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be partition key field, field name = %s", field.Name))
 			}
 			idx = i
 		}
@@ -628,6 +622,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			// nolint
 			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
+			t.result.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
 		}
 		return nil
 	}
@@ -1445,7 +1440,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
 		if err != nil {
-			return err
+			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 		flushReq := &datapb.FlushRequest{
 			Base: commonpbutil.UpdateMsgBase(

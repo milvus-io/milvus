@@ -19,9 +19,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -53,11 +54,13 @@ type SessionManager interface {
 	DeleteSession(node *NodeInfo)
 	GetSessionIDs() []int64
 	GetSessions() []*Session
+	GetSession(int64) (*Session, bool)
 
 	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
+	GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error)
 	GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
@@ -68,6 +71,7 @@ type SessionManager interface {
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	CheckHealth(ctx context.Context) error
 	QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error)
+	DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error
 	Close()
 }
 
@@ -76,7 +80,7 @@ var _ SessionManager = (*SessionManagerImpl)(nil)
 // SessionManagerImpl provides the grpc interfaces of cluster
 type SessionManagerImpl struct {
 	sessions struct {
-		sync.RWMutex
+		lock.RWMutex
 		data map[int64]*Session
 	}
 	sessionCreator dataNodeCreatorFunc
@@ -99,7 +103,7 @@ func defaultSessionCreator() dataNodeCreatorFunc {
 func NewSessionManagerImpl(options ...SessionOpt) *SessionManagerImpl {
 	m := &SessionManagerImpl{
 		sessions: struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[int64]*Session
 		}{data: make(map[int64]*Session)},
 		sessionCreator: defaultSessionCreator(),
@@ -118,6 +122,14 @@ func (c *SessionManagerImpl) AddSession(node *NodeInfo) {
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
 	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
+}
+
+// GetSession return a Session related to nodeID
+func (c *SessionManagerImpl) GetSession(nodeID int64) (*Session, bool) {
+	c.sessions.RLock()
+	defer c.sessions.RUnlock()
+	s, ok := c.sessions.data[nodeID]
+	return s, ok
 }
 
 // DeleteSession removes the node session
@@ -217,19 +229,18 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
+
 	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
-	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
+	cancel()
 	if err != nil {
 		log.Warn("failed to get client", zap.Error(err))
 		return err
 	}
 
 	err = retry.Do(context.Background(), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
-		defer cancel()
-
-		resp, err := cli.SyncSegments(ctx, req)
+		// doesn't set timeout
+		resp, err := cli.SyncSegments(context.Background(), req)
 		if err := VerifyResponse(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
 			return err
@@ -245,7 +256,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	return nil
 }
 
-// GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
+// GetCompactionPlansResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
 func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ctx := context.Background()
 	errorGroup, ctx := errgroup.WithContext(ctx)
@@ -296,6 +307,50 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pa
 	})
 
 	return rst, nil
+}
+
+func (c *SessionManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error) {
+	ctx := context.Background()
+	c.sessions.RLock()
+	s, ok := c.sessions.data[nodeID]
+	if !ok {
+		c.sessions.RUnlock()
+		return nil, merr.WrapErrNodeNotFound(nodeID)
+	}
+	c.sessions.RUnlock()
+	cli, err := s.GetOrCreateClient(ctx)
+	if err != nil {
+		log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	resp, err2 := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		PlanID: planID,
+	})
+
+	if err2 != nil {
+		return nil, err2
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Info("GetCompactionState state is not", zap.Error(err))
+		return nil, fmt.Errorf("GetCopmactionState failed")
+	}
+	var result *datapb.CompactionPlanResult
+	for _, rst := range resp.GetResults() {
+		if rst.GetPlanID() != planID {
+			continue
+		}
+		binlog.CompressCompactionBinlogs(rst.GetSegments())
+		result = rst
+		break
+	}
+
+	return result, nil
 }
 
 func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
@@ -491,6 +546,43 @@ func (c *SessionManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse,
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("planID", req.GetPlanID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		if errors.Is(err, merr.ErrNodeNotFound) {
+			log.Info("node not found, skip dropping compaction plan")
+			return nil
+		}
+		log.Warn("failed to get client", zap.Error(err))
+		return err
+	}
+
+	err = retry.Do(context.Background(), func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		defer cancel()
+
+		resp, err := cli.DropCompactionPlan(ctx, req)
+		if err := VerifyResponse(resp, err); err != nil {
+			log.Warn("failed to drop compaction plan", zap.Error(err))
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Warn("failed to drop compaction plan after retry", zap.Error(err))
+		return err
+	}
+
+	log.Info("success to drop compaction plan")
+	return nil
 }
 
 // Close release sessions

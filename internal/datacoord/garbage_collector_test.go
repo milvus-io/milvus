@@ -25,7 +25,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -361,7 +361,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		indexID = UniqueID(400)
 	)
 	return &meta{
-		RWMutex:      sync.RWMutex{},
+		RWMutex:      lock.RWMutex{},
 		ctx:          ctx,
 		catalog:      catalog,
 		collections:  nil,
@@ -465,11 +465,18 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			},
 		},
 		segID + 1: {
-			SegmentInfo: nil,
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "",
+				NumOfRows:     1026,
+				State:         commonpb.SegmentState_Dropped,
+			},
 		},
 	}
 	meta := &meta{
-		RWMutex:     sync.RWMutex{},
+		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
@@ -634,7 +641,7 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		},
 	}
 	meta := &meta{
-		RWMutex:     sync.RWMutex{},
+		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,

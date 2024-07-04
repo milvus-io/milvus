@@ -100,7 +100,7 @@ getdeps:
 		echo "Mockery v$(MOCKERY_VERSION) already installed"; \
 	fi
 	@if [ -z "$(INSTALL_GOTESTSUM)" ]; then \
-		echo "Install gotestsum v$(GOTESTSUM_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install gotest.tools/gotestsum@v$(GOTESTSUM_VERSION); \
+		echo "Install gotestsum v$(GOTESTSUM_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install -ldflags="-X 'gotest.tools/gotestsum/cmd.version=$(GOTESTSUM_VERSION)'" gotest.tools/gotestsum@v$(GOTESTSUM_VERSION); \
 	else \
 		echo "gotestsum v$(GOTESTSUM_VERSION) already installed";\
 	fi
@@ -457,10 +457,10 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=SessionManager --dir=internal/datacoord --filename=mock_session_manager.go --output=internal/datacoord  --structname=MockSessionManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=compactionPlanContext --dir=internal/datacoord --filename=mock_compaction_plan_context.go --output=internal/datacoord  --structname=MockCompactionPlanContext --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=CompactionMeta --dir=internal/datacoord --filename=mock_compaction_meta.go --output=internal/datacoord  --structname=MockCompactionMeta --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=Scheduler --dir=internal/datacoord --filename=mock_scheduler.go --output=internal/datacoord  --structname=MockScheduler --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=internal/datacoord --filename=mock_channelmanager.go --output=internal/datacoord  --structname=MockChannelManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage

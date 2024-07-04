@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -182,6 +183,7 @@ func NewManager() *Manager {
 		}
 		return int64(segment.ResourceUsageEstimate().DiskSize)
 	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
+		log := log.Ctx(ctx)
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
 		if segment == nil {
@@ -211,13 +213,15 @@ func NewManager() *Manager {
 		}
 		return segment, nil
 	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
-		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
+		log := log.Ctx(ctx)
+		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
 		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
 		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
 		defer cacheEvictRecord.Finish(nil)
 		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
+		log := log.Ctx(ctx)
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
 		if segment == nil {
 			// the segment has been released, just ignore it
@@ -764,11 +768,15 @@ func (mgr *segmentManager) updateMetric() {
 	collections, partiations := make(typeutil.Set[int64]), make(typeutil.Set[int64])
 	for _, seg := range mgr.growingSegments {
 		collections.Insert(seg.Collection())
-		partiations.Insert(seg.Partition())
+		if seg.Partition() != common.AllPartitionsID {
+			partiations.Insert(seg.Partition())
+		}
 	}
 	for _, seg := range mgr.sealedSegments {
 		collections.Insert(seg.Collection())
-		partiations.Insert(seg.Partition())
+		if seg.Partition() != common.AllPartitionsID {
+			partiations.Insert(seg.Partition())
+		}
 	}
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(collections.Len()))
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))

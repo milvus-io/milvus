@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -357,19 +356,10 @@ func (q *QuotaCenter) collectMetrics() error {
 	defer cancel()
 
 	group := &errgroup.Group{}
-	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-	if err != nil {
-		return err
-	}
 
 	// get Query cluster metrics
 	group.Go(func() error {
-		rsp, err := q.queryCoord.GetMetrics(ctx, req)
-		if err = merr.CheckRPCCall(rsp, err); err != nil {
-			return err
-		}
-		queryCoordTopology := &metricsinfo.QueryCoordTopology{}
-		err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), queryCoordTopology)
+		queryCoordTopology, err := getQueryCoordMetrics(ctx, q.queryCoord)
 		if err != nil {
 			return err
 		}
@@ -414,12 +404,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	})
 	// get Data cluster metrics
 	group.Go(func() error {
-		rsp, err := q.dataCoord.GetMetrics(ctx, req)
-		if err = merr.CheckRPCCall(rsp, err); err != nil {
-			return err
-		}
-		dataCoordTopology := &metricsinfo.DataCoordTopology{}
-		err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology)
+		dataCoordTopology, err := getDataCoordMetrics(ctx, q.dataCoord)
 		if err != nil {
 			return err
 		}
@@ -505,17 +490,11 @@ func (q *QuotaCenter) collectMetrics() error {
 	})
 	// get Proxies metrics
 	group.Go(func() error {
-		// TODO: get more proxy metrics info
-		rsps, err := q.proxies.GetProxyMetrics(ctx)
+		ret, err := getProxyMetrics(ctx, q.proxies)
 		if err != nil {
 			return err
 		}
-		for _, rsp := range rsps {
-			proxyMetric := &metricsinfo.ProxyInfos{}
-			err = metricsinfo.UnmarshalComponentInfos(rsp.GetResponse(), proxyMetric)
-			if err != nil {
-				return err
-			}
+		for _, proxyMetric := range ret {
 			if proxyMetric.QuotaMetrics != nil {
 				q.proxyMetrics[proxyMetric.ID] = proxyMetric.QuotaMetrics
 			}
@@ -532,7 +511,8 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 		return nil
 	})
-	err = group.Wait()
+
+	err := group.Wait()
 	if err != nil {
 		return err
 	}

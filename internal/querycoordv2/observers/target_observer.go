@@ -171,9 +171,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 }
 
 // Check whether provided collection is has current target.
-// If not, submit a async task into dispatcher.
-func (ob *TargetObserver) Check(ctx context.Context, collectionID int64) bool {
-	result := ob.targetMgr.IsCurrentTargetExist(collectionID)
+// If not, submit an async task into dispatcher.
+func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partitionID int64) bool {
+	result := ob.targetMgr.IsCurrentTargetExist(collectionID, partitionID)
 	if !result {
 		ob.dispatcher.AddTask(collectionID)
 	}

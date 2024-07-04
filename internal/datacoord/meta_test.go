@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -70,6 +71,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -82,6 +86,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -91,6 +98,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		defer suite.resetMock()
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -199,31 +209,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	}
 
 	mockChMgr := mocks.NewChunkManager(suite.T())
-	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
-	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
-	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-
 	m := &meta{
 		catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments:     latestSegments,
 		chunkManager: mockChMgr,
-	}
-
-	plan := &datapb.CompactionPlan{
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID:           1,
-				FieldBinlogs:        m.GetSegment(1).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(1).GetStatslogs(),
-				Deltalogs:           m.GetSegment(1).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-			{
-				SegmentID:           2,
-				FieldBinlogs:        m.GetSegment(2).GetBinlogs(),
-				Field2StatslogPaths: m.GetSegment(2).GetStatslogs(),
-				Deltalogs:           m.GetSegment(2).GetDeltalogs()[:1], // compaction plan use only 1 deltalog
-			},
-		},
 	}
 
 	compactToSeg := &datapb.CompactionSegment{
@@ -236,8 +225,13 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	result := &datapb.CompactionPlanResult{
 		Segments: []*datapb.CompactionSegment{compactToSeg},
 	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+	}
 
-	infos, mutation, err := m.CompleteCompactionMutation(plan, result)
+	infos, mutation, err := m.CompleteCompactionMutation(task, result)
+	assert.NoError(suite.T(), err)
 	suite.Equal(1, len(infos))
 	info := infos[0]
 	suite.NoError(err)
@@ -264,16 +258,6 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.EqualValues(50001, blog.GetLogID())
 		}
 	}
-
-	deltalogs := info.GetDeltalogs()
-	deltalogIDs := []int64{}
-	for _, fbinlog := range deltalogs {
-		for _, blog := range fbinlog.GetBinlogs() {
-			suite.Empty(blog.GetLogPath())
-			deltalogIDs = append(deltalogIDs, blog.GetLogID())
-		}
-	}
-	suite.ElementsMatch([]int64{30001, 31001}, deltalogIDs)
 
 	// check compactFrom segments
 	for _, segID := range []int64{1, 2} {
@@ -618,7 +602,7 @@ func TestMeta_Basic(t *testing.T) {
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMetaTable(&datacoord.Catalog{})
+		meta := createMeta(&datacoord.Catalog{}, nil, createIndexMeta(&datacoord.Catalog{}))
 		ret := meta.GetCollectionIndexFilesSize()
 		assert.Equal(t, uint64(0), ret)
 
@@ -689,7 +673,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1), LogID: 2}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -830,7 +814,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1), LogID: 2}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -846,7 +830,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 	})
 }
 
-func Test_meta_SetSegmentCompacting(t *testing.T) {
+func Test_meta_SetSegmentsCompacting(t *testing.T) {
 	type fields struct {
 		client   kv.MetaKv
 		segments *SegmentsInfo
@@ -889,58 +873,9 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
+			m.SetSegmentsCompacting([]UniqueID{tt.args.segmentID}, tt.args.compacting)
 			segment := m.GetHealthySegment(tt.args.segmentID)
 			assert.Equal(t, tt.args.compacting, segment.isCompacting)
-		})
-	}
-}
-
-func Test_meta_SetSegmentImporting(t *testing.T) {
-	type fields struct {
-		client   kv.MetaKv
-		segments *SegmentsInfo
-	}
-	type args struct {
-		segmentID UniqueID
-		importing bool
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-	}{
-		{
-			"test set segment importing",
-			fields{
-				NewMetaMemoryKV(),
-				&SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:          1,
-								State:       commonpb.SegmentState_Flushed,
-								IsImporting: false,
-							},
-						},
-					},
-				},
-			},
-			args{
-				segmentID: 1,
-				importing: true,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &meta{
-				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
-				segments: tt.fields.segments,
-			}
-			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)
-			segment := m.GetHealthySegment(tt.args.segmentID)
-			assert.Equal(t, tt.args.importing, segment.isCompacting)
 		})
 	}
 }
@@ -982,6 +917,97 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, expected, gotInfo.GetState())
 	}
+
+	got = m.GetSegmentsOfCollection(-1)
+	assert.Equal(t, 3, len(got))
+
+	got = m.GetSegmentsOfCollection(10)
+	assert.Equal(t, 0, len(got))
+}
+
+func Test_meta_GetSegmentsWithChannel(t *testing.T) {
+	storedSegments := NewSegmentsInfo()
+	for segID, segment := range map[int64]*SegmentInfo{
+		1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				InsertChannel: "h1",
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				InsertChannel: "h2",
+				State:         commonpb.SegmentState_Growing,
+			},
+		},
+		3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  2,
+				State:         commonpb.SegmentState_Flushed,
+				InsertChannel: "h1",
+			},
+		},
+	} {
+		storedSegments.SetSegment(segID, segment)
+	}
+	m := &meta{segments: storedSegments}
+	got := m.GetSegmentsByChannel("h1")
+	assert.Equal(t, 2, len(got))
+	assert.ElementsMatch(t, []int64{1, 3}, lo.Map(
+		got,
+		func(s *SegmentInfo, i int) int64 {
+			return s.ID
+		},
+	))
+
+	got = m.GetSegmentsByChannel("h3")
+	assert.Equal(t, 0, len(got))
+
+	got = m.SelectSegments(WithCollection(1), WithChannel("h1"), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return segment != nil && segment.GetState() == commonpb.SegmentState_Flushed
+	}))
+	assert.Equal(t, 1, len(got))
+	assert.ElementsMatch(t, []int64{1}, lo.Map(
+		got,
+		func(s *SegmentInfo, i int) int64 {
+			return s.ID
+		},
+	))
+
+	m.segments.DropSegment(3)
+	_, ok := m.segments.secondaryIndexes.coll2Segments[2]
+	assert.False(t, ok)
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
+	assert.Equal(t, 2, len(m.segments.secondaryIndexes.channel2Segments))
+
+	segments, ok := m.segments.secondaryIndexes.channel2Segments["h1"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	segments, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(2), segments[2].ID)
+
+	m.segments.DropSegment(2)
+	segments, ok = m.segments.secondaryIndexes.coll2Segments[1]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
+	assert.Equal(t, 1, len(m.segments.secondaryIndexes.channel2Segments))
+
+	segments, ok = m.segments.secondaryIndexes.channel2Segments["h1"]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segments))
+	assert.Equal(t, int64(1), segments[1].ID)
+	_, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
+	assert.False(t, ok)
 }
 
 func TestMeta_HasSegments(t *testing.T) {

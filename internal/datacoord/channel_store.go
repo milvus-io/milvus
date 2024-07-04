@@ -38,6 +38,8 @@ import (
 )
 
 // ROChannelStore is a read only channel store for channels and nodes.
+//
+//go:generate mockery --name=ROChannelStore --structname=ROChannelStore --output=./ --filename=mock_ro_channel_store.go --with-expecter
 type ROChannelStore interface {
 	// GetNode returns the channel info of a specific node.
 	// Returns nil if the node doesn't belong to the cluster
@@ -53,12 +55,16 @@ type ROChannelStore interface {
 	GetNodes() []int64
 	// GetNodeChannelCount
 	GetNodeChannelCount(nodeID int64) int
+	// GetNodeChannels for given collection
+	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
 
 	// GetNodeChannelsBy used by channel_store_v2 and channel_manager_v2 only
 	GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo
 }
 
 // RWChannelStore is the read write channel store for channels and nodes.
+//
+//go:generate mockery --name=RWChannelStore --structname=RWChannelStore --output=./ --filename=mock_channel_store.go --with-expecter
 type RWChannelStore interface {
 	ROChannelStore
 	// Reload restores the buffer channels and node-channels mapping form kv.
@@ -461,6 +467,23 @@ func (c *ChannelStore) GetNodesChannels() []*NodeChannelInfo {
 		}
 	}
 	return ret
+}
+
+func (c *ChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
+	nodeChs := make(map[UniqueID][]string)
+	for id, info := range c.channelsInfo {
+		if id == bufferID {
+			continue
+		}
+		var channelNames []string
+		for name, ch := range info.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channelNames = append(channelNames, name)
+			}
+		}
+		nodeChs[id] = channelNames
+	}
+	return nodeChs
 }
 
 // GetBufferChannelInfo returns all unassigned channels.

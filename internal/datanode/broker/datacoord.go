@@ -128,7 +128,7 @@ func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.D
 
 	resp, err := dc.client.DropVirtualChannel(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+		log.Warn("failed to DropVirtualChannel", zap.Error(err))
 		return resp, err
 	}
 

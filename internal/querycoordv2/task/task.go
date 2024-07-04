@@ -280,15 +280,8 @@ func (task *baseTask) SetReason(reason string) {
 
 func (task *baseTask) String() string {
 	var actionsStr string
-	for i, action := range task.actions {
-		if realAction, ok := action.(*SegmentAction); ok {
-			actionsStr += fmt.Sprintf(`{[type=%v][node=%d][streaming=%v]}`, action.Type(), action.Node(), realAction.Scope() == querypb.DataScope_Streaming)
-		} else {
-			actionsStr += fmt.Sprintf(`{[type=%v][node=%d]}`, action.Type(), action.Node())
-		}
-		if i != len(task.actions)-1 {
-			actionsStr += ", "
-		}
+	for _, action := range task.actions {
+		actionsStr += action.String() + ","
 	}
 	return fmt.Sprintf(
 		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [resourceGroup=%s] [priority=%s] [actionsCount=%d] [actions=%s]",
@@ -417,8 +410,7 @@ type LeaderTask struct {
 	leaderID  int64
 }
 
-func NewLeaderTask(ctx context.Context,
-	timeout time.Duration,
+func NewLeaderSegmentTask(ctx context.Context,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
@@ -426,12 +418,27 @@ func NewLeaderTask(ctx context.Context,
 	action *LeaderAction,
 ) *LeaderTask {
 	segmentID := action.SegmentID()
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderTask-%s-%d", action.Type().String(), segmentID))
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,
 		segmentID: segmentID,
 		leaderID:  leaderID,
+	}
+}
+
+func NewLeaderPartStatsTask(ctx context.Context,
+	source Source,
+	collectionID typeutil.UniqueID,
+	replica *meta.Replica,
+	leaderID int64,
+	action *LeaderAction,
+) *LeaderTask {
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
+	base.actions = []Action{action}
+	return &LeaderTask{
+		baseTask: base,
+		leaderID: leaderID,
 	}
 }
 

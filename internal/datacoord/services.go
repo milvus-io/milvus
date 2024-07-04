@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -1085,23 +1086,29 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
+	var id int64
+	var err error
+	if req.MajorCompaction {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+	} else {
+		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	plans := s.compactionHandler.getCompactionTasksBySignalID(id)
-	if len(plans) == 0 {
+	taskCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
+	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
 	} else {
 		resp.CompactionID = id
-		resp.CompactionPlanCount = int32(len(plans))
+		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
+	log.Info("success to trigger manual compaction", zap.Bool("isMajor", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1126,22 +1133,16 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
-	state, executingCnt, completedCnt, failedCnt, timeoutCnt := getCompactionState(tasks)
+	info := s.compactionHandler.getCompactionInfo(req.GetCompactionID())
 
-	resp.State = state
-	resp.ExecutingPlanNo = int64(executingCnt)
-	resp.CompletedPlanNo = int64(completedCnt)
-	resp.TimeoutPlanNo = int64(timeoutCnt)
-	resp.FailedPlanNo = int64(failedCnt)
-	log.Info("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
-		zap.Int("completed", completedCnt), zap.Int("failed", failedCnt), zap.Int("timeout", timeoutCnt),
-		zap.Int64s("plans", lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			if t.plan == nil {
-				return -1
-			}
-			return t.plan.PlanID
-		})))
+	resp.State = info.state
+	resp.ExecutingPlanNo = int64(info.executingCnt)
+	resp.CompletedPlanNo = int64(info.completedCnt)
+	resp.TimeoutPlanNo = int64(info.timeoutCnt)
+	resp.FailedPlanNo = int64(info.failedCnt)
+	log.Info("success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
+		zap.Int("completed", info.completedCnt), zap.Int("failed", info.failedCnt), zap.Int("timeout", info.timeoutCnt))
+
 	return resp, nil
 }
 
@@ -1166,66 +1167,16 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
-	for _, task := range tasks {
-		resp.MergeInfos = append(resp.MergeInfos, getCompactionMergeInfo(task))
-	}
+	info := s.compactionHandler.getCompactionInfo(req.GetCompactionID())
+	resp.State = info.state
+	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
+		return merge
+	})
 
-	state, _, _, _, _ := getCompactionState(tasks)
-
-	resp.State = state
-	log.Info("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos),
-		zap.Int64s("plans", lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			if t.plan == nil {
-				return -1
-			}
-			return t.plan.PlanID
-		})))
+	planIDs := lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(planID int64, _ *milvuspb.CompactionMergeInfo) int64 { return planID })
+	log.Info("success to get state with plans", zap.Any("state", info.state), zap.Any("merge infos", resp.MergeInfos),
+		zap.Int64s("plans", planIDs))
 	return resp, nil
-}
-
-func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo {
-	segments := task.plan.GetSegmentBinlogs()
-	var sources []int64
-	for _, s := range segments {
-		sources = append(sources, s.GetSegmentID())
-	}
-
-	var target int64 = -1
-	if task.result != nil {
-		segments := task.result.GetSegments()
-		if len(segments) > 0 {
-			target = segments[0].GetSegmentID()
-		}
-	}
-
-	return &milvuspb.CompactionMergeInfo{
-		Sources: sources,
-		Target:  target,
-	}
-}
-
-func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
-	for _, t := range tasks {
-		switch t.state {
-		case pipelining:
-			executingCnt++
-		case executing:
-			executingCnt++
-		case completed:
-			completedCnt++
-		case failed:
-			failedCnt++
-		case timeout:
-			timeoutCnt++
-		}
-	}
-	if executingCnt != 0 {
-		state = commonpb.CompactionState_Executing
-	} else {
-		state = commonpb.CompactionState_Completed
-	}
-	return
 }
 
 // WatchChannels notifies DataCoord to watch vchannels of a collection.
@@ -1589,10 +1540,18 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	err := s.sessionManager.CheckHealth(ctx)
 	if err != nil {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: []string{err.Error()}}, nil
+		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+	if err = CheckAllChannelsWatched(s.meta, s.channelManager); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	if err = CheckCheckPointsHealth(s.meta); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {

@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -649,7 +648,6 @@ func TestTryToSealSegment(t *testing.T) {
 							{
 								EntriesNum: 10,
 								LogID:      3,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 2, 3),
 							},
 						},
 					},
@@ -674,12 +672,10 @@ func TestTryToSealSegment(t *testing.T) {
 							{
 								EntriesNum: 10,
 								LogID:      1,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 3),
 							},
 							{
 								EntriesNum: 20,
 								LogID:      2,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 2),
 							},
 						},
 					},
