@@ -535,9 +535,6 @@ func (c *compactionPlanHandler) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
-	if c.isFull() {
-		return errCompactionBusy
-	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		return err
@@ -571,12 +568,11 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 		}
 	case datapb.CompactionType_ClusteringCompaction:
 		task = &clusteringCompactionTask{
-			CompactionTask:      t,
-			meta:                c.meta,
-			sessions:            c.sessions,
-			handler:             c.handler,
-			analyzeScheduler:    c.analyzeScheduler,
-			lastUpdateStateTime: time.Now().UnixMilli(),
+			CompactionTask:   t,
+			meta:             c.meta,
+			sessions:         c.sessions,
+			handler:          c.handler,
+			analyzeScheduler: c.analyzeScheduler,
 		}
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
