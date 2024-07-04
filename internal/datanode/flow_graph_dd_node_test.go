@@ -82,7 +82,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, ddNode)
 
-			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vChannelName), ddNode.Name())
+			assert.Equal(t, fmt.Sprintf("ddNode-%s", ddNode.vChannelName), ddNode.Name())
 
 			assert.Equal(t, len(test.inSealedSegs), len(ddNode.sealedSegInfo))
 			assert.Equal(t, len(test.inGrowingSegs), len(ddNode.growingSegInfo))
