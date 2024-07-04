@@ -1,9 +1,12 @@
 package resource
 
 import (
+	"reflect"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 )
 
 var r *resourceImpl // singleton resource instance
@@ -28,12 +31,15 @@ func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceIni
 // Init initializes the singleton of resources.
 // Should be call when streaming node startup.
 func Init(opts ...optResourceInit) {
-	r = &resourceImpl{}
+	newR := &resourceImpl{}
 	for _, opt := range opts {
-		opt(r)
+		opt(newR)
 	}
-	assertNotNil(r.ETCD())
-	assertNotNil(r.StreamingCatalog())
+	assertNotNil(newR.ETCD())
+	assertNotNil(newR.StreamingCatalog())
+	// TODO: after add streaming node manager client, remove this line.
+	// assertNotNil(r.StreamingNodeManagerClient())
+	r = newR
 }
 
 // Resource access the underlying singleton of resources.
@@ -44,8 +50,9 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	etcdClient       *clientv3.Client
-	streamingCatalog metastore.StreamingCoordCataLog
+	etcdClient                 *clientv3.Client
+	streamingCatalog           metastore.StreamingCoordCataLog
+	streamingNodeManagerClient manager.ManagerClient
 }
 
 // StreamingCatalog returns the StreamingCatalog client.
@@ -58,9 +65,21 @@ func (r *resourceImpl) ETCD() *clientv3.Client {
 	return r.etcdClient
 }
 
+// StreamingNodeClient returns the streaming node client.
+func (r *resourceImpl) StreamingNodeManagerClient() manager.ManagerClient {
+	return r.streamingNodeManagerClient
+}
+
 // assertNotNil panics if the resource is nil.
 func assertNotNil(v interface{}) {
-	if v == nil {
+	iv := reflect.ValueOf(v)
+	if !iv.IsValid() {
 		panic("nil resource")
+	}
+	switch iv.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
+		if iv.IsNil() {
+			panic("nil resource")
+		}
 	}
 }

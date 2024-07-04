@@ -25,8 +25,10 @@ type balanceTimer struct {
 
 // EnableBackoffOrNot enables or disables backoff
 func (t *balanceTimer) EnableBackoff() {
-	t.enableBackoff = true
-	t.newIncomingBackOff = true
+	if !t.enableBackoff {
+		t.enableBackoff = true
+		t.newIncomingBackOff = true
+	}
 }
 
 // DisableBackoff disables backoff
