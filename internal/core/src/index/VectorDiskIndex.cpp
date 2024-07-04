@@ -375,7 +375,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       search_config[RANGE_FILTER],
                                       GetMetricType());
             }
-            auto res = index_.RangeSearch(*dataset, search_config, bitset);
+            auto res = index_.RangeSearch(dataset, search_config, bitset);
 
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
@@ -386,7 +386,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
-            auto res = index_.Search(*dataset, search_config, bitset);
+            auto res = index_.Search(dataset, search_config, bitset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to search: {}: {}",
@@ -419,11 +419,11 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 }
 
 template <typename T>
-knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
-    return this->index_.AnnIterator(*dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset);
 }
 
 template <typename T>
@@ -440,7 +440,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, index is sparse");
     }
-    auto res = index_.GetVectorByIds(*dataset);
+    auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   fmt::format("failed to get vector: {}: {}",
