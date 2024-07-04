@@ -54,6 +54,7 @@ func TestCreateProduceServer(t *testing.T) {
 
 	// Return error if create scanner failed.
 	l := mock_wal.NewMockWAL(t)
+	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
 	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1}).Return(l, nil)
 	grpcProduceServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))

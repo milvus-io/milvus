@@ -90,7 +90,7 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 
 // sendLoop sends the message to client.
 func (s *AssignmentDiscoverServer) sendLoop() error {
-	err := s.balancer.WatchBalanceResult(s.ctx, s.streamServer.SendFullAssignment)
+	err := s.balancer.WatchChannelAssignments(s.ctx, s.streamServer.SendFullAssignment)
 	if errors.Is(err, errClosedByUser) {
 		return s.streamServer.SendCloseResponse()
 	}

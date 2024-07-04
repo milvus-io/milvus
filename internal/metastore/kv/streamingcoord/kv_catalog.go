@@ -9,6 +9,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 // NewCataLog creates a new catalog instance
@@ -53,7 +55,9 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		}
 		kvs[key] = string(v)
 	}
-	return c.metaKV.MultiSave(kvs)
+	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return c.metaKV.MultiSave(partialKvs)
+	})
 }
 
 // buildPChannelInfoPath builds the path for pchannel info.
