@@ -326,11 +326,9 @@ func (node *DataNode) Start() error {
 
 		go node.importScheduler.Start()
 
-		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = util.NewTimeTickSender(node.broker, node.session.ServerID,
-				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
-			node.timeTickSender.Start()
-		}
+		node.timeTickSender = util.NewTimeTickSender(node.broker, node.session.ServerID,
+			retry.Attempts(20), retry.Sleep(time.Millisecond*100))
+		node.timeTickSender.Start()
 
 		go node.channelCheckpointUpdater.Start()
 

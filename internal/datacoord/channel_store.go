@@ -57,7 +57,6 @@ type ROChannelStore interface {
 	// GetNodeChannels for given collection
 	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
 
-	// GetNodeChannelsBy used by channel_store_v2 and channel_manager_v2 only
 	GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo
 }
 

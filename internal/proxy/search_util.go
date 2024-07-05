@@ -28,7 +28,7 @@ type rankParams struct {
 
 // parseSearchInfo returns QueryInfo and offset
 func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool) (*planpb.QueryInfo, int64, error) {
-	//0. parse iterator field
+	// 0. parse iterator field
 	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
 
 	// 1. parse offset and real topk
@@ -42,8 +42,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 	if err := validateLimit(topK); err != nil {
 		if isIterator == "True" {
-			//1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
-			//2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
+			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
+			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
 			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 		} else {
 			return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
