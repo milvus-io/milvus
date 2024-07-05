@@ -27,6 +27,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -901,14 +902,37 @@ func (q *QuotaCenter) coolOffReading(realTimeSearchRate, realTimeQueryRate, cool
 	}
 }
 
+func (q *QuotaCenter) getDenyWritingDBs() map[int64]struct{} {
+	dbIDs := make(map[int64]struct{})
+	for _, dbID := range lo.Uniq(q.collectionIDToDBID.Values()) {
+		if db, err := q.meta.GetDatabaseByID(q.ctx, dbID, typeutil.MaxTimestamp); err == nil {
+			if v := db.GetProperty(common.DatabaseForceDenyWritingKey); v != "" {
+				if dbForceDenyWritingEnabled, _ := strconv.ParseBool(v); dbForceDenyWritingEnabled {
+					dbIDs[dbID] = struct{}{}
+				}
+			}
+		}
+	}
+	return dbIDs
+}
+
 // calculateWriteRates calculates and sets dml rates.
 func (q *QuotaCenter) calculateWriteRates() error {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
+	// check force deny writing of cluster level
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
 		return q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, true, nil, nil, nil)
 	}
 
-	if err := q.checkDiskQuota(); err != nil {
+	// check force deny writing of db level
+	dbIDs := q.getDenyWritingDBs()
+	if len(dbIDs) != 0 {
+		if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, maps.Keys(dbIDs), nil, nil); err != nil {
+			return err
+		}
+	}
+
+	if err := q.checkDiskQuota(dbIDs); err != nil {
 		return err
 	}
 
@@ -1288,7 +1312,7 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 }
 
 // checkDiskQuota checks if disk quota exceeded.
-func (q *QuotaCenter) checkDiskQuota() error {
+func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 	q.diskMu.Lock()
 	defer q.diskMu.Unlock()
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
@@ -1298,6 +1322,7 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		return nil
 	}
 
+	// check disk quota of cluster level
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
@@ -1326,19 +1351,14 @@ func (q *QuotaCenter) checkDiskQuota() error {
 			log.Warn("cannot find db id for collection", zap.Int64("collection", collection))
 			continue
 		}
-		dbSizeInfo[dbID] += binlogSize
-	}
 
-	dbs := make([]int64, 0)
-	dbDiskQuota := Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat()
-	for dbID, binlogSize := range dbSizeInfo {
-		if float64(binlogSize) >= dbDiskQuota {
-			log.RatedWarn(10, "db disk quota exceeded",
-				zap.Int64("db", dbID),
-				zap.Int64("db disk usage", binlogSize),
-				zap.Float64("db disk quota", dbDiskQuota))
-			dbs = append(dbs, dbID)
+		// skip db that has already denied writing
+		if denyWritingDBs != nil {
+			if _, ok = denyWritingDBs[dbID]; ok {
+				continue
+			}
 		}
+		dbSizeInfo[dbID] += binlogSize
 	}
 
 	col2partitions := make(map[int64][]int64)
@@ -1356,13 +1376,43 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		}
 	}
 
-	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbs, collections, col2partitions)
+	dbIDs := q.checkDBDiskQuota(dbSizeInfo)
+	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbIDs, collections, col2partitions)
 	if err != nil {
 		log.Warn("fail to force deny writing", zap.Error(err))
 		return err
 	}
 	q.totalBinlogSize = total
 	return nil
+}
+
+func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
+	dbIDs := make([]int64, 0)
+	checkDiskQuota := func(dbID, binlogSize int64, quota float64) {
+		if float64(binlogSize) >= quota {
+			log.RatedWarn(10, "db disk quota exceeded",
+				zap.Int64("db", dbID),
+				zap.Int64("db disk usage", binlogSize),
+				zap.Float64("db disk quota", quota))
+			dbIDs = append(dbIDs, dbID)
+		}
+	}
+
+	//  DB properties take precedence over quota configuration for disk quota.
+	for dbID, binlogSize := range dbSizeInfo {
+		db, err := q.meta.GetDatabaseByID(q.ctx, dbID, typeutil.MaxTimestamp)
+		if err == nil {
+			if dbDiskQuotaStr := db.GetProperty(common.DatabaseDiskQuotaKey); dbDiskQuotaStr != "" {
+				if dbDiskQuotaBytes, err := strconv.ParseFloat(dbDiskQuotaStr, 64); err == nil {
+					dbDiskQuotaMB := dbDiskQuotaBytes * 1024 * 1024
+					checkDiskQuota(dbID, binlogSize, dbDiskQuotaMB)
+					continue
+				}
+			}
+		}
+		checkDiskQuota(dbID, binlogSize, Params.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
+	}
+	return dbIDs
 }
 
 func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *proxypb.Limiter {
