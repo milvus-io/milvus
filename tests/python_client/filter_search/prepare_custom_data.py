@@ -6,8 +6,9 @@ from pymilvus import (
     Collection, BulkInsertState, utility
 )
 import pandas as pd
-
+import numpy as np
 import time
+import os
 import argparse
 from loguru import logger
 import faker
@@ -39,17 +40,35 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     logger.info(f"collection {collection_name} created: {collection.describe()}")
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
+
+    # generate data
+    np.random.seed(19530)
+    train_emb_file = 'train_emb_matrix.npy'
+    test_emb_file = 'test_emb_matrix.npy'
+    test_data_size = 1000
+    if not os.path.exists(train_emb_file):
+        train_emb_matrix = np.random.random((data_size, 768))
+        np.save(train_emb_file, train_emb_matrix)
+    else:
+        train_emb_matrix = np.load(train_emb_file)
+
+    if not os.path.exists(test_emb_file):
+        test_emb_matrix = np.random.random((test_data_size, 768))
+        np.save(test_emb_file, test_emb_matrix)
+    else:
+        test_emb_matrix = np.load(test_emb_file)
+
     # create test data
     t0 = time.time()
-    test_data_size = 1000
+
     data = {
         "id": [i for i in range(test_data_size)],
-        "emb": [[random.random() for _ in range(768)] for _ in range(test_data_size)]
+        "emb": test_emb_matrix.tolist()
     }
     df = pd.DataFrame(data)
     logger.info(f"generate test data {test_data_size} cost time {time.time() - t0}")
     df.to_parquet(f"{data_dir}/test.parquet")
-
+    logger.info(f"test data {df.head()}")
     t0 = time.time()
     batch_size = 1000000
     epoch = data_size // batch_size
@@ -59,19 +78,20 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
             if remainder == 0:
                 break
             batch_size = remainder
+        start_idx = i * batch_size
+        end_idx = (i+1) * batch_size
         data = {
-            "id": [i for i in range((i-1)*batch_size, i*batch_size)],
-            "scalar_3": [str(i%3) for i in range((i-1)*batch_size, i*batch_size)],
-            "scalar_6": [str(i%6) for i in range((i-1)*batch_size, i*batch_size)],
-            "scalar_9": [str(i%9) for i in range((i-1)*batch_size, i*batch_size)],
-            "scalar_12": [str(i%12) for i in range((i-1)*batch_size, i*batch_size)],
-            "scalar_5_linear": [str(i%5) for i in range((i-1)*batch_size, i*batch_size)],
-            "emb": [[random.random() for _ in range(768)] for _ in range(batch_size)]
+            "id": [i for i in range(start_idx, end_idx)],
+            "scalar_3": [str(i%3) for i in range(start_idx, end_idx)],
+            "scalar_6": [str(i%6) for i in range(start_idx, end_idx)],
+            "scalar_9": [str(i%9) for i in range(start_idx, end_idx)],
+            "scalar_12": [str(i%12) for i in range(start_idx, end_idx)],
+            "scalar_5_linear": [str(i%5) for i in range(start_idx, end_idx)],
+            "emb": train_emb_matrix[start_idx:end_idx].tolist()
         }
         df = pd.DataFrame(data)
         df.to_parquet(f"{data_dir}/train_{i}.parquet")
-
-
+    logger.info(f"train data {df.head()}")
     logger.info(f"generate data {data_size} cost time {time.time() - t0}")
     batch_files = glob.glob(f"{data_dir}/train*.parquet")
     logger.info(f"files {batch_files}")
@@ -82,7 +102,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
                 access_key="minioadmin",
                 secret_key="minioadmin",
                 secure=False,
-            )
+        )
         for file in batch_files:
             f_name = file.split("/")[-1]
             client.fput_object("milvus-bucket", f_name, file)
@@ -133,8 +153,8 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
-    parser.add_argument("--host", type=str, default="10.104.4.50")
-    parser.add_argument("--minio_host", type=str, default="10.104.18.68")
+    parser.add_argument("--host", type=str, default="10.104.5.119")
+    parser.add_argument("--minio_host", type=str, default="10.104.32.34")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
