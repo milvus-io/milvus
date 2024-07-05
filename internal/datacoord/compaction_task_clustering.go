@@ -367,7 +367,6 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	err = t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
-		return merr.WrapErrClusteringCompactionMetaError("CleanPartitionStatsInfo", err)
 	}
 
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
