@@ -587,7 +587,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	actions := []metacache.SegmentAction{}
 
 	for _, chunk := range insert {
-		batchSize = int64(chunk.GetRowNum())
+		batchSize += int64(chunk.GetRowNum())
 		totalMemSize += float64(chunk.GetMemorySize())
 	}
 
