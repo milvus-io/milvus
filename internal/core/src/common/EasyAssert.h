@@ -116,11 +116,10 @@ FailureCStatus(int code, const std::string& msg) {
 }
 
 inline CStatus
-FailureCStatus(const std::exception* ex) {
-    if (dynamic_cast<const SegcoreError*>(ex) != nullptr) {
-        auto segcore_error = dynamic_cast<const SegcoreError*>(ex);
-        return CStatus{static_cast<int>(segcore_error->get_error_code()),
-                       strdup(ex->what())};
+FailureCStatus(std::exception* ex) {
+    if (auto segcore_err = dynamic_cast<SegcoreError*>(ex)) {
+        return CStatus{static_cast<int>(segcore_err->get_error_code()),
+                       strdup(segcore_err->what())};
     }
     return CStatus{static_cast<int>(UnexpectedError), strdup(ex->what())};
 }

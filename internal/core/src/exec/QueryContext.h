@@ -66,7 +66,7 @@ class BaseConfig {
 
     virtual const std::unordered_map<std::string, std::string>&
     values() const {
-        throw NotImplementedException("method values() is not supported");
+        PanicInfo(NotImplemented, "method values() is not supported");
     }
 
     virtual ~BaseConfig() = default;

@@ -99,7 +99,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        throw SegcoreError(
+        PanicInfo(
             RetrieveError,
             fmt::format("query results exceed the limit size ", limit_size));
     }
@@ -258,7 +258,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        throw SegcoreError(FieldIDInvalid, "unsupported system field id");
+        PanicInfo(FieldIDInvalid, "unsupported system field id");
     }
 
     auto schema = get_schema();
