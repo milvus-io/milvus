@@ -60,14 +60,14 @@ class VectorIndex : public IndexBase {
           const BitsetView& bitset,
           SearchResult& search_result) const = 0;
 
-    virtual knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const {
-        throw std::runtime_error("VectorIndex:" + this->GetIndexType() +
-                                 " didn't implement VectorIterator interface, "
-                                 "there must be sth wrong in the code");
+        PanicInfo(NotImplemented,
+                  "VectorIndex:" + this->GetIndexType() +
+                      " didn't implement VectorIterator interface, "
+                      "there must be sth wrong in the code");
     }
 
     virtual const bool

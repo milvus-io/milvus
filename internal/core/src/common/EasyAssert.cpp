@@ -45,15 +45,15 @@ EasyAssertInfo(bool value,
     if (!value) {
         std::string info;
         if (!expr_str.empty()) {
-            info += fmt::format("Assert \"{}\" at {}:{}\n",
-                                expr_str,
-                                std::string(filename),
-                                std::to_string(lineno));
+            info += fmt::format("Assert \"{}\" ", expr_str);
         }
         if (!extra_info.empty()) {
             info += " => " + std::string(extra_info);
         }
+        info += fmt::format(
+            " at {}:{}\n", std::string(filename), std::to_string(lineno));
         std::cout << info << std::endl;
+
         throw SegcoreError(error_code, std::string(info));
     }
 }

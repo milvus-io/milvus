@@ -100,3 +100,15 @@ func setStartTime(startTime int64) compactionTaskOpt {
 		task.StartTime = startTime
 	}
 }
+
+func setRetryTimes(retryTimes int32) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.RetryTimes = retryTimes
+	}
+}
+
+func setLastStateStartTime(lastStateStartTime int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.LastStateStartTime = lastStateStartTime
+	}
+}

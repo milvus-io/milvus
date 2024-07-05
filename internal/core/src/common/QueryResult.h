@@ -93,7 +93,7 @@ struct VectorIterator {
         return !heap_.empty();
     }
     bool
-    AddIterator(std::shared_ptr<knowhere::IndexNode::iterator> iter) {
+    AddIterator(knowhere::IndexNode::IteratorPtr iter) {
         if (!sealed && iter != nullptr) {
             iterators_.emplace_back(iter);
             return true;
@@ -130,7 +130,7 @@ struct VectorIterator {
     }
 
  private:
-    std::vector<std::shared_ptr<knowhere::IndexNode::iterator>> iterators_;
+    std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     std::priority_queue<std::shared_ptr<OffsetDisPair>,
                         std::vector<std::shared_ptr<OffsetDisPair>>,
                         OffsetDisPairComparator>
@@ -161,8 +161,7 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         int64_t rows_per_chunk,
-        const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
-            kw_iterators) {
+        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
                    "wrong state",

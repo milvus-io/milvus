@@ -148,7 +148,6 @@ func (m *timeTickSender) cleanStatesCache(lastSentTss map[string]uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sizeBeforeClean := len(m.statsCache)
-	log := log.With(zap.Any("lastSentTss", lastSentTss), zap.Int("sizeBeforeClean", sizeBeforeClean))
 	for channelName, lastSentTs := range lastSentTss {
 		_, ok := m.statsCache[channelName]
 		if ok {
@@ -162,7 +161,7 @@ func (m *timeTickSender) cleanStatesCache(lastSentTss map[string]uint64) {
 			delete(m.statsCache, channelName)
 		}
 	}
-	log.RatedDebug(30, "timeTickSender stats", zap.Int("sizeAfterClean", len(m.statsCache)))
+	log.RatedDebug(30, "timeTickSender stats", zap.Any("lastSentTss", lastSentTss), zap.Int("sizeBeforeClean", sizeBeforeClean), zap.Int("sizeAfterClean", len(m.statsCache)))
 }
 
 func (m *timeTickSender) sendReport(ctx context.Context) error {

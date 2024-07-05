@@ -45,8 +45,7 @@ class OpenDALChunkManager : public ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) override {
-        throw SegcoreError(NotImplemented,
-                           GetName() + "Read with offset not implement");
+        PanicInfo(NotImplemented, GetName() + "Read with offset not implement");
     }
 
     void
@@ -54,8 +53,8 @@ class OpenDALChunkManager : public ChunkManager {
           uint64_t offset,
           void* buf,
           uint64_t len) override {
-        throw SegcoreError(NotImplemented,
-                           GetName() + "Write with offset not implement");
+        PanicInfo(NotImplemented,
+                  GetName() + "Write with offset not implement");
     }
 
     uint64_t

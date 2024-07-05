@@ -27,8 +27,7 @@ class SubSearchResult {
         int64_t topk,
         const MetricType& metric_type,
         int64_t round_decimal,
-        const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
-            iters)
+        const std::vector<knowhere::IndexNode::IteratorPtr>& iters)
         : num_queries_(num_queries),
           topk_(topk),
           round_decimal_(round_decimal),
@@ -47,7 +46,7 @@ class SubSearchResult {
               topk,
               metric_type,
               round_decimal,
-              std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>{}) {
+              std::vector<knowhere::IndexNode::IteratorPtr>{}) {
     }
 
     SubSearchResult(SubSearchResult&& other) noexcept
@@ -114,7 +113,7 @@ class SubSearchResult {
     void
     merge(const SubSearchResult& other);
 
-    const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
+    const std::vector<knowhere::IndexNode::IteratorPtr>&
     chunk_iterators() {
         return this->chunk_iterators_;
     }
@@ -131,7 +130,7 @@ class SubSearchResult {
     knowhere::MetricType metric_type_;
     std::vector<int64_t> seg_offsets_;
     std::vector<float> distances_;
-    std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>
+    std::vector<knowhere::IndexNode::IteratorPtr>
         chunk_iterators_;
 };
 
