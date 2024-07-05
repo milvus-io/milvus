@@ -1,6 +1,9 @@
 package adaptor
 
 import (
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -18,6 +21,7 @@ func newScannerAdaptor(
 	cleanup func(),
 ) wal.Scanner {
 	s := &scannerAdaptorImpl{
+		logger:        log.With(zap.String("name", name), zap.String("channel", l.Channel().Name)),
 		innerWAL:      l,
 		readOption:    readOption,
 		sendingCh:     make(chan message.ImmutableMessage, 1),
@@ -33,6 +37,7 @@ func newScannerAdaptor(
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
+	logger        *log.MLogger
 	innerWAL      walimpls.WALImpls
 	readOption    wal.ReadOption
 	sendingCh     chan message.ImmutableMessage
@@ -96,8 +101,9 @@ func (s *scannerAdaptorImpl) getEventCh(scanner walimpls.ScannerImpls) (<-chan m
 		// we always need to recv message from upstream to avoid starve.
 		return scanner.Chan(), nil
 	}
-	// TODO: configurable pending count.
-	if s.pendingQueue.Len()+s.reorderBuffer.Len() > 1024 {
+	// TODO: configurable pending buffer count.
+	// If the pending queue is full, we need to wait until it's consumed to avoid scanner overloading.
+	if s.pendingQueue.Len() > 16 {
 		return nil, s.sendingCh
 	}
 	return scanner.Chan(), s.sendingCh
@@ -107,8 +113,6 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		// If the time tick message incoming,
 		// the reorder buffer can be consumed into a pending queue with latest timetick.
-
-		// TODO: !!! should we drop the unexpected broken timetick rule message.
 		s.pendingQueue.Add(s.reorderBuffer.PopUtilTimeTick(msg.TimeTick()))
 		return
 	}
@@ -117,5 +121,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.
-	s.reorderBuffer.Push(msg)
+	if err := s.reorderBuffer.Push(msg); err != nil {
+		s.logger.Warn("failed to push message into reorder buffer",
+			zap.Any("msgID", msg.MessageID()),
+			zap.Uint64("timetick", msg.TimeTick()),
+			zap.String("vchannel", msg.VChannel()),
+			zap.Error(err))
+	}
 }
