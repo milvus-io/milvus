@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/FieldMeta.h"
+#include "common/Geometry.h"
 #include "common/Types.h"
 #include "mmap/Types.h"
 #include "storage/Util.h"
@@ -130,6 +131,27 @@ WriteFieldData(File& file,
                     ssize_t written_data =
                         file.FWrite(padded_string.data(), padded_string.size());
                     if (written_data < padded_string.size()) {
+                        THROW_FILE_WRITE_ERROR
+                    }
+                    total_written += written_data;
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                // write as: |size|data|size|data......
+                for (ssize_t i = 0; i < data->get_num_rows(); ++i) {
+                    indices.push_back(total_written);
+                    auto geo_ptr =
+                        static_cast<const std::string*>(data->RawValue(i));
+                    ssize_t written_data_size =
+                        file.WriteInt<uint32_t>(geo_ptr->size());
+                    if (written_data_size != sizeof(uint32_t)) {
+                        THROW_FILE_WRITE_ERROR
+                    }
+                    total_written += written_data_size;
+                    ssize_t written_data =
+                        file.Write(geo_ptr->data(), geo_ptr->size());
+                    if (written_data < geo_ptr->size()) {
                         THROW_FILE_WRITE_ERROR
                     }
                     total_written += written_data;

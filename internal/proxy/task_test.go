@@ -69,6 +69,7 @@ const (
 	testBinaryVecField   = "bvec"
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
+	testGeometryField    = "geometry"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -84,6 +85,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testBinaryVecField,
 		testFloat16VecField,
 		testBFloat16VecField,
+		testGeometryField,
 		testVecDim,
 		collectionName)
 }
@@ -226,6 +228,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
 	floatVecField, binaryVecField, float16VecField, bfloat16VecField string,
+	geometryField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -339,6 +342,16 @@ func constructCollectionSchemaWithAllType(
 		IndexParams: nil,
 		AutoID:      false,
 	}
+	g := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         geometryField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Geometry,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
 
 	if enableMultipleVectorFields {
 		return &schemapb.CollectionSchema{
@@ -355,6 +368,7 @@ func constructCollectionSchemaWithAllType(
 				bVec,
 				f16Vec,
 				bf16Vec,
+				g,
 			},
 		}
 	}
@@ -371,6 +385,7 @@ func constructCollectionSchemaWithAllType(
 			d,
 			fVec,
 			// bVec,
+			g,
 		},
 	}
 }

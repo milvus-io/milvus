@@ -25,12 +25,15 @@
 #include "exec/expression/CompareExpr.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/ExistsExpr.h"
+#include "exec/expression/GISFunctionFilterExpr.h"
 #include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "expr/ITypeExpr.h"
 #include "exec/expression/ValueExpr.h"
+#include "log/Log.h"
 
 #include <memory>
 
@@ -282,6 +285,16 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             column_expr,
             "PhyColumnExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
+    } else if (auto casted_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::GISFunctioinFilterExpr>(expr)) {
+        LOG_WARN("trans to phygisexpr!!");
+        result = std::make_shared<PhyGISFunctionFilterExpr>(
+            compiled_inputs,
+            casted_expr,
+            "PhyGISFunctionFilterExpr",
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());

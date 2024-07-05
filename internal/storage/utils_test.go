@@ -1003,12 +1003,35 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 		case schemapb.DataType_JSON:
 			data := testutils.GenerateBytesArray(numRows)
 			f := &schemapb.FieldData{
-				Type:      schemapb.DataType_Array,
+				Type:      schemapb.DataType_JSON,
 				FieldName: field.GetName(),
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], d)
+			}
+		case schemapb.DataType_Geometry:
+			data := testutils.GenerateGeometryWktArray(numRows)
+			f := &schemapb.FieldData{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: field.GetName(),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
 								Data: data,
 							},
 						},

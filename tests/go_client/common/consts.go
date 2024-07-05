@@ -13,6 +13,7 @@ const (
 	DefaultDoubleFieldName      = "double"
 	DefaultVarcharFieldName     = "varchar"
 	DefaultJSONFieldName        = "json"
+	DefaultGeometryName         = "geometry"
 	DefaultArrayFieldName       = "array"
 	DefaultFloatVecFieldName    = "floatVec"
 	DefaultBinaryVecFieldName   = "binaryVec"

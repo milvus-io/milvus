@@ -248,7 +248,7 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	var expFields []string
 	var idx index.Index
 	for _, field := range schema.Fields {
-		if field.DataType == entity.FieldTypeJSON {
+		if field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeGeometry {
 			idx = index.NewAutoIndex(entity.IP)
 			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 			common.CheckErr(t, err, false, fmt.Sprintf("create auto index on type:%s is not supported", field.DataType))
@@ -461,7 +461,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 	for _, field := range schema.Fields {
 		if hp.SupportScalarIndexFieldType(field.DataType) {
 			if field.DataType == entity.FieldTypeVarChar || field.DataType == entity.FieldTypeBool ||
-				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
+				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray || field.DataType == entity.FieldTypeGeometry {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				common.CheckErr(t, err, false, "STL_SORT are only supported on numeric field")
 			} else {

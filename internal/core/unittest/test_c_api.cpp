@@ -4057,7 +4057,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto N = ROW_COUNT;
     uint64_t ts_offset = 1000;
-    auto dataset = DataGen(schema, N, ts_offset);
+    auto dataset = DataGen(schema, N, 42, ts_offset);
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + BIAS * DIM;
 

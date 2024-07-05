@@ -48,6 +48,10 @@ fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
 pushd ${BUILD_OUTPUT_DIR}
+GEOS_CONFIG_FILE="bin/geos-config"
+if [ -f "$GEOS_CONFIG_FILE" ]; then
+  rm -f "$GEOS_CONFIG_FILE"
+fi
 
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"

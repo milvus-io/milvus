@@ -212,6 +212,22 @@ func (s *MockSuiteBase) getJSONBytesFieldData(name string, data [][]byte, isDyna
 	}
 }
 
+func (s *MockSuiteBase) getGeometryBytesFieldData(name string, data [][]byte) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Geometry,
+		FieldName: name,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{
+						Data: data,
+					},
+				},
+			},
+		},
+	}
+}
+
 func (s *MockSuiteBase) getFloatVectorFieldData(name string, dim int64, data []float32) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_FloatVector,
