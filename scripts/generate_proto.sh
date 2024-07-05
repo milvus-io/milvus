@@ -25,7 +25,8 @@ done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 PROTO_DIR=$ROOT_DIR/internal/proto/
-API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
+# API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
+API_PROTO_DIR=/home/adam/milvus-proto/proto
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
 

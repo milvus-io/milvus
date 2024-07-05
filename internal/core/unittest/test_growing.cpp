@@ -150,6 +150,8 @@ TEST_P(GrowingTest, FillData) {
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geospatial_field =
+        schema->AddDebugField("geospatial", DataType::GEOSPATIAL);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -213,6 +215,8 @@ TEST_P(GrowingTest, FillData) {
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
             segment->bulk_subscript(json_field, ids_ds->GetIds(), num_inserted);
+        auto geospatial_result = segment->bulk_subscript(
+            geospatial_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
             int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
@@ -241,6 +245,8 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(geospatial_result->scalars().geospatial_data().data_size(),
+                  num_inserted);
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);

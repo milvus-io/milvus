@@ -123,6 +123,20 @@ func genEmptyJSONFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyGeospatialFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeospatialData{GeospatialData: &schemapb.GeoSpatialArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyBinaryVectorFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	dim, err := GetDim(field)
 	if err != nil {
@@ -246,6 +260,8 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyArrayFieldData(field), nil
 	case schemapb.DataType_JSON:
 		return genEmptyJSONFieldData(field), nil
+	case schemapb.DataType_GeoSpatial:
+		return genEmptyGeospatialFieldData(field), nil
 	case schemapb.DataType_BinaryVector:
 		return genEmptyBinaryVectorFieldData(field)
 	case schemapb.DataType_FloatVector:

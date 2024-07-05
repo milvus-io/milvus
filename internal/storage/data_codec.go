@@ -365,6 +365,16 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 				return err
 			}
 		}
+	case schemapb.DataType_GeoSpatial:
+		for i, singleGeospatial := range singleData.(*GeospatialFieldData).Data {
+			isValid := true
+			if len(singleData.(*GeospatialFieldData).ValidData) != 0 {
+				isValid = singleData.(*GeospatialFieldData).ValidData[i]
+			}
+			if err = eventWriter.AddOneGeospatialToPayload(singleGeospatial, isValid); err != nil {
+				return err
+			}
+		}
 	case schemapb.DataType_BinaryVector:
 		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim); err != nil {
 			return err
@@ -597,6 +607,17 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		jsonFieldData.Data = append(jsonFieldData.Data, singleData...)
 		jsonFieldData.ValidData = append(jsonFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = jsonFieldData
+		return len(singleData), nil
+	case schemapb.DataType_GeoSpatial:
+		singleData := data.([][]byte)
+		if fieldData == nil {
+			fieldData = &GeospatialFieldData{Data: make([][]byte, 0, rowNum)}
+		}
+		geospatialFieldData := fieldData.(*GeospatialFieldData)
+
+		geospatialFieldData.Data = append(geospatialFieldData.Data, singleData...)
+		geospatialFieldData.ValidData = append(geospatialFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = geospatialFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_BinaryVector:

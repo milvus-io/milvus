@@ -85,10 +85,7 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
-  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
-  # It is recommended to change this parameter before starting Milvus for the first time.
-  path: /var/lib/milvus/data/
+  path: /tmp/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -214,11 +211,9 @@ pulsar:
 #   readTimeout: 10
 
 rocksmq:
-  # Prefix of the key to where Milvus stores data in RocksMQ.
-  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
-  # It is recommended to change this parameter before starting Milvus for the first time.
-  # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
-  path: /var/lib/milvus/rdb_data
+  # The path where the message is stored in rocksmq
+  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
+  path: /tmp/milvus/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
   rocksmqPageSize: 67108864 # The maximum size of messages in each page in RocksMQ. Messages in RocksMQ are checked and cleared (when expired) in batch based on this parameters. Unit: Byte.
   retentionTimeInMinutes: 4320 # The maximum retention time of acked messages in RocksMQ. Acked messages in RocksMQ are retained for the specified period of time and then cleared. Unit: Minute.
@@ -427,7 +422,9 @@ queryNode:
     # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
-    growingMmapEnabled: false
+    mmapEnabled: true # Enable mmap for loading data
+    mmapDirPath: /tmp/mmap #Set memory-mapped directory path, if you leave mmapDirPath unspecified, the memory-mapped files will be stored in {localStorage.path}/ mmap by default. 
+    growingMmapEnabled: true # Enable mmap for using in growing raw data
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:

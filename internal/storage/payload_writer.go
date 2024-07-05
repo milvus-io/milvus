@@ -206,6 +206,25 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []boo
 			isValid = validData[0]
 		}
 		return w.AddOneJSONToPayload(val, isValid)
+	case schemapb.DataType_GeoSpatial:
+		val, ok := data.([]byte)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneGeospatialToPayload(val, isValid)
 	case schemapb.DataType_BinaryVector:
 		val, ok := data.([]byte)
 		if !ok {
@@ -546,6 +565,29 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 	return nil
 }
 
+func (w *NativePayloadWriter) AddOneGeospatialToPayload(data []byte, isValid bool) error {
+	if w.finished {
+		return errors.New("can't append data to finished geospatial payload")
+	}
+
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
+	}
+
+	builder, ok := w.builder.(*array.BinaryBuilder)
+	if !ok {
+		return errors.New("failed to cast geospatialBuilder")
+	}
+
+	if !isValid {
+		builder.AppendNull()
+	} else {
+		builder.Append(data)
+	}
+
+	return nil
+}
+
 func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int) error {
 	if w.finished {
 		return errors.New("can't append data to finished binary vector payload")
@@ -751,6 +793,8 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 	case schemapb.DataType_Array:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_JSON:
+		return &arrow.BinaryType{}
+	case schemapb.DataType_GeoSpatial:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_FloatVector:
 		return &arrow.FixedSizeBinaryType{

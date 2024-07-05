@@ -19,7 +19,9 @@
 
 #include "common/Common.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "index/ScalarIndex.h"
 #include "mmap/Utils.h"
 #include "log/Log.h"
@@ -143,6 +145,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 auto& json_data = FIELD_DATA(data, json);
                 for (auto& json_bytes : json_data) {
                     result += json_bytes.size();
+                }
+                break;
+            }
+            case DataType::GEOSPATIAL: {
+                auto& geospatial_data = FIELD_DATA(data, geospatial);
+                for (auto& geospatial_bytes : geospatial_data) {
+                    result += geospatial_bytes.size();
                 }
                 break;
             }
@@ -292,6 +301,14 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             }
             break;
         }
+        case DataType::GEOSPATIAL: {
+            auto obj = scalar_array->mutable_geospatial_data();
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
         case DataType::ARRAY: {
             auto obj = scalar_array->mutable_array_data();
             obj->mutable_data()->Reserve(count);
@@ -435,6 +452,14 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::JSON: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_json_data();
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = data[i];
+            }
+            break;
+        }
+        case DataType::GEOSPATIAL: {
+            auto data = reinterpret_cast<const std::string*>(data_raw);
+            auto obj = scalar_array->mutable_geospatial_data();
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
             }
@@ -652,6 +677,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             case DataType::JSON: {
                 auto& data = FIELD_DATA(src_field_data, json);
                 auto obj = scalar_array->mutable_json_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::GEOSPATIAL: {
+                auto& data = FIELD_DATA(src_field_data, geospatial);
+                auto obj = scalar_array->mutable_geospatial_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }

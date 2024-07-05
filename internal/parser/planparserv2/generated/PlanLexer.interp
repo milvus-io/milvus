@@ -87,6 +87,13 @@ ArrayContains
 ArrayContainsAll
 ArrayContainsAny
 ArrayLength
+GeospatialEuqals
+GeospatialTouches
+GeospatialOverlaps
+GeospatialCrosses
+GeospatialContains
+GeospatialIntersects
+GeospatialWithin
 BooleanConstant
 IntegerConstant
 FloatingConstant
@@ -135,6 +142,13 @@ ArrayContains
 ArrayContainsAll
 ArrayContainsAny
 ArrayLength
+GeospatialEuqals
+GeospatialTouches
+GeospatialOverlaps
+GeospatialCrosses
+GeospatialContains
+GeospatialIntersects
+GeospatialWithin
 BooleanConstant
 IntegerConstant
 FloatingConstant

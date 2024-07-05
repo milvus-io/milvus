@@ -134,6 +134,22 @@ message JSONContainsExpr {
   bool elements_same_type = 4;
 }
 
+message GISFunctionFilterExpr{
+  ColumnInfo column_info = 1;
+  string wkt_string = 2;
+  enum GISOp {
+    Invalid = 0;
+    Equals = 1;
+    Touches = 2;
+    Overlaps = 3;
+    Crosses = 4;
+    Contains = 5;
+    Intersects = 6;
+    Within = 7;
+  }
+  GISOp op = 3;
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -191,6 +207,7 @@ message Expr {
     ExistsExpr exists_expr = 11;
     AlwaysTrueExpr always_true_expr = 12;
     JSONContainsExpr json_contains_expr = 13;
+    GISFunctionFilterExpr gisfunction_filter_expr = 14;
   };
 }
 

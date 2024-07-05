@@ -256,6 +256,46 @@ type JSONIdentifierContext struct {
 	ExprContext
 }
 
+func NewGeospatialEuqalsContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *GeospatialEuqalsContext {
+	var p = new(GeospatialEuqalsContext)
+
+	InitEmptyExprContext(&p.ExprContext)
+	p.parser = parser
+	p.CopyAll(ctx.(*ExprContext))
+
+	return p
+}
+
+func (s *GeospatialEuqalsContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *GeospatialEuqalsContext) GeospatialEuqals() antlr.TerminalNode {
+	return s.GetToken(PlanParserGeospatialEuqals, 0)
+}
+
+func (s *GeospatialEuqalsContext) Identifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserIdentifier, 0)
+}
+
+func (s *GeospatialEuqalsContext) StringLiteral() antlr.TerminalNode {
+	return s.GetToken(PlanParserStringLiteral, 0)
+}
+
+func (s *GeospatialEuqalsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case PlanVisitor:
+		return t.VisitGeospatialEuqals(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+type JSONIdentifierContext struct {
+	ExprContext
+}
+
 func NewJSONIdentifierContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *JSONIdentifierContext {
 	var p = new(JSONIdentifierContext)
 
@@ -386,6 +426,46 @@ func (s *FloatingContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 	switch t := visitor.(type) {
 	case PlanVisitor:
 		return t.VisitFloating(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+type JSONContainsAllContext struct {
+	ExprContext
+}
+
+func NewGeospatialContainsContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *GeospatialContainsContext {
+	var p = new(GeospatialContainsContext)
+
+	InitEmptyExprContext(&p.ExprContext)
+	p.parser = parser
+	p.CopyAll(ctx.(*ExprContext))
+
+	return p
+}
+
+func (s *GeospatialContainsContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *GeospatialContainsContext) GeospatialContains() antlr.TerminalNode {
+	return s.GetToken(PlanParserGeospatialContains, 0)
+}
+
+func (s *GeospatialContainsContext) Identifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserIdentifier, 0)
+}
+
+func (s *GeospatialContainsContext) StringLiteral() antlr.TerminalNode {
+	return s.GetToken(PlanParserStringLiteral, 0)
+}
+
+func (s *GeospatialContainsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case PlanVisitor:
+		return t.VisitGeospatialContains(s)
 
 	default:
 		return t.VisitChildren(s)
@@ -706,6 +786,46 @@ func (s *LikeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 	switch t := visitor.(type) {
 	case PlanVisitor:
 		return t.VisitLike(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+type LogicalAndContext struct {
+	ExprContext
+}
+
+func NewGeospatialWithinContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *GeospatialWithinContext {
+	var p = new(GeospatialWithinContext)
+
+	InitEmptyExprContext(&p.ExprContext)
+	p.parser = parser
+	p.CopyAll(ctx.(*ExprContext))
+
+	return p
+}
+
+func (s *GeospatialWithinContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *GeospatialWithinContext) GeospatialWithin() antlr.TerminalNode {
+	return s.GetToken(PlanParserGeospatialWithin, 0)
+}
+
+func (s *GeospatialWithinContext) Identifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserIdentifier, 0)
+}
+
+func (s *GeospatialWithinContext) StringLiteral() antlr.TerminalNode {
+	return s.GetToken(PlanParserStringLiteral, 0)
+}
+
+func (s *GeospatialWithinContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case PlanVisitor:
+		return t.VisitGeospatialWithin(s)
 
 	default:
 		return t.VisitChildren(s)
@@ -2657,8 +2777,8 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 			}
 		}
 
-	case PlanParserArrayLength:
-		localctx = NewArrayLengthContext(p, localctx)
+	case PlanParserGeospatialEuqals:
+		localctx = NewGeospatialEuqalsContext(p, localctx)
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 		{

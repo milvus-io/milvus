@@ -175,6 +175,9 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateStringArray(rows))
 		case schemapb.DataType_JSON:
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateJSONArray(rows))
+		case schemapb.DataType_GeoSpatial:
+			// wkb bytes array
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateGeospatialArray(rows))
 		case schemapb.DataType_Array:
 			switch f.GetElementType() {
 			case schemapb.DataType_Bool:
@@ -427,6 +430,14 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				return string(bs)
 			}), validData)
 			columns = append(columns, builder.NewStringArray())
+		case schemapb.DataType_GeoSpatial:
+			builder := array.NewStringBuilder(mem)
+			wkbData := insertData.Data[fieldID].(*storage.GeospatialFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.GeospatialFieldData).ValidData
+			builder.AppendValues(lo.Map(wkbData, func(bs []byte, _ int) string {
+				return string(bs)
+			}), validData)
+			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_Array:
 			data := insertData.Data[fieldID].(*storage.ArrayFieldData).Data
 			validData := insertData.Data[fieldID].(*storage.ArrayFieldData).ValidData
@@ -582,6 +593,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				columns = append(columns, builder.NewListArray())
 			}
 		}
+
 	}
 	return columns, nil
 }

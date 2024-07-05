@@ -7,6 +7,10 @@ type BasePlanVisitor struct {
 	*antlr.BaseParseTreeVisitor
 }
 
+func (v *BasePlanVisitor) VisitGeospatialEuqals(ctx *GeospatialEuqalsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -20,6 +24,10 @@ func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitGeospatialContains(ctx *GeospatialContainsContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -43,6 +51,10 @@ func (v *BasePlanVisitor) VisitLike(ctx *LikeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitGeospatialWithin(ctx *GeospatialWithinContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitLogicalAnd(ctx *LogicalAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -59,6 +71,10 @@ func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitGeospatialCrosses(ctx *GeospatialCrossesContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitReverseRange(ctx *ReverseRangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -72,6 +88,10 @@ func (v *BasePlanVisitor) VisitEmptyArray(ctx *EmptyArrayContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitAddSub(ctx *AddSubContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitGeospatialTouches(ctx *GeospatialTouchesContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -96,6 +116,10 @@ func (v *BasePlanVisitor) VisitJSONContains(ctx *JSONContainsContext) interface{
 }
 
 func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitGeospatialIntersects(ctx *GeospatialIntersectsContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

@@ -25,6 +25,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "ogr_geometry.h"
 #include "pb/plan.pb.h"
 
 namespace milvus {
@@ -631,6 +632,34 @@ class CompareExpr : public ITypeFilterExpr {
     const DataType left_data_type_;
     const DataType right_data_type_;
     const proto::plan::OpType op_type_;
+};
+
+class GISFunctioinFilterExpr : public ITypeFilterExpr {
+ public:
+    GISFunctioinFilterExpr(ColumnInfo cloumn,
+                           GISFunctionType op,
+                           const std::string wkb)
+        : column_(cloumn), op_(op), wkb_(wkb){};
+    std::string
+    ToString() const override {
+        OGRGeometry* geo = nullptr;
+        OGRGeometryFactory::createFromWkb(
+            wkb_.data(), nullptr, &geo, wkb_.size());
+        if (!geo) {
+            return "";
+        }
+        return fmt::format(
+            "GISFunctioinFilterExpr:[Column: {}, Operator: {} "
+            "WktValue: {}]",
+            column_.ToString(),
+            GISFunctionFilterExpr_GISOp_Name(op_),
+            geo->exportToWkt());
+    }
+
+ public:
+    const ColumnInfo column_;
+    GISFunctionType op_;
+    const std::string wkb_;
 };
 
 class JsonContainsExpr : public ITypeFilterExpr {

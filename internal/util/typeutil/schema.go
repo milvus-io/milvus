@@ -62,6 +62,11 @@ func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error)
 				Name: field.Name,
 				Type: arrow.BinaryTypes.Binary,
 			})
+		case schemapb.DataType_GeoSpatial:
+			arrowFields = append(arrowFields, arrow.Field{
+				Name: field.Name,
+				Type: arrow.BinaryTypes.Binary,
+			})
 		case schemapb.DataType_BinaryVector:
 			dim, err := storage.GetDimFromParams(field.TypeParams)
 			if err != nil {

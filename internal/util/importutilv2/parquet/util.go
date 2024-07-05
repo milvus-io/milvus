@@ -175,6 +175,8 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.StringType{}, nil
 	case schemapb.DataType_JSON:
 		return &arrow.StringType{}, nil
+	case schemapb.DataType_GeoSpatial:
+		return &arrow.StringType{}, nil
 	case schemapb.DataType_Array:
 		elemType, err := convertToArrowDataType(field, true)
 		if err != nil {

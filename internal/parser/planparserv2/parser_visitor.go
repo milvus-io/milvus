@@ -1348,3 +1348,213 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 		nodeDependent: true,
 	}
 }
+
+func (v *ParserVisitor) VisitGeospatialEuqals(ctx *parser.GeospatialEuqalsContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Equals,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialTouches(ctx *parser.GeospatialTouchesContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Touches,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialOverlaps(ctx *parser.GeospatialOverlapsContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Overlaps,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialCrosses(ctx *parser.GeospatialCrossesContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Crosses,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialContains(ctx *parser.GeospatialContainsContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Contains,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialIntersects(ctx *parser.GeospatialIntersectsContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Intersects,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitGeospatialWithin(ctx *parser.GeospatialWithinContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.StringLiteral())
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil ||
+		(!typeutil.IsGeospatialType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"Euqals operation are only supported on geospatial fields now, got: %s", ctx.GetText())
+	}
+	element := ctx.GetChild(4).(antlr.ParseTree).GetText() // the wkt input
+	log.Warn(element)
+	if err := getError(element); err != nil {
+		return err
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				WktString:  element[1 : len(element)-1],
+				Op:         planpb.GISFunctionFilterExpr_Within,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}

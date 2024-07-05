@@ -145,6 +145,11 @@ func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
 			return schemapb.DataType_Int64, nil
 		}
 	}
+	if typeutil.IsGeospatialType(lDataType) {
+		if typeutil.IsGeospatialType(rDataType) || typeutil.IsJSONType(rDataType) {
+			return schemapb.DataType_GeoSpatial, nil
+		}
+	}
 	if typeutil.IsFloatingType(lDataType) {
 		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
 			return schemapb.DataType_Double, nil

@@ -45,6 +45,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "Json.h"
+#include "GeoSpatial.h"
 
 #include "CustomBitset.h"
 
@@ -74,6 +75,7 @@ enum class DataType {
     VARCHAR = 21,
     ARRAY = 22,
     JSON = 23,
+    GEOSPATIAL = 24,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -179,6 +181,8 @@ GetDataTypeName(DataType data_type) {
             return "array";
         case DataType::JSON:
             return "json";
+        case DataType::GEOSPATIAL:
+            return "geospatial";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY:
@@ -214,6 +218,7 @@ using GroupByValueType = std::variant<std::monostate,
                                       bool,
                                       std::string>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
+using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
@@ -261,13 +266,19 @@ IsJsonDataType(DataType data_type) {
 }
 
 inline bool
+IsGeoSpatialDataType(DataType data_type) {
+    return data_type == DataType::GEOSPATIAL;
+}
+
+inline bool
 IsArrayDataType(DataType data_type) {
     return data_type == DataType::ARRAY;
 }
 
 inline bool
 IsBinaryDataType(DataType data_type) {
-    return IsJsonDataType(data_type) || IsArrayDataType(data_type);
+    return IsJsonDataType(data_type) || IsArrayDataType(data_type) ||
+           IsGeoSpatialDataType(data_type);
 }
 
 inline bool
@@ -291,6 +302,11 @@ IsPrimitiveType(proto::schema::DataType type) {
 inline bool
 IsJsonType(proto::schema::DataType type) {
     return type == proto::schema::DataType::JSON;
+}
+
+inline bool
+IsGeoSpatialType(proto::schema::DataType type) {
+    return type == proto::schema::DataType::GeoSpatial;
 }
 
 inline bool
@@ -536,6 +552,15 @@ struct TypeTraits<DataType::JSON> {
 };
 
 template <>
+struct TypeTraits<DataType::GEOSPATIAL> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::GEOSPATIAL;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "GEOSPATIAL";
+};
+
+template <>
 struct TypeTraits<DataType::ROW> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ROW;
@@ -604,6 +629,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::JSON:
                 name = "JSON";
+                break;
+            case milvus::DataType::GEOSPATIAL:
+                name = "GEOSPATIAL";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";

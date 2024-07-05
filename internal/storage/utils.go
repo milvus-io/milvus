@@ -673,6 +673,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
 				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
 			}
+		case schemapb.DataType_GeoSpatial:
+			srcData := srcField.GetScalars().GetGeospatialData().GetData()
+			validData := srcField.GetValidData()
+			fieldData = &GeospatialFieldData{
+				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
+				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+			}
 
 		default:
 			return nil, merr.WrapErrServiceInternal("data type not handled", field.GetDataType().String())
@@ -1192,6 +1199,20 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					},
 				},
 				ValidData: rawData.ValidData,
+			}
+		case *GeospatialFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_GeoSpatial,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeospatialData{
+							GeospatialData: &schemapb.GeoSpatialArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
 			}
 		case *FloatVectorFieldData:
 			fieldData = &schemapb.FieldData{

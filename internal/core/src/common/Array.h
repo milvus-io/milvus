@@ -218,7 +218,9 @@ class Array {
                 return true;
             }
             case DataType::STRING:
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            //treat geospatial as wkb string
+            case DataType::GEOSPATIAL: {
                 for (int i = 0; i < length_; ++i) {
                     if (get_data<std::string_view>(i) !=
                         arr.get_data<std::string_view>(i)) {
@@ -331,6 +333,13 @@ class Array {
                 }
                 break;
             }
+            case DataType::GEOSPATIAL: {
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<std::string>(j);
+                    data_array.mutable_geospatial_data()->add_data(element);
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -418,7 +427,8 @@ class Array {
                 return true;
             }
             case DataType::VARCHAR:
-            case DataType::STRING: {
+            case DataType::STRING:
+            case DataType::GEOSPATIAL: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
@@ -554,6 +564,13 @@ class ArrayView {
                 }
                 break;
             }
+            case DataType::GEOSPATIAL: {
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<std::string>(j);
+                    data_array.mutable_geospatial_data()->add_data(element);
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -643,7 +660,8 @@ class ArrayView {
                 return true;
             }
             case DataType::VARCHAR:
-            case DataType::STRING: {
+            case DataType::STRING:
+            case DataType::GEOSPATIAL: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {

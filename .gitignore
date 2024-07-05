@@ -105,3 +105,7 @@ internal/core/src/pb/*.pb.h
 internal/core/src/pb/*.pb.cc
 *.pb.go
 **/legacypb/*.pb.go
+
+rebuild_milvus.sh
+insert_data.py
+query.py

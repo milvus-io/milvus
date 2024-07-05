@@ -114,6 +114,9 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_JSON:
 			data := singleData.(*JSONFieldData).Data
 			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_GeoSpatial:
+			data := singleData.(*GeospatialFieldData).Data
+			data[i], data[j] = data[j], data[i]
 		case schemapb.DataType_SparseFloatVector:
 			fieldData := singleData.(*SparseFloatVectorFieldData)
 			fieldData.Contents[i], fieldData.Contents[j] = fieldData.Contents[j], fieldData.Contents[i]

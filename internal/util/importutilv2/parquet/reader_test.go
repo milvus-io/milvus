@@ -426,6 +426,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_String, schemapb.DataType_None, false, 0)
 	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, false, 0)
 	s.run(schemapb.DataType_JSON, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_GeoSpatial, schemapb.DataType_None, false, 0)
 
 	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, false, 0)
 	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, false, 0)
@@ -464,6 +465,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 100)
 	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 100)
 	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_GeoSpatial, schemapb.DataType_None, true, 100)
 
 	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 100)
 	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 100)

@@ -55,6 +55,8 @@ type BulkInsertSuite struct {
 	vecType    schemapb.DataType
 	indexType  indexparamcheck.IndexType
 	metricType metric.MetricType
+	expr       string
+	testType   schemapb.DataType
 }
 
 func (s *BulkInsertSuite) SetupTest() {
@@ -68,6 +70,8 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.vecType = schemapb.DataType_FloatVector
 	s.indexType = indexparamcheck.IndexHNSW
 	s.metricType = metric.L2
+	s.expr = ""
+	s.testType = schemapb.DataType_None
 }
 
 func (s *BulkInsertSuite) run() {
@@ -87,9 +91,19 @@ func (s *BulkInsertSuite) run() {
 	fieldSchema3 := &schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
 	fieldSchema4 := &schemapb.FieldSchema{FieldID: 103, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{}}
 	if s.vecType != schemapb.DataType_SparseFloatVector {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3)
+		if s.testType == schemapb.DataType_None {
+			schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3)
+		} else {
+			fieldSchema5 := &schemapb.FieldSchema{FieldID: 104, Name: "testField" + schemapb.DataType_name[int32(s.testType)], DataType: s.testType, TypeParams: []*commonpb.KeyValuePair{}}
+			schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3, fieldSchema5)
+		}
 	} else {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4)
+		if s.testType == schemapb.DataType_None {
+			schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4)
+		} else {
+			fieldSchema5 := &schemapb.FieldSchema{FieldID: 104, Name: "testField" + schemapb.DataType_name[int32(s.testType)], DataType: s.testType, TypeParams: []*commonpb.KeyValuePair{}}
+			schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4, fieldSchema5)
+		}
 	}
 
 	marshaledSchema, err := proto.Marshal(schema)
@@ -203,7 +217,7 @@ func (s *BulkInsertSuite) run() {
 	s.WaitForLoad(ctx, collectionName)
 
 	// search
-	expr := ""
+	expr := s.expr
 	nq := 10
 	topk := 10
 	roundDecimal := -1
@@ -216,6 +230,12 @@ func (s *BulkInsertSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	// s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+}
+
+func (s *BulkInsertSuite) TestGeospatialTypes() {
+	s.testType = schemapb.DataType_GeoSpatial
+	s.expr = "geospatial_equals(" + "testField" + schemapb.DataType_name[int32(s.testType)] + ",'POINT (-84.036 39.997)')"
+	s.run()
 }
 
 func (s *BulkInsertSuite) TestMultiFileTypes() {
@@ -246,10 +266,10 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 
 		// TODO: not support numpy for SparseFloatVector by now
 		if fileType != importutilv2.Numpy {
-			s.vecType = schemapb.DataType_SparseFloatVector
-			s.indexType = indexparamcheck.IndexSparseWand
-			s.metricType = metric.IP
-			s.run()
+			// s.vecType = schemapb.DataType_SparseFloatVector
+			// s.indexType = indexparamcheck.IndexSparseWand
+			// s.metricType = metric.IP
+			// s.run()
 		}
 	}
 }

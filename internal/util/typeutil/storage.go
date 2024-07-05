@@ -77,6 +77,8 @@ func BuildRecord(b *array.RecordBuilder, data *storage.InsertData, fields []*sch
 			}
 		case schemapb.DataType_JSON:
 			fBuilder.(*array.BinaryBuilder).AppendValues(data.Data[field.FieldID].(*storage.JSONFieldData).Data, nil)
+		case schemapb.DataType_GeoSpatial:
+			fBuilder.(*array.BinaryBuilder).AppendValues(data.Data[field.FieldID].(*storage.GeospatialFieldData).Data, nil)
 		case schemapb.DataType_BinaryVector:
 			vecData := data.Data[field.FieldID].(*storage.BinaryVectorFieldData)
 			for i := 0; i < len(vecData.Data); i += vecData.Dim / 8 {

@@ -546,6 +546,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
 	}
+	validateGeospatialFieldSearchResult(&t.result.FieldsData)
 	t.result.OutputFields = t.userOutputFields
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 

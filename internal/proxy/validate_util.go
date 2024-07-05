@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 )
 
 type validateUtil struct {
@@ -50,6 +53,43 @@ func withMaxCapCheck() validateOption {
 	return func(v *validateUtil) {
 		v.checkMaxCap = true
 	}
+}
+
+func validateGeospatialFieldSearchResult(array *[]*schemapb.FieldData) error {
+	for idx, fieldData := range *array {
+		if fieldData.Type == schemapb.DataType_GeoSpatial {
+			wkbArray := fieldData.GetScalars().GetGeospatialData().Data
+			wktArray := make([][]byte, len(wkbArray))
+			for i, data := range wkbArray {
+				geomT, err := wkb.Unmarshal(data)
+				if err != nil {
+					log.Warn("translate the wkb format search result into geometry failed")
+					return err
+				}
+				// MaxDecimalDigits set as 6 temporarily
+				wktStr, err := wkt.Marshal(geomT, wkt.EncodeOptionWithMaxDecimalDigits(6))
+				if err != nil {
+					log.Warn("translate the geomery  into its wkt failed")
+					return err
+				}
+				wktArray[i] = []byte(wktStr)
+			}
+			// modify the field data
+			(*array)[idx] = &schemapb.FieldData{
+				Type:      fieldData.GetType(),
+				FieldName: fieldData.GetFieldName(),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeospatialData{GeospatialData: &schemapb.GeoSpatialArray{Data: wktArray}},
+					},
+				},
+				FieldId:   fieldData.GetFieldId(),
+				IsDynamic: fieldData.GetIsDynamic(),
+			}
+		}
+	}
+
+	return nil
 }
 
 func (v *validateUtil) apply(opts ...validateOption) {
@@ -91,6 +131,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			}
 		case schemapb.DataType_VarChar:
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_GeoSpatial:
+			if err := v.checkGeospatialFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_JSON:
@@ -369,6 +413,13 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 				}
 			}
 
+		case *schemapb.ScalarField_GeospatialData:
+			if fieldSchema.GetNullable() {
+				sd.GeospatialData.Data, err = fillWithNullValueImpl(sd.GeospatialData.Data, field.GetValidData())
+				if err != nil {
+					return err
+				}
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -464,6 +515,17 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
 			sd.JsonData.Data, err = fillWithDefaultValueImpl(sd.JsonData.Data, defaultValue, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_GeospatialData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
+			sd.GeospatialData.Data, err = fillWithDefaultValueImpl(sd.GeospatialData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
 			}
@@ -634,6 +696,42 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		return nil
 	}
 
+	return nil
+}
+
+func (v *validateUtil) checkGeospatialFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	geospatialArray := field.GetScalars().GetGeospatialData().GetData()
+	if geospatialArray == nil {
+		msg := fmt.Sprintf("geospatial field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need geospatial array", "got nil", msg)
+	}
+
+	for index, wktdata := range geospatialArray {
+		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
+		// fmt.Println(strings.Trim(string(wktdata), "\""))
+		geomT, err := wkt.Unmarshal(strings.Trim(string(wktdata), "\""))
+		if err != nil {
+			log.Warn("insert invalid Geospatial data!! The wkt data has errors", zap.Error(err))
+			return merr.WrapErrIoFailedReason(err.Error())
+		}
+		geospatialArray[index], err = wkb.Marshal(geomT, wkb.NDR)
+		if err != nil {
+			log.Warn("insert invalid Geospatial data!! Transform to wkb failed, has errors", zap.Error(err))
+			return merr.WrapErrIoFailedReason(err.Error())
+		}
+	}
+	// replace the field data with wkb data array
+	field = &schemapb.FieldData{
+		Type:      field.GetType(),
+		FieldName: field.GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeospatialData{GeospatialData: &schemapb.GeoSpatialArray{Data: geospatialArray}},
+			},
+		},
+		FieldId:   field.GetFieldId(),
+		IsDynamic: field.GetIsDynamic(),
+	}
 	return nil
 }
 

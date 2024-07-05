@@ -7,6 +7,9 @@ import "github.com/antlr4-go/antlr/v4"
 type PlanVisitor interface {
 	antlr.ParseTreeVisitor
 
+	// Visit a parse tree produced by PlanParser#GeospatialEuqals.
+	VisitGeospatialEuqals(ctx *GeospatialEuqalsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#JSONIdentifier.
 	VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{}
 
@@ -18,6 +21,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#GeospatialContains.
+	VisitGeospatialContains(ctx *GeospatialContainsContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#JSONContainsAll.
 	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}
@@ -34,6 +40,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Like.
 	VisitLike(ctx *LikeContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#GeospatialWithin.
+	VisitGeospatialWithin(ctx *GeospatialWithinContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#LogicalAnd.
 	VisitLogicalAnd(ctx *LogicalAndContext) interface{}
 
@@ -46,6 +55,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Shift.
 	VisitShift(ctx *ShiftContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#GeospatialCrosses.
+	VisitGeospatialCrosses(ctx *GeospatialCrossesContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#ReverseRange.
 	VisitReverseRange(ctx *ReverseRangeContext) interface{}
 
@@ -57,6 +69,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#AddSub.
 	VisitAddSub(ctx *AddSubContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#GeospatialTouches.
+	VisitGeospatialTouches(ctx *GeospatialTouchesContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Relational.
 	VisitRelational(ctx *RelationalContext) interface{}
@@ -75,6 +90,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Range.
 	VisitRange(ctx *RangeContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#GeospatialIntersects.
+	VisitGeospatialIntersects(ctx *GeospatialIntersectsContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Unary.
 	VisitUnary(ctx *UnaryContext) interface{}
