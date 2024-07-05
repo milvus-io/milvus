@@ -40,23 +40,29 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     logger.info(f"collection {collection_name} created: {collection.describe()}")
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
-
-    # generate data
-    np.random.seed(19530)
-    train_emb_file = 'train_emb_matrix.npy'
-    test_emb_file = 'test_emb_matrix.npy'
     test_data_size = 1000
-    if not os.path.exists(train_emb_file):
-        train_emb_matrix = np.random.random((data_size, 768))
-        np.save(train_emb_file, train_emb_matrix)
-    else:
-        train_emb_matrix = np.load(train_emb_file)
+    test_emb_matrix = pd.read_parquet(f"{data_dir}/test.parquet")["emb"].values
+    test_emb_matrix = test_emb_matrix[:test_data_size]
 
-    if not os.path.exists(test_emb_file):
-        test_emb_matrix = np.random.random((test_data_size, 768))
-        np.save(test_emb_file, test_emb_matrix)
-    else:
-        test_emb_matrix = np.load(test_emb_file)
+    train_emb_matrix = pd.read_parquet(f"{data_dir}/train-00-of-10.parquet")["emb"].values
+    train_emb_matrix = train_emb_matrix[:data_size]
+    #
+    # # generate data
+    # np.random.seed(19530)
+    # train_emb_file = 'train_emb_matrix.npy'
+    # test_emb_file = 'test_emb_matrix.npy'
+    # test_data_size = 1000
+    # if not os.path.exists(train_emb_file):
+    #     train_emb_matrix = np.random.random((data_size, 768))
+    #     np.save(train_emb_file, train_emb_matrix)
+    # else:
+    #     train_emb_matrix = np.load(train_emb_file)
+    #
+    # if not os.path.exists(test_emb_file):
+    #     test_emb_matrix = np.random.random((test_data_size, 768))
+    #     np.save(test_emb_file, test_emb_matrix)
+    # else:
+    #     test_emb_matrix = np.load(test_emb_file)
 
     # create test data
     t0 = time.time()
