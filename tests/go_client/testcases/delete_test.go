@@ -28,7 +28,7 @@ func TestDelete(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete with expr
@@ -64,7 +64,7 @@ func TestDeleteVarcharPks(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete varchar with pk
@@ -101,7 +101,7 @@ func TestDeleteEmptyCollection(t *testing.T) {
 	require.Equal(t, int64(1), delRes.DeleteCount)
 
 	// delete complex expr from empty collection
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	comExpr := fmt.Sprintf("%s < 10", common.DefaultInt64FieldName)
@@ -154,7 +154,7 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 	common.CheckErr(t, errDelete2, false, "collection not loaded")
 
 	// index and load collection
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)).
@@ -205,7 +205,7 @@ func TestDeleteVarcharEmptyIds(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	exprQuery := "varchar != '' "
@@ -274,7 +274,7 @@ func TestDeleteWithIds(t *testing.T) {
 	_, err = mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
 	// index and load
-	hp.CollPrepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	hp.CollPrepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	hp.CollPrepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
 
 	// delete with non-pk fields ids
@@ -310,7 +310,7 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete with default params, actually delete from all partitions
@@ -348,7 +348,7 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete with default params, actually delete from all partitions
@@ -386,7 +386,7 @@ func TestDeletePartitionName(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete with default params, actually delete from all partitions
@@ -489,7 +489,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 		// index and load
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
@@ -518,7 +518,7 @@ func TestDeleteInvalidExpr(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	for _, _invalidExpr := range common.InvalidExpressions {
@@ -541,7 +541,7 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete

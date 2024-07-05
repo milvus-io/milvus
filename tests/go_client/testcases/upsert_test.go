@@ -33,7 +33,7 @@ func TestUpsertAllFields(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 0), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	upsertNb := 200
@@ -111,7 +111,7 @@ func TestUpsertSparse(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
 
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, upsertNb)
@@ -166,7 +166,7 @@ func TestUpsertVarcharPk(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	upsertNb := 10
@@ -219,7 +219,7 @@ func TestUpsertMultiPartitions(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// upsert new partition
@@ -261,7 +261,7 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 
 	// flush -> index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query and verify the updated entities
@@ -380,7 +380,7 @@ func TestUpsertDynamicField(t *testing.T) {
 	// create -> insert [0, 3000) -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// verify that dynamic field exists
@@ -432,7 +432,7 @@ func TestUpsertWithoutLoading(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// index -> load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query and verify

@@ -51,6 +51,10 @@ const (
 	DISKANN    IndexType = "DISKANN"
 	SCANN      IndexType = "SCANN"
 
+	// Sparse
+	SparseInverted IndexType = "SPARSE_INVERTED_INDEX"
+	SparseWAND     IndexType = "SPARSE_WAND"
+
 	GPUIvfFlat IndexType = "GPU_IVF_FLAT"
 	GPUIvfPQ   IndexType = "GPU_IVF_PQ"
 
