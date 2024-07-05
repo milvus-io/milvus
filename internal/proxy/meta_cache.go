@@ -1108,6 +1108,13 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			return err
 		}
 
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Error("fail to init meta cache",
+				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
+				zap.String("reason", resp.GetStatus().GetReason()))
+			return merr.Error(resp.Status)
+		}
+
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.userToRoles = make(map[string]map[string]struct{})
