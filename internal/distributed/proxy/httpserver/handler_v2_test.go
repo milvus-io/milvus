@@ -109,7 +109,7 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	path = "/wrapper/post/trace/call"
 	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return wrapperProxy(ctx, c, req, false, false, func(reqctx context.Context, req any) (any, error) {
+		return wrapperProxy(ctx, c, req, false, false, "", func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
 	})))
@@ -169,12 +169,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -188,12 +188,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -210,12 +210,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -234,12 +234,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -286,11 +286,11 @@ func TestGrpcWrapper(t *testing.T) {
 
 	path = "/wrapper/grpc/auth"
 	app.GET(path, func(c *gin.Context) {
-		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, "", handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "test", DefaultDbName)
-		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, "", handle)
 	})
 	t.Run("check authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
