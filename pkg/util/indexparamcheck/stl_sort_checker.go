@@ -16,8 +16,8 @@ func (c *STLSORTChecker) CheckTrain(params map[string]string) error {
 	return c.scalarIndexChecker.CheckTrain(params)
 }
 
-func (c *STLSORTChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsArithmetic(dType) {
+func (c *STLSORTChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if !typeutil.IsArithmetic(field.GetDataType()) {
 		return fmt.Errorf("STL_SORT are only supported on numeric field")
 	}
 	return nil

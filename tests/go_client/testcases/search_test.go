@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -26,12 +26,12 @@ func TestSearchDefault(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	resSearch, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 }
@@ -42,13 +42,13 @@ func TestSearchDefaultGrowing(t *testing.T) {
 
 	// create -> index -> load -> insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 
 	// search
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
-	resSearch, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 }
@@ -60,20 +60,20 @@ func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 
 	// search with not exist collection
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	_, err := mc.Search(ctx, clientv2.NewSearchOption("aaa", common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	_, err := mc.Search(ctx, client.NewSearchOption("aaa", common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "can't find collection")
 
 	// search with empty collections name
-	_, err = mc.Search(ctx, clientv2.NewSearchOption("", common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	_, err = mc.Search(ctx, client.NewSearchOption("", common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "collection name should not be empty")
 
 	// search with not exist partition
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	_, err1 := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithPartitions([]string{"aaa"}))
+	_, err1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithPartitions([]string{"aaa"}))
 	common.CheckErr(t, err1, false, "partition name aaa not found")
 
 	// search with empty partition name []string{""} -> error
-	_, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+	_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
 		WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions([]string{""}))
 	common.CheckErr(t, errSearch, false, "Partition name should not be empty")
 }
@@ -88,7 +88,7 @@ func TestSearchEmptyCollection(t *testing.T) {
 		// create -> index -> load
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(),
 			hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamicField))
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		type mNameVec struct {
@@ -101,7 +101,7 @@ func TestSearchEmptyCollection(t *testing.T) {
 			{fieldName: common.DefaultBFloat16VecFieldName, queryVec: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBFloat16Vector)},
 			{fieldName: common.DefaultBinaryVecFieldName, queryVec: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)},
 		} {
-			resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, _mNameVec.queryVec).
+			resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, _mNameVec.queryVec).
 				WithConsistencyLevel(entity.ClStrong).WithANNSField(_mNameVec.fieldName))
 			common.CheckErr(t, errSearch, true)
 			t.Log("https://github.com/milvus-io/milvus/issues/33952")
@@ -116,12 +116,12 @@ func TestSearchEmptySparseCollection(t *testing.T) {
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(),
 		hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
-	resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+	resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
 		WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultSparseVecFieldName))
 	common.CheckErr(t, errSearch, true)
 	t.Log("https://github.com/milvus-io/milvus/issues/33952")
@@ -137,22 +137,22 @@ func TestSearchPartitions(t *testing.T) {
 	// create collection and partition
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption().TWithAutoID(true),
 		hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, true)
 
 	// insert autoID data into parName and _default partitions
 	_defVec := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	_defDynamic := hp.GenDynamicColumnData(0, common.DefaultNb)
-	insertRes1, err1 := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(_defVec).WithColumns(_defDynamic...))
+	insertRes1, err1 := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(_defVec).WithColumns(_defDynamic...))
 	common.CheckErr(t, err1, true)
 
 	_parVec := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
-	insertRes2, err2 := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(_parVec))
+	insertRes2, err2 := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(_parVec))
 	common.CheckErr(t, err2, true)
 
 	// flush -> FLAT index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewFlatIndex(entity.COSINE)}))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewFlatIndex(entity.COSINE)}))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search with empty partition name []string{""} -> error
@@ -160,7 +160,7 @@ func TestSearchPartitions(t *testing.T) {
 	// query first ID of _default and parName partition
 	_defId0, _ := insertRes1.IDs.GetAsInt64(0)
 	_parId0, _ := insertRes2.IDs.GetAsInt64(0)
-	queryRes, _ := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("int64 in [%d, %d]", _defId0, _parId0)).WithOutputFields([]string{"*"}))
+	queryRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("int64 in [%d, %d]", _defId0, _parId0)).WithOutputFields([]string{"*"}))
 	require.ElementsMatch(t, []int64{_defId0, _parId0}, queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data())
 	for _, vec := range queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data() {
 		vectors = append(vectors, entity.FloatVector(vec))
@@ -168,7 +168,7 @@ func TestSearchPartitions(t *testing.T) {
 
 	for _, partitions := range [][]string{{}, {common.DefaultPartition, parName}} {
 		// search with empty partition names slice []string{} -> all partitions
-		searchResult, errSearch1 := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, 5, vectors).
+		searchResult, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, 5, vectors).
 			WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultFloatVecFieldName).WithPartitions(partitions).WithOutputFields([]string{"*"}))
 
 		// check search result contains search vector, which from all partitions
@@ -192,16 +192,16 @@ func TestSearchEmptyOutputFields(t *testing.T) {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(dynamic))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 100), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-		resSearch, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{}))
+		resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{}))
 		common.CheckErr(t, err, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 		common.CheckOutputFields(t, []string{}, resSearch[0].Fields)
 
-		_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{""}))
+		_, err = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{""}))
 		if dynamic {
 			common.CheckErr(t, err, false, "parse output field name failed")
 		} else {
@@ -222,7 +222,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamic))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// search vector output fields not exist, part exist
@@ -238,7 +238,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 		}
 
 		for _, _dof := range dof {
-			resSearch, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(_dof.outputFields))
+			resSearch, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(_dof.outputFields))
 			if enableDynamic {
 				common.CheckErr(t, err, true)
 				common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
@@ -248,7 +248,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 			}
 		}
 		existedRepeatedFields := []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}
-		resSearch2, err2 := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(existedRepeatedFields))
+		resSearch2, err2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(existedRepeatedFields))
 		common.CheckErr(t, err2, true)
 		common.CheckSearchResult(t, resSearch2, common.DefaultNq, common.DefaultLimit)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, resSearch2[0].Fields)
@@ -264,7 +264,7 @@ func TestSearchOutputAllFields(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	//
@@ -274,7 +274,7 @@ func TestSearchOutputAllFields(t *testing.T) {
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
-	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 		WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
@@ -292,7 +292,7 @@ func TestSearchOutputBinaryPk(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	//
@@ -301,7 +301,7 @@ func TestSearchOutputBinaryPk(t *testing.T) {
 		allFieldsName = append(allFieldsName, field.Name)
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
-	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	for _, res := range searchRes {
@@ -318,7 +318,7 @@ func TestSearchOutputSparse(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	//
@@ -327,7 +327,7 @@ func TestSearchOutputSparse(t *testing.T) {
 		allFieldsName = append(allFieldsName, field.Name)
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
-	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 		WithANNSField(common.DefaultSparseVecFieldName).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
@@ -344,7 +344,7 @@ func TestSearchInvalidVectorField(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type invalidVectorFieldStruct struct {
@@ -372,7 +372,7 @@ func TestSearchInvalidVectorField(t *testing.T) {
 
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
 	for _, invalidVectorField := range invalidVectorFields {
-		_, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(invalidVectorField.vectorField))
+		_, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(invalidVectorField.vectorField))
 		common.CheckErr(t, err, invalidVectorField.errNil, invalidVectorField.errMsg)
 	}
 }
@@ -386,7 +386,7 @@ func TestSearchInvalidVectors(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type invalidVectorsStruct struct {
@@ -412,7 +412,7 @@ func TestSearchInvalidVectors(t *testing.T) {
 	}
 
 	for _, invalidVector := range invalidVectors {
-		_, errSearchEmpty := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(invalidVector.fieldName))
+		_, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(invalidVector.fieldName))
 		common.CheckErr(t, errSearchEmpty, false, invalidVector.errMsg)
 	}
 }
@@ -426,7 +426,7 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type invalidVectorsStruct struct {
@@ -448,7 +448,7 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 	}
 
 	for _, invalidVector := range invalidVectors {
-		_, errSearchEmpty := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(common.DefaultFloatVecFieldName))
+		_, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(common.DefaultFloatVecFieldName))
 		common.CheckErr(t, errSearchEmpty, invalidVector.errNil, invalidVector.errMsg)
 	}
 }
@@ -462,12 +462,12 @@ func TestSearchNotMatchMetricType(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).
 		TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewHNSWIndex(entity.COSINE, 8, 200)}))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
-	_, errSearchEmpty := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors))
+	_, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors))
 	common.CheckErr(t, errSearchEmpty, false, "metric type not match: invalid parameter")
 }
 
@@ -479,12 +479,12 @@ func TestSearchInvalidTopK(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, invalidTopK := range []int{-1, 0, 16385} {
-		_, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, invalidTopK, vectors))
+		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, invalidTopK, vectors))
 		common.CheckErr(t, errSearch, false, "should be in range [1, 16384]")
 	}
 }
@@ -497,12 +497,12 @@ func TestSearchInvalidOffset(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, invalidOffset := range []int{-1, common.MaxTopK + 1} {
-		_, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithOffset(invalidOffset))
+		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithOffset(invalidOffset))
 		common.CheckErr(t, errSearch, false, "should be in range [1, 16384]")
 	}
 }
@@ -521,12 +521,12 @@ func TestSearchEfHnsw(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).
 		TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewHNSWIndex(entity.COSINE, 8, 200)}))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
-	_, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors))
+	_, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors))
 	common.CheckErr(t, err, false, "ef(7) should be larger than k(10)")
 }
 
@@ -544,9 +544,8 @@ func TestSearchInvalidScannReorderK(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
-		common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16, false),
-	}))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
+		common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16, true)}))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search with invalid reorder_k < topK
@@ -566,14 +565,14 @@ func TestSearchScannAllMetricsWithRawData(t *testing.T) {
 			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 			prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
 			prepare.FlushData(ctx, t, mc, schema.CollectionName)
-			prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
+			prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
 				common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16),
 			}))
 			prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 			// search and output all fields
 			vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
-			resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
+			resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{"*"}))
 			common.CheckErr(t, errSearch, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatFieldName,
 				common.DefaultJSONFieldName, common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName}, resSearch[0].Fields)
@@ -590,7 +589,7 @@ func TestSearchExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type mExprExpected struct {
@@ -603,7 +602,7 @@ func TestSearchExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s < 10", common.DefaultInt64FieldName), ids: []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
 		{expr: fmt.Sprintf("%s in [10, 100]", common.DefaultInt64FieldName), ids: []int64{10, 100}},
 	} {
-		resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(_mExpr.expr))
 		common.CheckErr(t, errSearch, true)
 		for _, res := range resSearch {
@@ -622,14 +621,14 @@ func TestSearchInvalidExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// search with invalid expr
 	vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, exprStruct := range common.InvalidExpressions {
 		log.Debug("TestSearchInvalidExpr", zap.String("expr", exprStruct.Expr))
-		_, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(exprStruct.Expr).WithANNSField(common.DefaultFloatVecFieldName))
 		common.CheckErr(t, errSearch, exprStruct.ErrNil, exprStruct.ErrMsg)
 	}
@@ -667,14 +666,14 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 			TWithEnableDynamicField(dynamicField))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// search with jsonField expr key datatype and json data type mismatch
 		for _, expr := range exprs {
 			log.Debug("TestSearchJsonFieldExpr", zap.String("expr", expr))
 			vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-			searchRes, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+			searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 				WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}))
 			common.CheckErr(t, errSearch, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultJSONFieldName}, searchRes[0].Fields)
@@ -691,7 +690,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 		TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	exprs := []string{
@@ -709,7 +708,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 	for _, expr := range exprs {
 		log.Debug("TestSearchDynamicFieldExpr", zap.String("expr", expr))
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-		searchRes, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields([]string{common.DefaultInt64FieldName, "dynamicNumber", "number"}))
 		common.CheckErr(t, errSearch, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, "dynamicNumber", "number"}, searchRes[0].Fields)
@@ -731,7 +730,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 
 	for _, expr := range exprs2 {
 		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-		searchRes, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName).
 			WithOutputFields([]string{common.DefaultInt64FieldName, common.DefaultJSONFieldName, common.DefaultDynamicFieldName, "dynamicNumber", "number"}))
 		common.CheckErr(t, errSearch, true)
@@ -753,7 +752,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 		TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	var capacity int64 = common.TestCapacity
@@ -778,7 +777,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 	}
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, expr := range exprs {
-		searchRes, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		searchRes, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithOutputFields(allArrayFields))
 		common.CheckErr(t, errSearch, true)
 		common.CheckOutputFields(t, allArrayFields, searchRes[0].Fields)
@@ -786,7 +785,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 	}
 
 	// search hits empty
-	searchRes, errSearchEmpty := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+	searchRes, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 		WithFilter(fmt.Sprintf("array_contains (%s, 1000000)", common.DefaultInt32ArrayField)).WithOutputFields(allArrayFields))
 	common.CheckErr(t, errSearchEmpty, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, 0)
@@ -804,13 +803,13 @@ func TestSearchNotExistedExpr(t *testing.T) {
 			TWithEnableDynamicField(isDynamic))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// search with invalid expr
 		vectors := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
 		expr := "id in [0]"
-		res, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
+		res, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(common.DefaultFloatVecFieldName))
 		if isDynamic {
 			common.CheckErr(t, errSearch, true)
@@ -832,7 +831,7 @@ func TestSearchMultiVectors(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	flatIndex := index.NewFlatIndex(entity.L2)
 	binIndex := index.NewGenericIndex(common.DefaultBinaryVecFieldName, map[string]string{"nlist": "64", index.MetricTypeKey: "JACCARD", index.IndexTypeKey: "BIN_IVF_FLAT"})
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
 		common.DefaultFloatVecFieldName:    flatIndex,
 		common.DefaultFloat16VecFieldName:  flatIndex,
 		common.DefaultBFloat16VecFieldName: flatIndex,
@@ -857,7 +856,7 @@ func TestSearchMultiVectors(t *testing.T) {
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, fnt.fieldType)
 		expr := fmt.Sprintf("%s > 10", common.DefaultInt64FieldName)
 
-		resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit*2, queryVec).WithConsistencyLevel(entity.ClStrong).
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit*2, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}))
 		common.CheckErr(t, errSearch, true)
 		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit*2)
@@ -867,7 +866,7 @@ func TestSearchMultiVectors(t *testing.T) {
 		}, resSearch[0].Fields)
 
 		// pagination search
-		resPage, errPage := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
+		resPage, errPage := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(expr).WithANNSField(fnt.fieldName).WithOutputFields([]string{"*"}).WithOffset(10))
 
 		common.CheckErr(t, errPage, true)
@@ -897,12 +896,12 @@ func TestSearchSparseVector(t *testing.T) {
 			TWithEnableDynamicField(true))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb*2), hp.TNewDataOption().TWithSparseMaxLen(128))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// search
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
-		resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithOutputFields([]string{"*"}))
 
 		common.CheckErr(t, errSearch, true)
@@ -931,15 +930,15 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 			TWithEnableDynamicField(true))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-		_, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{}).WithConsistencyLevel(entity.ClStrong))
+		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{}).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, errSearch, false, "nq (number of search vector per search request) should be in range [1, 16384]")
 
 		vector1, err := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
 		common.CheckErr(t, err, true)
-		_, errSearch1 := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector1}).WithConsistencyLevel(entity.ClStrong))
+		_, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector1}).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, errSearch1, false, "Sparse row data should not be empty")
 
 		positions := make([]uint32, 100)
@@ -949,7 +948,7 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 			values[i] = rand.Float32()
 		}
 		vector, _ := entity.NewSliceSparseEmbedding(positions, values)
-		_, errSearch2 := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
+		_, errSearch2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, errSearch2, false, "Invalid sparse row: id should be strict ascending")
 	}
 }
@@ -966,17 +965,17 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 			TWithEnableDynamicField(true))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// search
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeSparseVector)
-		resSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithOutputFields([]string{"*"}))
 		common.CheckErr(t, errSearch, true)
 		require.Len(t, resSearch, common.DefaultNq)
 
-		pageSearch, errSearch := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
+		pageSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).WithConsistencyLevel(entity.ClStrong).
 			WithOutputFields([]string{"*"}).WithOffset(5))
 		common.CheckErr(t, errSearch, true)
 		require.Len(t, pageSearch, common.DefaultNq)
@@ -1000,7 +999,7 @@ func TestRangeSearchSparseVector(t *testing.T) {
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)

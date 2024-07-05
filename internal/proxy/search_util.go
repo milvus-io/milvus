@@ -28,6 +28,9 @@ type rankParams struct {
 
 // parseSearchInfo returns QueryInfo and offset
 func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool) (*planpb.QueryInfo, int64, error) {
+	// 0. parse iterator field
+	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+
 	// 1. parse offset and real topk
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
@@ -38,7 +41,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 	}
 	if err := validateLimit(topK); err != nil {
-		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+		if isIterator == "True" {
+			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
+			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
+			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
+		} else {
+			return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+		}
 	}
 
 	var offset int64
@@ -109,8 +118,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
-	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
-	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+	// 6. disable groupBy for iterator and range search
 	if isIterator == "True" && groupByFieldId > 0 {
 		return nil, 0, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")

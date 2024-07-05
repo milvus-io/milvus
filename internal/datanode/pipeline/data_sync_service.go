@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -260,26 +259,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		return nil, err
 	}
 
-	var updater statsUpdater
-	if paramtable.Get().DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-		updater = ds.timetickSender
-	} else {
-		m, err := config.msFactory.NewMsgStream(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		m.AsProducer([]string{paramtable.Get().CommonCfg.DataCoordTimeTick.GetValue()})
-		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(config.serverID)).Inc()
-		log.Info("datanode AsProducer", zap.String("TimeTickChannelName", paramtable.Get().CommonCfg.DataCoordTimeTick.GetValue()))
-
-		m.EnableProduce(true)
-
-		updater = newMqStatsUpdater(config, m)
-	}
-
-	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, updater, config)
-
+	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	if err != nil {
 		return nil, err

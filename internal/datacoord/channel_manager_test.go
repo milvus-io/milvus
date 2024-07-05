@@ -66,7 +66,7 @@ func (s *ChannelManagerSuite) prepareMeta(chNodes map[string]int64, state datapb
 	s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(keys, values, nil).Once()
 }
 
-func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImplV2, nodeID int64, channel string, state ChannelState) {
+func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImpl, nodeID int64, channel string, state ChannelState) {
 	rwChannel, found := m.GetChannel(nodeID, channel)
 	s.True(found)
 	s.NotNil(rwChannel)
@@ -84,7 +84,7 @@ func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImplV2, nodeID in
 	}
 }
 
-func (s *ChannelManagerSuite) checkNoAssignment(m *ChannelManagerImplV2, nodeID int64, channel string) {
+func (s *ChannelManagerSuite) checkNoAssignment(m *ChannelManagerImpl, nodeID int64, channel string) {
 	rwChannel, found := m.GetChannel(nodeID, channel)
 	s.False(found)
 	s.Nil(rwChannel)

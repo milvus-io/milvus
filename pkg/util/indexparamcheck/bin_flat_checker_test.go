@@ -136,7 +136,8 @@ func Test_binFlatChecker_CheckValidDataType(t *testing.T) {
 
 	c := newBinFlatChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		field_schema := &schemapb.FieldSchema{DataType: test.dType}
+		err := c.CheckValidDataType(field_schema)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

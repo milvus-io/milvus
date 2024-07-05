@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	clientv2 "github.com/milvus-io/milvus/client/v2"
+	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -27,12 +27,12 @@ func TestQueryDefault(t *testing.T) {
 
 	// flush -> index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query
 	expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 100)
-	queryRes, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr))
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{insertRes.IDs.Slice(0, 100)})
 }
@@ -47,12 +47,12 @@ func TestQueryVarcharPkDefault(t *testing.T) {
 	_, insertRes := prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 
 	// flush -> index -> load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query
 	expr := fmt.Sprintf("%s in ['0', '1', '2', '3', '4']", common.DefaultVarcharFieldName)
-	queryRes, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr))
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{insertRes.IDs.Slice(0, 5)})
 }
@@ -64,16 +64,16 @@ func TestQueryNotExistName(t *testing.T) {
 
 	// query with not existed collection
 	expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 100)
-	_, errCol := mc.Query(ctx, clientv2.NewQueryOption("aaa").WithFilter(expr))
+	_, errCol := mc.Query(ctx, client.NewQueryOption("aaa").WithFilter(expr))
 	common.CheckErr(t, errCol, false, "can't find collection")
 
 	// create -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with not existed partition
-	_, errPar := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{"aaa"}))
+	_, errPar := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{"aaa"}))
 	common.CheckErr(t, errPar, false, "partition name aaa not found")
 }
 
@@ -88,7 +88,7 @@ func TestQueryInvalidPartitionName(t *testing.T) {
 	expr := fmt.Sprintf("%s >= %d", common.DefaultInt64FieldName, 0)
 	emptyPartitionName := ""
 	// query from "" partitions, expect to query from default partition
-	_, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{emptyPartitionName}))
+	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{emptyPartitionName}))
 	common.CheckErr(t, err, false, "Partition name should not be empty")
 }
 
@@ -101,7 +101,7 @@ func TestQueryPartition(t *testing.T) {
 
 	// create collection and partition
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	err := mc.CreatePartition(ctx, clientv2.NewCreatePartitionOption(schema.CollectionName, parName))
+	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into parName
@@ -110,34 +110,34 @@ func TestQueryPartition(t *testing.T) {
 
 	// flush -> index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	expr := fmt.Sprintf("%s >= %d", common.DefaultInt64FieldName, 0)
 	expColumn := hp.GenColumnData(common.DefaultNb*2, entity.FieldTypeInt64, *hp.TNewDataOption().TWithStart(0))
 
 	// query with default params, expect to query from all partitions
-	queryRes, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 
 	// query with empty partition names
-	queryRes, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{}).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 
 	// query with default partition
-	queryRes, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition}).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{i1Res.IDs})
 
 	// query with specify partition
-	queryRes, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{parName}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{parName}).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{i2Res.IDs})
 
 	// query with all partitions
-	queryRes, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition, parName}).WithConsistencyLevel(entity.ClStrong))
+	queryRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithPartitions([]string{common.DefaultPartition, parName}).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{expColumn})
 }
@@ -151,11 +151,11 @@ func TestQueryWithoutExpr(t *testing.T) {
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// query without expr
-	_, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName))
+	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName))
 	common.CheckErr(t, err, false, "empty expression should be used with limit")
 
 	// query with empty expr
-	_, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(""))
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(""))
 	common.CheckErr(t, err, false, "empty expression should be used with limit")
 }
 
@@ -175,18 +175,18 @@ func TestQueryOutputFields(t *testing.T) {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamic))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)
 
 		// query with empty output fields []string{}-> output "int64"
-		queryNilOutputs, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{}))
+		queryNilOutputs, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{}))
 		common.CheckErr(t, err, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName}, queryNilOutputs.Fields)
 
 		// query with empty output fields []string{""}-> output "int64" and dynamic field
-		_, err1 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{""}))
+		_, err1 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{""}))
 		if enableDynamic {
 			common.CheckErr(t, err1, false, "parse output field name failed")
 		} else {
@@ -195,7 +195,7 @@ func TestQueryOutputFields(t *testing.T) {
 
 		// query with not existed field -> output field as dynamic or error
 		fakeName := "aaa"
-		res2, err2 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName}))
+		res2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName}))
 		if enableDynamic {
 			common.CheckErr(t, err2, true)
 			for _, c := range res2.Fields {
@@ -213,7 +213,7 @@ func TestQueryOutputFields(t *testing.T) {
 		}
 
 		// query with part not existed field ["aa", "$meat"]: error or as dynamic field
-		res3, err3 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName, common.DefaultDynamicFieldName}))
+		res3, err3 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{fakeName, common.DefaultDynamicFieldName}))
 		if enableDynamic {
 			common.CheckErr(t, err3, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName, common.DefaultDynamicFieldName}, res3.Fields)
@@ -222,7 +222,7 @@ func TestQueryOutputFields(t *testing.T) {
 		}
 
 		// query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
-		res4, err4 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*", common.DefaultDynamicFieldName}))
+		res4, err4 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*", common.DefaultDynamicFieldName}))
 		if enableDynamic {
 			common.CheckErr(t, err4, true)
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName}, res4.Fields)
@@ -230,7 +230,7 @@ func TestQueryOutputFields(t *testing.T) {
 			common.CheckErr(t, err4, false, "$meta not exist")
 		}
 
-		res5, err5 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(
+		res5, err5 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(
 			[]string{common.DefaultFloatVecFieldName, common.DefaultFloatVecFieldName, common.DefaultInt64FieldName}))
 		common.CheckErr(t, err5, true)
 		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, res5.Fields)
@@ -239,21 +239,20 @@ func TestQueryOutputFields(t *testing.T) {
 
 // test query output all fields and verify data
 func TestQueryOutputAllFieldsColumn(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33848")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	// create collection
 	for _, isDynamic := range [2]bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(isDynamic))
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// insert
 		columns := make([]column.Column, 0, len(schema.Fields)+1)
 		dynamicColumns := hp.GenDynamicColumnData(0, common.DefaultNb)
 		genDataOpt := hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity)
-		insertOpt := clientv2.NewColumnBasedInsertOption(schema.CollectionName)
+		insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName)
 		for _, field := range schema.Fields {
 			if field.DataType == entity.FieldTypeArray {
 				genDataOpt.TWithElementType(field.ElementType)
@@ -277,7 +276,7 @@ func TestQueryOutputAllFieldsColumn(t *testing.T) {
 		if isDynamic {
 			allFieldsName = append(allFieldsName, common.DefaultDynamicFieldName)
 		}
-		queryResultAll, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+		queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
 			WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, pos)).WithOutputFields([]string{"*"}))
 		common.CheckErr(t, errQuery, true)
 		common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
@@ -305,12 +304,12 @@ func TestQueryOutputAllFieldsRows(t *testing.T) {
 
 	// prepare and insert data
 	rows := hp.GenAllFieldsRows(common.DefaultNb, false, *hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
-	ids, err := mc.Insert(ctx, clientv2.NewRowBasedInsertOption(schema.CollectionName, rows...))
+	ids, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 	common.CheckErr(t, err, true)
 	require.Equal(t, int64(common.DefaultNb), ids.InsertCount)
 
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query output all fields -> output all fields, includes vector and $meta field
@@ -318,7 +317,7 @@ func TestQueryOutputAllFieldsRows(t *testing.T) {
 	for _, field := range schema.Fields {
 		allFieldsName = append(allFieldsName, field.Name)
 	}
-	queryResultAll, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
 		WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
@@ -330,7 +329,7 @@ func TestQueryOutputBinaryAndVarchar(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert
@@ -340,7 +339,7 @@ func TestQueryOutputBinaryAndVarchar(t *testing.T) {
 	for _, field := range schema.Fields {
 		columns = append(columns, hp.GenColumnData(common.DefaultNb, field.DataType, *hp.TNewDataOption().TWithDim(common.DefaultDim)))
 	}
-	ids, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, columns...).WithColumns(dynamicColumns...))
+	ids, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, columns...).WithColumns(dynamicColumns...))
 	common.CheckErr(t, err, true)
 	require.Equal(t, int64(common.DefaultNb), ids.InsertCount)
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
@@ -348,7 +347,7 @@ func TestQueryOutputBinaryAndVarchar(t *testing.T) {
 	// query output all fields -> output all fields, includes vector and $meta field
 	expr := fmt.Sprintf("%s in ['0', '1', '2', '3', '4', '5'] ", common.DefaultVarcharFieldName)
 	allFieldsName := []string{common.DefaultVarcharFieldName, common.DefaultBinaryVecFieldName, common.DefaultDynamicFieldName}
-	queryResultAll, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
 		WithFilter(expr).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, allFieldsName, queryResultAll.Fields)
@@ -367,7 +366,7 @@ func TestQueryOutputSparse(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert
@@ -376,7 +375,7 @@ func TestQueryOutputSparse(t *testing.T) {
 		columns = append(columns, hp.GenColumnData(common.DefaultNb, field.DataType, *hp.TNewDataOption().TWithSparseMaxLen(10)))
 	}
 
-	ids, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, columns...))
+	ids, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, columns...))
 	common.CheckErr(t, err, true)
 	require.Equal(t, int64(common.DefaultNb), ids.InsertCount)
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
@@ -384,7 +383,7 @@ func TestQueryOutputSparse(t *testing.T) {
 	// query output all fields -> output all fields, includes vector and $meta field
 	expr := fmt.Sprintf("%s < 100 ", common.DefaultInt64FieldName)
 	expFieldsName := []string{common.DefaultInt64FieldName, common.DefaultVarcharFieldName, common.DefaultSparseVecFieldName}
-	queryResultAll, errQuery := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*"}))
+	queryResultAll, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"*"}))
 	common.CheckErr(t, errQuery, true)
 	common.CheckOutputFields(t, expFieldsName, queryResultAll.Fields)
 
@@ -402,7 +401,7 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecAllScalar),
 		hp.TNewFieldsOption().TWithMaxCapacity(common.TestCapacity*2), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert 2 batch with array capacity 100 and 200
@@ -416,7 +415,7 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 			}
 			columns = append(columns, hp.GenColumnData(common.DefaultNb, field.DataType, *genDataOpt))
 		}
-		ids, err := mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, columns...))
+		ids, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, columns...))
 		common.CheckErr(t, err, true)
 		require.Equal(t, int64(common.DefaultNb), ids.InsertCount)
 	}
@@ -424,19 +423,19 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 	// query array idx exceeds max capacity, array[200]
 	expr := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity*2)
-	countRes, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{common.QueryCountFieldName}))
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{common.QueryCountFieldName}))
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
-	countRes, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"Count(*)"}))
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields([]string{"Count(*)"}))
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
 	// query: some rows has element greater than expr index array[100]
 	expr2 := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity)
-	countRes2, err2 := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields([]string{common.QueryCountFieldName}))
+	countRes2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields([]string{common.QueryCountFieldName}))
 	common.CheckErr(t, err2, true)
 	count2, _ := countRes2.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb), count2)
@@ -450,13 +449,13 @@ func TestQueryJsonDynamicExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with different expr and count
 	expr := fmt.Sprintf("%s['number'] < 10 || %s < 10", common.DefaultJSONFieldName, common.DefaultDynamicNumberField)
 
-	queryRes, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong).
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong).
 		WithOutputFields([]string{common.DefaultJSONFieldName, common.DefaultDynamicFieldName}))
 
 	// verify output fields and count, dynamicNumber value
@@ -483,11 +482,11 @@ func TestQueryInvalidExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 100), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	for _, _invalidExpr := range common.InvalidExpressions {
-		_, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_invalidExpr.Expr))
+		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_invalidExpr.Expr))
 		common.CheckErr(t, err, _invalidExpr.ErrNil, _invalidExpr.ErrMsg)
 	}
 }
@@ -500,7 +499,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with different expr and count
@@ -558,7 +557,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 
 	for _, _exprCount := range exprCounts {
 		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
-		countRes, _ := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
+		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
 	}
@@ -572,7 +571,7 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// create collection
@@ -601,7 +600,7 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 
 	for _, _exprCount := range exprCounts {
 		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
-		countRes, _ := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
+		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields([]string{common.QueryCountFieldName}))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
 	}
@@ -619,7 +618,7 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(false))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// invalid expr
@@ -633,7 +632,7 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 		queryExpr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
 
 		// query with empty output fields []string{}-> output "int64"
-		_, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(queryExpr).WithOutputFields([]string{invalidCount.countField}))
+		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(queryExpr).WithOutputFields([]string{invalidCount.countField}))
 		common.CheckErr(t, err, false, invalidCount.errMsg)
 	}
 }

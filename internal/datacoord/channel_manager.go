@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -60,7 +59,7 @@ type SubCluster interface {
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
 }
 
-type ChannelManagerImplV2 struct {
+type ChannelManagerImpl struct {
 	cancel context.CancelFunc
 	mu     lock.RWMutex
 	wg     sync.WaitGroup
@@ -83,15 +82,15 @@ type ChannelManagerImplV2 struct {
 // ChannelBGChecker are goroutining running background
 type ChannelBGChecker func(ctx context.Context)
 
-// ChannelmanagerOptV2 is to set optional parameters in channel manager.
-type ChannelmanagerOptV2 func(c *ChannelManagerImplV2)
+// ChannelmanagerOpt is to set optional parameters in channel manager.
+type ChannelmanagerOpt func(c *ChannelManagerImpl)
 
-func withFactoryV2(f ChannelPolicyFactory) ChannelmanagerOptV2 {
-	return func(c *ChannelManagerImplV2) { c.factory = f }
+func withFactoryV2(f ChannelPolicyFactory) ChannelmanagerOpt {
+	return func(c *ChannelManagerImpl) { c.factory = f }
 }
 
-func withCheckerV2() ChannelmanagerOptV2 {
-	return func(c *ChannelManagerImplV2) { c.balanceCheckLoop = c.CheckLoop }
+func withCheckerV2() ChannelmanagerOpt {
+	return func(c *ChannelManagerImpl) { c.balanceCheckLoop = c.CheckLoop }
 }
 
 func NewChannelManagerV2(
@@ -99,9 +98,9 @@ func NewChannelManagerV2(
 	h Handler,
 	subCluster SubCluster, // sessionManager
 	alloc allocator,
-	options ...ChannelmanagerOptV2,
-) (*ChannelManagerImplV2, error) {
-	m := &ChannelManagerImplV2{
+	options ...ChannelmanagerOpt,
+) (*ChannelManagerImpl, error) {
+	m := &ChannelManagerImpl{
 		h:          h,
 		factory:    NewChannelPolicyFactoryV1(),
 		store:      NewChannelStoreV2(kv),
@@ -122,7 +121,7 @@ func NewChannelManagerV2(
 	return m, nil
 }
 
-func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
+func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
 	ctx, m.cancel = context.WithCancel(ctx)
 
 	m.legacyNodes = typeutil.NewUniqueSet(legacyNodes...)
@@ -176,14 +175,14 @@ func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNode
 	return nil
 }
 
-func (m *ChannelManagerImplV2) Close() {
+func (m *ChannelManagerImpl) Close() {
 	if m.cancel != nil {
 		m.cancel()
 		m.wg.Wait()
 	}
 }
 
-func (m *ChannelManagerImplV2) AddNode(nodeID UniqueID) error {
+func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -205,7 +204,7 @@ func (m *ChannelManagerImplV2) AddNode(nodeID UniqueID) error {
 }
 
 // Release writes ToRelease channel watch states for a channel
-func (m *ChannelManagerImplV2) Release(nodeID UniqueID, channelName string) error {
+func (m *ChannelManagerImpl) Release(nodeID UniqueID, channelName string) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.String("channel", channelName),
@@ -228,7 +227,7 @@ func (m *ChannelManagerImplV2) Release(nodeID UniqueID, channelName string) erro
 	return m.execute(updates)
 }
 
-func (m *ChannelManagerImplV2) Watch(ctx context.Context, ch RWChannel) error {
+func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
 	log := log.Ctx(ctx).With(zap.String("channel", ch.GetName()))
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -257,7 +256,7 @@ func (m *ChannelManagerImplV2) Watch(ctx context.Context, ch RWChannel) error {
 	return nil
 }
 
-func (m *ChannelManagerImplV2) DeleteNode(nodeID UniqueID) error {
+func (m *ChannelManagerImpl) DeleteNode(nodeID UniqueID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -289,7 +288,7 @@ func (m *ChannelManagerImplV2) DeleteNode(nodeID UniqueID) error {
 }
 
 // reassign reassigns a channel to another DataNode.
-func (m *ChannelManagerImplV2) reassign(original *NodeChannelInfo) error {
+func (m *ChannelManagerImpl) reassign(original *NodeChannelInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -310,7 +309,7 @@ func (m *ChannelManagerImplV2) reassign(original *NodeChannelInfo) error {
 	return nil
 }
 
-func (m *ChannelManagerImplV2) Balance() {
+func (m *ChannelManagerImpl) Balance() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -326,7 +325,7 @@ func (m *ChannelManagerImplV2) Balance() {
 	}
 }
 
-func (m *ChannelManagerImplV2) Match(nodeID UniqueID, channel string) bool {
+func (m *ChannelManagerImpl) Match(nodeID UniqueID, channel string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -339,7 +338,7 @@ func (m *ChannelManagerImplV2) Match(nodeID UniqueID, channel string) bool {
 	return ok
 }
 
-func (m *ChannelManagerImplV2) GetChannel(nodeID int64, channelName string) (RWChannel, bool) {
+func (m *ChannelManagerImpl) GetChannel(nodeID int64, channelName string) (RWChannel, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -351,13 +350,13 @@ func (m *ChannelManagerImplV2) GetChannel(nodeID int64, channelName string) (RWC
 	return nil, false
 }
 
-func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
+func (m *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.store.GetNodeChannelsByCollectionID(collectionID)
 }
 
-func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []RWChannel {
+func (m *ChannelManagerImpl) GetChannelsByCollectionID(collectionID int64) []RWChannel {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	channels := []RWChannel{}
@@ -371,14 +370,14 @@ func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []R
 	return channels
 }
 
-func (m *ChannelManagerImplV2) GetChannelNamesByCollectionID(collectionID int64) []string {
+func (m *ChannelManagerImpl) GetChannelNamesByCollectionID(collectionID int64) []string {
 	channels := m.GetChannelsByCollectionID(collectionID)
 	return lo.Map(channels, func(ch RWChannel, _ int) string {
 		return ch.GetName()
 	})
 }
 
-func (m *ChannelManagerImplV2) FindWatcher(channel string) (UniqueID, error) {
+func (m *ChannelManagerImpl) FindWatcher(channel string) (UniqueID, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -401,7 +400,7 @@ func (m *ChannelManagerImplV2) FindWatcher(channel string) (UniqueID, error) {
 }
 
 // unsafe innter func
-func (m *ChannelManagerImplV2) removeChannel(nodeID int64, ch RWChannel) error {
+func (m *ChannelManagerImpl) removeChannel(nodeID int64, ch RWChannel) error {
 	op := NewChannelOpSet(NewChannelOp(nodeID, Delete, ch))
 	log.Info("remove channel assignment",
 		zap.String("channel", ch.GetName()),
@@ -410,7 +409,7 @@ func (m *ChannelManagerImplV2) removeChannel(nodeID int64, ch RWChannel) error {
 	return m.store.Update(op)
 }
 
-func (m *ChannelManagerImplV2) CheckLoop(ctx context.Context) {
+func (m *ChannelManagerImpl) CheckLoop(ctx context.Context) {
 	balanceTicker := time.NewTicker(Params.DataCoordCfg.ChannelBalanceInterval.GetAsDuration(time.Second))
 	defer balanceTicker.Stop()
 	checkTicker := time.NewTicker(Params.DataCoordCfg.ChannelCheckInterval.GetAsDuration(time.Second))
@@ -431,7 +430,7 @@ func (m *ChannelManagerImplV2) CheckLoop(ctx context.Context) {
 	}
 }
 
-func (m *ChannelManagerImplV2) AdvanceChannelState(ctx context.Context) {
+func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	m.mu.RLock()
 	standbys := m.store.GetNodeChannelsBy(WithAllNodes(), WithChannelStates(Standby))
 	toNotifies := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(ToWatch, ToRelease))
@@ -448,7 +447,7 @@ func (m *ChannelManagerImplV2) AdvanceChannelState(ctx context.Context) {
 	}
 }
 
-func (m *ChannelManagerImplV2) finishRemoveChannel(nodeID int64, channels ...RWChannel) {
+func (m *ChannelManagerImpl) finishRemoveChannel(nodeID int64, channels ...RWChannel) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, ch := range channels {
@@ -464,7 +463,7 @@ func (m *ChannelManagerImplV2) finishRemoveChannel(nodeID int64, channels ...RWC
 	}
 }
 
-func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*NodeChannelInfo) bool {
+func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range standbys {
 		validChannels := make(map[string]RWChannel)
@@ -488,6 +487,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
 			)
+			continue
 		}
 
 		log.Info("Reassign standby channels to node",
@@ -500,7 +500,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 	return advanced
 }
 
-func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies []*NodeChannelInfo) bool {
+func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toNotifies {
 		channelCount := len(nodeAssign.Channels)
@@ -523,7 +523,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 		)
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
-			tmpWatchInfo := proto.Clone(innerCh.GetWatchInfo()).(*datapb.ChannelWatchInfo)
+			tmpWatchInfo := typeutil.Clone(innerCh.GetWatchInfo())
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
@@ -563,7 +563,7 @@ type poolResult struct {
 	ch         RWChannel
 }
 
-func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
+func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toChecks {
 		if len(nodeAssign.Channels) == 0 {
@@ -615,7 +615,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 	return advanced
 }
 
-func (m *ChannelManagerImplV2) Notify(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) error {
+func (m *ChannelManagerImpl) Notify(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) error {
 	log := log.With(
 		zap.String("channel", info.GetVchan().GetChannelName()),
 		zap.Int64("assignment", nodeID),
@@ -631,7 +631,7 @@ func (m *ChannelManagerImplV2) Notify(ctx context.Context, nodeID int64, info *d
 	return nil
 }
 
-func (m *ChannelManagerImplV2) Check(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
+func (m *ChannelManagerImpl) Check(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
 	log := log.With(
 		zap.Int64("opID", info.GetOpID()),
 		zap.Int64("nodeID", nodeID),
@@ -674,7 +674,7 @@ func (m *ChannelManagerImplV2) Check(ctx context.Context, nodeID int64, info *da
 	return false, false
 }
 
-func (m *ChannelManagerImplV2) execute(updates *ChannelOpSet) error {
+func (m *ChannelManagerImpl) execute(updates *ChannelOpSet) error {
 	for _, op := range updates.ops {
 		if op.Type != Delete {
 			if err := m.fillChannelWatchInfo(op); err != nil {
@@ -688,7 +688,7 @@ func (m *ChannelManagerImplV2) execute(updates *ChannelOpSet) error {
 }
 
 // fillChannelWatchInfoWithState updates the channel op by filling in channel watch info.
-func (m *ChannelManagerImplV2) fillChannelWatchInfo(op *ChannelOp) error {
+func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 	startTs := time.Now().Unix()
 	for _, ch := range op.Channels {
 		vcInfo := m.h.GetDataVChanPositions(ch, allPartitionID)

@@ -535,7 +535,6 @@ dataNode:
     checkInterval: 3000 # the interal to check datanode memory usage, in milliseconds
     forceSyncWatermark: 0.5 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
   timetick:
-    byRPC: true
     interval: 500
   channel:
     # specify the size of global work pool of all channels

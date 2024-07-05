@@ -101,7 +101,7 @@ func (idx ivfSQ8Index) Params() map[string]string {
 }
 
 func NewIvfSQ8Index(metricType MetricType, nlist int) Index {
-	return ivfPQIndex{
+	return ivfSQ8Index{
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  IvfSQ8,
@@ -122,7 +122,7 @@ type binIvfFlat struct {
 func (idx binIvfFlat) Params() map[string]string {
 	return map[string]string{
 		MetricTypeKey: string(idx.metricType),
-		IndexTypeKey:  string(IvfSQ8),
+		IndexTypeKey:  string(BinIvfFlat),
 		ivfNlistKey:   strconv.Itoa(idx.nlist),
 	}
 }

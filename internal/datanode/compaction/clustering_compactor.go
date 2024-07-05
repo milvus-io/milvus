@@ -623,7 +623,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 							log.Warn("stop waiting for memory buffer release as task chan done")
 							return nil
 						default:
-							//currentSize := t.getCurrentBufferWrittenMemorySize()
+							// currentSize := t.getCurrentBufferWrittenMemorySize()
 							currentSize := t.getBufferTotalUsedMemorySize()
 							if currentSize < t.getMemoryBufferBlockFlushThreshold() {
 								log.Debug("memory is already below the block watermark, continue writing",

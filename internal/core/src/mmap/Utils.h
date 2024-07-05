@@ -39,6 +39,33 @@ namespace milvus {
                           file.Path(),                                   \
                           strerror(errno)));
 
+/*
+* If string field's value all empty, need a string padding to avoid
+* mmap failing because size_ is zero which causing invalid arguement
+* array has the same problem
+* TODO: remove it when support NULL value
+*/
+constexpr size_t FILE_STRING_PADDING = 1;
+constexpr size_t FILE_ARRAY_PADDING = 1;
+
+inline size_t 
+PaddingSize(const DataType& type) {
+    switch (type) {
+        case DataType::JSON:
+            // simdjson requires a padding following the json data
+            return simdjson::SIMDJSON_PADDING;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return FILE_STRING_PADDING;
+            break;
+        case DataType::ARRAY:
+            return FILE_ARRAY_PADDING;
+        default:
+            break;
+    }
+    return 0;
+}
+
 inline void
 WriteFieldData(File& file,
                DataType data_type,
@@ -127,6 +154,18 @@ WriteFieldData(File& file,
             indices.emplace_back(total_written);
             total_written += data->Size(i);
         }
+    }
+
+    // write padding 0 in file content directly
+    // see also https://github.com/milvus-io/milvus/issues/34442
+    auto padding_size = PaddingSize(data_type);
+    if (padding_size > 0 ) {
+        std::vector<char> padding(padding_size, 0);
+        ssize_t written = file.Write(padding.data(), padding_size);
+        if (written < padding_size) {
+            THROW_FILE_WRITE_ERROR
+        }
+        total_written += written;
     }
 }
 }  // namespace milvus
