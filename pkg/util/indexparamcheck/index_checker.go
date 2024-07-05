@@ -22,7 +22,7 @@ import (
 
 type IndexChecker interface {
 	CheckTrain(map[string]string) error
-	CheckValidDataType(dType schemapb.DataType) error
+	CheckValidDataType(field *schemapb.FieldSchema) error
 	SetDefaultMetricTypeIfNotExist(map[string]string, schemapb.DataType)
 	StaticCheck(map[string]string) error
 }

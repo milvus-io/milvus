@@ -3712,7 +3712,6 @@ type dataNodeConfig struct {
 	MemoryCheckInterval       ParamItem `refreshable:"true"`
 	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
 
-	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
@@ -3919,15 +3918,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "16",
 	}
 	p.FileReadConcurrency.Init(base.mgr)
-
-	p.DataNodeTimeTickByRPC = ParamItem{
-		Key:          "dataNode.timetick.byRPC",
-		Version:      "2.2.9",
-		PanicIfEmpty: false,
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.DataNodeTimeTickByRPC.Init(base.mgr)
 
 	p.DataNodeTimeTickInterval = ParamItem{
 		Key:          "dataNode.timetick.interval",
