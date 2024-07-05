@@ -76,6 +76,11 @@ func NewInner(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INNER, format, args...)
 }
 
+// NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
+func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
+}
+
 // New creates a new StreamingError with the given code and cause.
 func New(code streamingpb.StreamingCode, format string, args ...interface{}) *StreamingError {
 	if len(args) == 0 {

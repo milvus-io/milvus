@@ -20,6 +20,10 @@ type walImpl struct {
 	p pulsar.Producer
 }
 
+func (w *walImpl) WALName() string {
+	return walName
+}
+
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 	id, err := w.p.Send(ctx, &pulsar.ProducerMessage{
 		Payload:    msg.Payload(),

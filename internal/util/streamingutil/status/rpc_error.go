@@ -22,6 +22,7 @@ var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{
 	streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM: codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION:      codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_INNER:                  codes.Unavailable,
+	streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT:       codes.InvalidArgument,
 	streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN:                codes.Unknown,
 }
 

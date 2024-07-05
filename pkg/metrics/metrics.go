@@ -84,6 +84,7 @@ const (
 	collectionIDLabelName    = "collection_id"
 	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
+	channelTermLabelName     = "channel_term"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"

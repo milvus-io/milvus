@@ -60,11 +60,6 @@ var (
 		Help: "Total of pchannels",
 	})
 
-	// StreamingCoordVChannelTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
-	// 	Name: "vchannel_total",
-	// 	Help: "Total of vchannels",
-	// })
-
 	StreamingCoordAssignmentListenerTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "assignment_listener_total",
 		Help: "Total of assignment listener",
@@ -95,19 +90,19 @@ var (
 		Name:    "produce_bytes",
 		Help:    "Bytes of produced message",
 		Buckets: bytesBuckets,
-	})
+	}, channelNameLabelName, channelTermLabelName)
 
 	StreamingNodeConsumeBytes = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
 		Name:    "consume_bytes",
 		Help:    "Bytes of consumed message",
 		Buckets: bytesBuckets,
-	})
+	}, channelNameLabelName, channelTermLabelName)
 
 	StreamingNodeProduceDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
 		Name:    "produce_duration_seconds",
 		Help:    "Duration of producing message",
 		Buckets: secondsBuckets,
-	}, statusLabelName)
+	}, channelNameLabelName, channelTermLabelName, statusLabelName)
 )
 
 func RegisterStreamingServiceClient(registry *prometheus.Registry) {
