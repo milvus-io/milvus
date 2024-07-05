@@ -99,7 +99,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
         df.to_parquet(f"{data_dir}/train_{i}.parquet")
     logger.info(f"train data {df.head()}")
     logger.info(f"generate data {data_size} cost time {time.time() - t0}")
-    batch_files = glob.glob(f"{data_dir}/train*.parquet")
+    batch_files = glob.glob(f"{data_dir}/train_*.parquet")
     logger.info(f"files {batch_files}")
     if insert_mode == "import":
         # copy file to minio
