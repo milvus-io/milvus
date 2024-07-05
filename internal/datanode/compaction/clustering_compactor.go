@@ -297,7 +297,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		if err = t.refreshBufferWriter(buffer); err != nil {
+		if _, err = t.refreshBufferWriter(buffer); err != nil {
 			return err
 		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -350,7 +350,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		if err = t.refreshBufferWriter(clusterBuffer); err != nil {
+		if _, err = t.refreshBufferWriter(clusterBuffer); err != nil {
 			return err
 		}
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
@@ -872,7 +872,7 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 	}
 
 	start := time.Now()
-	kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, writer)
+	kvs, partialBinlogs, err := serializeWrite(ctx, t.logIDAlloc, writer)
 	if err != nil {
 		log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
 		return err
