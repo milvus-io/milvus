@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
 )
@@ -44,6 +45,11 @@ type scannerAdaptorImpl struct {
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // only support time tick reorder now.
 	pendingQueue  *utility.ImmutableMessageQueue   //
 	cleanup       func()
+}
+
+// Channel returns the channel assignment info of the wal.
+func (s *scannerAdaptorImpl) Channel() types.PChannelInfo {
+	return s.innerWAL.Channel()
 }
 
 // Chan returns the channel of message.

@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -33,7 +32,6 @@ func TestMain(m *testing.M) {
 
 func TestNewMessageFilter(t *testing.T) {
 	filters := []*streamingpb.DeliverFilter{
-		{},
 		{
 			Filter: &streamingpb.DeliverFilter_TimeTickGt{
 				TimeTickGt: &streamingpb.DeliverFilterTimeTickGT{
@@ -121,13 +119,14 @@ func TestCreateConsumeServer(t *testing.T) {
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, errors.New("create scanner failed"))
 	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
-	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{"test", int64(1)}).Return(l, nil)
+	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(l, nil)
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
 	// Return error if send created failed.
 	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
 	l.EXPECT().Read(mock.Anything, mock.Anything).Unset()
 	s := mock_wal.NewMockScanner(t)
+	s.EXPECT().Close().Return(nil)
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(s, nil)
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
@@ -150,7 +149,8 @@ func TestConsumeServerRecvArm(t *testing.T) {
 		consumeServer: &consumeGrpcServerHelper{
 			StreamingNodeHandlerService_ConsumeServer: grpcConsumerServer,
 		},
-		logger: log.With(),
+		logger:  log.With(),
+		closeCh: make(chan struct{}),
 	}
 	recvCh := make(chan *streamingpb.ConsumeRequest)
 	grpcConsumerServer.EXPECT().Recv().RunAndReturn(func() (*streamingpb.ConsumeRequest, error) {
@@ -162,33 +162,28 @@ func TestConsumeServerRecvArm(t *testing.T) {
 	})
 
 	// Test recv arm
-	recvFailureCh := syncutil.NewFuture[error]()
 	ch := make(chan error)
 	go func() {
-		ch <- server.recvLoop(recvFailureCh)
+		ch <- server.recvLoop()
 	}()
 
 	// should be blocked.
 	testChannelShouldBeBlocked(t, ch, 500*time.Millisecond)
-	testChannelShouldBeBlocked(t, recvFailureCh.Done(), 500*time.Millisecond)
+	testChannelShouldBeBlocked(t, server.closeCh, 500*time.Millisecond)
 
 	// cancelConsumerCh should be closed after receiving close request.
 	recvCh <- &streamingpb.ConsumeRequest{
 		Request: &streamingpb.ConsumeRequest_Close{},
 	}
-	<-recvFailureCh.Done()
+	close(recvCh)
+	<-server.closeCh
 	assert.NoError(t, <-ch)
 
 	// Test unexpected recv error.
 	grpcConsumerServer.EXPECT().Recv().Unset()
 	grpcConsumerServer.EXPECT().Recv().Return(nil, io.ErrUnexpectedEOF)
-	recvFailureCh = syncutil.NewFuture[error]()
-	assert.ErrorIs(t, server.recvLoop(recvFailureCh), io.ErrUnexpectedEOF)
-
-	grpcConsumerServer.EXPECT().Recv().Unset()
-	grpcConsumerServer.EXPECT().Recv().Return(nil, io.EOF)
-	recvFailureCh = syncutil.NewFuture[error]()
-	assert.ErrorIs(t, server.recvLoop(recvFailureCh), io.ErrUnexpectedEOF)
+	server.closeCh = make(chan struct{})
+	assert.ErrorIs(t, server.recvLoop(), io.ErrUnexpectedEOF)
 }
 
 func TestConsumerServeSendArm(t *testing.T) {
@@ -200,20 +195,21 @@ func TestConsumerServeSendArm(t *testing.T) {
 		},
 		logger:  log.With(),
 		scanner: scanner,
+		closeCh: make(chan struct{}),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	grpcConsumerServer.EXPECT().Context().Return(ctx)
 	grpcConsumerServer.EXPECT().Send(mock.Anything).RunAndReturn(func(cr *streamingpb.ConsumeResponse) error { return nil }).Times(2)
 
-	scanCh := make(chan message.ImmutableMessage)
+	scanCh := make(chan message.ImmutableMessage, 1)
+	scanner.EXPECT().Channel().Return(types.PChannelInfo{})
 	scanner.EXPECT().Chan().Return(scanCh)
 	scanner.EXPECT().Close().Return(nil).Times(3)
 
 	// Test send arm
-	recvFailureCh := syncutil.NewFuture[error]()
 	ch := make(chan error)
 	go func() {
-		ch <- s.sendLoop(recvFailureCh)
+		ch <- s.sendLoop()
 	}()
 
 	// should be blocked.
@@ -238,17 +234,17 @@ func TestConsumerServeSendArm(t *testing.T) {
 	scanner.EXPECT().Chan().Unset()
 	scanner.EXPECT().Chan().Return(make(<-chan message.ImmutableMessage))
 	go func() {
-		ch <- s.sendLoop(recvFailureCh)
+		ch <- s.sendLoop()
 	}()
 	// should be blocked.
 	testChannelShouldBeBlocked(t, ch, 500*time.Millisecond)
-	recvFailureCh.Set(nil)
+	close(s.closeCh)
 	assert.NoError(t, <-ch)
 
 	// test cancel by server context.
-	recvFailureCh = syncutil.NewFuture[error]()
+	s.closeCh = make(chan struct{})
 	go func() {
-		ch <- s.sendLoop(recvFailureCh)
+		ch <- s.sendLoop()
 	}()
 	testChannelShouldBeBlocked(t, ch, 500*time.Millisecond)
 	cancel()

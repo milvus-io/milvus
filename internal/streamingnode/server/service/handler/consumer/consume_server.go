@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"io"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -15,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // CreateConsumeServer create a new consumer.
@@ -66,6 +66,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		scanner:       scanner,
 		consumeServer: consumeServer,
 		logger:        log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
+		closeCh:       make(chan struct{}),
 	}, nil
 }
 
@@ -74,40 +75,35 @@ type ConsumeServer struct {
 	scanner       wal.Scanner
 	consumeServer *consumeGrpcServerHelper
 	logger        *log.MLogger
+	closeCh       chan struct{}
 }
 
 // Execute executes the consumer.
 func (c *ConsumeServer) Execute() error {
-	// sender: recv arm, receiver: send arm, with buffer 1 to avoid block.
-	recvFailureSignal := syncutil.NewFuture[error]()
+	// recv loop will be blocked until the stream is closed.
+	// 1. close by client.
+	// 2. close by server context cancel by return of outside Execute.
+	go c.recvLoop()
 
-	// Start a recv arm to handle the control message on background.
-	go func() {
-		// recv loop will be blocked until the stream is closed.
-		// 1. close by client.
-		// 2. close by server context cancel by return of outside Execute.
-		_ = c.recvLoop(recvFailureSignal)
-	}()
-
-	// Start a send loop on current main goroutine.
+	// Start a send loop on current goroutine.
 	// the loop will be blocked until:
 	// 1. the stream is broken.
 	// 2. recv arm recv close signal.
 	// 3. scanner is quit with expected error.
-	return c.sendLoop(recvFailureSignal)
+	return c.sendLoop()
 }
 
 // sendLoop sends the message to client.
-func (c *ConsumeServer) sendLoop(recvChanSignal *syncutil.Future[error]) (err error) {
+func (c *ConsumeServer) sendLoop() (err error) {
 	defer func() {
-		if err != nil {
-			c.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err))
-		} else {
-			c.logger.Info("send arm of stream closed")
-		}
 		if err := c.scanner.Close(); err != nil {
 			c.logger.Warn("close scanner failed", zap.Error(err))
 		}
+		if err != nil {
+			c.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err))
+			return
+		}
+		c.logger.Info("send arm of stream closed")
 	}()
 	// Read ahead buffer is implemented by scanner.
 	// Do not add buffer here.
@@ -130,15 +126,18 @@ func (c *ConsumeServer) sendLoop(recvChanSignal *syncutil.Future[error]) (err er
 			}); err != nil {
 				return errors.Wrap(err, "at send consume message")
 			}
-			metrics.StreamingNodeConsumeBytes.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(messageSize))
-		case <-recvChanSignal.Done():
-			err := recvChanSignal.Get()
-			c.logger.Info("recv channel notified", zap.Error(err))
+			metrics.StreamingNodeConsumeBytes.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				c.scanner.Channel().Name,
+				strconv.FormatInt(c.scanner.Channel().Term, 10),
+			).Observe(float64(messageSize))
+		case <-c.closeCh:
+			c.logger.Info("close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
 				c.logger.Warn("send close failed", zap.Error(err))
 				return errors.Wrap(err, "at send close")
 			}
-			return errors.Wrap(err, "at recv failure channel")
+			return nil
 		case <-c.consumeServer.Context().Done():
 			return errors.Wrap(c.consumeServer.Context().Err(), "at grpc context done")
 		}
@@ -146,30 +145,26 @@ func (c *ConsumeServer) sendLoop(recvChanSignal *syncutil.Future[error]) (err er
 }
 
 // recvLoop receives messages from client.
-func (c *ConsumeServer) recvLoop(recvFailureCh *syncutil.Future[error]) (err error) {
+func (c *ConsumeServer) recvLoop() (err error) {
 	defer func() {
-		recvFailureCh.Set(err)
 		if err != nil {
 			c.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
-		} else {
-			c.logger.Info("recv arm of stream closed")
+			return
 		}
+		c.logger.Info("recv arm of stream closed")
 	}()
 
 	for {
 		req, err := c.consumeServer.Recv()
 		if err == io.EOF {
-			// should always return by ConsumeRequest_Close message.
-			c.logger.Warn("stream closed by client unexpectedly")
-			return io.ErrUnexpectedEOF
+			return nil
 		}
 		if err != nil {
 			return err
 		}
 		switch req := req.Request.(type) {
 		case *streamingpb.ConsumeRequest_Close:
-			return nil
-			// should be eof next.
+			close(c.closeCh)
 		default:
 			// skip unknown message here, to keep the forward compatibility.
 			c.logger.Warn("unknown request type", zap.Any("request", req))

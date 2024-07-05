@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // CreateProduceServer create a new producer.
@@ -65,33 +64,29 @@ type ProduceServer struct {
 
 // Execute starts the producer.
 func (p *ProduceServer) Execute() error {
-	// sender: recv arm, receiver: send arm.
-	recvDoneSignal := syncutil.NewFuture[error]()
-
 	// Start a recv arm to handle the control message from client.
 	go func() {
 		// recv loop will be blocked until the stream is closed.
 		// 1. close by client.
 		// 2. close by server context cancel by return of outside Execute.
-		_ = p.recvLoop(recvDoneSignal)
+		_ = p.recvLoop()
 	}()
 
 	// Start a send loop on current main goroutine.
 	// the loop will be blocked until:
 	// 1. the stream is broken.
 	// 2. recv arm recv closed and all response is sent.
-	return p.sendLoop(recvDoneSignal)
+	return p.sendLoop()
 }
 
 // sendLoop sends the message to client.
-func (p *ProduceServer) sendLoop(recvDoneSignal *syncutil.Future[error]) (err error) {
+func (p *ProduceServer) sendLoop() (err error) {
 	defer func() {
-		recvErr := recvDoneSignal.Get()
-		if err != nil || recvErr != nil {
-			p.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err), zap.NamedError("recvErr", recvErr))
-		} else {
-			p.logger.Info("send arm of stream closed")
+		if err != nil {
+			p.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err))
+			return
 		}
+		p.logger.Info("send arm of stream closed")
 	}()
 	for {
 		select {
@@ -111,25 +106,19 @@ func (p *ProduceServer) sendLoop(recvDoneSignal *syncutil.Future[error]) (err er
 }
 
 // recvLoop receives the message from client.
-func (p *ProduceServer) recvLoop(recvDoneSignal *syncutil.Future[error]) (err error) {
+func (p *ProduceServer) recvLoop() (err error) {
 	defer func() {
-		p.logger.Info("recv arm of stream start to close, waiting for all append request done")
-		p.appendWG.Wait()
-		close(p.produceMessageCh)
-		recvDoneSignal.Set(err)
-
 		if err != nil {
 			p.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
-		} else {
-			p.logger.Info("recv arm of stream closed")
+			return
 		}
+		p.logger.Info("recv arm of stream closed")
 	}()
 
 	for {
 		req, err := p.produceServer.Recv()
 		if err == io.EOF {
-			p.logger.Warn("stream closed by client unexpectedly")
-			return io.ErrUnexpectedEOF
+			return nil
 		}
 		if err != nil {
 			return err
@@ -138,7 +127,9 @@ func (p *ProduceServer) recvLoop(recvDoneSignal *syncutil.Future[error]) (err er
 		case *streamingpb.ProduceRequest_Produce:
 			p.handleProduce(req.Produce)
 		case *streamingpb.ProduceRequest_Close:
-			return nil
+			p.logger.Info("recv arm of stream start to close, waiting for all append request done")
+			p.appendWG.Wait()
+			close(p.produceMessageCh)
 			// we will receive EOF after that.
 		default:
 			// skip message here, to keep the forward compatibility.
@@ -196,6 +187,7 @@ func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err
 		RequestId: reqID,
 	}
 	if err != nil {
+		p.logger.Warn("append message to wal failed", zap.Int64("requestID", reqID), zap.Error(err))
 		resp.Response = &streamingpb.ProduceMessageResponse_Error{
 			Error: status.AsStreamingError(err).AsPBError(),
 		}

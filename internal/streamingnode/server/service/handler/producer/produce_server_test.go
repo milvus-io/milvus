@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -98,11 +97,10 @@ func TestProduceSendArm(t *testing.T) {
 		appendWG:         sync.WaitGroup{},
 	}
 
-	recvFailureSignal := syncutil.NewFuture[error]()
 	// test send arm success.
 	ch := make(chan error)
 	go func() {
-		ch <- p.sendLoop(recvFailureSignal)
+		ch <- p.sendLoop()
 	}()
 
 	p.produceMessageCh <- &streamingpb.ProduceMessageResponse{
@@ -116,7 +114,6 @@ func TestProduceSendArm(t *testing.T) {
 		},
 	}
 	close(p.produceMessageCh)
-	recvFailureSignal.Set(nil)
 	assert.Nil(t, <-ch)
 	assert.Equal(t, int32(2), success.Load())
 
@@ -130,10 +127,9 @@ func TestProduceSendArm(t *testing.T) {
 		appendWG:         sync.WaitGroup{},
 	}
 
-	recvFailureSignal = syncutil.NewFuture[error]()
 	ch = make(chan error)
 	go func() {
-		ch <- p.sendLoop(recvFailureSignal)
+		ch <- p.sendLoop()
 	}()
 
 	success.Store(0)
@@ -149,7 +145,6 @@ func TestProduceSendArm(t *testing.T) {
 			},
 		},
 	}
-	recvFailureSignal.Set(nil)
 	assert.Error(t, <-ch)
 
 	// test send arm failure
@@ -162,13 +157,11 @@ func TestProduceSendArm(t *testing.T) {
 		appendWG:         sync.WaitGroup{},
 	}
 
-	recvFailureSignal = syncutil.NewFuture[error]()
 	ch = make(chan error)
 	go func() {
-		ch <- p.sendLoop(recvFailureSignal)
+		ch <- p.sendLoop()
 	}()
 	cancel()
-	recvFailureSignal.Set(nil)
 	assert.Error(t, <-ch)
 }
 
@@ -209,7 +202,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 	// Test send arm
 	ch := make(chan error)
 	go func() {
-		ch <- p.recvLoop(syncutil.NewFuture[error]())
+		ch <- p.recvLoop()
 	}()
 
 	req := &streamingpb.ProduceRequest{
@@ -273,7 +266,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 		return nil, io.ErrUnexpectedEOF
 	})
 
-	assert.ErrorIs(t, p.recvLoop(syncutil.NewFuture[error]()), io.ErrUnexpectedEOF)
+	assert.ErrorIs(t, p.recvLoop(), io.ErrUnexpectedEOF)
 }
 
 func assertCreateProduceServerFail(t *testing.T, manager walmanager.Manager, grpcProduceServer streamingpb.StreamingNodeHandlerService_ProduceServer) {
