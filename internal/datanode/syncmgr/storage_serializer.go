@@ -214,6 +214,7 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 			FieldID: s.pkField.GetFieldID(),
 			MaxPk:   pks.MaxPK,
 			MinPk:   pks.MinPK,
+			BFType:  pks.PkFilter.Type(),
 			BF:      pks.PkFilter,
 			PkType:  int64(s.pkField.GetDataType()),
 		}
