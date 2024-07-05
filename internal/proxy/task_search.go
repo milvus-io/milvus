@@ -720,6 +720,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 
+	validateGeometryFieldSearchResult(&t.result.Results.FieldsData)
 	// reduce done, get final result
 	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
 	resultSizeInsufficient := false

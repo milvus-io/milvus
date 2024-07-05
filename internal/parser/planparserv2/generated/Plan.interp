@@ -92,6 +92,13 @@ ArrayContains
 ArrayContainsAll
 ArrayContainsAny
 ArrayLength
+STEuqals
+STTouches
+STOverlaps
+STCrosses
+STContains
+STIntersects
+STWithin
 BooleanConstant
 IntegerConstant
 FloatingConstant
