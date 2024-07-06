@@ -56,6 +56,7 @@ func TestCreateProduceServer(t *testing.T) {
 	l := mock_wal.NewMockWAL(t)
 	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
+	l.EXPECT().WALName().Return("test")
 	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1}).Return(l, nil)
 	grpcProduceServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
 	assertCreateProduceServerFail(t, manager, grpcProduceServer)

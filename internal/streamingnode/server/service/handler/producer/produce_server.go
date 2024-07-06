@@ -33,7 +33,7 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create producer request is required")
 	}
-	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.Pchannel))
+	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,9 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	produceServer := &produceGrpcServerHelper{
 		StreamingNodeHandlerService_ProduceServer: streamServer,
 	}
-	if err := produceServer.SendCreated(l.WALName()); err != nil {
+	if err := produceServer.SendCreated(&streamingpb.CreateProducerResponse{
+		WalName: l.WALName(),
+	}); err != nil {
 		return nil, errors.Wrap(err, "at send created")
 	}
 	return &ProduceServer{

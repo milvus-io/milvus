@@ -16,7 +16,7 @@ type Manager interface {
 
 	// GetAvailableWAL returns a available wal instance for the channel.
 	// Return nil if the wal instance is not found.
-	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
+	GetAvailableWAL(types.PChannelInfo) (wal.WAL, error)
 
 	// GetAllAvailableWALInfo returns all available channel info.
 	GetAllAvailableChannels() ([]types.PChannelInfo, error)
