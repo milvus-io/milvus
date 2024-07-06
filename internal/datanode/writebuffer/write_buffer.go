@@ -311,6 +311,13 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 }
 
 func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
+	for _, segmentID := range segmentIDs {
+		_, ok := wb.metaCache.GetSegmentByID(segmentID)
+		if !ok {
+			log.Warn("cannot find segment when sealSegments", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
+			return merr.WrapErrSegmentNotFound(segmentID)
+		}
+	}
 	// mark segment flushing if segment was growing
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
@@ -542,6 +549,7 @@ func (wb *writeBufferBase) bufferInsert(inData *inData, startPos, endPos *msgpb.
 		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.SetStartPosRecorded(false))
+		log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.String("channel", wb.channelName))
 	}
 
 	segBuf := wb.getOrCreateBuffer(inData.segmentID)
