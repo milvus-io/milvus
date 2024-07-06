@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strconv"
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow"
@@ -40,12 +41,6 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		defer reader.Close()
 		err = reader.Next()
 		assert.Equal(t, io.EOF, err)
-
-		// blobs := generateTestData(t, 0)
-		// reader, err = NewBinlogDeserializeReader(blobs, common.RowIDField)
-		// assert.NoError(t, err)
-		// err = reader.Next()
-		// assert.Equal(t, io.EOF, err)
 	})
 
 	t.Run("test deserialize", func(t *testing.T) {
@@ -186,24 +181,11 @@ func TestNull(t *testing.T) {
 		assert.NoError(t, err)
 
 		m := make(map[FieldID]any)
+		for _, fs := range schema.Fields {
+			m[fs.FieldID] = nil
+		}
 		m[common.RowIDField] = int64(0)
 		m[common.TimeStampField] = int64(0)
-		m[10] = nil
-		m[11] = nil
-		m[12] = nil
-		m[13] = nil
-		m[14] = nil
-		m[15] = nil
-		m[16] = nil
-		m[17] = nil
-		m[18] = nil
-		m[19] = nil
-		m[101] = nil
-		m[102] = nil
-		m[103] = nil
-		m[104] = nil
-		m[105] = nil
-		m[106] = nil
 		pk, err := GenPrimaryKeyByRawData(m[common.RowIDField], schemapb.DataType_Int64)
 		assert.NoError(t, err)
 
@@ -342,4 +324,162 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 			assertTestDeltalogData(t, i, value)
 		}
 	})
+}
+
+func TestDeltalogPkTsSeparateFormat(t *testing.T) {
+	t.Run("test empty data", func(t *testing.T) {
+		eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, nil)
+		writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, 7)
+		assert.NoError(t, err)
+		defer writer.Close()
+		err = writer.Close()
+		assert.NoError(t, err)
+		blob, err := eventWriter.Finalize()
+		assert.NoError(t, err)
+		assert.NotNil(t, blob)
+	})
+
+	testCases := []struct {
+		name     string
+		pkType   schemapb.DataType
+		assertPk func(t *testing.T, i int, value *DeleteLog)
+	}{
+		{
+			name:   "test int64 pk",
+			pkType: schemapb.DataType_Int64,
+			assertPk: func(t *testing.T, i int, value *DeleteLog) {
+				assert.Equal(t, NewInt64PrimaryKey(int64(i)), value.Pk)
+				assert.Equal(t, uint64(i+1), value.Ts)
+			},
+		},
+		{
+			name:   "test varchar pk",
+			pkType: schemapb.DataType_VarChar,
+			assertPk: func(t *testing.T, i int, value *DeleteLog) {
+				assert.Equal(t, NewVarCharPrimaryKey(strconv.Itoa(i)), value.Pk)
+				assert.Equal(t, uint64(i+1), value.Ts)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// serialize data
+			size := 10
+			blob, err := writeDeltalogNewFormat(size, tc.pkType, 7)
+			assert.NoError(t, err)
+
+			// Deserialize data
+			reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+			assert.NoError(t, err)
+			defer reader.Close()
+			for i := 0; i < size; i++ {
+				err = reader.Next()
+				assert.NoError(t, err)
+
+				value := reader.Value()
+				tc.assertPk(t, i, value)
+			}
+			err = reader.Next()
+			assert.Equal(t, io.EOF, err)
+		})
+	}
+}
+
+func BenchmarkDeltalogReader(b *testing.B) {
+	size := 1000000
+	blob, err := generateTestDeltalogData(size)
+	assert.NoError(b, err)
+
+	b.Run("one string format reader", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			readDeltaLog(size, blob)
+		}
+	})
+
+	blob, err = writeDeltalogNewFormat(size, schemapb.DataType_Int64, size)
+	assert.NoError(b, err)
+
+	b.Run("pk ts separate format reader", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			readDeltaLog(size, blob)
+		}
+	})
+}
+
+func BenchmarkDeltalogFormatWriter(b *testing.B) {
+	size := 1000000
+	b.Run("one string format writer", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			eventWriter := NewDeltalogStreamWriter(0, 0, 0)
+			writer, _ := NewDeltalogSerializeWriter(0, 0, eventWriter, size)
+			var value *DeleteLog
+			for j := 0; j < size; j++ {
+				value = NewDeleteLog(NewInt64PrimaryKey(int64(j)), uint64(j+1))
+				writer.Write(value)
+			}
+			writer.Close()
+			eventWriter.Finalize()
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("pk and ts separate format writer", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			writeDeltalogNewFormat(size, schemapb.DataType_Int64, size)
+		}
+		b.ReportAllocs()
+	})
+}
+
+func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (*Blob, error) {
+	var err error
+	eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "pk", DataType: pkType},
+		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+	})
+	writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	var value *DeleteLog
+	for i := 0; i < size; i++ {
+		switch pkType {
+		case schemapb.DataType_Int64:
+			value = NewDeleteLog(NewInt64PrimaryKey(int64(i)), uint64(i+1))
+		case schemapb.DataType_VarChar:
+			value = NewDeleteLog(NewVarCharPrimaryKey(strconv.Itoa(i)), uint64(i+1))
+		}
+		if err = writer.Write(value); err != nil {
+			return nil, err
+		}
+	}
+	if err = writer.Close(); err != nil {
+		return nil, err
+	}
+	blob, err := eventWriter.Finalize()
+	if err != nil {
+		return nil, err
+	}
+	return blob, nil
+}
+
+func readDeltaLog(size int, blob *Blob) error {
+	reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	for j := 0; j < size; j++ {
+		err = reader.Next()
+		_ = reader.Value()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
