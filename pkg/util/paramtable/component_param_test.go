@@ -542,6 +542,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
 		params.Save("common.useVectorAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
+		params.Save("common.enableVectorClusteringKey", "true")
+		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
 }
 
@@ -571,6 +573,7 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
+	assert.Equal(t, "BasicBloomFilter", params.CommonCfg.BloomFilterType.GetValue())
 
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())

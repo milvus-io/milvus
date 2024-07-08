@@ -32,7 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -153,16 +153,15 @@ func (s *LogFormatterSuite) TestFormatMethodInfo() {
 	for _, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(metaContext, s.serverinfo, req)
 		fs := formatter.Format(i)
-		log.Info(fs)
 		s.True(strings.Contains(fs, s.traceID))
 	}
 
+	tracer.Init()
 	traceContext, traceSpan := otel.Tracer(typeutil.ProxyRole).Start(s.ctx, "test")
 	trueTraceID := traceSpan.SpanContext().TraceID().String()
 	for _, req := range s.reqs {
 		i := info.NewGrpcAccessInfo(traceContext, s.serverinfo, req)
 		fs := formatter.Format(i)
-		log.Info(fs)
 		s.True(strings.Contains(fs, trueTraceID))
 	}
 }

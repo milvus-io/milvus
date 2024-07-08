@@ -24,6 +24,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -789,6 +790,7 @@ type SerializeWriter[T any] struct {
 	rw         RecordWriter
 	serializer Serializer[T]
 	batchSize  int
+	mu         sync.Mutex
 
 	buffer            []T
 	pos               int
@@ -796,6 +798,8 @@ type SerializeWriter[T any] struct {
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	if sw.pos == 0 {
 		return nil
 	}

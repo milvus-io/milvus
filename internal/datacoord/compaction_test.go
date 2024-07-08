@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -52,7 +51,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = NewMockSessionManager(s.T())
 	s.cluster = NewMockCluster(s.T())
-	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -529,9 +528,9 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
-	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Once()
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
-	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,
@@ -546,19 +545,19 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.handler.taskNumber.Add(1000)
 	task.PlanID = 2
 	err = s.handler.enqueueCompaction(task)
-	s.Error(err)
+	s.NoError(err)
 }
 
 func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	s.SetupTest()
 
 	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(111), int64(1)).Return(
-		&datapb.CompactionPlanResult{PlanID: 1, State: commonpb.CompactionState_Executing}, nil).Once()
+		&datapb.CompactionPlanResult{PlanID: 1, State: datapb.CompactionTaskState_executing}, nil).Once()
 
 	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(111), int64(2)).Return(
 		&datapb.CompactionPlanResult{
 			PlanID:   2,
-			State:    commonpb.CompactionState_Completed,
+			State:    datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{{PlanID: 2}},
 		}, nil).Once()
 
@@ -566,9 +565,12 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		&datapb.CompactionPlanResult{
 			PlanID:   6,
 			Channel:  "ch-2",
-			State:    commonpb.CompactionState_Completed,
+			State:    datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{{PlanID: 6}},
 		}, nil).Once()
+
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return()
 
 	inTasks := map[int64]CompactionTask{
 		1: &mixCompactionTask{
@@ -658,11 +660,11 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	// s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).RunAndReturn(
-		func(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-			if plan.GetPlanID() == 2 {
+		func(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+			if t.GetPlanID() == 2 {
 				segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 				return []*SegmentInfo{segment}, &segMetricMutation{}, nil
-			} else if plan.GetPlanID() == 6 {
+			} else if t.GetPlanID() == 6 {
 				return nil, nil, errors.Errorf("intended error")
 			}
 			return nil, nil, errors.Errorf("unexpected error")
@@ -706,7 +708,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 
 	// s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().SetSegmentCompacting(mock.Anything, mock.Anything).Return().Twice()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return().Once()
 	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 		[]*SegmentInfo{segment},
@@ -749,20 +751,21 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 
 	task := &mixCompactionTask{
 		CompactionTask: &datapb.CompactionTask{
-			PlanID:    plan.GetPlanID(),
-			TriggerID: 1,
-			Type:      plan.GetType(),
-			State:     datapb.CompactionTaskState_executing,
-			NodeID:    dataNodeID,
+			PlanID:        plan.GetPlanID(),
+			TriggerID:     1,
+			Type:          plan.GetType(),
+			State:         datapb.CompactionTaskState_executing,
+			NodeID:        dataNodeID,
+			InputSegments: []UniqueID{1, 2},
 		},
-		plan:     plan,
+		// plan:     plan,
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
 
 	compactionResult := datapb.CompactionPlanResult{
 		PlanID: 1,
-		State:  commonpb.CompactionState_Completed,
+		State:  datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
 			{
 				SegmentID:           3,
@@ -775,6 +778,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	}
 
 	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(111), int64(1)).Return(&compactionResult, nil).Once()
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
 	s.handler.doSchedule()

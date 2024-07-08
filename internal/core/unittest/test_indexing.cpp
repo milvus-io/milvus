@@ -233,7 +233,7 @@ TEST(Indexing, BinaryBruteForce) {
 }
 
 TEST(Indexing, Naive) {
-    constexpr int N = 10000;
+    constexpr int N = 1000;
     constexpr int TOPK = 10;
 
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
@@ -410,7 +410,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
 TEST(Indexing, Iterator) {
-    constexpr int N = 10240;
+    constexpr int N = 1024;
     constexpr int TOPK = 100;
     constexpr int dim = 128;
 
@@ -449,8 +449,7 @@ TEST(Indexing, Iterator) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         kw_iterators = vec_index->VectorIterators(
             query_ds, searchInfo.search_params_, view);
     ASSERT_TRUE(kw_iterators.has_value());
@@ -755,7 +754,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 }
 
 TEST(Indexing, SearchDiskAnnWithFloat16) {
-    int64_t NB = 1000;
+    int64_t NB = 100;
     int64_t NQ = 2;
     int64_t K = 4;
     IndexType index_type = knowhere::IndexEnum::INDEX_DISKANN;

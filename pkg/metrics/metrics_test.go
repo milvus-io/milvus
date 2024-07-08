@@ -38,6 +38,7 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterMetaMetrics(r)
 		RegisterStorageMetrics(r)
 		RegisterMsgStreamMetrics(r)
+		RegisterCGOMetrics(r)
 	})
 }
 

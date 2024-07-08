@@ -20,12 +20,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestFieldStatsUpdate(t *testing.T) {
@@ -373,7 +374,7 @@ func TestFieldStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		FieldID: common.RowIDField,
 		Min:     1,
 		Max:     9,
-		BF:      bloom.NewWithEstimates(100000, 0.05),
+		BF:      bloomfilter.NewBloomFilterWithType(100000, 0.05, paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
 	}
 
 	b := make([]byte, 8)
@@ -574,8 +575,9 @@ func TestFieldStatsUnMarshal(t *testing.T) {
 		assert.Error(t, err)
 		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": \"b\"}"))
 		assert.Error(t, err)
+		// return AlwaysTrueBloomFilter when deserialize bloom filter failed.
 		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": 1, \"bf\": \"2\"}"))
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("succeed", func(t *testing.T) {
@@ -706,4 +708,16 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 	stats4.UnmarshalJSON(bytes2)
 	assert.Equal(t, 2, len(stats4.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
+}
+
+func TestFindMaxVersion(t *testing.T) {
+	files := []string{"path/1", "path/2", "path/3"}
+	version, path := FindPartitionStatsMaxVersion(files)
+	assert.Equal(t, int64(3), version)
+	assert.Equal(t, "path/3", path)
+
+	files2 := []string{}
+	version2, path2 := FindPartitionStatsMaxVersion(files2)
+	assert.Equal(t, int64(-1), version2)
+	assert.Equal(t, "", path2)
 }

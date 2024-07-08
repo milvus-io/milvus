@@ -244,11 +244,13 @@ type commonConfig struct {
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
+	BloomFilterType           ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
+	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -449,7 +451,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
-		Version:      "2.5.0",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 	}
 	p.EnableMaterializedView.Init(base.mgr)
@@ -729,6 +731,15 @@ like the old password verification when updating the credential`,
 	}
 	p.BloomFilterSize.Init(base.mgr)
 
+	p.BloomFilterType = ParamItem{
+		Key:          "common.bloomFilterType",
+		Version:      "2.4.3",
+		DefaultValue: "BasicBloomFilter",
+		Doc:          "bloom filter type, support BasicBloomFilter and BlockedBloomFilter",
+		Export:       true,
+	}
+	p.BloomFilterType.Init(base.mgr)
+
 	p.MaxBloomFalsePositive = ParamItem{
 		Key:          "common.maxBloomFalsePositive",
 		Version:      "2.3.2",
@@ -757,7 +768,7 @@ like the old password verification when updating the credential`,
 
 	p.UsePartitionKeyAsClusteringKey = ParamItem{
 		Key:          "common.usePartitionKeyAsClusteringKey",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on partition key field",
 		DefaultValue: "false",
 	}
@@ -765,11 +776,19 @@ like the old password verification when updating the credential`,
 
 	p.UseVectorAsClusteringKey = ParamItem{
 		Key:          "common.useVectorAsClusteringKey",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on vector field",
 		DefaultValue: "false",
 	}
 	p.UseVectorAsClusteringKey.Init(base.mgr)
+
+	p.EnableVectorClusteringKey = ParamItem{
+		Key:          "common.enableVectorClusteringKey",
+		Version:      "2.4.6",
+		Doc:          "if true, enable vector clustering key and vector clustering compaction",
+		DefaultValue: "false",
+	}
+	p.EnableVectorClusteringKey.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1033,12 +1052,14 @@ type AccessLogConfig struct {
 	LocalPath     ParamItem  `refreshable:"false"`
 	Filename      ParamItem  `refreshable:"false"`
 	MaxSize       ParamItem  `refreshable:"false"`
-	CacheSize     ParamItem  `refreshable:"false"`
 	RotatedTime   ParamItem  `refreshable:"false"`
 	MaxBackups    ParamItem  `refreshable:"false"`
 	RemotePath    ParamItem  `refreshable:"false"`
 	RemoteMaxTime ParamItem  `refreshable:"false"`
 	Formatter     ParamGroup `refreshable:"false"`
+
+	CacheSize          ParamItem `refreshable:"false"`
+	CacheFlushInterval ParamItem `refreshable:"false"`
 }
 
 type proxyConfig struct {
@@ -1294,11 +1315,19 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.CacheSize = ParamItem{
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
-		DefaultValue: "10240",
-		Doc:          "Size of log of memory cache, in B",
+		DefaultValue: "0",
+		Doc:          "Size of log of write cache, in B. (Close write cache if size was 0",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
+
+	p.AccessLog.CacheFlushInterval = ParamItem{
+		Key:          "proxy.accessLog.cacheFlushInterval",
+		Version:      "2.4.0",
+		DefaultValue: "3",
+		Doc:          "time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)",
+	}
+	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
 	p.AccessLog.MaxBackups = ParamItem{
 		Key:          "proxy.accessLog.maxBackups",
@@ -2155,6 +2184,8 @@ type queryNodeConfig struct {
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	QueryStreamBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2771,13 +2802,23 @@ user-task-polling:
 	p.UseStreamComputing.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "queryNode.bloomFilterApplyBatchSize",
+		Key:          "queryNode.bloomFilterApplyParallelFactor",
+		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.QueryStreamBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamBatchSize",
+		Version:      "2.4.1",
+		DefaultValue: "4194304",
+		Doc:          "return batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3250,7 +3291,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 		Doc:          "Enable clustering compaction",
 		Export:       true,
@@ -3259,7 +3300,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionAutoEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.autoEnable",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 		Doc:          "Enable auto clustering compaction",
 		Export:       true,
@@ -3268,28 +3309,28 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "600",
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
 	p.ClusteringCompactionStateCheckInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "10",
 	}
 	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
 
 	p.ClusteringCompactionGCInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.gcInterval",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "600",
 	}
 	p.ClusteringCompactionGCInterval.Init(base.mgr)
 
 	p.ClusteringCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minInterval",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction",
 		DefaultValue: "3600",
 	}
@@ -3297,7 +3338,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxInterval",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "If a collection haven't been clustering compacted for longer than maxInterval, force compact",
 		DefaultValue: "86400",
 	}
@@ -3305,7 +3346,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionNewDataSizeThreshold = ParamItem{
 		Key:          "dataCoord.compaction.clustering.newDataSizeThreshold",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute clustering compaction",
 		DefaultValue: "512m",
 	}
@@ -3313,14 +3354,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionTimeoutInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.clustering.timeout",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "3600",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
 
 	p.ClusteringCompactionDropTolerance = ParamItem{
 		Key:          "dataCoord.compaction.clustering.dropTolerance",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		Doc:          "If clustering compaction job is finished for a long time, gc it",
 		DefaultValue: "259200",
 	}
@@ -3328,7 +3369,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionPreferSegmentSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.preferSegmentSize",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "512m",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -3337,7 +3378,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxSegmentSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxSegmentSize",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "1024m",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -3346,7 +3387,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxTrainSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxTrainSizeRatio",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "0.8",
 		Doc:          "max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
@@ -3355,7 +3396,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "10240",
 		Doc:          "maximum centroids number in Kmeans train",
 		Export:       true,
@@ -3364,7 +3405,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minCentroidsNum",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "16",
 		Doc:          "minimum centroids number in Kmeans train",
 		Export:       true,
@@ -3373,7 +3414,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minClusterSizeRatio",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "0.01",
 		Doc:          "minimum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3382,7 +3423,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSizeRatio",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "10",
 		Doc:          "maximum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3391,7 +3432,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSize",
-		Version:      "2.4.2",
+		Version:      "2.4.6",
 		DefaultValue: "5g",
 		Doc:          "maximum cluster size in Kmeans train",
 		Export:       true,
@@ -3411,7 +3452,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.interval",
 		Version:      "2.0.0",
 		DefaultValue: "3600",
-		Doc:          "gc interval in seconds",
+		Doc:          "meta-based gc scanning interval in seconds",
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
@@ -3420,7 +3461,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.scanInterval",
 		Version:      "2.4.0",
 		DefaultValue: "168", // hours, default 7 * 24 hours
-		Doc:          "garbage collection scan residue interval in hours",
+		Doc:          "orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours",
 		Export:       true,
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
@@ -3430,7 +3471,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "86400",
-		Doc:          "file meta missing tolerance duration in seconds, default to 24hr(1d)",
+		Doc:          "orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
@@ -3439,7 +3480,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "10800",
-		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
+		Doc:          "meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)",
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
@@ -3695,7 +3736,8 @@ type dataNodeConfig struct {
 	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
@@ -4003,6 +4045,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)
 
+	p.L0CompactionMaxBatchSize = ParamItem{
+		Key:          "dataNode.compaction.levelZeroMaxBatchSize",
+		Version:      "2.4.5",
+		Doc:          "Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.",
+		DefaultValue: "-1",
+		Export:       true,
+	}
+	p.L0CompactionMaxBatchSize.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -4013,7 +4064,8 @@ if this parameter <= 0, will set it as 10`,
 	p.GracefulStopTimeout.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyBatchSize",
+		Key:          "datanode.bloomFilterApplyParallelFactor",
+		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
@@ -4031,8 +4083,8 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap.Init(base.mgr)
 
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
-		Key:          "datanode.clusteringCompaction.memoryBufferRatio",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
+		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
@@ -4041,8 +4093,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio.Init(base.mgr)
 
 	p.ClusteringCompactionWorkerPoolSize = ParamItem{
-		Key:          "datanode.clusteringCompaction.cpu",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.workPoolSize",
+		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,

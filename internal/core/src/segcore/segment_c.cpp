@@ -27,6 +27,8 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
 #include "storage/Util.h"
+#include "futures/Future.h"
+#include "futures/Executor.h"
 #include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
@@ -82,113 +84,129 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
-CStatus
-Search(CTraceContext c_trace,
-       CSegmentInterface c_segment,
-       CSearchPlan c_plan,
-       CPlaceholderGroup c_placeholder_group,
-       uint64_t timestamp,
-       CSearchResult* result) {
-    try {
-        auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-        auto plan = (milvus::query::Plan*)c_plan;
-        auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
-            c_placeholder_group);
+CFuture*  // Future<milvus::SearchResult*>
+AsyncSearch(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CSearchPlan c_plan,
+            CPlaceholderGroup c_placeholder_group,
+            uint64_t timestamp) {
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+    auto plan = (milvus::query::Plan*)c_plan;
+    auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
+        c_placeholder_group);
 
-        // save trace context into search_info
-        auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
-        trace_ctx.traceID = c_trace.traceID;
-        trace_ctx.spanID = c_trace.spanID;
-        trace_ctx.traceFlags = c_trace.traceFlags;
+    auto future = milvus::futures::Future<milvus::SearchResult>::async(
+        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::ExecutePriority::HIGH,
+        [c_trace, segment, plan, phg_ptr, timestamp](
+            milvus::futures::CancellationToken cancel_token) {
+            // save trace context into search_info
+            auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
+            trace_ctx.traceID = c_trace.traceID;
+            trace_ctx.spanID = c_trace.spanID;
+            trace_ctx.traceFlags = c_trace.traceFlags;
 
-        auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
-        milvus::tracer::SetRootSpan(span);
+            auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
+            milvus::tracer::SetRootSpan(span);
 
-        auto search_result = segment->Search(plan, phg_ptr, timestamp);
-        if (!milvus::PositivelyRelated(
-                plan->plan_node_->search_info_.metric_type_)) {
-            for (auto& dis : search_result->distances_) {
-                dis *= -1;
+            auto search_result = segment->Search(plan, phg_ptr, timestamp);
+            if (!milvus::PositivelyRelated(
+                    plan->plan_node_->search_info_.metric_type_)) {
+                for (auto& dis : search_result->distances_) {
+                    dis *= -1;
+                }
             }
-        }
-        *result = search_result.release();
-        span->End();
-        milvus::tracer::CloseRootSpan();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+            span->End();
+            milvus::tracer::CloseRootSpan();
+            return search_result.release();
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
-    std::free(const_cast<void*>(retrieve_result->proto_blob));
+    delete[] static_cast<uint8_t*>(
+        const_cast<void*>(retrieve_result->proto_blob));
+    delete retrieve_result;
 }
 
-CStatus
-Retrieve(CTraceContext c_trace,
-         CSegmentInterface c_segment,
-         CRetrievePlan c_plan,
-         uint64_t timestamp,
-         CRetrieveResult* result,
-         int64_t limit_size,
-         bool ignore_non_pk) {
+/// Create a leaked CRetrieveResult from a proto.
+/// Should be released by DeleteRetrieveResult.
+CRetrieveResult*
+CreateLeakedCRetrieveResultFromProto(
+    std::unique_ptr<milvus::proto::segcore::RetrieveResults> retrieve_result) {
+    auto size = retrieve_result->ByteSizeLong();
+    auto buffer = new uint8_t[size];
     try {
-        auto segment =
-            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
-
-        auto trace_ctx = milvus::tracer::TraceContext{
-            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-        milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
-
-        auto retrieve_result = segment->Retrieve(
-            &trace_ctx, plan, timestamp, limit_size, ignore_non_pk);
-
-        auto size = retrieve_result->ByteSizeLong();
-        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
-        retrieve_result->SerializePartialToArray(buffer.get(), size);
-
-        result->proto_blob = buffer.release();
-        result->proto_size = size;
-
-        return milvus::SuccessCStatus();
+        retrieve_result->SerializePartialToArray(buffer, size);
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+        delete[] buffer;
+        throw;
     }
+
+    auto result = new CRetrieveResult();
+    result->proto_blob = buffer;
+    result->proto_size = size;
+    return result;
 }
 
-CStatus
-RetrieveByOffsets(CTraceContext c_trace,
-                  CSegmentInterface c_segment,
-                  CRetrievePlan c_plan,
-                  CRetrieveResult* result,
-                  int64_t* offsets,
-                  int64_t len) {
-    try {
-        auto segment =
-            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieve(CTraceContext c_trace,
+              CSegmentInterface c_segment,
+              CRetrievePlan c_plan,
+              uint64_t timestamp,
+              int64_t limit_size,
+              bool ignore_non_pk) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
-        auto trace_ctx = milvus::tracer::TraceContext{
-            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-        milvus::tracer::AutoSpan span(
-            "SegCoreRetrieveByOffsets", &trace_ctx, true);
+    auto future = milvus::futures::Future<CRetrieveResult>::async(
+        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::ExecutePriority::HIGH,
+        [c_trace, segment, plan, timestamp, limit_size, ignore_non_pk](
+            milvus::futures::CancellationToken cancel_token) {
+            auto trace_ctx = milvus::tracer::TraceContext{
+                c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+            milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-        auto retrieve_result =
-            segment->Retrieve(&trace_ctx, plan, offsets, len);
+            auto retrieve_result = segment->Retrieve(
+                &trace_ctx, plan, timestamp, limit_size, ignore_non_pk);
 
-        auto size = retrieve_result->ByteSizeLong();
-        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
-        retrieve_result->SerializePartialToArray(buffer.get(), size);
+            return CreateLeakedCRetrieveResultFromProto(
+                std::move(retrieve_result));
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
 
-        result->proto_blob = buffer.release();
-        result->proto_size = size;
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieveByOffsets(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       CRetrievePlan c_plan,
+                       int64_t* offsets,
+                       int64_t len) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+    auto future = milvus::futures::Future<CRetrieveResult>::async(
+        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::ExecutePriority::HIGH,
+        [c_trace, segment, plan, offsets, len](
+            milvus::futures::CancellationToken cancel_token) {
+            auto trace_ctx = milvus::tracer::TraceContext{
+                c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+            milvus::tracer::AutoSpan span(
+                "SegCoreRetrieveByOffsets", &trace_ctx, true);
+
+            auto retrieve_result =
+                segment->Retrieve(&trace_ctx, plan, offsets, len);
+
+            return CreateLeakedCRetrieveResultFromProto(
+                std::move(retrieve_result));
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
 int64_t

@@ -261,3 +261,9 @@ func (c *Client) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, op
 		return client.QuerySlot(ctx, req)
 	})
 }
+
+func (c *Client) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.DropCompactionPlan(ctx, req)
+	})
+}

@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -133,31 +132,26 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	}
 
 	var (
-		totalSize      int64
-		totalDeltalogs = make(map[int64][]string)
+		memorySize     int64
+		totalDeltalogs = []string{}
 	)
 	for _, s := range l0Segments {
-		paths := []string{}
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
-				paths = append(paths, l.GetLogPath())
-				totalSize += l.GetMemorySize()
+				totalDeltalogs = append(totalDeltalogs, l.GetLogPath())
+				memorySize += l.GetMemorySize()
 			}
-		}
-		if len(paths) > 0 {
-			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
 
-	batchSize := getMaxBatchSize(totalSize)
-	resultSegments, err := t.process(ctx, batchSize, targetSegments, lo.Values(totalDeltalogs)...)
+	resultSegments, err := t.process(ctx, memorySize, targetSegments, totalDeltalogs)
 	if err != nil {
 		return nil, err
 	}
 
 	result := &datapb.CompactionPlanResult{
 		PlanID:   t.plan.GetPlanID(),
-		State:    commonpb.CompactionState_Completed,
+		State:    datapb.CompactionTaskState_completed,
 		Segments: resultSegments,
 		Channel:  t.plan.GetChannel(),
 		Type:     t.plan.GetType(),
@@ -170,15 +164,22 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	return result, nil
 }
 
-// batch size means segment count
-func getMaxBatchSize(totalSize int64) int {
-	max := 1
-	memLimit := float64(hardware.GetFreeMemoryCount()) * paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
-	if memLimit > float64(totalSize) {
-		max = int(memLimit / float64(totalSize))
+// BatchSize refers to the L1/L2 segments count that in one batch, batchSize controls the expansion ratio
+// of deltadata in memory.
+func getMaxBatchSize(baseMemSize, memLimit float64) int {
+	batchSize := 1
+	if memLimit > baseMemSize {
+		batchSize = int(memLimit / baseMemSize)
 	}
 
-	return max
+	maxSizeLimit := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.GetAsInt()
+	// Set batch size to maxSizeLimit if it is larger than maxSizeLimit.
+	// When maxSizeLimit <= 0, it means no limit.
+	if maxSizeLimit > 0 && batchSize > maxSizeLimit {
+		return maxSizeLimit
+	}
+
+	return batchSize
 }
 
 func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
@@ -328,18 +329,15 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaDa
 	return retMap
 }
 
-func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
-	results := make([]*datapb.CompactionSegment, 0)
-	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := log.Ctx(ctx).With(
-		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int("max conc segment counts", batchSize),
-		zap.Int("total segment counts", len(targetSegments)),
-		zap.Int("total batch", batch),
-	)
+	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
+	memLimit := float64(hardware.GetFreeMemoryCount()) * ratio
+	if float64(l0MemSize) > memLimit {
+		return nil, errors.Newf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit)
+	}
 
 	log.Info("L0 compaction process start")
 	allDelta, err := t.loadDelta(ctx, lo.Flatten(deltaLogs))
@@ -348,6 +346,16 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 		return nil, err
 	}
 
+	batchSize := getMaxBatchSize(float64(allDelta.Size()), memLimit)
+	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
+	log := log.Ctx(ctx).With(
+		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Int("max conc segment counts", batchSize),
+		zap.Int("total segment counts", len(targetSegments)),
+		zap.Int("total batch", batch),
+	)
+
+	results := make([]*datapb.CompactionSegment, 0)
 	for i := 0; i < batch; i++ {
 		batchStart := time.Now()
 		left, right := i*batchSize, (i+1)*batchSize

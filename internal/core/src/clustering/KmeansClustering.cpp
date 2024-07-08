@@ -326,6 +326,8 @@ KmeansClustering::StreamingAssignandUpload(
     if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
         LOG_INFO(msg_header_ + "data skew! skip clustering");
         // remove uploaded files
+        remote_paths_to_size[cluster_result_.centroid_path] =
+            cluster_result_.centroid_file_size;
         RemoveClusteringResultFiles(file_manager_->GetChunkManager().get(),
                                     remote_paths_to_size);
         // skip clustering, nothing takes affect

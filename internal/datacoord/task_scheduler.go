@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 const (
@@ -34,7 +35,7 @@ const (
 )
 
 type taskScheduler struct {
-	sync.RWMutex
+	lock.RWMutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,8 +101,8 @@ func (s *taskScheduler) reloadFromKV() {
 			}
 			if segIndex.IndexState != commonpb.IndexState_Finished && segIndex.IndexState != commonpb.IndexState_Failed {
 				s.tasks[segIndex.BuildID] = &indexBuildTask{
-					buildID: segIndex.BuildID,
-					nodeID:  segIndex.NodeID,
+					taskID: segIndex.BuildID,
+					nodeID: segIndex.NodeID,
 					taskInfo: &indexpb.IndexTaskInfo{
 						BuildID:    segIndex.BuildID,
 						State:      segIndex.IndexState,
@@ -223,6 +224,12 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 		s.removeTask(taskID)
 
 	case indexpb.JobState_JobStateInit:
+		// 0. pre check task
+		skip := task.PreCheck(s.ctx, s)
+		if skip {
+			return true
+		}
+
 		// 1. pick an indexNode client
 		nodeID, client := s.nodeManager.PickClient()
 		if client == nil {
@@ -239,17 +246,13 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 		log.Ctx(s.ctx).Info("update task version success", zap.Int64("taskID", taskID))
 
 		// 3. assign task to indexNode
-		success, skip := task.AssignTask(s.ctx, client, s)
+		success := task.AssignTask(s.ctx, client)
 		if !success {
 			log.Ctx(s.ctx).Warn("assign task to client failed", zap.Int64("taskID", taskID),
 				zap.String("new state", task.GetState().String()), zap.String("fail reason", task.GetFailReason()))
 			// If the problem is caused by the task itself, subsequent tasks will not be skipped.
 			// If etcd fails or fails to send tasks to the node, the subsequent tasks will be skipped.
-			return !skip
-		}
-		if skip {
-			// create index for small segment(<1024), skip next steps.
-			return true
+			return false
 		}
 		log.Ctx(s.ctx).Info("assign task to client success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
 

@@ -127,6 +127,10 @@ func (w *SegmentWriter) GetPkID() int64 {
 	return w.pkstats.FieldID
 }
 
+func (w *SegmentWriter) WrittenMemorySize() uint64 {
+	return w.writer.WrittenMemorySize()
+}
+
 func (w *SegmentWriter) Write(v *storage.Value) error {
 	ts := typeutil.Timestamp(v.Timestamp)
 	if ts < w.tsFrom {
@@ -148,11 +152,19 @@ func (w *SegmentWriter) Finish(actualRowCount int64) (*storage.Blob, error) {
 }
 
 func (w *SegmentWriter) IsFull() bool {
+	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+}
+
+func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
 	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
 }
 
 func (w *SegmentWriter) IsEmpty() bool {
+	return w.writer.WrittenMemorySize() == 0
+}
+
+func (w *SegmentWriter) FlushAndIsEmpty() bool {
 	w.writer.Flush()
 	return w.writer.WrittenMemorySize() == 0
 }

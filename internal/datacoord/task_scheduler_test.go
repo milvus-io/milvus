@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -927,7 +927,6 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		ctx := context.Background()
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		in := mocks.NewMockIndexNodeClient(s.T())
 		workerManager := NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
@@ -946,7 +945,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 				},
 			},
 			&indexMeta{
-				RWMutex: sync.RWMutex{},
+				RWMutex: lock.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
 			})
@@ -958,9 +957,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		scheduler.scheduleDuration = s.duration
 		scheduler.Start()
 
-		// taskID 1 peek client success, update version success. AssignTask failed --> state: Failed --> save
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// taskID 1 PreCheck failed --> state: Failed --> save
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(nil, false).Once()
 
@@ -990,7 +987,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager := NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog, s.createAnalyzeMeta(catalog), &indexMeta{
-			RWMutex: sync.RWMutex{},
+			RWMutex: lock.RWMutex{},
 			ctx:     ctx,
 			catalog: catalog,
 		})
@@ -1229,7 +1226,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 				catalog: catalog,
 			},
 			&indexMeta{
-				RWMutex: sync.RWMutex{},
+				RWMutex: lock.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1298,14 +1295,10 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		defer Params.CommonCfg.EnableStorageV2.SwapTempValue("False")
 		scheduler.Start()
 
-		// peek client success, update version success, get collection info failed --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// get collection info failed --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
-		// peek client success, update version success, partition key field is nil, get collection info failed  --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// partition key field is nil, get collection info failed  --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
 			Schema: &schemapb.CollectionSchema{
@@ -1316,9 +1309,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}, nil).Once()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
-		// peek client success, update version success, get collection info success, get dim failed --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// get collection info success, get dim failed --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
 			Schema: &schemapb.CollectionSchema{
@@ -1331,8 +1322,6 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 		// peek client success, update version success, get collection info success, get dim success, get storage uri failed --> init
 		s.NoError(err)
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*collectionInfo, error) {
 			return &collectionInfo{
 				ID: collID,
@@ -1676,14 +1665,12 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
-				buildID: buildID,
-				nodeID:  nodeID,
+				taskID: buildID,
+				nodeID: nodeID,
 				taskInfo: &indexpb.IndexTaskInfo{
 					BuildID:    buildID,
 					State:      commonpb.IndexState_Unissued,
 					FailReason: "",
-					// CurrentIndexVersion: 0,
-					// IndexStoreVersion:   0,
 				},
 			}
 			scheduler.enqueue(t)
@@ -1701,8 +1688,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
-			buildID: buildID,
-			nodeID:  nodeID,
+			taskID: buildID,
+			nodeID: nodeID,
 			taskInfo: &indexpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
@@ -1730,8 +1717,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
-				buildID: buildID,
-				nodeID:  nodeID,
+				taskID: buildID,
+				nodeID: nodeID,
 				taskInfo: &indexpb.IndexTaskInfo{
 					BuildID:    buildID,
 					State:      commonpb.IndexState_Unissued,
@@ -1753,8 +1740,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
-			buildID: buildID,
-			nodeID:  nodeID,
+			taskID: buildID,
+			nodeID: nodeID,
 			taskInfo: &indexpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,

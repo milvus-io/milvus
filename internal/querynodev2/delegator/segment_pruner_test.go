@@ -44,7 +44,7 @@ func (sps *SegmentPrunerSuite) SetupForClustering(clusterKeyFieldName string,
 	fieldName2DataType[sps.primaryFieldName] = schemapb.DataType_Int64
 	fieldName2DataType[sps.clusterKeyFieldName] = clusterKeyFieldType
 	fieldName2DataType["info"] = schemapb.DataType_VarChar
-	fieldName2DataType["age"] = schemapb.DataType_Int32
+	fieldName2DataType["age"] = schemapb.DataType_Int64
 	fieldName2DataType["vec"] = schemapb.DataType_FloatVector
 
 	sps.schema = testutil.ConstructCollectionSchemaWithKeys(sps.collectionName,
@@ -249,6 +249,58 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.Equal(0, len(testSegments[1].Segments))
 	}
 	{
+		// test for not-equal operator, which is unsupported
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age!=156"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+	{
+		// test for term operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age in [100,200,300]"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(0, len(testSegments[1].Segments))
+	}
+	{
+		// test for not operator, segment prune don't support not operator
+		// so it's expected to get all segments here
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age not in [100,200,300]"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+	{
 		// test for range one expr part
 		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
 		copy(testSegments, sps.sealedSegments)
@@ -266,24 +318,6 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.Equal(2, len(testSegments[1].Segments))
 	}
 	{
-		// test for unlogical binary range
-		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
-		copy(testSegments, sps.sealedSegments)
-		exprStr := "age>=700 and age<=500"
-		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
-		sps.NoError(err)
-		serializedPlan, _ := proto.Marshal(planNode)
-		queryReq := &internalpb.RetrieveRequest{
-			SerializedExprPlan: serializedPlan,
-			PartitionIDs:       targetPartitions,
-		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
-		sps.Equal(2, len(testSegments[0].Segments))
-		sps.Equal(2, len(testSegments[1].Segments))
-	}
-	{
-		// test for unlogical binary range
 		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
 		copy(testSegments, sps.sealedSegments)
 		exprStr := "age>=500 and age<=550"
@@ -298,6 +332,209 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "500<=age<=550"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		// test for multiple ranges connected with or operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "(age>=500 and age<=550) or (age>800 and age<950) or (age>300 and age<330)"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(1, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		// test for multiple ranges connected with or operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "(age>=500 and age<=550) or (age>800 and age<950) or (age>300 and age<330) or age < 150"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		// test for multiple ranges connected with or operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age > 600 or age < 300"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		// test for multiple ranges connected with or operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age > 600 or age < 30"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+}
+
+func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
+	sps.SetupForClustering("age", schemapb.DataType_Int32)
+	paramtable.Init()
+	targetPartitions := make([]UniqueID, 0)
+	targetPartitions = append(targetPartitions, sps.targetPartition)
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and age<=550 and info != 'xxx'"
+		// as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and info != 'xxx' and age<=550"
+		// as info is not cluster key field, so 'and' one more info condition will not influence the pruned result
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(0, len(testSegments[0].Segments))
+		sps.Equal(1, len(testSegments[1].Segments))
+	}
+	{
+		// test for unrelated fields
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age>=500 and age<=550 or info != 'xxx'"
+		// as info is not cluster key field, so 'or' one more will make it impossible to prune any segments
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		// test for multiple ranges + unrelated field + or connector
+		// as info is not cluster key and or operator is applied, so prune cannot work and have to search all segments in this case
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "(age>=500 and age<=550) or info != 'xxx' or (age>800 and age<950) or (age>300 and age<330) or age < 50"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		// test for multiple ranges + unrelated field + and connector
+		// as info is not cluster key and 'and' operator is applied, so prune conditions can work
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "(age>=500 and age<=550) and info != 'xxx' or (age>800 and age<950) or (age>300 and age<330) or age < 50"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(1, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
+
+	{
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "info in ['aa','bb','cc']"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
 	}
 }
 
@@ -380,6 +617,7 @@ func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
 	sps.SetupForClustering("vec", schemapb.DataType_FloatVector)
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
@@ -399,21 +637,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 		Topk:             100,
 	}
 
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
-	sps.Equal(1, len(sps.sealedSegments[0].Segments))
-	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
-	sps.Equal(1, len(sps.sealedSegments[1].Segments))
-	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
-
-	// test for IP metrics
-	req = &internalpb.SearchRequest{
-		MetricType:       "IP",
-		PlaceholderGroup: bs,
-		PartitionIDs:     []UniqueID{sps.targetPartition},
-		Topk:             100,
-	}
-
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
+	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{1})
 	sps.Equal(1, len(sps.sealedSegments[0].Segments))
 	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
 	sps.Equal(1, len(sps.sealedSegments[1].Segments))

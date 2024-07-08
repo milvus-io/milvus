@@ -98,7 +98,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 				continue
 			}
 			for _, partitionID := range collInfo.Partitions {
-				if err := sss.SyncFlushedSegments(collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
+				if err := sss.SyncSegments(collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
 					log.Warn("sync segment with channel failed, retry next ticker",
 						zap.Int64("collectionID", collID),
 						zap.Int64("partitionID", partitionID),
@@ -111,11 +111,14 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 	}
 }
 
-func (sss *SyncSegmentsScheduler) SyncFlushedSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
+func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
-	segments := sss.meta.SelectSegments(WithCollection(collectionID), WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && isFlush(info)
+	// sync all healthy segments, but only check flushed segments on datanode. Because L0 growing segments may not in datacoord's meta.
+	// upon receiving the SyncSegments request, the datanode's segment state may have already transitioned from Growing/Flushing
+	// to Flushed, so the view must include this segment.
+	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetPartitionID() == partitionID && info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,

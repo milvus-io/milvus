@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -27,11 +26,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type analyzeMeta struct {
-	sync.RWMutex
+	lock.RWMutex
 
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog

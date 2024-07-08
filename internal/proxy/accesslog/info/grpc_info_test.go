@@ -103,6 +103,22 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	s.Equal("rpc error: code = Unavailable desc = mock", result[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestErrorType() {
+	s.info.resp = &milvuspb.QueryResults{
+		Status: merr.Status(nil),
+	}
+	result := Get(s.info, "$error_type")
+	s.Equal("", result[0])
+
+	s.info.resp = merr.Status(merr.WrapErrAsInputError(merr.ErrParameterInvalid))
+	result = Get(s.info, "$error_type")
+	s.Equal(merr.InputError.String(), result[0])
+
+	s.info.err = merr.ErrParameterInvalid
+	result = Get(s.info, "$error_type")
+	s.Equal(merr.SystemError.String(), result[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestDbName() {
 	s.info.req = nil
 	result := Get(s.info, "$database_name")
@@ -188,6 +204,17 @@ func (s *GrpcAccessInfoSuite) TestOutputFields() {
 	}
 	result = Get(s.info, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestConsistencyLevel() {
+	result := Get(s.info, "$consistency_level")
+	s.Equal(Unknown, result[0])
+
+	s.info.req = &milvuspb.QueryRequest{
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	}
+	result = Get(s.info, "$consistency_level")
+	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
@@ -129,6 +128,10 @@ func (i *GrpcAccessInfo) TraceID() string {
 	}
 
 	traceID := trace.SpanFromContext(i.ctx).SpanContext().TraceID()
+	if !traceID.IsValid() {
+		return Unknown
+	}
+
 	return traceID.String()
 }
 
@@ -178,22 +181,44 @@ func (i *GrpcAccessInfo) ErrorCode() string {
 	return fmt.Sprint(merr.Code(i.err))
 }
 
+func (i *GrpcAccessInfo) respStatus() *commonpb.Status {
+	baseResp, ok := i.resp.(BaseResponse)
+	if ok {
+		return baseResp.GetStatus()
+	}
+
+	status, ok := i.resp.(*commonpb.Status)
+	if ok {
+		return status
+	}
+	return nil
+}
+
 func (i *GrpcAccessInfo) ErrorMsg() string {
 	if i.err != nil {
 		return i.err.Error()
 	}
 
-	baseResp, ok := i.resp.(BaseResponse)
-	if ok {
-		status := baseResp.GetStatus()
+	if status := i.respStatus(); status != nil {
 		return status.GetReason()
 	}
 
-	status, ok := i.resp.(*commonpb.Status)
-	if ok {
-		return status.GetReason()
-	}
 	return Unknown
+}
+
+func (i *GrpcAccessInfo) ErrorType() string {
+	if i.err != nil {
+		return merr.GetErrorType(i.err).String()
+	}
+
+	if status := i.respStatus(); status.GetCode() > 0 {
+		if _, ok := status.ExtraInfo[merr.InputErrorFlagKey]; ok {
+			return merr.InputError.String()
+		}
+		return merr.SystemError.String()
+	}
+
+	return ""
 }
 
 func (i *GrpcAccessInfo) DbName() string {
@@ -252,14 +277,18 @@ func (i *GrpcAccessInfo) SdkVersion() string {
 	return getSdkVersionByUserAgent(i.ctx)
 }
 
-func (i *GrpcAccessInfo) ClusterPrefix() string {
-	return paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-}
-
 func (i *GrpcAccessInfo) OutputFields() string {
 	fields, ok := requestutil.GetOutputFieldsFromRequest(i.req)
 	if ok {
 		return fmt.Sprint(fields.([]string))
+	}
+	return Unknown
+}
+
+func (i *GrpcAccessInfo) ConsistencyLevel() string {
+	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
+	if ok {
+		return level.String()
 	}
 	return Unknown
 }

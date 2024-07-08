@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -281,8 +281,9 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+			bf := bloomfilter.NewBloomFilterWithType(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
@@ -537,8 +538,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+				bf := bloomfilter.NewBloomFilterWithType(
+					paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+					paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -695,8 +698,10 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+				bf := bloomfilter.NewBloomFilterWithType(
+					paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+					paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -896,8 +901,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
@@ -1067,7 +1074,9 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	defer s.chunkManager.Remove(context.Background(), statsPath1)
 
 	// reload and check partition stats
-	s.delegator.maybeReloadPartitionStats(context.Background())
+	partVersions := make(map[int64]int64)
+	partVersions[partitionID1] = 1
+	s.delegator.loadPartitionStats(context.Background(), partVersions)
 	s.Equal(1, len(s.delegator.partitionStats))
 	s.NotNil(s.delegator.partitionStats[partitionID1])
 	p1Stats := s.delegator.partitionStats[partitionID1]

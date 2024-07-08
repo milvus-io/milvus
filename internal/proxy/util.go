@@ -646,10 +646,10 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 				StrId: scalarField.GetStringData(),
 			}
 		default:
-			return nil, errors.New("currently only support DataType Int64 or VarChar as PrimaryField")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as PrimaryField")
 		}
 	default:
-		return nil, errors.New("currently not support vector field as PrimaryField")
+		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as PrimaryField")
 	}
 
 	return primaryData, nil
@@ -1626,4 +1626,23 @@ func GetCostValue(status *commonpb.Status) int {
 		return 0
 	}
 	return value
+}
+
+type isProxyRequestKeyType struct{}
+
+var ctxProxyRequestKey = isProxyRequestKeyType{}
+
+func SetRequestLabelForContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxProxyRequestKey, true)
+}
+
+func GetRequestLabelFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v := ctx.Value(ctxProxyRequestKey)
+	if v == nil {
+		return false
+	}
+	return v.(bool)
 }

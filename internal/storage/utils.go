@@ -982,44 +982,6 @@ func binaryWrite(endian binary.ByteOrder, data interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// FieldDataToBytes encode field data to byte slice.
-// For some fixed-length data, such as int32, int64, float vector, use binary.Write directly.
-// For binary vector, return it directly.
-// For bool data, first transfer to schemapb.BoolArray and then marshal it. (TODO: handle bool like other scalar data.)
-// For variable-length data, such as string, first transfer to schemapb.StringArray and then marshal it.
-// TODO: find a proper way to store variable-length data. Or we should unify to use protobuf?
-func FieldDataToBytes(endian binary.ByteOrder, fieldData FieldData) ([]byte, error) {
-	switch field := fieldData.(type) {
-	case *BoolFieldData:
-		// return binaryWrite(endian, field.Data)
-		return boolFieldDataToPbBytes(field)
-	case *StringFieldData:
-		return stringFieldDataToPbBytes(field)
-	case *ArrayFieldData:
-		return arrayFieldDataToPbBytes(field)
-	case *JSONFieldData:
-		return jsonFieldDataToPbBytes(field)
-	case *BinaryVectorFieldData:
-		return field.Data, nil
-	case *FloatVectorFieldData:
-		return binaryWrite(endian, field.Data)
-	case *Int8FieldData:
-		return binaryWrite(endian, field.Data)
-	case *Int16FieldData:
-		return binaryWrite(endian, field.Data)
-	case *Int32FieldData:
-		return binaryWrite(endian, field.Data)
-	case *Int64FieldData:
-		return binaryWrite(endian, field.Data)
-	case *FloatFieldData:
-		return binaryWrite(endian, field.Data)
-	case *DoubleFieldData:
-		return binaryWrite(endian, field.Data)
-	default:
-		return nil, fmt.Errorf("unsupported field data: %s", field)
-	}
-}
-
 func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.InsertRecord, error) {
 	insertRecord := &segcorepb.InsertRecord{}
 	for fieldID, rawData := range insertData.Data {

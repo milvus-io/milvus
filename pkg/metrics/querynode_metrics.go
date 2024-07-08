@@ -362,6 +362,30 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeSegmentPruneRatio = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_ratio",
+			Help:      "latency of compaction operation",
+			Buckets:   buckets,
+		}, []string{
+			collectionIDLabelName,
+			isVectorFieldLabelName,
+		})
+
+	QueryNodeSegmentPruneLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_latency",
+			Help:      "latency of segment prune",
+			Buckets:   buckets,
+		}, []string{
+			collectionIDLabelName,
+			isVectorFieldLabelName,
+		})
+
 	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -777,8 +801,12 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
+	registry.MustRegister(QueryNodeSegmentPruneLatency)
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
+	registry.MustRegister(QueryNodeSegmentPruneRatio)
+	// Add cgo metrics
+	RegisterCGOMetrics(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

@@ -20,6 +20,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "common/type_c.h"
+#include "futures/future_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
 #include "segcore/load_field_data_c.h"
@@ -43,33 +44,30 @@ ClearSegmentData(CSegmentInterface c_segment);
 void
 DeleteSearchResult(CSearchResult search_result);
 
-CStatus
-Search(CTraceContext c_trace,
-       CSegmentInterface c_segment,
-       CSearchPlan c_plan,
-       CPlaceholderGroup c_placeholder_group,
-       uint64_t timestamp,
-       CSearchResult* result);
+CFuture*  // Future<CSearchResultBody>
+AsyncSearch(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CSearchPlan c_plan,
+            CPlaceholderGroup c_placeholder_group,
+            uint64_t timestamp);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
-CStatus
-Retrieve(CTraceContext c_trace,
-         CSegmentInterface c_segment,
-         CRetrievePlan c_plan,
-         uint64_t timestamp,
-         CRetrieveResult* result,
-         int64_t limit_size,
-         bool ignore_non_pk);
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieve(CTraceContext c_trace,
+              CSegmentInterface c_segment,
+              CRetrievePlan c_plan,
+              uint64_t timestamp,
+              int64_t limit_size,
+              bool ignore_non_pk);
 
-CStatus
-RetrieveByOffsets(CTraceContext c_trace,
-                  CSegmentInterface c_segment,
-                  CRetrievePlan c_plan,
-                  CRetrieveResult* result,
-                  int64_t* offsets,
-                  int64_t len);
+CFuture*  // Future<CRetrieveResult>
+AsyncRetrieveByOffsets(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       CRetrievePlan c_plan,
+                       int64_t* offsets,
+                       int64_t len);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
