@@ -79,8 +79,9 @@ std::map<std::string, int> ReadAheadPolicy_Map = {
 std::vector<uint8_t>
 genValidIter(const uint8_t* valid_data, int length) {
     std::vector<uint8_t> valid_data_;
+    valid_data_.reserve(length);
     for (size_t i = 0; i < length; ++i) {
-        auto bit = (valid_data[i >> 3] >> ((i & 0x07))) & 1;
+        auto bit = (valid_data[i >> 3] >> (i & 0x07)) & 1;
         valid_data_.push_back(bit);
     }
     return valid_data_;

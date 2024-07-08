@@ -87,10 +87,8 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                uint64_t& total_written,
                std::vector<uint64_t>& indices,
-               std::vector<std::vector<uint64_t>>& element_indices) {
-    if (data->IsNullable()) {
-        total_written += file.Write(data->ValidData(), data->ValidDataSize());
-    }
+               std::vector<std::vector<uint64_t>>& element_indices,
+               FixedVector<bool>& valid_data) {
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case DataType::VARCHAR:
@@ -178,6 +176,15 @@ WriteFieldData(File& file,
         for (auto i = 0; i < data->get_num_rows(); i++) {
             indices.emplace_back(total_written);
             total_written += data->DataSize(i);
+        }
+    }
+    if (data->IsNullable()) {
+        size_t required_rows = valid_data.size() + data->get_num_rows();
+        if (required_rows > valid_data.size()) {
+            valid_data.reserve(required_rows * 2);
+        }
+        for (size_t i = 0; i < data->get_num_rows(); i++) {
+            valid_data.push_back(data->is_valid(i));
         }
     }
 }

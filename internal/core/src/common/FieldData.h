@@ -37,9 +37,11 @@ class FieldData : public FieldDataImpl<Type, true> {
               1, data_type, nullable, buffered_num_rows) {
     }
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
-    explicit FieldData(DataType data_type, FixedVector<Type>&& inner_data)
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<Type>&& inner_data)
         : FieldDataImpl<Type, true>::FieldDataImpl(
-              1, data_type, std::move(inner_data)) {
+              1, data_type, nullable, std::move(inner_data)) {
     }
 };
 
@@ -125,7 +127,7 @@ class FieldData<BFloat16Vector> : public FieldDataImpl<bfloat16, false> {
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
         : FieldDataImpl<bfloat16, false>::FieldDataImpl(
-              dim,data_type, false,buffered_num_rows) {
+              dim, data_type, false, buffered_num_rows) {
     }
 };
 

@@ -443,7 +443,12 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto rawValue = field_data->RawValue(i);
                             auto array =
                                 static_cast<const milvus::Array*>(rawValue);
-                            var_column->Append(*array);
+                            if (field_data->IsNullable()) {
+                                var_column->Append(*array,
+                                                   field_data->is_valid(i));
+                            } else {
+                                var_column->Append(*array);
+                            }
 
                             // we stores the offset for each array element, so there is a additional uint64_t for each array element
                             field_data_size =
@@ -549,18 +554,19 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
+    FixedVector<bool> valid_data{};
     while (data.channel->pop(field_data)) {
         WriteFieldData(file,
                        data_type,
                        field_data,
                        total_written,
                        indices,
-                       element_indices);
+                       element_indices,
+                       valid_data);
     }
     WriteFieldPadding(file, data_type, total_written);
-
-    auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
+    auto num_rows = data.row_count;
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case milvus::DataType::STRING:
@@ -602,6 +608,8 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     } else {
         column = std::make_shared<Column>(file, total_written, field_meta);
     }
+
+    column->SetValidData(std::move(valid_data));
 
     {
         std::unique_lock lck(mutex_);
@@ -711,7 +719,7 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
         auto& field_data = it->second;
         return field_data->Span();
     }
-    auto field_data = insert_record_.get_field_data_base(field_id);
+    auto field_data = insert_record_.get_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
@@ -1237,12 +1245,9 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
-        // auto valid_data = std::make_unique<bool[]>(count);
-        for (size_t i = 0; i < count; ++i) {
+        for (int64_t i = 0; i < count; ++i) {
             auto offset = seg_offsets[i];
-            auto bit =
-                (column->ValidData()[offset >> 3] >> ((offset & 0x07))) & 1;
-            dst[i] = bit;
+            dst[i] = column->IsValid(offset);
         }
     }
     switch (field_meta.get_data_type()) {

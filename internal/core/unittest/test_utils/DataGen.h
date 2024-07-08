@@ -333,9 +333,8 @@ inline GeneratedData DataGen(SchemaPtr schema,
     auto insert_data = std::make_unique<InsertRecordProto>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
-        auto nullable = field_meta.is_nullable();
         FixedVector<bool> valid_data(count);
-        if (nullable) {
+        if (field_meta.is_nullable()) {
             for (int i = 0; i < count; ++i) {
                 valid_data[i] = i % 2 == 0 ? true : false;
             }
@@ -985,19 +984,19 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                                        int64_t dim) {
         field_data = storage::CreateFieldData(data_type, true, dim);
         int byteSize = (raw_count + 7) / 8;
-        auto valid_data = std::make_unique<uint8_t>(byteSize);
-        auto valid_data_ptr = valid_data.get();
+        uint8_t* valid_data = new uint8_t[byteSize];
         for (int i = 0; i < raw_count; i++) {
             bool value = raw_valid_data[i];
             int byteIndex = i / 8;
             int bitIndex = i % 8;
             if (value) {
-                valid_data_ptr[byteIndex] |= (1 << bitIndex);
+                valid_data[byteIndex] |= (1 << bitIndex);
             } else {
-                valid_data_ptr[byteIndex] &= ~(1 << bitIndex);
+                valid_data[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(raw_data, valid_data.get(), raw_count);
+        field_data->FillFieldData(raw_data, valid_data, raw_count);
+        delete[] valid_data;
     };
 
     if (field_meta.is_vector()) {

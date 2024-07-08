@@ -43,7 +43,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(const void* source,
     }
     std::copy_n(static_cast<const Type*>(source),
                 element_count * dim_,
-                field_data_.data() + length_ * dim_);
+                data_.data() + length_ * dim_);
     length_ += element_count;
 }
 
@@ -64,15 +64,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     }
     std::copy_n(static_cast<const Type*>(field_data),
                 element_count * dim_,
-                field_data_.data() + length_ * dim_);
+                data_.data() + length_ * dim_);
 
     ssize_t byte_count = (element_count + 7) / 8;
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
     if (valid_data == nullptr) {
-        std::fill_n(valid_data_.get(), byte_count, 0xFF);
+        valid_data_.resize(byte_count, 0xFF);
     } else {
-        std::copy_n(valid_data, byte_count, valid_data_.get());
+        std::copy_n(valid_data, byte_count, valid_data_.data());
     }
 
     length_ += element_count;

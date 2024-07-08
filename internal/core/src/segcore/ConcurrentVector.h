@@ -141,9 +141,7 @@ class VectorBase {
     const int64_t size_per_chunk_;
 };
 
-template <typename Type,
-          bool is_type_entire_row = false,
-          bool is_valid_data = false>
+template <typename Type, bool is_type_entire_row = false>
 class ConcurrentVectorImpl : public VectorBase {
  public:
     ConcurrentVectorImpl(ConcurrentVectorImpl&&) = delete;
@@ -237,42 +235,6 @@ class ConcurrentVectorImpl : public VectorBase {
             element_offset, static_cast<const Type*>(source), element_count);
     }
 
-    void
-    set_data(ssize_t element_offset,
-             const Type* source,
-             ssize_t element_count) {
-        auto chunk_id = element_offset / size_per_chunk_;
-        auto chunk_offset = element_offset % size_per_chunk_;
-        ssize_t source_offset = 0;
-        // first partition:
-        if (chunk_offset + element_count <= size_per_chunk_) {
-            // only first
-            fill_chunk(
-                chunk_id, chunk_offset, element_count, source, source_offset);
-            return;
-        }
-
-        auto first_size = size_per_chunk_ - chunk_offset;
-        fill_chunk(chunk_id, chunk_offset, first_size, source, source_offset);
-
-        source_offset += size_per_chunk_ - chunk_offset;
-        element_count -= first_size;
-        ++chunk_id;
-
-        // the middle
-        while (element_count >= size_per_chunk_) {
-            fill_chunk(chunk_id, 0, size_per_chunk_, source, source_offset);
-            source_offset += size_per_chunk_;
-            element_count -= size_per_chunk_;
-            ++chunk_id;
-        }
-
-        // the final
-        if (element_count > 0) {
-            fill_chunk(chunk_id, 0, element_count, source, source_offset);
-        }
-    }
-
     const void*
     get_chunk_data(ssize_t chunk_index) const override {
         return (const void*)chunks_ptr_->get_chunk_data(chunk_index);
@@ -329,6 +291,41 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
  private:
+    void
+    set_data(ssize_t element_offset,
+             const Type* source,
+             ssize_t element_count) {
+        auto chunk_id = element_offset / size_per_chunk_;
+        auto chunk_offset = element_offset % size_per_chunk_;
+        ssize_t source_offset = 0;
+        // first partition:
+        if (chunk_offset + element_count <= size_per_chunk_) {
+            // only first
+            fill_chunk(
+                chunk_id, chunk_offset, element_count, source, source_offset);
+            return;
+        }
+
+        auto first_size = size_per_chunk_ - chunk_offset;
+        fill_chunk(chunk_id, chunk_offset, first_size, source, source_offset);
+
+        source_offset += size_per_chunk_ - chunk_offset;
+        element_count -= first_size;
+        ++chunk_id;
+
+        // the middle
+        while (element_count >= size_per_chunk_) {
+            fill_chunk(chunk_id, 0, size_per_chunk_, source, source_offset);
+            source_offset += size_per_chunk_;
+            element_count -= size_per_chunk_;
+            ++chunk_id;
+        }
+
+        // the final
+        if (element_count > 0) {
+            fill_chunk(chunk_id, 0, element_count, source, source_offset);
+        }
+    }
     void
     fill_chunk(ssize_t chunk_id,
                ssize_t chunk_offset,
@@ -459,63 +456,6 @@ class ConcurrentVector<SparseFloatVector>
 
  private:
     int64_t dim_;
-};
-
-class ConcurrentValidDataVector : public ConcurrentVectorImpl<bool, true> {
- public:
-    static_assert(IsScalar<bool>);
-    explicit ConcurrentValidDataVector(int64_t size_per_chunk)
-        : ConcurrentVectorImpl<bool, true>::ConcurrentVectorImpl(
-              1, size_per_chunk) {
-    }
-    void
-    set_data_raw(ssize_t element_offset,
-                 const std::vector<FieldDataPtr>& datas) override {
-        for (auto& field_data : datas) {
-            auto num_rows = field_data->get_num_rows();
-            auto valid_data = std::make_unique<bool[]>(num_rows);
-            for (size_t i = 0; i < num_rows; ++i) {
-                auto bit =
-                    (field_data->ValidData()[i >> 3] >> ((i & 0x07))) & 1;
-                valid_data[i] = bit;
-            }
-            set_data_raw(element_offset, valid_data.get(), num_rows);
-            element_offset += num_rows;
-        }
-    }
-    void
-    set_data_raw(ssize_t element_offset,
-                 ssize_t element_count,
-                 const DataArray* data,
-                 const FieldMeta& field_meta) override {
-        if (field_meta.is_nullable()) {
-            return set_data_raw(
-                element_offset, data->valid_data().data(), element_count);
-        }
-    }
-
-    void
-    set_data_raw(ssize_t element_offset,
-                 const void* source,
-                 ssize_t element_count) override {
-        throw SegcoreError(
-            NotImplemented,
-            "source type is specified in ConcurrentValidDataVector");
-    }
-
-    void
-    set_data_raw(ssize_t element_offset,
-                 const bool* source,
-                 ssize_t element_count) {
-        if (element_count == 0) {
-            return;
-        }
-        chunks_ptr_->emplace_to_at_least(
-            upper_div(element_offset + element_count, size_per_chunk_),
-            elements_per_row_ * size_per_chunk_);
-        set_data(
-            element_offset, static_cast<const bool*>(source), element_count);
-    }
 };
 
 template <>

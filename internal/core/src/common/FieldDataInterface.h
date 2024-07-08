@@ -64,8 +64,8 @@ class FieldDataBase {
     virtual void*
     Data() = 0;
 
-    virtual const uint8_t*
-    ValidData() const = 0;
+    virtual uint8_t*
+    ValidData() = 0;
 
     // For all FieldDataImpl subclasses, this method returns a Type* that points
     // at the offset-th row of this field data.
@@ -117,7 +117,7 @@ class FieldDataBase {
     get_null_count() const = 0;
 
     virtual bool
-    is_null(ssize_t offset) const = 0;
+    is_valid(ssize_t offset) const = 0;
 
  protected:
     const DataType data_type_;
@@ -143,25 +143,38 @@ class FieldDataImpl : public FieldDataBase {
         : FieldDataBase(data_type, nullable),
           num_rows_(buffered_num_rows),
           dim_(is_type_entire_row ? 1 : dim) {
-        field_data_.resize(num_rows_ * dim_);
+        data_.resize(num_rows_ * dim_);
         if (nullable) {
-            if (IsVectorDataType(data_type)){
-                PanicInfo(NotImplemented,
-                  "vector type not support null");
+            if (IsVectorDataType(data_type)) {
+                PanicInfo(NotImplemented, "vector type not support null");
             }
-            valid_data_ =
-                std::shared_ptr<uint8_t[]>(new uint8_t[(num_rows_ + 7) / 8]);
+            valid_data_.resize((num_rows_ + 7) / 8);
         }
     }
 
     explicit FieldDataImpl(size_t dim,
                            DataType type,
                            bool nullable,
-                           FixedVector<Type>&& field_data)
+                           FixedVector<Type>&& data)
         : FieldDataBase(type, nullable), dim_(is_type_entire_row ? 1 : dim) {
-        field_data_ = std::move(field_data);
-        Assert(field_data.size() % dim == 0);
-        num_rows_ = field_data.size() / dim;
+        AssertInfo(!nullable, "need to fill valid_data when nullable is true");
+        data_ = std::move(data);
+        Assert(data.size() % dim == 0);
+        num_rows_ = data.size() / dim;
+    }
+
+    explicit FieldDataImpl(size_t dim,
+                           DataType type,
+                           bool nullable,
+                           FixedVector<Type>&& data,
+                           FixedVector<uint8_t>&& valid_data)
+        : FieldDataBase(type, nullable), dim_(is_type_entire_row ? 1 : dim) {
+        AssertInfo(nullable,
+                   "no need to fill valid_data when nullable is false");
+        data_ = std::move(data);
+        valid_data_ = std::move(valid_data);
+        Assert(data.size() % dim == 0);
+        num_rows_ = data.size() / dim;
     }
 
     void
@@ -196,12 +209,12 @@ class FieldDataImpl : public FieldDataBase {
 
     void*
     Data() override {
-        return field_data_.data();
+        return data_.data();
     }
 
-    const uint8_t*
-    ValidData() const override {
-        return valid_data_.get();
+    uint8_t*
+    ValidData() override {
+        return valid_data_.data();
     }
 
     const void*
@@ -210,23 +223,23 @@ class FieldDataImpl : public FieldDataBase {
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return &field_data_[offset];
+        return &data_[offset];
     }
 
-    std::optional<const void*>
-    Value(ssize_t offset) {
-        if (!is_type_entire_row) {
-            return RawValue(offset);
-        }
-        AssertInfo(offset < get_num_rows(),
-                   "field data subscript out of range");
-        AssertInfo(offset < length(),
-                   "subscript position don't has valid value");
-        if (nullable_ && !valid_data_[offset]) {
-            return std::nullopt;
-        }
-        return &field_data_[offset];
-    }
+    // std::optional<const void*>
+    // Value(ssize_t offset) {
+    //     if (!is_type_entire_row) {
+    //         return RawValue(offset);
+    //     }
+    //     AssertInfo(offset < get_num_rows(),
+    //                "field data subscript out of range");
+    //     AssertInfo(offset < length(),
+    //                "subscript position don't has valid value");
+    //     if (nullable_ && !valid_data_[offset]) {
+    //         return std::nullopt;
+    //     }
+    //     return &field_data_[offset];
+    // }
 
     int64_t
     Size() const override {
@@ -250,8 +263,7 @@ class FieldDataImpl : public FieldDataBase {
     int64_t
     ValidDataSize() const override {
         if (nullable_) {
-            int byteSize = (length() + 7) / 8;
-            return sizeof(uint8_t) * byteSize;
+            return sizeof(uint8_t) * (length() + 7) / 8;
         }
         return 0;
     }
@@ -278,10 +290,10 @@ class FieldDataImpl : public FieldDataBase {
         std::lock_guard lck(num_rows_mutex_);
         if (cap > num_rows_) {
             num_rows_ = cap;
-            field_data_.resize(num_rows_ * dim_);
+            data_.resize(num_rows_ * dim_);
         }
         if (nullable_) {
-            valid_data_ = std::shared_ptr<uint8_t[]>(new uint8_t[num_rows_]);
+            valid_data_.resize((num_rows_ + 7) / 8);
         }
     }
 
@@ -297,11 +309,9 @@ class FieldDataImpl : public FieldDataBase {
         std::lock_guard lck(num_rows_mutex_);
         if (num_rows > num_rows_) {
             num_rows_ = num_rows;
-            field_data_.resize(num_rows_ * dim_);
+            data_.resize(num_rows_ * dim_);
             if (nullable_) {
-                ssize_t byte_count = (num_rows + 7) / 8;
-                valid_data_ =
-                    std::shared_ptr<uint8_t[]>(new uint8_t[byte_count]);
+                valid_data_.resize((num_rows + 7) / 8);
             }
         }
     }
@@ -324,23 +334,27 @@ class FieldDataImpl : public FieldDataBase {
     }
 
     bool
-    is_null(ssize_t offset) const override {
+    is_valid(ssize_t offset) const override {
         std::shared_lock lck(tell_mutex_);
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
         if (!nullable_) {
-            return false;
+            return true;
         }
         auto bit = (valid_data_[offset >> 3] >> ((offset & 0x07))) & 1;
-        return !bit;
+        return bit;
     }
 
  protected:
-    FixedVector<Type> field_data_;
-    std::shared_ptr<uint8_t[]> valid_data_;
-    // number of elements field_data_ can hold
+    FixedVector<Type> data_{};
+    FixedVector<uint8_t> valid_data_{};
+    // number of elements data_ can hold
     int64_t num_rows_;
     mutable std::shared_mutex num_rows_mutex_;
-    int64_t null_count;
-    // number of actual elements in field_data_
+    int64_t null_count{0};
+    // number of actual elements in data_
     size_t length_{};
     mutable std::shared_mutex tell_mutex_;
 
@@ -361,7 +375,7 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     DataSize() const override {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
-            data_size += field_data_[offset].size();
+            data_size += data_[offset].size();
         }
 
         return data_size;
@@ -373,7 +387,7 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return field_data_[offset].size();
+        return data_[offset].size();
     }
 
     void
@@ -390,8 +404,16 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
 
         auto i = 0;
         for (const auto& str : *array) {
-            field_data_[length_ + i] = str.value();
+            data_[length_ + i] = str.value();
             i++;
+        }
+        if (IsNullable()) {
+            auto valid_data = array->null_bitmap_data();
+            if (valid_data == nullptr) {
+                valid_data_.resize((n + 7) / 8, 0xFF);
+            } else {
+                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            }
         }
         length_ += n;
     }
@@ -409,7 +431,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     DataSize() const override {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
-            data_size += field_data_[offset].data().size();
+            data_size += data_[offset].data().size();
         }
 
         return data_size;
@@ -421,7 +443,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return field_data_[offset].data().size();
+        return data_[offset].data().size();
     }
 
     void
@@ -448,9 +470,16 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 
         auto i = 0;
         for (const auto& json : *array) {
-            field_data_[length_ + i] =
-                Json(simdjson::padded_string(json.value()));
+            data_[length_ + i] = Json(simdjson::padded_string(json.value()));
             i++;
+        }
+        if (IsNullable()) {
+            auto valid_data = array->null_bitmap_data();
+            if (valid_data == nullptr) {
+                valid_data_.resize((n + 7) / 8, 0xFF);
+            } else {
+                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            }
         }
         length_ += n;
     }
@@ -472,7 +501,7 @@ class FieldDataSparseVectorImpl
     DataSize() const override {
         int64_t data_size = 0;
         for (size_t i = 0; i < length(); ++i) {
-            data_size += field_data_[i].data_byte_size();
+            data_size += data_[i].data_byte_size();
         }
         return data_size;
     }
@@ -483,7 +512,7 @@ class FieldDataSparseVectorImpl
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return field_data_[offset].data_byte_size();
+        return data_[offset].data_byte_size();
     }
 
     // source is a pointer to element_count of
@@ -504,7 +533,7 @@ class FieldDataSparseVectorImpl
             auto& row = ptr[i];
             vec_dim_ = std::max(vec_dim_, row.dim());
         }
-        std::copy_n(ptr, element_count, field_data_.data() + length_);
+        std::copy_n(ptr, element_count, data_.data() + length_);
         length_ += element_count;
     }
 
@@ -523,7 +552,7 @@ class FieldDataSparseVectorImpl
 
         for (int64_t i = 0; i < array->length(); ++i) {
             auto view = array->GetView(i);
-            auto& row = field_data_[length_ + i];
+            auto& row = data_[length_ + i];
             row = CopyAndWrapSparseRow(view.data(), view.size());
             vec_dim_ = std::max(vec_dim_, row.dim());
         }
@@ -548,12 +577,11 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
     }
 
     int64_t
-    DataSize() const override  {
+    DataSize() const override {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
-            data_size += field_data_[offset].byte_size();
+            data_size += data_[offset].byte_size();
         }
-
         return data_size;
     }
 
@@ -563,7 +591,7 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return field_data_[offset].byte_size();
+        return data_[offset].byte_size();
     }
 };
 

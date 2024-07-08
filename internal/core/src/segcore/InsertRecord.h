@@ -12,6 +12,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -407,6 +408,65 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
+class ThreadSafeValidData {
+ public:
+    explicit ThreadSafeValidData() = default;
+    explicit ThreadSafeValidData(FixedVector<bool> data)
+        : data_(std::move(data)) {
+    }
+
+    void
+    set_data_raw(const std::vector<FieldDataPtr>& datas) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        auto total = 0;
+        for (auto& field_data : datas) {
+            total += field_data->get_num_rows();
+        }
+        if (length_ + total > data_.size()) {
+            data_.reserve(length_ + total);
+        }
+        length_ += total;
+        for (auto& field_data : datas) {
+            auto num_row = field_data->get_num_rows();
+            for (size_t i = 0; i < num_row; i++) {
+                data_.push_back(field_data->is_valid(i));
+            }
+        }
+    }
+
+    void
+    set_data_raw(size_t num_rows,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        if (field_meta.is_nullable()) {
+            if (length_ + num_rows > data_.size()) {
+                data_.reserve(length_ + num_rows);
+            }
+
+            auto src = data->valid_data().data();
+            for (size_t i = 0; i < num_rows; ++i) {
+                data_.push_back(src[i]);
+                // data_[length_ + i] = src[i];
+            }
+            length_ += num_rows;
+        }
+    }
+
+    bool
+    is_valid(size_t offset) {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        Assert(offset < length_);
+        return data_[offset];
+    }
+
+ private:
+    mutable std::shared_mutex mutex_{};
+    FixedVector<bool> data_;
+    // number of actual elements
+    size_t length_{0};
+};
+
 template <bool is_sealed = false>
 struct InsertRecord {
     InsertRecord(
@@ -420,7 +480,7 @@ struct InsertRecord {
             auto field_id = field.first;
             auto& field_meta = field.second;
             if (field_meta.is_nullable()) {
-                this->append_valid_data(field_id, size_per_chunk);
+                this->append_valid_data(field_id);
             }
             if (pk2offset_ == nullptr && pk_field_id.has_value() &&
                 pk_field_id.value() == field_id) {
@@ -454,28 +514,28 @@ struct InsertRecord {
             }
             if (field_meta.is_vector()) {
                 if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                    this->append_field_data<FloatVector>(
+                    this->append_data<FloatVector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_BINARY) {
-                    this->append_field_data<BinaryVector>(
+                    this->append_data<BinaryVector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_FLOAT16) {
-                    this->append_field_data<Float16Vector>(
+                    this->append_data<Float16Vector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_BFLOAT16) {
-                    this->append_field_data<BFloat16Vector>(
+                    this->append_data<BFloat16Vector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_SPARSE_FLOAT) {
-                    this->append_field_data<SparseFloatVector>(field_id,
-                                                               size_per_chunk);
+                    this->append_data<SparseFloatVector>(field_id,
+                                                         size_per_chunk);
                     continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
@@ -485,44 +545,43 @@ struct InsertRecord {
             }
             switch (field_meta.get_data_type()) {
                 case DataType::BOOL: {
-                    this->append_field_data<bool>(field_id, size_per_chunk);
+                    this->append_data<bool>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT8: {
-                    this->append_field_data<int8_t>(field_id, size_per_chunk);
+                    this->append_data<int8_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT16: {
-                    this->append_field_data<int16_t>(field_id, size_per_chunk);
+                    this->append_data<int16_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT32: {
-                    this->append_field_data<int32_t>(field_id, size_per_chunk);
+                    this->append_data<int32_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT64: {
-                    this->append_field_data<int64_t>(field_id, size_per_chunk);
+                    this->append_data<int64_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::FLOAT: {
-                    this->append_field_data<float>(field_id, size_per_chunk);
+                    this->append_data<float>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::DOUBLE: {
-                    this->append_field_data<double>(field_id, size_per_chunk);
+                    this->append_data<double>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::VARCHAR: {
-                    this->append_field_data<std::string>(field_id,
-                                                         size_per_chunk);
+                    this->append_data<std::string>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::JSON: {
-                    this->append_field_data<Json>(field_id, size_per_chunk);
+                    this->append_data<Json>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::ARRAY: {
-                    this->append_field_data<Array>(field_id, size_per_chunk);
+                    this->append_data<Array>(field_id, size_per_chunk);
                     break;
                 }
                 default: {
@@ -669,23 +728,22 @@ struct InsertRecord {
         pk2offset_->seal();
     }
 
-    // get field data without knowing the type
+    // get data without knowing the type
     VectorBase*
-    get_field_data_base(FieldId field_id) const {
-        AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
+    get_data_base(FieldId field_id) const {
+        AssertInfo(data_.find(field_id) != data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
-        AssertInfo(
-            fields_data_.at(field_id) != nullptr,
-            "fields_data_ at i is null" + std::to_string(field_id.get()));
-        return fields_data_.at(field_id).get();
+        AssertInfo(data_.at(field_id) != nullptr,
+                   "data_ at i is null" + std::to_string(field_id.get()));
+        return data_.at(field_id).get();
     }
 
     // get field data in given type, const version
     template <typename Type>
     const ConcurrentVector<Type>*
-    get_field_data(FieldId field_id) const {
-        auto base_ptr = get_field_data_base(field_id);
+    get_data(FieldId field_id) const {
+        auto base_ptr = get_data_base(field_id);
         auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
@@ -694,21 +752,21 @@ struct InsertRecord {
     // get field data in given type, non-const version
     template <typename Type>
     ConcurrentVector<Type>*
-    get_field_data(FieldId field_id) {
-        auto base_ptr = get_field_data_base(field_id);
+    get_data(FieldId field_id) {
+        auto base_ptr = get_data_base(field_id);
         auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
 
-    ConcurrentValidDataVector*
+    ThreadSafeValidData*
     get_valid_data(FieldId field_id) const {
         AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
                    "Cannot find valid_data with field_id: " +
                        std::to_string(field_id.get()));
-        auto ptr = valid_data_.at(field_id).get();
-        Assert(ptr);
-        return ptr;
+        AssertInfo(valid_data_.at(field_id) != nullptr,
+                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+        return valid_data_.at(field_id).get();
     }
 
     bool
@@ -719,34 +777,32 @@ struct InsertRecord {
     // append a column of scalar or sparse float vector type
     template <typename Type>
     void
-    append_field_data(FieldId field_id, int64_t size_per_chunk) {
+    append_data(FieldId field_id, int64_t size_per_chunk) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        fields_data_.emplace(field_id,
-                             std::make_unique<ConcurrentVector<Type>>(
-                                 size_per_chunk, mmap_descriptor_));
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVector<Type>>(
+                          size_per_chunk, mmap_descriptor_));
     }
 
     // append a column of scalar type
     void
-    append_valid_data(FieldId field_id, int64_t size_per_chunk) {
-        valid_data_.emplace(
-            field_id,
-            std::make_unique<ConcurrentValidDataVector>(size_per_chunk));
+    append_valid_data(FieldId field_id) {
+        valid_data_.emplace(field_id, std::make_unique<ThreadSafeValidData>());
     }
 
     // append a column of vector type
     template <typename VectorType>
     void
-    append_field_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
+    append_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        fields_data_.emplace(field_id,
-                             std::make_unique<ConcurrentVector<VectorType>>(
-                                 dim, size_per_chunk, mmap_descriptor_));
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVector<VectorType>>(
+                          dim, size_per_chunk, mmap_descriptor_));
     }
 
     void
-    drop_data(FieldId field_id) {
-        fields_data_.erase(field_id);
+    drop_field_data(FieldId field_id) {
+        data_.erase(field_id);
         valid_data_.erase(field_id);
     }
 
@@ -767,7 +823,7 @@ struct InsertRecord {
         ack_responder_.clear();
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
-        fields_data_.clear();
+        data_.clear();
     }
 
     bool
@@ -789,8 +845,8 @@ struct InsertRecord {
     std::unique_ptr<OffsetMap> pk2offset_;
 
  private:
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
-    std::unordered_map<FieldId, std::unique_ptr<ConcurrentValidDataVector>>
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
+    std::unordered_map<FieldId, std::unique_ptr<ThreadSafeValidData>>
         valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     storage::MmapChunkDescriptorPtr mmap_descriptor_;

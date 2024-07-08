@@ -244,7 +244,7 @@ BaseEventData::Serialize() {
                  ++offset) {
                 auto str = static_cast<const std::string*>(
                     field_data->RawValue(offset));
-                auto size = field_data->is_null(offset) ? -1 : str->size();
+                auto size = field_data->is_valid(offset) ? str->size() : -1;
                 payload_writer->add_one_string_payload(str->c_str(), size);
             }
             break;
@@ -256,7 +256,7 @@ BaseEventData::Serialize() {
                     static_cast<const Array*>(field_data->RawValue(offset));
                 auto array_string = array->output_data().SerializeAsString();
                 auto size =
-                    field_data->is_null(offset) ? -1 : array_string.size();
+                    field_data->is_valid(offset) ? array_string.size() : -1;
 
                 payload_writer->add_one_binary_payload(
                     reinterpret_cast<const uint8_t*>(array_string.c_str()),
@@ -378,8 +378,9 @@ std::vector<uint8_t>
 LocalInsertEvent::Serialize() {
     int row_num = field_data->get_num_rows();
     int dimension = field_data->get_dim();
-    int payload_size = field_data->Size();
-    int len = sizeof(row_num) + sizeof(dimension) + payload_size;
+    int data_size = field_data->DataSize();
+    int valid_data_size = field_data->ValidDataSize();
+    int len = sizeof(row_num) + sizeof(dimension) + data_size + valid_data_size;
 
     std::vector<uint8_t> res(len);
     int offset = 0;
@@ -387,8 +388,9 @@ LocalInsertEvent::Serialize() {
     offset += sizeof(row_num);
     memcpy(res.data() + offset, &dimension, sizeof(dimension));
     offset += sizeof(dimension);
-    memcpy(res.data() + offset, field_data->Data(), payload_size);
-
+    memcpy(res.data() + offset, field_data->Data(), data_size);
+    offset += data_size;
+    memcpy(res.data() + offset, field_data->ValidData(), valid_data_size);
     return res;
 }
 

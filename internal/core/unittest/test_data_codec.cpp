@@ -53,7 +53,7 @@ TEST(storage, InsertDataBool) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<bool> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -83,7 +83,7 @@ TEST(storage, InsertDataBoolNullable) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 2);
     FixedVector<bool> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     // valid_data is 0001 0011, read from LSB, '1' means the according index is valid
     ASSERT_EQ(data[0], new_data[0]);
     ASSERT_EQ(data[1], new_data[1]);
@@ -116,7 +116,7 @@ TEST(storage, InsertDataInt8) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<int8_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -144,7 +144,7 @@ TEST(storage, InsertDataInt8Nullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT8);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<int8_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -176,7 +176,7 @@ TEST(storage, InsertDataInt16) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<int16_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -204,7 +204,7 @@ TEST(storage, InsertDataInt16Nullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT16);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<int16_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -236,7 +236,7 @@ TEST(storage, InsertDataInt32) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<int32_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -264,7 +264,7 @@ TEST(storage, InsertDataInt32Nullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT32);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<int32_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -296,7 +296,7 @@ TEST(storage, InsertDataInt64) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<int64_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -324,7 +324,7 @@ TEST(storage, InsertDataInt64Nullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT64);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<int64_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -390,7 +390,7 @@ TEST(storage, InsertDataStringNullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::STRING);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<std::string> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {"test1", "test2", "", "", "test5"};
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] =
@@ -426,7 +426,7 @@ TEST(storage, InsertDataFloat) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<float> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -454,7 +454,7 @@ TEST(storage, InsertDataFloatNullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::FLOAT);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<float> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -485,7 +485,7 @@ TEST(storage, InsertDataDouble) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 0);
     FixedVector<double> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -513,7 +513,7 @@ TEST(storage, InsertDataDoubleNullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::DOUBLE);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<double> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
@@ -617,7 +617,7 @@ TEST(storage, InsertDataBinaryVector) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size() * 8 / DIM);
     ASSERT_EQ(new_payload->get_null_count(), 0);
     std::vector<uint8_t> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->Size());
+    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -677,7 +677,7 @@ TEST(storage, IndexData) {
     ASSERT_EQ(new_field_data->get_data_type(), storage::DataType::INT8);
     ASSERT_EQ(new_field_data->Size(), data.size());
     std::vector<uint8_t> new_data(data.size());
-    memcpy(new_data.data(), new_field_data->Data(), new_field_data->Size());
+    memcpy(new_data.data(), new_field_data->Data(), new_field_data->DataSize());
     ASSERT_EQ(data, new_data);
 }
 
