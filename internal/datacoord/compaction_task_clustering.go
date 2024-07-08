@@ -288,7 +288,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 		VChannel:     t.GetChannel(),
 		Version:      t.GetPlanID(),
 		SegmentIDs:   t.GetResultSegments(),
-	})
+	}, t.GetInputSegments())
 	if err != nil {
 		return merr.WrapErrClusteringCompactionMetaError("SavePartitionStatsInfo", err)
 	}

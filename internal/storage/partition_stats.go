@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"path"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 )
 
 type SegmentStats struct {
@@ -100,4 +102,30 @@ func FindPartitionStatsMaxVersion(filePaths []string) (int64, string) {
 		}
 	}
 	return maxVersion, maxVersionFilePath
+}
+
+func MergePartitionsStatsSnapshot(basePart *PartitionStatsSnapshot, mergePart *PartitionStatsSnapshot, removeSegmentIDs []int64, newVersionID int64) (*PartitionStatsSnapshot, error) {
+	if basePart == nil || mergePart == nil {
+		return nil, errors.New("partitionStats to merge can not be empty")
+	}
+	newPartStats := NewPartitionStatsSnapshot()
+	if newVersionID <= 0 {
+		newPartStats.SetVersion(basePart.GetVersion())
+	} else {
+		newPartStats.SetVersion(newVersionID)
+	}
+	newSegmentStats := make(map[UniqueID]SegmentStats, 0)
+	for segmentID, segmentStat := range basePart.SegmentStats {
+		newSegmentStats[segmentID] = segmentStat
+	}
+	for segmentID, segmentStat := range mergePart.SegmentStats {
+		newSegmentStats[segmentID] = segmentStat
+	}
+	for _, removeSegmentID := range removeSegmentIDs {
+		delete(newSegmentStats, removeSegmentID)
+	}
+	for segmentID, segmentStat := range newSegmentStats {
+		newPartStats.UpdateSegmentStats(segmentID, segmentStat)
+	}
+	return newPartStats, nil
 }
