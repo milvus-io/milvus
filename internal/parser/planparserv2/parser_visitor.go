@@ -299,7 +299,6 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 			return fmt.Errorf("modulo can only apply on integer types")
 		}
 	default:
-		break
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithExpr{

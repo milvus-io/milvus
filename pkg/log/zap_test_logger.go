@@ -49,13 +49,13 @@ type testingWriter struct {
 	markFailed bool
 }
 
-func newTestingWriter(t zaptest.TestingT) testingWriter {
-	return testingWriter{t: t}
+func newTestingWriter(t zaptest.TestingT) *testingWriter {
+	return &testingWriter{t: t}
 }
 
 // WithMarkFailed returns a copy of this testingWriter with markFailed set to
 // the provided value.
-func (w testingWriter) WithMarkFailed(v bool) testingWriter {
+func (w *testingWriter) WithMarkFailed(v bool) *testingWriter {
 	w.markFailed = v
 	return w
 }
