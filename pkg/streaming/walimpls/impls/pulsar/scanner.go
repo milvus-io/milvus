@@ -57,11 +57,11 @@ func (s *scannerImpl) executeConsume() {
 			s.Finish(err)
 			return
 		}
-		newImmutableMessage := message.NewBuilder().
-			WithMessageID(pulsarID{msg.ID()}).
-			WithPayload(msg.Payload()).
-			WithProperties(msg.Properties()).
-			BuildImmutable()
+		newImmutableMessage := message.NewImmutableMesasge(
+			pulsarID{msg.ID()},
+			msg.Payload(),
+			msg.Properties(),
+		)
 
 		select {
 		case <-s.Context().Done():

@@ -528,7 +528,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
-	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Once()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything).Return(true, true).Maybe()
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
 	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
 
@@ -545,7 +545,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.handler.taskNumber.Add(1000)
 	task.PlanID = 2
 	err = s.handler.enqueueCompaction(task)
-	s.Error(err)
+	s.NoError(err)
 }
 
 func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {

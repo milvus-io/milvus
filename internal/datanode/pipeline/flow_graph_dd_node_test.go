@@ -83,7 +83,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, ddNode)
 
-			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vChannelName), ddNode.Name())
+			assert.Equal(t, fmt.Sprintf("ddNode-%s", ddNode.vChannelName), ddNode.Name())
 
 			assert.Equal(t, len(test.inSealedSegs), len(ddNode.sealedSegInfo))
 			assert.Equal(t, len(test.inGrowingSegs), len(ddNode.growingSegInfo))
@@ -229,7 +229,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		}
 
 		tsMessages := []msgstream.TsMsg{getInsertMsg(100, 10000), getInsertMsg(200, 20000)}
-		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, []*msgpb.MsgPosition{{Timestamp: 20000}}, []*msgpb.MsgPosition{{Timestamp: 20000}})
 
 		rt := ddn.Operate([]Msg{msgStreamMsg})
 		assert.Equal(t, 1, len(rt[0].(*FlowGraphMsg).InsertMessages))

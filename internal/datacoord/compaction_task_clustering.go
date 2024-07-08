@@ -47,10 +47,9 @@ const (
 
 type clusteringCompactionTask struct {
 	*datapb.CompactionTask
-	plan                *datapb.CompactionPlan
-	result              *datapb.CompactionPlanResult
-	span                trace.Span
-	lastUpdateStateTime int64
+	plan   *datapb.CompactionPlan
+	result *datapb.CompactionPlanResult
+	span   trace.Span
 
 	meta             CompactionMeta
 	sessions         SessionManager
@@ -66,24 +65,22 @@ func (t *clusteringCompactionTask) Process() bool {
 		log.Warn("fail in process task", zap.Error(err))
 		if merr.IsRetryableErr(err) && t.RetryTimes < taskMaxRetryTimes {
 			// retry in next Process
-			t.RetryTimes = t.RetryTimes + 1
+			t.updateAndSaveTaskMeta(setRetryTimes(t.RetryTimes + 1))
 		} else {
 			log.Error("task fail with unretryable reason or meet max retry times", zap.Error(err))
-			t.State = datapb.CompactionTaskState_failed
-			t.FailReason = err.Error()
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		}
 	}
 	// task state update, refresh retry times count
 	currentState := t.State.String()
 	if currentState != lastState {
-		t.RetryTimes = 0
 		ts := time.Now().UnixMilli()
-		lastStateDuration := ts - t.lastUpdateStateTime
+		lastStateDuration := ts - t.GetLastStateStartTime()
 		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration))
-		t.lastUpdateStateTime = ts
+		t.updateAndSaveTaskMeta(setRetryTimes(0), setLastStateStartTime(ts))
 
 		if t.State == datapb.CompactionTaskState_completed {
 			t.updateAndSaveTaskMeta(setEndTime(ts))
@@ -370,7 +367,6 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	err = t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
-		return merr.WrapErrClusteringCompactionMetaError("CleanPartitionStatsInfo", err)
 	}
 
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
@@ -410,24 +406,27 @@ func (t *clusteringCompactionTask) doCompact() error {
 	if t.NeedReAssignNodeID() {
 		return errors.New("not assign nodeID")
 	}
+
+	// todo refine this logic: GetCompactionPlanResult return a fail result when this is no compaction in datanode which is weird
 	// check whether the compaction plan is already submitted considering
 	// datacoord may crash between call sessions.Compaction and updateTaskState to executing
-	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
-	if err != nil {
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
-			// setNodeID(NullNodeID) to trigger reassign node ID
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
-			return nil
-		}
-		return merr.WrapErrGetCompactionPlanResultFail(err)
-	}
-	if result != nil {
-		log.Info("compaction already submitted")
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
-		return nil
-	}
+	// result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
+	// if err != nil {
+	//	if errors.Is(err, merr.ErrNodeNotFound) {
+	//		log.Warn("GetCompactionPlanResult fail", zap.Error(err))
+	//		// setNodeID(NullNodeID) to trigger reassign node ID
+	//		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+	//		return nil
+	//	}
+	//	return merr.WrapErrGetCompactionPlanResultFail(err)
+	// }
+	// if result != nil {
+	//	log.Info("compaction already submitted")
+	//	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
+	//	return nil
+	// }
 
+	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
@@ -469,6 +468,7 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 		PreferSegmentRows:  t.GetPreferSegmentRows(),
 		AnalyzeTaskID:      t.GetAnalyzeTaskID(),
 		AnalyzeVersion:     t.GetAnalyzeVersion(),
+		LastStateStartTime: t.GetLastStateStartTime(),
 	}
 	for _, opt := range opts {
 		opt(taskClone)

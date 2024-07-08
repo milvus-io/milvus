@@ -19,24 +19,43 @@ package indexparamcheck
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type baseChecker struct{}
 
 func (c baseChecker) CheckTrain(params map[string]string) error {
 	// vector dimension should be checked on collection creation. this is just some basic check
-	if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
-		return fmt.Errorf("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
+	isSparse := false
+	if val, exist := params[common.IsSparseKey]; exist {
+		val = strings.ToLower(val)
+		if val != "true" && val != "false" {
+			return fmt.Errorf("invalid is_sparse value: %s, must be true or false", val)
+		}
+		if val == "true" {
+			isSparse = true
+		}
+	}
+	if isSparse {
+		if !CheckStrByValues(params, Metric, SparseMetrics) {
+			return fmt.Errorf("metric type not found or not supported for sparse float vectors, supported: %v", SparseMetrics)
+		}
+	} else {
+		// we do not check dim for sparse
+		if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
+			return fmt.Errorf("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
+		}
 	}
 	return nil
 }
 
 // CheckValidDataType check whether the field data type is supported for the index type
-func (c baseChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c baseChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
 	return nil
 }
 

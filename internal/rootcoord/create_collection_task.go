@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -81,17 +82,8 @@ func (t *createCollectionTask) validate() error {
 
 	// 2. check db-collection capacity
 	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
-
-	collIDs, ok := db2CollIDs[t.dbID]
-	if !ok {
-		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
-		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
-	}
-
-	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
-	if len(collIDs) >= maxColNumPerDB {
-		log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
-		return merr.WrapErrCollectionNumLimitExceeded(maxColNumPerDB, "max number of collection has reached the limit in DB")
+	if err := t.checkMaxCollectionsPerDB(db2CollIDs); err != nil {
+		return err
 	}
 
 	// 3. check total collection number
@@ -103,7 +95,7 @@ func (t *createCollectionTask) validate() error {
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
 		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
-		return merr.WrapErrCollectionNumLimitExceeded(maxCollectionNum, "max number of collection has reached the limit")
+		return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxCollectionNum)
 	}
 
 	// 4. check collection * shard * partition
@@ -112,6 +104,43 @@ func (t *createCollectionTask) validate() error {
 		newPartNum = t.Req.GetNumPartitions()
 	}
 	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
+}
+
+// checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
+func (t *createCollectionTask) checkMaxCollectionsPerDB(db2CollIDs map[int64][]int64) error {
+	collIDs, ok := db2CollIDs[t.dbID]
+	if !ok {
+		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
+	}
+
+	db, err := t.core.meta.GetDatabaseByName(t.ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
+	if err != nil {
+		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
+	}
+
+	check := func(maxColNumPerDB int) error {
+		if len(collIDs) >= maxColNumPerDB {
+			log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
+		}
+		return nil
+	}
+
+	maxColNumPerDBStr := db.GetProperty(common.DatabaseMaxCollectionsKey)
+	if maxColNumPerDBStr != "" {
+		maxColNumPerDB, err := strconv.Atoi(maxColNumPerDBStr)
+		if err != nil {
+			log.Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
+				zap.String("value", maxColNumPerDBStr), zap.Error(err))
+			return fmt.Errorf(fmt.Sprintf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr))
+		}
+		return check(maxColNumPerDB)
+	}
+
+	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
+	return check(maxColNumPerDB)
 }
 
 func checkDefaultValue(schema *schemapb.CollectionSchema) error {

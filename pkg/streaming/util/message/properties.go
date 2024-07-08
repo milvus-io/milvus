@@ -6,6 +6,7 @@ const (
 	messageTypeKey       = "_t"  // message type key.
 	messageTimeTick      = "_tt" // message time tick.
 	messageLastConfirmed = "_lc" // message last confirmed message id.
+	messageVChannel      = "_vc" // message virtual channel.
 )
 
 var (

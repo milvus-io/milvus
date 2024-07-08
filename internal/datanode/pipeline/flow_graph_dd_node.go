@@ -76,7 +76,7 @@ type ddNode struct {
 
 // Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
-	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
+	return fmt.Sprintf("ddNode-%s", ddn.vChannelName)
 }
 
 func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
@@ -198,7 +198,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			log.Debug("DDNode receive insert messages",
 				zap.Int64("segmentID", imsg.GetSegmentID()),
 				zap.String("channel", ddn.vChannelName),
-				zap.Int("numRows", len(imsg.GetRowIDs())))
+				zap.Int("numRows", len(imsg.GetRowIDs())),
+				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()))
 			fgMsg.InsertMessages = append(fgMsg.InsertMessages, imsg)
 
 		case commonpb.MsgType_Delete:

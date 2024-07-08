@@ -13,7 +13,7 @@ func (c *AUTOINDEXChecker) CheckTrain(params map[string]string) error {
 	return nil
 }
 
-func (c *AUTOINDEXChecker) CheckValidDataType(dType schemapb.DataType) error {
+func (c *AUTOINDEXChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
 	return nil
 }
 

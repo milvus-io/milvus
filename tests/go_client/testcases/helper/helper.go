@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 
@@ -134,23 +135,14 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
-	fields := ip.Schema.Fields
-	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName)
-	if ip.Schema.EnableDynamicField {
-		insertOpt.WithColumns(GenDynamicColumnData(option.start, ip.Nb)...)
-	}
-	for _, field := range fields {
-		if field.DataType == entity.FieldTypeArray {
-			option.TWithElementType(field.ElementType)
-		}
-		column := GenColumnData(ip.Nb, field.DataType, *option)
-		insertOpt.WithColumns(column)
-	}
+	columns, dynamicColumns := GenColumnsBasedSchema(ip.Schema, option)
+	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
 	if ip.PartitionName != "" {
 		insertOpt.WithPartition(ip.PartitionName)
 	}
 	insertRes, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
+	require.Equal(t, option.nb, insertRes.IDs.Len())
 	return chainTask, insertRes
 }
 

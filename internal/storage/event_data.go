@@ -31,8 +31,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-const originalSizeKey = "original_size"
-const nullableKey = "nullable"
+const (
+	originalSizeKey = "original_size"
+	nullableKey     = "nullable"
+)
+
+const version = "version"
+
+// mark useMultiFieldFormat if there are multi fields in a log file
+const MULTI_FIELD = "MULTI_FIELD"
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
@@ -71,7 +78,7 @@ func (data *descriptorEventData) GetNullable() (bool, error) {
 		return false, nil
 	}
 	nullable, ok := nullableStore.(bool)
-	// will not happend, has checked bool format when FinishExtra
+	// will not happen, has checked bool format when FinishExtra
 	if !ok {
 		return false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
 	}

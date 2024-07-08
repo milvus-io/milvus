@@ -379,7 +379,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
-	err = preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
+	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
 }
 
@@ -431,7 +431,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err = importTask.(*ImportTask).importFile(s.reader, importTask)
+	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
 }
 

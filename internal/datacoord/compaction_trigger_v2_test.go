@@ -48,32 +48,6 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta)
 }
 
-func (s *CompactionTriggerManagerSuite) TestNotifyToFullScheduler() {
-	s.mockPlanContext.EXPECT().isFull().Return(true)
-	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
-	segments, found := collSegs[1]
-	s.Require().True(found)
-
-	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
-		return info.GetLevel() == datapb.SegmentLevel_L0
-	})
-
-	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
-	s.Require().NotEmpty(latestL0Segments)
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.Require().True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
-	s.True(ok)
-	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
-
-	// s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().isFull().Return(false)
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
-}
-
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
@@ -104,7 +78,6 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().isFull().Return(false)
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
@@ -149,7 +122,6 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().isFull().Return(false)
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
