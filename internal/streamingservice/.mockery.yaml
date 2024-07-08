@@ -19,3 +19,10 @@ packages:
   google.golang.org/grpc:
     interfaces:
       ClientStream:
+  github.com/milvus-io/milvus/internal/proto/streamingpb:
+    interfaces:
+      StreamingNodeHandlerService_ConsumeServer:
+      StreamingNodeHandlerService_ProduceServer:
+  github.com/milvus-io/milvus/internal/streamingnode/server/walmanager:
+    interfaces:
+      Manager:

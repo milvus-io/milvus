@@ -63,6 +63,10 @@ type walAdaptorImpl struct {
 	cleanup             func()
 }
 
+func (w *walAdaptorImpl) WALName() string {
+	return w.inner.WALName()
+}
+
 // Channel returns the channel info of wal.
 func (w *walAdaptorImpl) Channel() types.PChannelInfo {
 	return w.inner.Channel()

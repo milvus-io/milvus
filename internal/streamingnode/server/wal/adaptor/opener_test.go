@@ -66,9 +66,8 @@ func TestOpenerAdaptor(t *testing.T) {
 			defer wg.Done()
 			wal, err := opener.Open(context.Background(), &wal.OpenOption{
 				Channel: types.PChannelInfo{
-					Name:     fmt.Sprintf("test_%d", i),
-					Term:     int64(i),
-					ServerID: 1,
+					Name: fmt.Sprintf("test_%d", i),
+					Term: int64(i),
 				},
 			})
 			if err != nil {
@@ -108,9 +107,8 @@ func TestOpenerAdaptor(t *testing.T) {
 	// open a wal after opener closed should return shutdown error.
 	_, err := opener.Open(context.Background(), &wal.OpenOption{
 		Channel: types.PChannelInfo{
-			Name:     "test_after_close",
-			Term:     int64(1),
-			ServerID: 1,
+			Name: "test_after_close",
+			Term: int64(1),
 		},
 	})
 	assertShutdownError(t, err)

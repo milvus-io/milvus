@@ -70,6 +70,12 @@ func TestStatePair(t *testing.T) {
 	}
 }
 
+func assertErrorOperationIgnored(t *testing.T, err error) {
+	assert.Error(t, err)
+	logErr := status.AsStreamingError(err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION, logErr.Code)
+}
+
 func assertErrorTermExpired(t *testing.T, err error) {
 	assert.Error(t, err)
 	logErr := status.AsStreamingError(err)

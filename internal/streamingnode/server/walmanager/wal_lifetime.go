@@ -53,7 +53,7 @@ func (w *walLifetime) Open(ctx context.Context, channel types.PChannelInfo) erro
 	// Set expected WAL state to available at given term.
 	expected := newAvailableExpectedState(ctx, channel)
 	if !w.statePair.SetExpectedState(expected) {
-		return status.NewUnmatchedChannelTerm("expired term, cannot change expected state for open")
+		return status.NewIgnoreOperation("channel %s with expired term %d, cannot change expected state for open", channel.Name, channel.Term)
 	}
 
 	// Wait until the WAL state is ready or term expired or error occurs.
@@ -65,7 +65,7 @@ func (w *walLifetime) Remove(ctx context.Context, term int64) error {
 	// Set expected WAL state to unavailable at given term.
 	expected := newUnavailableExpectedState(term)
 	if !w.statePair.SetExpectedState(expected) {
-		return status.NewUnmatchedChannelTerm("expired term, cannot change expected state for remove")
+		return status.NewIgnoreOperation("expired term %d, cannot change expected state for remove", term)
 	}
 
 	// Wait until the WAL state is ready or term expired or error occurs.

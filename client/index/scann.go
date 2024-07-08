@@ -45,7 +45,7 @@ func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
 			metricType: metricType,
 			indexType:  SCANN,
 		},
-		nlist: nlist,
+		nlist:       nlist,
 		withRawData: withRawData,
 	}
 }

@@ -98,9 +98,8 @@ func (f *testOneWALImplsFramework) Run() {
 	// test a read write loop
 	for ; f.term <= 3; f.term++ {
 		pChannel := types.PChannelInfo{
-			Name:     f.pchannel,
-			Term:     int64(f.term),
-			ServerID: 1,
+			Name: f.pchannel,
+			Term: int64(f.term),
 		}
 		// create a wal.
 		w, err := f.opener.Open(ctx, &OpenOption{
@@ -109,7 +108,6 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.NoError(f.t, err)
 		assert.NotNil(f.t, w)
 		assert.Equal(f.t, pChannel.Name, w.Channel().Name)
-		assert.Equal(f.t, pChannel.ServerID, w.Channel().ServerID)
 		assert.Equal(f.t, pChannel.Term, w.Channel().Term)
 
 		f.testReadAndWrite(ctx, w)
