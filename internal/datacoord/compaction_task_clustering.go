@@ -75,12 +75,12 @@ func (t *clusteringCompactionTask) Process() bool {
 	currentState := t.State.String()
 	if currentState != lastState {
 		ts := time.Now().UnixMilli()
-		t.updateAndSaveTaskMeta(setRetryTimes(0), setLastStateStartTime(ts))
 		lastStateDuration := ts - t.GetLastStateStartTime()
 		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration))
+		t.updateAndSaveTaskMeta(setRetryTimes(0), setLastStateStartTime(ts))
 
 		if t.State == datapb.CompactionTaskState_completed {
 			t.updateAndSaveTaskMeta(setEndTime(ts))
@@ -448,6 +448,7 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 		PreferSegmentRows:  t.GetPreferSegmentRows(),
 		AnalyzeTaskID:      t.GetAnalyzeTaskID(),
 		AnalyzeVersion:     t.GetAnalyzeVersion(),
+		LastStateStartTime: t.GetLastStateStartTime(),
 	}
 	for _, opt := range opts {
 		opt(taskClone)

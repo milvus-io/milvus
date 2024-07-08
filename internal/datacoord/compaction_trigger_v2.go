@@ -171,11 +171,6 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
 	for _, view := range views {
-		if m.compactionHandler.isFull() {
-			log.RatedInfo(10, "Skip trigger compaction for scheduler is full")
-			return
-		}
-
 		switch eventType {
 		case TriggerTypeLevelZeroViewChange:
 			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
