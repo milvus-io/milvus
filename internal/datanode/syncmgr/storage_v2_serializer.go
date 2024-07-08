@@ -29,6 +29,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -54,10 +55,11 @@ type storageV2Serializer struct {
 
 func NewStorageV2Serializer(
 	storageV2Cache *metacache.StorageV2Cache,
+	allocator allocator.Interface,
 	metacache metacache.MetaCache,
 	metaWriter MetaWriter,
 ) (*storageV2Serializer, error) {
-	v1Serializer, err := NewStorageSerializer(metacache, metaWriter)
+	v1Serializer, err := NewStorageSerializer(allocator, metacache, metaWriter)
 	if err != nil {
 		return nil, err
 	}
