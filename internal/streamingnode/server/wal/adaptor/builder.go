@@ -2,7 +2,9 @@ package adaptor
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walimpls"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
 
 var _ wal.OpenerBuilder = (*builderAdaptorImpl)(nil)
@@ -22,11 +24,12 @@ func (b builderAdaptorImpl) Name() string {
 }
 
 func (b builderAdaptorImpl) Build() (wal.Opener, error) {
-	_, err := b.builder.Build()
+	o, err := b.builder.Build()
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
-	// TODO: wait for implementation.
-	// return adaptImplsToOpener(o), nil
+	// Add all interceptor here.
+	return adaptImplsToOpener(o, []interceptors.InterceptorBuilder{
+		timetick.NewInterceptorBuilder(),
+	}), nil
 }

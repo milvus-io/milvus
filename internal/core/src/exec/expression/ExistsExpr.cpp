@@ -26,7 +26,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             if (is_index_mode_) {
                 PanicInfo(ExprInvalid,
-                          "exists expr for json index mode not supportted");
+                          "exists expr for json index mode not supported");
             }
             result = EvalJsonExistsForDataSegment();
             break;

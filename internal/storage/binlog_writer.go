@@ -278,7 +278,8 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = FieldID
-	descriptorEvent.Nullable = nullable
+	// store nullable in extra for compatible
+	descriptorEvent.AddExtra(nullableKey, nullable)
 
 	w := &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{

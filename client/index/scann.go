@@ -32,19 +32,20 @@ type scannIndex struct {
 
 func (idx scannIndex) Params() map[string]string {
 	return map[string]string{
-		MetricTypeKey: string(idx.metricType),
-		IndexTypeKey:  string(IvfFlat),
-		ivfNlistKey:   strconv.Itoa(idx.nlist),
+		MetricTypeKey:       string(idx.metricType),
+		IndexTypeKey:        string(SCANN),
+		scannNlistKey:       strconv.Itoa(idx.nlist),
+		scannWithRawDataKey: strconv.FormatBool(idx.withRawData),
 	}
 }
 
-func NewSCANNIndex(metricType MetricType, nlist int) Index {
-	return ivfFlatIndex{
+func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
+	return scannIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
-			indexType:  IvfFlat,
+			indexType:  SCANN,
 		},
-
 		nlist: nlist,
+		withRawData: withRawData,
 	}
 }

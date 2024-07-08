@@ -5,10 +5,10 @@ package mock_wal
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/internal/util/streamingutil/message"
+	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
-	streamingpb "github.com/milvus-io/milvus/internal/proto/streamingpb"
+	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )
@@ -117,16 +117,14 @@ func (_c *MockWAL_AppendAsync_Call) RunAndReturn(run func(context.Context, messa
 }
 
 // Channel provides a mock function with given fields:
-func (_m *MockWAL) Channel() *streamingpb.PChannelInfo {
+func (_m *MockWAL) Channel() types.PChannelInfo {
 	ret := _m.Called()
 
-	var r0 *streamingpb.PChannelInfo
-	if rf, ok := ret.Get(0).(func() *streamingpb.PChannelInfo); ok {
+	var r0 types.PChannelInfo
+	if rf, ok := ret.Get(0).(func() types.PChannelInfo); ok {
 		r0 = rf()
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*streamingpb.PChannelInfo)
-		}
+		r0 = ret.Get(0).(types.PChannelInfo)
 	}
 
 	return r0
@@ -149,12 +147,12 @@ func (_c *MockWAL_Channel_Call) Run(run func()) *MockWAL_Channel_Call {
 	return _c
 }
 
-func (_c *MockWAL_Channel_Call) Return(_a0 *streamingpb.PChannelInfo) *MockWAL_Channel_Call {
+func (_c *MockWAL_Channel_Call) Return(_a0 types.PChannelInfo) *MockWAL_Channel_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWAL_Channel_Call) RunAndReturn(run func() *streamingpb.PChannelInfo) *MockWAL_Channel_Call {
+func (_c *MockWAL_Channel_Call) RunAndReturn(run func() types.PChannelInfo) *MockWAL_Channel_Call {
 	_c.Call.Return(run)
 	return _c
 }

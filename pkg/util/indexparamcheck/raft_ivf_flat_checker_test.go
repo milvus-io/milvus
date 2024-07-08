@@ -156,7 +156,7 @@ func Test_raftIvfFlatChecker_CheckValidDataType(t *testing.T) {
 
 	c := newRaftIVFFlatChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		err := c.CheckValidDataType(&schemapb.FieldSchema{DataType: test.dType})
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

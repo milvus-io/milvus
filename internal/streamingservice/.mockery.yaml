@@ -5,24 +5,17 @@ dir: "internal/mocks/{{trimPrefix .PackagePath \"github.com/milvus-io/milvus/int
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
 packages:
-  github.com/milvus-io/milvus/internal/util/streamingutil/message:
-    interfaces:
-      MessageID:
-      ImmutableMessage:
-      MutableMessage:
-      RProperties:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal:
     interfaces:
       OpenerBuilder:
       Opener:
       Scanner:
       WAL:
-  github.com/milvus-io/milvus/internal/streamingnode/server/wal/walimpls:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors:
     interfaces:
-      OpenerBuilderImpls:
-      OpenerImpls:
-      ScannerImpls:
-      WALImpls:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
+  google.golang.org/grpc:
+    interfaces:
+      ClientStream:

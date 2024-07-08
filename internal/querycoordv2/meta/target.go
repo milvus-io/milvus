@@ -23,19 +23,22 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // CollectionTarget collection target is immutable,
 type CollectionTarget struct {
 	segments   map[int64]*datapb.SegmentInfo
 	dmChannels map[string]*DmChannel
+	partitions typeutil.Set[int64] // stores target partitions info
 	version    int64
 }
 
-func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel) *CollectionTarget {
+func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
 	return &CollectionTarget{
 		segments:   segments,
 		dmChannels: dmChannels,
+		partitions: typeutil.NewSet(partitionIDs...),
 		version:    time.Now().UnixNano(),
 	}
 }
@@ -43,6 +46,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget {
 	segments := make(map[int64]*datapb.SegmentInfo)
 	dmChannels := make(map[string]*DmChannel)
+	var partitions []int64
 
 	for _, t := range target.GetChannelTargets() {
 		for _, partition := range t.GetPartitionTargets() {
@@ -55,6 +59,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 					InsertChannel: t.GetChannelName(),
 				}
 			}
+			partitions = append(partitions, partition.GetPartitionID())
 		}
 		dmChannels[t.GetChannelName()] = &DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{
@@ -68,7 +73,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		}
 	}
 
-	return NewCollectionTarget(segments, dmChannels)
+	return NewCollectionTarget(segments, dmChannels, partitions)
 }
 
 func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {

@@ -40,7 +40,7 @@ type RestfulInfo struct {
 }
 
 func NewRestfulInfo() *RestfulInfo {
-	return &RestfulInfo{start: time.Now()}
+	return &RestfulInfo{start: time.Now(), params: &gin.LogFormatterParams{}}
 }
 
 func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
@@ -129,6 +129,10 @@ func (i *RestfulInfo) ErrorMsg() string {
 		return ""
 	}
 	return fmt.Sprint(message)
+}
+
+func (i *RestfulInfo) ErrorType() string {
+	return Unknown
 }
 
 func (i *RestfulInfo) SdkVersion() string {

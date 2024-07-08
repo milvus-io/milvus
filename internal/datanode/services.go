@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -306,32 +305,41 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		allSegments[segID] = struct{}{}
 	}
 
-	missingSegments := ds.metacache.DetectMissingSegments(allSegments)
+	missingSegments := ds.GetMetaCache().DetectMissingSegments(allSegments)
 
 	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
 	futures := make([]*conc.Future[any], 0, len(missingSegments))
 
 	for _, segID := range missingSegments {
-		segID := segID
 		newSeg := req.GetSegmentInfos()[segID]
-		newSegments = append(newSegments, newSeg)
-		future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-			var val *metacache.BloomFilterSet
-			var err error
-			err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-			if err != nil {
-				log.Warn("failed to DecompressBinLog", zap.Error(err))
-				return val, err
+		switch newSeg.GetLevel() {
+		case datapb.SegmentLevel_L0:
+			log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
+		case datapb.SegmentLevel_Legacy:
+			log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
+		default:
+			if newSeg.GetState() == commonpb.SegmentState_Flushed {
+				log.Info("segment loading PKs", zap.Int64("segmentID", segID))
+				newSegments = append(newSegments, newSeg)
+				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+					var val *metacache.BloomFilterSet
+					var err error
+					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					if err != nil {
+						log.Warn("failed to DecompressBinLog", zap.Error(err))
+						return val, err
+					}
+					pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					if err != nil {
+						log.Warn("failed to load segment stats log", zap.Error(err))
+						return val, err
+					}
+					val = metacache.NewBloomFilterSet(pks...)
+					return val, nil
+				})
+				futures = append(futures, future)
 			}
-			pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-			if err != nil {
-				log.Warn("failed to load segment stats log", zap.Error(err))
-				return val, err
-			}
-			val = metacache.NewBloomFilterSet(pks...)
-			return val, nil
-		})
-		futures = append(futures, future)
+		}
 	}
 
 	err := conc.AwaitAll(futures...)
@@ -343,7 +351,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return future.Value().(*metacache.BloomFilterSet)
 	})
 
-	ds.metacache.UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
+	ds.GetMetaCache().UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
 }
 

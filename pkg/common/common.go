@@ -120,6 +120,7 @@ const (
 	DropRatioBuildKey = "drop_ratio_build"
 
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
+	IsSparseKey               = "is_sparse"
 )
 
 //  Collection properties key
@@ -146,8 +147,11 @@ const (
 	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
 
 	// database level properties
-	DatabaseReplicaNumber  = "database.replica.number"
-	DatabaseResourceGroups = "database.resource_groups"
+	DatabaseReplicaNumber       = "database.replica.number"
+	DatabaseResourceGroups      = "database.resource_groups"
+	DatabaseDiskQuotaKey        = "database.diskQuota.mb"
+	DatabaseMaxCollectionsKey   = "database.max.collections"
+	DatabaseForceDenyWritingKey = "database.force.deny.writing"
 )
 
 // common properties

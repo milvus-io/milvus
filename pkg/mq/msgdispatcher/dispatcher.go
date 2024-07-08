@@ -96,6 +96,7 @@ func NewDispatcher(ctx context.Context,
 		return nil, err
 	}
 	if position != nil && len(position.MsgID) != 0 {
+		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
 		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)
 		if err != nil {
@@ -110,8 +111,8 @@ func NewDispatcher(ctx context.Context,
 			return nil, err
 		}
 		posTime := tsoutil.PhysicalTime(position.GetTimestamp())
-		log.Info("seek successfully", zap.Time("posTime", posTime),
-			zap.Duration("tsLag", time.Since(posTime)))
+		log.Info("seek successfully", zap.Uint64("posTs", position.GetTimestamp()),
+			zap.Time("posTime", posTime), zap.Duration("tsLag", time.Since(posTime)))
 	} else {
 		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
 		if err != nil {
@@ -234,7 +235,7 @@ func (d *Dispatcher) work() {
 					}
 				}
 				if err != nil {
-					t.pos = pack.StartPositions[0]
+					t.pos = typeutil.Clone(pack.StartPositions[0])
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
 					d.lagTargets.Insert(t.vchannel, t)

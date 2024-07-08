@@ -54,10 +54,26 @@ func TestDescriptorEvent(t *testing.T) {
 	err = desc.Write(&buf)
 	assert.Error(t, err)
 
+	// nullable not existed
+	nullable, err := desc.GetNullable()
+	assert.NoError(t, err)
+	assert.False(t, nullable)
+
 	desc.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	desc.AddExtra(nullableKey, "not bool format")
+
+	err = desc.Write(&buf)
+	// nullable not formatted
+	assert.Error(t, err)
+
+	desc.AddExtra(nullableKey, true)
 
 	err = desc.Write(&buf)
 	assert.NoError(t, err)
+
+	nullable, err = desc.GetNullable()
+	assert.NoError(t, err)
+	assert.True(t, nullable)
 
 	buffer := buf.Bytes()
 
@@ -89,25 +105,17 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID)))
 	assert.Equal(t, fieldID, int64(-1))
-	nullable := UnsafeReadBool(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID))+
-		int(unsafe.Sizeof(segID))+
-		int(unsafe.Sizeof(fieldID)))
-	assert.Equal(t, nullable, false)
 	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
-		int(unsafe.Sizeof(fieldID))+
-		int(unsafe.Sizeof(nullable)))
+		int(unsafe.Sizeof(fieldID)))
 	assert.Equal(t, startTs, int64(0))
 	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID))+
-		int(unsafe.Sizeof(nullable))+
 		int(unsafe.Sizeof(startTs)))
 	assert.Equal(t, endTs, int64(0))
 	colType := UnsafeReadInt32(buffer, binary.Size(eventHeader{})+
@@ -115,7 +123,6 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID))+
-		int(unsafe.Sizeof(nullable))+
 		int(unsafe.Sizeof(startTs))+
 		int(unsafe.Sizeof(endTs)))
 	assert.Equal(t, colType, int32(-1))
@@ -125,7 +132,6 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID)) +
 		int(unsafe.Sizeof(segID)) +
 		int(unsafe.Sizeof(fieldID)) +
-		int(unsafe.Sizeof(nullable)) +
 		int(unsafe.Sizeof(startTs)) +
 		int(unsafe.Sizeof(endTs)) +
 		int(unsafe.Sizeof(colType))

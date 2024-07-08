@@ -1704,6 +1704,17 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 	return nil
 }
 
+func (m *meta) GetChannelCheckpoints() map[string]*msgpb.MsgPosition {
+	m.channelCPs.RLock()
+	defer m.channelCPs.RUnlock()
+
+	checkpoints := make(map[string]*msgpb.MsgPosition, len(m.channelCPs.checkpoints))
+	for ch, cp := range m.channelCPs.checkpoints {
+		checkpoints[ch] = proto.Clone(cp).(*msgpb.MsgPosition)
+	}
+	return checkpoints
+}
+
 func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
 	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
 }

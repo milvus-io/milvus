@@ -461,7 +461,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
-		Version:      "2.5.0",
+		Version:      "2.4.6",
 		DefaultValue: "false",
 	}
 	p.EnableMaterializedView.Init(base.mgr)
@@ -2819,7 +2819,8 @@ user-task-polling:
 	p.QueryStreamBatchSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "queryNode.bloomFilterApplyBatchSize",
+		Key:          "queryNode.bloomFilterApplyParallelFactor",
+		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
@@ -2833,7 +2834,6 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
-	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
@@ -2948,19 +2948,10 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
 
-	p.EnableBalanceChannelWithRPC = ParamItem{
-		Key:          "dataCoord.channel.balanceWithRpc",
-		Version:      "2.4.0",
-		DefaultValue: "true",
-		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
-		Export:       true,
-	}
-	p.EnableBalanceChannelWithRPC.Init(base.mgr)
-
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
-		Version:      "2.4.0",
-		DefaultValue: "2.4.0",
+		Version:      "2.4.1",
+		DefaultValue: "2.4.1",
 		Doc:          "Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels",
 		Export:       true,
 	}
@@ -3244,10 +3235,10 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.ChannelCheckpointMaxLag.Init(base.mgr)
 
 	p.SyncSegmentsInterval = ParamItem{
-		Key:          "dataCoord.sync.interval",
-		Version:      "2.4.3",
+		Key:          "dataCoord.syncSegmentsInterval",
+		Version:      "2.4.6",
 		Doc:          "The time interval for regularly syncing segments",
-		DefaultValue: "600", // 10 * 60 seconds
+		DefaultValue: "300", // 5 * 60 seconds
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
 
@@ -3721,7 +3712,6 @@ type dataNodeConfig struct {
 	MemoryCheckInterval       ParamItem `refreshable:"true"`
 	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
 
-	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
@@ -3743,7 +3733,8 @@ type dataNodeConfig struct {
 	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -3928,15 +3919,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.FileReadConcurrency.Init(base.mgr)
 
-	p.DataNodeTimeTickByRPC = ParamItem{
-		Key:          "dataNode.timetick.byRPC",
-		Version:      "2.2.9",
-		PanicIfEmpty: false,
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.DataNodeTimeTickByRPC.Init(base.mgr)
-
 	p.DataNodeTimeTickInterval = ParamItem{
 		Key:          "dataNode.timetick.interval",
 		Version:      "2.2.5",
@@ -4052,6 +4034,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)
 
+	p.L0CompactionMaxBatchSize = ParamItem{
+		Key:          "dataNode.compaction.levelZeroMaxBatchSize",
+		Version:      "2.4.5",
+		Doc:          "Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.",
+		DefaultValue: "-1",
+		Export:       true,
+	}
+	p.L0CompactionMaxBatchSize.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -4071,8 +4062,8 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap.Init(base.mgr)
 
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
-		Key:          "datanode.clusteringCompaction.memoryBufferRatio",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
+		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
@@ -4081,8 +4072,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio.Init(base.mgr)
 
 	p.ClusteringCompactionWorkerPoolSize = ParamItem{
-		Key:          "datanode.clusteringCompaction.cpu",
-		Version:      "2.4.2",
+		Key:          "dataNode.clusteringCompaction.workPoolSize",
+		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,
@@ -4091,7 +4082,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyBatchSize",
+		Key:          "datanode.bloomFilterApplyParallelFactor",
+		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
 		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",

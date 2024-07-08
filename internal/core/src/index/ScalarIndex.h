@@ -37,6 +37,26 @@ enum class ScalarIndexType {
     HYBRID,
 };
 
+inline std::string
+ToString(ScalarIndexType type) {
+    switch (type) {
+        case ScalarIndexType::NONE:
+            return "NONE";
+        case ScalarIndexType::BITMAP:
+            return "BITMAP";
+        case ScalarIndexType::STLSORT:
+            return "STLSORT";
+        case ScalarIndexType::MARISA:
+            return "MARISA";
+        case ScalarIndexType::INVERTED:
+            return "INVERTED";
+        case ScalarIndexType::HYBRID:
+            return "HYBRID";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
