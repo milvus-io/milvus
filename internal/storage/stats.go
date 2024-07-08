@@ -20,9 +20,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/bits-and-blooms/bloom/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -31,13 +32,14 @@ import (
 
 // PrimaryKeyStats contains statistics data for pk column
 type PrimaryKeyStats struct {
-	FieldID int64              `json:"fieldID"`
-	Max     int64              `json:"max"` // useless, will delete
-	Min     int64              `json:"min"` // useless, will delete
-	BF      *bloom.BloomFilter `json:"bf"`
-	PkType  int64              `json:"pkType"`
-	MaxPk   PrimaryKey         `json:"maxPk"`
-	MinPk   PrimaryKey         `json:"minPk"`
+	FieldID int64                            `json:"fieldID"`
+	Max     int64                            `json:"max"` // useless, will delete
+	Min     int64                            `json:"min"` // useless, will delete
+	BFType  bloomfilter.BFType               `json:"bfType"`
+	BF      bloomfilter.BloomFilterInterface `json:"bf"`
+	PkType  int64                            `json:"pkType"`
+	MaxPk   PrimaryKey                       `json:"maxPk"`
+	MinPk   PrimaryKey                       `json:"minPk"`
 }
 
 // UnmarshalJSON unmarshal bytes to PrimaryKeyStats
@@ -110,12 +112,22 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
-		stats.BF = &bloom.BloomFilter{}
-		err = stats.BF.UnmarshalJSON(*bfMessage)
+	bfType := bloomfilter.BasicBF
+	if bfTypeMessage, ok := messageMap["bfType"]; ok && bfTypeMessage != nil {
+		err := json.Unmarshal(*bfTypeMessage, &bfType)
 		if err != nil {
 			return err
 		}
+		stats.BFType = bfType
+	}
+
+	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
+		bf, err := bloomfilter.UnmarshalJSON(*bfMessage, bfType)
+		if err != nil {
+			log.Warn("Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", zap.Error(err))
+			bf = bloomfilter.AlwaysTrueBloomFilter
+		}
+		stats.BF = bf
 	}
 
 	return nil
@@ -189,10 +201,16 @@ func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error)
 	if rowNum <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num", rowNum)
 	}
+
+	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	return &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  pkType,
-		BF:      bloom.NewWithEstimates(uint(rowNum), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+		BFType:  bloomfilter.BFTypeFromString(bfType),
+		BF: bloomfilter.NewBloomFilterWithType(
+			uint(rowNum),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			bfType),
 	}, nil
 }
 
@@ -228,10 +246,15 @@ func (sw *StatsWriter) Generate(stats *PrimaryKeyStats) error {
 
 // GenerateByData writes Int64Stats or StringStats from @msgs with @fieldID to @buffer
 func (sw *StatsWriter) GenerateByData(fieldID int64, pkType schemapb.DataType, msgs FieldData) error {
+	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	stats := &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  int64(pkType),
-		BF:      bloom.NewWithEstimates(uint(msgs.RowNum()), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+		BFType:  bloomfilter.BFTypeFromString(bfType),
+		BF: bloomfilter.NewBloomFilterWithType(
+			uint(msgs.RowNum()),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			bfType),
 	}
 
 	stats.UpdateByMsgs(msgs)
