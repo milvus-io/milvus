@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -28,30 +29,30 @@ import (
 func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ConsumeServer) (*ConsumeServer, error) {
 	createReq, err := contextutil.GetCreateConsumer(streamServer.Context())
 	if err != nil {
-		return nil, errors.Wrap(err, "at get create consumer request")
+		return nil, status.NewInvaildArgument("create consumer request is required")
 	}
 
 	pchanelInfo := typeconverter.NewPChannelInfoFromProto(createReq.Pchannel)
 	l, err := walManager.GetAvailableWAL(pchanelInfo)
 	if err != nil {
-		return nil, errors.Wrap(err, "at get available wal")
+		return nil, err
 	}
+
 	deliverPolicy, err := typeconverter.NewDeliverPolicyFromProto(l.WALName(), createReq.GetDeliverPolicy())
 	if err != nil {
-		return nil, errors.Wrap(err, "at convert deliver policy")
+		return nil, status.NewInvaildArgument("at convert deliver policy, err: %s", err.Error())
 	}
 	deliverFilters, err := newMessageFilter(createReq.DeliverFilters)
 	if err != nil {
-		return nil, errors.Wrap(err, "at convert deliver filters")
+		return nil, status.NewInvaildArgument("at convert deliver filters, err: %s", err.Error())
 	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
 		DeliverPolicy: deliverPolicy,
 		MessageFilter: deliverFilters,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "at create scanner")
+		return nil, err
 	}
-
 	consumeServer := &consumeGrpcServerHelper{
 		StreamingNodeHandlerService_ConsumeServer: streamServer,
 	}
@@ -111,7 +112,7 @@ func (c *ConsumeServer) sendLoop() (err error) {
 		select {
 		case msg, ok := <-c.scanner.Chan():
 			if !ok {
-				return errors.Wrap(c.scanner.Error(), "at scanner")
+				return status.NewInner("scanner error: %s", c.scanner.Error())
 			}
 			// Send Consumed message to client and do metrics.
 			messageSize := msg.EstimateSize()
@@ -124,7 +125,7 @@ func (c *ConsumeServer) sendLoop() (err error) {
 					Properties: msg.Properties().ToRawMap(),
 				},
 			}); err != nil {
-				return errors.Wrap(err, "at send consume message")
+				return status.NewInner("send consume message failed: %s", err.Error())
 			}
 			metrics.StreamingNodeConsumeBytes.WithLabelValues(
 				paramtable.GetStringNodeID(),
@@ -135,11 +136,11 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			c.logger.Info("close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
 				c.logger.Warn("send close failed", zap.Error(err))
-				return errors.Wrap(err, "at send close")
+				return status.NewInner("close send server failed: %s", err.Error())
 			}
 			return nil
 		case <-c.consumeServer.Context().Done():
-			return errors.Wrap(c.consumeServer.Context().Err(), "at grpc context done")
+			return c.consumeServer.Context().Err()
 		}
 	}
 }

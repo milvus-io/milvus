@@ -31,11 +31,11 @@ import (
 func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ProduceServer) (*ProduceServer, error) {
 	createReq, err := contextutil.GetCreateProducer(streamServer.Context())
 	if err != nil {
-		return nil, errors.Wrap(err, "at get create producer request")
+		return nil, status.NewInvaildArgument("create producer request is required")
 	}
 	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.Pchannel))
 	if err != nil {
-		return nil, errors.Wrap(err, "at get available wal")
+		return nil, err
 	}
 
 	produceServer := &produceGrpcServerHelper{

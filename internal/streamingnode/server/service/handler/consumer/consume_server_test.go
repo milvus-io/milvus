@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -228,7 +229,9 @@ func TestConsumerServeSendArm(t *testing.T) {
 	// test scanner broken.
 	scanner.EXPECT().Error().Return(io.EOF)
 	close(scanCh)
-	assert.ErrorIs(t, <-ch, io.EOF)
+	err := <-ch
+	sErr := status.AsStreamingError(err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INNER, sErr.Code)
 
 	// test cancel by client.
 	scanner.EXPECT().Chan().Unset()
