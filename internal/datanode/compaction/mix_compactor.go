@@ -65,7 +65,7 @@ func NewMixCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
-	alloc := allocator.NewStaticAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	return &mixCompactionTask{
 		ctx:       ctx1,
 		cancel:    cancel,

@@ -112,6 +112,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 	segmentID := int64(1001)
 
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().GetSegmentByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, true)
 
 	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)

@@ -21,23 +21,23 @@ import (
 	"sync"
 )
 
-// staticAllocator implements the Interface.
+// localAllocator implements the Interface.
 // It is constructed from a range of IDs.
 // Once all IDs are allocated, an error will be returned.
-type staticAllocator struct {
+type localAllocator struct {
 	mu      sync.Mutex
 	idStart int64
 	idEnd   int64
 }
 
-func NewStaticAllocator(start, end int64) Interface {
-	return &staticAllocator{
+func NewLocalAllocator(start, end int64) Interface {
+	return &localAllocator{
 		idStart: start,
 		idEnd:   end,
 	}
 }
 
-func (a *staticAllocator) Alloc(count uint32) (int64, int64, error) {
+func (a *localAllocator) Alloc(count uint32) (int64, int64, error) {
 	cnt := int64(count)
 	if cnt <= 0 {
 		return 0, 0, fmt.Errorf("non-positive count is not allowed, count=%d", cnt)
@@ -52,7 +52,7 @@ func (a *staticAllocator) Alloc(count uint32) (int64, int64, error) {
 	return start, start + cnt, nil
 }
 
-func (a *staticAllocator) AllocOne() (int64, error) {
+func (a *localAllocator) AllocOne() (int64, error) {
 	start, _, err := a.Alloc(1)
 	return start, err
 }

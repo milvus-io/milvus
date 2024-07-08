@@ -115,7 +115,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
 		Return([][]byte{dblobs.GetValue()}, nil).Times(3)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-	alloc := allocator.NewStaticAllocator(7777777, math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
 
 	// clear origial segments
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
@@ -177,7 +177,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 
 func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	segments := []int64{5, 6, 7}
-	alloc := allocator.NewStaticAllocator(7777777, math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segID := range segments {
@@ -248,7 +248,7 @@ func (s *MixCompactionTaskSuite) TestMergeBufferFull() {
 	err := s.segWriter.Write(&v)
 	s.Require().NoError(err)
 
-	alloc := allocator.NewStaticAllocator(888888, math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 
@@ -275,7 +275,7 @@ func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
 	currTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second*(time.Duration(collTTL)+1)), 0)
 	s.task.currentTs = currTs
 	s.task.plan.CollectionTtl = int64(collTTL)
-	alloc := allocator.NewStaticAllocator(888888, math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 
 	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
@@ -308,7 +308,7 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 		{"deleted pk=4", map[interface{}]uint64{int64(4): deleteTs}, 0},
 	}
 
-	alloc := allocator.NewStaticAllocator(888888, math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 	for _, test := range tests {

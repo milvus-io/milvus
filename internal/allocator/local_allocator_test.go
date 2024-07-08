@@ -25,9 +25,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func TestStaticAllocator(t *testing.T) {
+func TestLocalAllocator(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		alloc := NewStaticAllocator(100, 200)
+		alloc := NewLocalAllocator(100, 200)
 		for i := 0; i < 10; i++ {
 			start, end, err := alloc.Alloc(10)
 			assert.NoError(t, err)
@@ -44,7 +44,7 @@ func TestStaticAllocator(t *testing.T) {
 
 	t.Run("concurrent", func(t *testing.T) {
 		idMap := typeutil.NewConcurrentMap[int64, struct{}]()
-		alloc := NewStaticAllocator(111, 1000111)
+		alloc := NewLocalAllocator(111, 1000111)
 		fn := func(wg *sync.WaitGroup) {
 			defer wg.Done()
 			for i := 0; i < 100; i++ {
@@ -64,7 +64,7 @@ func TestStaticAllocator(t *testing.T) {
 		wg.Wait()
 		assert.Equal(t, 1000000, idMap.Len())
 		// should be exhausted
-		assert.Equal(t, alloc.(*staticAllocator).idEnd, alloc.(*staticAllocator).idStart)
+		assert.Equal(t, alloc.(*localAllocator).idEnd, alloc.(*localAllocator).idStart)
 		_, err := alloc.AllocOne()
 		assert.Error(t, err)
 		t.Logf("%v", err)

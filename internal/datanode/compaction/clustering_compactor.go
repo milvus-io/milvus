@@ -130,8 +130,8 @@ func NewClusteringCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
-	logIDAlloc := allocator.NewStaticAllocator(plan.GetBeginLogID(), math.MaxInt64)
-	segIDAlloc := allocator.NewStaticAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
 	return &clusteringCompactionTask{
 		ctx:                ctx,
 		cancel:             cancel,

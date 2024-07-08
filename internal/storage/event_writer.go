@@ -212,6 +212,16 @@ func newDescriptorEvent() *descriptorEvent {
 	}
 }
 
+func NewBaseDescriptorEvent(collectionID int64, partitionID int64, segmentID int64) *descriptorEvent {
+	de := newDescriptorEvent()
+	de.CollectionID = collectionID
+	de.PartitionID = partitionID
+	de.SegmentID = segmentID
+	de.StartTimestamp = 0
+	de.EndTimestamp = 0
+	return de
+}
+
 func newInsertEventWriter(dataType schemapb.DataType, nullable bool, dim ...int) (*insertEventWriter, error) {
 	var payloadWriter PayloadWriterInterface
 	var err error

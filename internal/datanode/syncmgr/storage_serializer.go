@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -44,11 +45,12 @@ type storageV1Serializer struct {
 	inCodec  *storage.InsertCodec
 	delCodec *storage.DeleteCodec
 
+	allocator  allocator.Interface
 	metacache  metacache.MetaCache
 	metaWriter MetaWriter
 }
 
-func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
+func NewStorageSerializer(allocator allocator.Interface, metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
 	collectionID := metacache.Collection()
 	schema := metacache.Schema()
 	pkField := lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
@@ -67,6 +69,7 @@ func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) 
 
 		inCodec:    inCodec,
 		delCodec:   storage.NewDeleteCodec(),
+		allocator:  allocator,
 		metacache:  metacache,
 		metaWriter: metaWriter,
 	}, nil
@@ -135,6 +138,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	s.setTaskMeta(task, pack)
+	task.WithAllocator(s.allocator)
 
 	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pack.level.String()).Observe(float64(tr.RecordSpan().Milliseconds()))
 	return task, nil
