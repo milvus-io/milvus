@@ -40,12 +40,12 @@ func (idx scannIndex) Params() map[string]string {
 }
 
 func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
-	return ivfFlatIndex{
+	return scannIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  SCANN,
 		},
-
 		nlist: nlist,
+		withRawData: withRawData,
 	}
 }

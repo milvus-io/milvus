@@ -33,7 +33,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 				}
 			}
 			if !contains {
-				t.Fatalf("CheckErr failed, actualErr doesn contains any expErrorMsg, please check test cases!")
+				t.Fatalf("CheckErr failed, actualErr doesn't contains any expErrorMsg, actual msg:%s", actualErr)
 			}
 		}
 	}

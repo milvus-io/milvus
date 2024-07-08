@@ -51,12 +51,11 @@ type SyncManager interface {
 type syncManager struct {
 	*keyLockDispatcher[int64]
 	chunkManager storage.ChunkManager
-	allocator    allocator.Interface
 
 	tasks *typeutil.ConcurrentMap[string, Task]
 }
 
-func NewSyncManager(chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
+func NewSyncManager(chunkManager storage.ChunkManager) (SyncManager, error) {
 	params := paramtable.Get()
 	initPoolSize := params.DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt()
 	if initPoolSize < 1 {
@@ -68,7 +67,6 @@ func NewSyncManager(chunkManager storage.ChunkManager, allocator allocator.Inter
 	syncMgr := &syncManager{
 		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
-		allocator:         allocator,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
 	}
 	// setup config update watcher
@@ -100,9 +98,8 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	switch t := task.(type) {
 	case *SyncTask:
-		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
+		t.WithChunkManager(mgr.chunkManager)
 	case *SyncTaskV2:
-		t.WithAllocator(mgr.allocator)
 	}
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...)

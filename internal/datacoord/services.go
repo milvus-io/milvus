@@ -1466,21 +1466,6 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	return nil
 }
 
-// getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.
-func getDiff(base, remove []int64) []int64 {
-	mb := make(map[int64]struct{}, len(remove))
-	for _, x := range remove {
-		mb[x] = struct{}{}
-	}
-	var diff []int64
-	for _, x := range base {
-		if _, found := mb[x]; !found {
-			diff = append(diff, x)
-		}
-	}
-	return diff
-}
-
 // MarkSegmentsDropped marks the given segments as `Dropped`.
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
 // Deprecated, do not use it

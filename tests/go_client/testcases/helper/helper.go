@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 
@@ -141,6 +142,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	}
 	insertRes, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
+	require.Equal(t, option.nb, insertRes.IDs.Len())
 	return chainTask, insertRes
 }
 

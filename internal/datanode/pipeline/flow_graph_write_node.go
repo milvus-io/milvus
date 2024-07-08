@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -23,8 +24,13 @@ type writeNode struct {
 
 	channelName string
 	wbManager   writebuffer.BufferManager
-	updater     statsUpdater
+	updater     util.StatsUpdater
 	metacache   metacache.MetaCache
+}
+
+// Name returns node name, implementing flowgraph.Node
+func (wNode *writeNode) Name() string {
+	return fmt.Sprintf("writeNode-%s", wNode.channelName)
 }
 
 func (wNode *writeNode) Operate(in []Msg) []Msg {
@@ -116,7 +122,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 func newWriteNode(
 	_ context.Context,
 	writeBufferManager writebuffer.BufferManager,
-	updater statsUpdater,
+	updater util.StatsUpdater,
 	config *nodeConfig,
 ) *writeNode {
 	baseNode := BaseNode{}

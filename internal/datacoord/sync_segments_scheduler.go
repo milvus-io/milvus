@@ -118,7 +118,7 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	// upon receiving the SyncSegments request, the datanode's segment state may have already transitioned from Growing/Flushing
 	// to Flushed, so the view must include this segment.
 	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && isSegmentHealthy(info)
+		return info.GetPartitionID() == partitionID && info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,

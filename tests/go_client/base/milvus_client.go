@@ -180,8 +180,8 @@ func (mc *MilvusClient) ListIndexes(ctx context.Context, option clientv2.ListInd
 
 // DescribeIndex Describe Index
 func (mc *MilvusClient) DescribeIndex(ctx context.Context, option clientv2.DescribeIndexOption, callOptions ...grpc.CallOption) (index.Index, error) {
-	index, err := mc.mClient.DescribeIndex(ctx, option, callOptions...)
-	return index, err
+	idx, err := mc.mClient.DescribeIndex(ctx, option, callOptions...)
+	return idx, err
 }
 
 // DropIndex Drop Index

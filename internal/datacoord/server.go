@@ -49,8 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -58,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -103,7 +100,6 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 	quitCh           chan struct{}
 	stateCode        atomic.Value
-	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
 	tikvCli          *txnkv.Client
@@ -166,17 +162,6 @@ type CollectionNameInfo struct {
 	DBName         string
 }
 
-// ServerHelper datacoord server injection helper
-type ServerHelper struct {
-	eventAfterHandleDataNodeTt func()
-}
-
-func defaultServerHelper() ServerHelper {
-	return ServerHelper{
-		eventAfterHandleDataNodeTt: func() {},
-	}
-}
-
 // Option utility function signature to set DataCoord server attributes
 type Option func(svr *Server)
 
@@ -184,13 +169,6 @@ type Option func(svr *Server)
 func WithRootCoordCreator(creator rootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
-	}
-}
-
-// WithServerHelper returns an `Option` setting ServerHelp with provided parameter
-func WithServerHelper(helper ServerHelper) Option {
-	return func(svr *Server) {
-		svr.helper = helper
 	}
 }
 
@@ -228,7 +206,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
-		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
 	}
@@ -710,11 +687,6 @@ func (s *Server) startServerLoop() {
 		s.startCompaction()
 	}
 
-	if !Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-		s.serverLoopWg.Add(1)
-		s.startDataNodeTtLoop(s.serverLoopCtx)
-	}
-
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
@@ -723,80 +695,6 @@ func (s *Server) startServerLoop() {
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 	s.syncSegmentsScheduler.Start()
-}
-
-// startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
-// tt msg stands for the currently consumed timestamp for each channel
-func (s *Server) startDataNodeTtLoop(ctx context.Context) {
-	ttMsgStream, err := s.factory.NewMsgStream(ctx)
-	if err != nil {
-		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
-		panic(err)
-	}
-
-	timeTickChannel := Params.CommonCfg.DataCoordTimeTick.GetValue()
-	if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
-		timeTickChannel = Params.CommonCfg.TimeTicker.GetValue()
-	}
-	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
-
-	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, common.SubscriptionPositionLatest)
-	log.Info("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", timeTickChannel),
-		zap.String("subscription", subName))
-
-	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
-}
-
-func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStream msgstream.MsgStream) {
-	var checker *timerecord.LongTermChecker
-	if enableTtChecker {
-		checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
-		checker.Start()
-		defer checker.Stop()
-	}
-
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	defer func() {
-		// https://github.com/milvus-io/milvus/issues/15659
-		// msgstream service closed before datacoord quits
-		defer func() {
-			if x := recover(); x != nil {
-				log.Error("Failed to close ttMessage", zap.Any("recovered", x))
-			}
-		}()
-		ttMsgStream.Close()
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("DataNode timetick loop shutdown")
-			return
-		case msgPack, ok := <-ttMsgStream.Chan():
-			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
-				log.Info("receive nil timetick msg and shutdown timetick channel")
-				return
-			}
-
-			for _, msg := range msgPack.Msgs {
-				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
-				if !ok {
-					log.Warn("receive unexpected msg type from tt channel")
-					continue
-				}
-				if enableTtChecker {
-					checker.Check()
-				}
-
-				if err := s.handleDataNodeTtMsg(ctx, &ttMsg.DataNodeTtMsg); err != nil {
-					log.Warn("failed to handle timetick message", zap.Error(err))
-					continue
-				}
-			}
-			s.helper.eventAfterHandleDataNodeTt()
-		}
-	}
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {

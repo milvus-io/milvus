@@ -85,7 +85,7 @@ func (opt *createCollectionOption) WithVarcharPK(varcharPK bool, maxLen int) *cr
 
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 	// fast create collection
-	if opt.isFast || opt.schema == nil {
+	if opt.isFast {
 		var pkField *entity.Field
 		if opt.varcharPK {
 			pkField = entity.NewField().WithDataType(entity.FieldTypeVarChar).WithMaxLength(int64(opt.varcharPKMaxLength))
@@ -101,8 +101,11 @@ func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 			WithField(entity.NewField().WithName(opt.vectorFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(opt.dim))
 	}
 
-	schemaProto := opt.schema.ProtoMessage()
-	schemaBytes, _ := proto.Marshal(schemaProto)
+	var schemaBytes []byte
+	if opt.schema != nil {
+		schemaProto := opt.schema.ProtoMessage()
+		schemaBytes, _ = proto.Marshal(schemaProto)
+	}
 
 	return &milvuspb.CreateCollectionRequest{
 		DbName:           "", // reserved fields, not used for now

@@ -249,7 +249,7 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 	return jsonValues
 }
 
-// GenColumnData GenColumnDataOption
+// GenColumnData GenColumnDataOption except dynamic column
 func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
 	dim := option.dim
 	sparseMaxLen := option.sparseMaxLen
