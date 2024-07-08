@@ -106,6 +106,7 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
+	log.Info("Compaction trigger manager start")
 	for {
 		select {
 		case <-m.closeSig:
@@ -117,11 +118,11 @@ func (m *CompactionTriggerManager) startLoop() {
 			}
 			if m.compactionHandler.isFull() {
 				log.RatedInfo(10, "Skip trigger l0 compaction since compactionHandler is full")
-				return
+				continue
 			}
 			events, err := m.l0Policy.Trigger()
 			if err != nil {
-				log.Warn("Fail to trigger policy", zap.Error(err))
+				log.Warn("Fail to trigger L0 policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
@@ -136,11 +137,11 @@ func (m *CompactionTriggerManager) startLoop() {
 			}
 			if m.compactionHandler.isFull() {
 				log.RatedInfo(10, "Skip trigger l0 compaction since compactionHandler is full")
-				return
+				continue
 			}
 			events, err := m.clusteringPolicy.Trigger()
 			if err != nil {
-				log.Warn("Fail to trigger policy", zap.Error(err))
+				log.Warn("Fail to trigger clustering policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
