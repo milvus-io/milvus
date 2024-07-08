@@ -148,6 +148,7 @@ func (c *ConsumeServer) sendLoop() (err error) {
 // recvLoop receives messages from client.
 func (c *ConsumeServer) recvLoop() (err error) {
 	defer func() {
+		close(c.closeCh)
 		if err != nil {
 			c.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
 			return
@@ -165,7 +166,8 @@ func (c *ConsumeServer) recvLoop() (err error) {
 		}
 		switch req := req.Request.(type) {
 		case *streamingpb.ConsumeRequest_Close:
-			close(c.closeCh)
+			c.logger.Info("close request received")
+			// we will receive io.EOF soon, just do nothing here.
 		default:
 			// skip unknown message here, to keep the forward compatibility.
 			c.logger.Warn("unknown request type", zap.Any("request", req))

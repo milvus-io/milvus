@@ -7,8 +7,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 )
 
 const (

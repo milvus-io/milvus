@@ -90,7 +90,7 @@ var (
 		Name:    "produce_bytes",
 		Help:    "Bytes of produced message",
 		Buckets: bytesBuckets,
-	}, channelNameLabelName, channelTermLabelName)
+	}, channelNameLabelName, channelTermLabelName, statusLabelName)
 
 	StreamingNodeConsumeBytes = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
 		Name:    "consume_bytes",

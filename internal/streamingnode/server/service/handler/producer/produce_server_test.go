@@ -280,7 +280,7 @@ func testChannelShouldBeBlocked[T any](t *testing.T, ch <-chan T, d time.Duratio
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	select {
-	case _ = <-ch:
+	case <-ch:
 		t.Errorf("should be block")
 	case <-ctx.Done():
 	}

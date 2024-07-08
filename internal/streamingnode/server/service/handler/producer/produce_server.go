@@ -108,6 +108,8 @@ func (p *ProduceServer) sendLoop() (err error) {
 // recvLoop receives the message from client.
 func (p *ProduceServer) recvLoop() (err error) {
 	defer func() {
+		p.appendWG.Wait()
+		close(p.produceMessageCh)
 		if err != nil {
 			p.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
 			return
@@ -127,10 +129,8 @@ func (p *ProduceServer) recvLoop() (err error) {
 		case *streamingpb.ProduceRequest_Produce:
 			p.handleProduce(req.Produce)
 		case *streamingpb.ProduceRequest_Close:
-			p.logger.Info("recv arm of stream start to close, waiting for all append request done")
-			p.appendWG.Wait()
-			close(p.produceMessageCh)
-			// we will receive EOF after that.
+			p.logger.Info("recv arm of stream start to close, waiting for all append request finished...")
+			// we will receive io.EOF after that.
 		default:
 			// skip message here, to keep the forward compatibility.
 			p.logger.Warn("unknown request type", zap.Any("request", req))
@@ -216,9 +216,7 @@ func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err
 func (p *ProduceServer) updateMetrics(messageSize int, cost float64, err error) {
 	name := p.wal.Channel().Name
 	term := strconv.FormatInt(p.wal.Channel().Term, 10)
-	if err == nil {
-		metrics.StreamingNodeProduceBytes.WithLabelValues(paramtable.GetStringNodeID(), name, term).Observe(float64(messageSize))
-	}
+	metrics.StreamingNodeProduceBytes.WithLabelValues(paramtable.GetStringNodeID(), name, term, getStatusLabel(err)).Observe(float64(messageSize))
 	metrics.StreamingNodeProduceDurationSeconds.WithLabelValues(paramtable.GetStringNodeID(), name, term, getStatusLabel(err)).Observe(cost)
 }
 

@@ -5,9 +5,10 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 )
 
 func TestWithCreateConsumer(t *testing.T) {

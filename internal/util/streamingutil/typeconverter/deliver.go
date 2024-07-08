@@ -1,7 +1,7 @@
 package typeconverter
 
 import (
-	"errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
