@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -590,10 +589,6 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 			}
 		}
 	}
-
-	sort.Slice(pks, func(i, j int) bool {
-		return tss[i] < tss[j]
-	})
 
 	return pks, tss
 }

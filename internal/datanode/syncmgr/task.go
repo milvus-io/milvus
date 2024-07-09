@@ -179,6 +179,7 @@ func (t *SyncTask) Run() (err error) {
 
 	if t.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segment.SegmentID()))
+		log.Info("segment removed", zap.Int64("segmentID", t.segment.SegmentID()), zap.String("channel", t.channelName))
 	}
 
 	log.Info("task done", zap.Float64("flushedSize", totalSize))
