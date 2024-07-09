@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -494,6 +495,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			_, err := tr.triggerManualCompaction(tt.collectionID)
@@ -519,6 +521,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
@@ -543,6 +546,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 
@@ -781,6 +785,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			_, err := tr.triggerManualCompaction(tt.args.collectionID)
@@ -932,6 +937,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1119,6 +1125,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				closeCh:           lifetime.NewSafeChan(),
 				testingOnly:       true,
 			}
 			tr.start()
@@ -1312,6 +1319,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1501,6 +1509,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1675,6 +1684,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				compactionHandler:         tt.fields.compactionHandler,
 				globalTrigger:             tt.fields.globalTrigger,
 				indexEngineVersionManager: newMockVersionManager(),
+				closeCh:                   lifetime.NewSafeChan(),
 				testingOnly:               true,
 			}
 			tr.start()
