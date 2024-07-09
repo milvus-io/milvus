@@ -1742,13 +1742,13 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupLabel) *msgpb.MsgPosition {
 	segments := m.SelectSegments(WithCollection(label.CollectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing &&
-			segment.GetPartitionID() == label.PartitionID &&
+			(label.PartitionID == common.AllPartitionsID || segment.GetPartitionID() == label.PartitionID) &&
 			segment.GetInsertChannel() == label.Channel
 	}))
 
 	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {
-		if earliest == nil || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
+		if earliest.GetTimestamp() == math.MaxUint64 || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
 			earliest = seg.GetStartPosition()
 		}
 	}
