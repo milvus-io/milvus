@@ -67,6 +67,21 @@ PaddingSize(const DataType& type) {
 }
 
 inline void
+WriteFieldPadding(File& file, DataType data_type, uint64_t& total_written) {
+    // write padding 0 in file content directly
+    // see also https://github.com/milvus-io/milvus/issues/34442
+    auto padding_size = PaddingSize(data_type);
+    if (padding_size > 0) {
+        std::vector<char> padding(padding_size, 0);
+        ssize_t written = file.Write(padding.data(), padding_size);
+        if (written < padding_size) {
+            THROW_FILE_WRITE_ERROR
+        }
+        total_written += written;
+    }
+}
+
+inline void
 WriteFieldData(File& file,
                DataType data_type,
                const FieldDataPtr& data,
@@ -154,18 +169,6 @@ WriteFieldData(File& file,
             indices.emplace_back(total_written);
             total_written += data->Size(i);
         }
-    }
-
-    // write padding 0 in file content directly
-    // see also https://github.com/milvus-io/milvus/issues/34442
-    auto padding_size = PaddingSize(data_type);
-    if (padding_size > 0 ) {
-        std::vector<char> padding(padding_size, 0);
-        ssize_t written = file.Write(padding.data(), padding_size);
-        if (written < padding_size) {
-            THROW_FILE_WRITE_ERROR
-        }
-        total_written += written;
     }
 }
 }  // namespace milvus
