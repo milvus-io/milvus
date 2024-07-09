@@ -81,15 +81,13 @@ type Loader interface {
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadIndex append index for segment and remove vector binlogs.
-	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
-
-	LoadSegment(ctx context.Context,
-		segment *LocalSegment,
-		loadInfo *querypb.SegmentLoadInfo,
-	) error
+	LoadIndex(ctx context.Context,
+		segment Segment,
+		info *querypb.SegmentLoadInfo,
+		version int64) error
 
 	LoadLazySegment(ctx context.Context,
-		segment *LocalSegment,
+		segment Segment,
 		loadInfo *querypb.SegmentLoadInfo,
 	) error
 }
@@ -140,7 +138,7 @@ func NewLoaderV2(
 	}
 }
 
-func (loader *segmentLoaderV2) LoadDelta(ctx context.Context, collectionID int64, segment *LocalSegment) error {
+func (loader *segmentLoaderV2) LoadDelta(ctx context.Context, collectionID int64, segment Segment) error {
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
@@ -230,7 +228,7 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 
 		var err error
 		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
-			err = loader.LoadDelta(ctx, collectionID, segment.(*LocalSegment))
+			err = loader.LoadDelta(ctx, collectionID, segment)
 		} else {
 			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo)
 		}
@@ -390,9 +388,10 @@ func (loader *segmentLoaderV2) loadBloomFilter(ctx context.Context, segmentID in
 }
 
 func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
-	segment *LocalSegment,
+	seg Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
+	segment := seg.(*LocalSegment)
 	// TODO: we should create a transaction-like api to load segment for segment interface,
 	// but not do many things in segment loader.
 	stateLockGuard, err := segment.StartLoadData()
@@ -498,7 +497,7 @@ func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 }
 
 func (loader *segmentLoaderV2) LoadLazySegment(ctx context.Context,
-	segment *LocalSegment,
+	segment Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
 	return merr.ErrOperationNotSupported
@@ -1087,9 +1086,14 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 }
 
 func (loader *segmentLoader) LoadSegment(ctx context.Context,
-	segment *LocalSegment,
+	// segment *LocalSegment,
+	seg Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
+	segment, ok := seg.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
@@ -1135,7 +1139,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 }
 
 func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
-	segment *LocalSegment,
+	segment Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
 	resource, err := loader.requestResourceWithTimeout(ctx, loadInfo)
@@ -1660,7 +1664,16 @@ func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb
 	return 0, merr.WrapErrFieldNotFound(fieldID)
 }
 
-func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, version int64) error {
+func (loader *segmentLoader) LoadIndex(ctx context.Context,
+	// segment *LocalSegment,
+	seg Segment,
+	loadInfo *querypb.SegmentLoadInfo,
+	version int64,
+) error {
+	segment, ok := seg.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
 	log := log.Ctx(ctx).With(
 		zap.Int64("collection", segment.Collection()),
 		zap.Int64("segment", segment.ID()),
