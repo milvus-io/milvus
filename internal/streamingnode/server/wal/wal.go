@@ -10,6 +10,8 @@ import (
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
+	WALName() string
+
 	// Channel returns the channel assignment info of the wal.
 	Channel() types.PChannelInfo
 

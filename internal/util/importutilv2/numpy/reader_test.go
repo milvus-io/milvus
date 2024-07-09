@@ -147,7 +147,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
@@ -155,7 +155,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -164,7 +164,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		default:
@@ -281,7 +281,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
@@ -289,7 +289,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -298,7 +298,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		default:

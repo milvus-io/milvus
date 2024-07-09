@@ -95,6 +95,20 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
+		}
+		userIndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: common.AutoIndexName,
+			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
 		}
 	)
 
@@ -114,7 +128,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		IndexParams:     indexParams,
 		Timestamp:       0,
 		IsAutoIndex:     false,
-		UserIndexParams: indexParams,
+		UserIndexParams: userIndexParams,
 	}
 
 	t.Run("can create index", func(t *testing.T) {
@@ -132,7 +146,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			TypeParams:      typeParams,
 			IndexParams:     indexParams,
 			IsAutoIndex:     false,
-			UserIndexParams: indexParams,
+			UserIndexParams: userIndexParams,
 		}
 
 		err = m.CreateIndex(index)
@@ -162,6 +176,32 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
 		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = req.IndexParams
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), tmpIndexID)
+
+		// when we use autoindex, it is possible autoindex changes default metric type
+		// if user does not specify metric type, we should follow the very first autoindex config
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = false
+		tmpIndexID, err = m.CanCreateIndex(req)
+		assert.NoError(t, err)
+		assert.Equal(t, indexID, tmpIndexID)
+		// req should follow the meta
+		assert.Equal(t, "L2", req.GetUserIndexParams()[1].Value)
+		assert.Equal(t, "L2", req.GetIndexParams()[1].Value)
+
+		// if autoindex specify metric type, so the index param change is from user, return error
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
+		req.UserAutoindexMetricTypeSpecified = true
 		tmpIndexID, err = m.CanCreateIndex(req)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)

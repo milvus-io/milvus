@@ -22,7 +22,8 @@ prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
 default_index_params = ct.default_index
-default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
+default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE"}
+default_sparse_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
 uid = "test_index"
@@ -2118,7 +2119,7 @@ class TestAutoIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         collection_w.create_index(binary_field_name, {})
-        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'JACCARD'}
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING'}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_all_vector_type(self):
@@ -2141,7 +2142,7 @@ class TestAutoIndex(TestcaseBase):
                    collection_w.index(index_name="bf16")[0].params.items())
 
         collection_w.create_index("sparse", index_name="sparse")
-        assert all(item in default_autoindex_params.items() for item in
+        assert all(item in default_sparse_autoindex_params.items() for item in
                    collection_w.index(index_name="sparse")[0].params.items())
 
 

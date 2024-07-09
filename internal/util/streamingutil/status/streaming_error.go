@@ -57,13 +57,13 @@ func NewChannelExist(format string, args ...interface{}) *StreamingError {
 }
 
 // NewChannelNotExist creates a new StreamingError with code STREAMING_CODE_CHANNEL_NOT_EXIST.
-func NewChannelNotExist(format string, args ...interface{}) *StreamingError {
-	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST, format, args...)
+func NewChannelNotExist(channel string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST, "%s not exist", channel)
 }
 
 // NewUnmatchedChannelTerm creates a new StreamingError with code StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM.
-func NewUnmatchedChannelTerm(format string, args ...interface{}) *StreamingError {
-	return New(streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM, format, args...)
+func NewUnmatchedChannelTerm(channel string, expectedTerm int64, currentTerm int64) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM, "channel %s at term %d is expected, but current term is %d", channel, expectedTerm, currentTerm)
 }
 
 // NewIgnoreOperation creates a new StreamingError with code STREAMING_CODE_IGNORED_OPERATION.
@@ -74,6 +74,11 @@ func NewIgnoreOperation(format string, args ...interface{}) *StreamingError {
 // NewInner creates a new StreamingError with code STREAMING_CODE_INNER.
 func NewInner(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INNER, format, args...)
+}
+
+// NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
+func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

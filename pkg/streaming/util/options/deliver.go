@@ -5,50 +5,26 @@ import (
 )
 
 const (
-	deliverOrderTimetick DeliverOrder = 1
+	DeliverPolicyTypeAll        deliverPolicyType = 1
+	DeliverPolicyTypeLatest     deliverPolicyType = 2
+	DeliverPolicyTypeStartFrom  deliverPolicyType = 3
+	DeliverPolicyTypeStartAfter deliverPolicyType = 4
 
-	DeliverPolicyTypeAll        DeliverPolicyType = 1
-	DeliverPolicyTypeLatest     DeliverPolicyType = 2
-	DeliverPolicyTypeStartFrom  DeliverPolicyType = 3
-	DeliverPolicyTypeStartAfter DeliverPolicyType = 4
+	DeliverFilterTypeTimeTickGT  deliverFilterType = 1
+	DeliverFilterTypeTimeTickGTE deliverFilterType = 2
+	DeliverFilterTypeVChannel    deliverFilterType = 3
 )
 
-// DeliverOrder is the order of delivering messages.
 type (
-	DeliverOrder      int
-	DeliverPolicyType int
+	deliverPolicyType int
+	deliverFilterType int
 )
 
 // DeliverPolicy is the policy of delivering messages.
 type DeliverPolicy interface {
-	Policy() DeliverPolicyType
+	Policy() deliverPolicyType
 
 	MessageID() message.MessageID
-}
-
-type deliverPolicyWithoutMessageID struct {
-	policy DeliverPolicyType
-}
-
-func (d *deliverPolicyWithoutMessageID) Policy() DeliverPolicyType {
-	return d.policy
-}
-
-func (d *deliverPolicyWithoutMessageID) MessageID() message.MessageID {
-	panic("not implemented")
-}
-
-type deliverPolicyWithMessageID struct {
-	policy    DeliverPolicyType
-	messageID message.MessageID
-}
-
-func (d *deliverPolicyWithMessageID) Policy() DeliverPolicyType {
-	return d.policy
-}
-
-func (d *deliverPolicyWithMessageID) MessageID() message.MessageID {
-	return d.messageID
 }
 
 // DeliverPolicyAll delivers all messages.
@@ -81,7 +57,34 @@ func DeliverPolicyStartAfter(messageID message.MessageID) DeliverPolicy {
 	}
 }
 
-// DeliverOrderTimeTick delivers messages by time tick.
-func DeliverOrderTimeTick() DeliverOrder {
-	return deliverOrderTimetick
+// DeliverFilter is the filter of delivering messages.
+type DeliverFilter interface {
+	Type() deliverFilterType
+
+	Filter(message.ImmutableMessage) bool
+}
+
+//
+// DeliverFilters
+//
+
+// DeliverFilterTimeTickGT delivers messages by time tick greater than the specified time tick.
+func DeliverFilterTimeTickGT(timeTick uint64) DeliverFilter {
+	return &deliverFilterTimeTickGT{
+		timeTick: timeTick,
+	}
+}
+
+// DeliverFilterTimeTickGTE delivers messages by time tick greater than or equal to the specified time tick.
+func DeliverFilterTimeTickGTE(timeTick uint64) DeliverFilter {
+	return &deliverFilterTimeTickGTE{
+		timeTick: timeTick,
+	}
+}
+
+// DeliverFilterVChannel delivers messages filtered by vchannel.
+func DeliverFilterVChannel(vchannel string) DeliverFilter {
+	return &deliverFilterVChannel{
+		vchannel: vchannel,
+	}
 }

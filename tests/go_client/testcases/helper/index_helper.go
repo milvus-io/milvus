@@ -64,7 +64,6 @@ var UnsupportedSparseVecMetricsType = []entity.MetricType{
 	entity.SUPERSTRUCTURE,
 }
 
-
 // GenAllFloatIndex gen all float vector index
 func GenAllFloatIndex(metricType entity.MetricType) []index.Index {
 	nlist := 128

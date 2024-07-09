@@ -19,6 +19,10 @@ type walImpls struct {
 	datas *messageLog
 }
 
+func (w *walImpls) WALName() string {
+	return WALName
+}
+
 func (w *walImpls) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 	return w.datas.Append(ctx, msg)
 }

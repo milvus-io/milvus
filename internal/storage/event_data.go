@@ -39,7 +39,7 @@ const (
 const version = "version"
 
 // mark useMultiFieldFormat if there are multi fields in a log file
-const MULTI_FIELD = "MULTI_FIELD"
+const MultiField = "MULTI_FIELD"
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
