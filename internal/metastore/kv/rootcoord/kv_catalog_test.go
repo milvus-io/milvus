@@ -2547,7 +2547,7 @@ func TestRBAC_Grant(t *testing.T) {
 func TestCatalog_AlterDatabase(t *testing.T) {
 	kvmock := mocks.NewSnapShotKV(t)
 	c := &Catalog{Snapshot: kvmock}
-	db := model.NewDatabase(1, "db", pb.DatabaseState_DatabaseCreated)
+	db := model.NewDatabase(1, "db", pb.DatabaseState_DatabaseCreated, nil)
 
 	kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ctx := context.Background()
