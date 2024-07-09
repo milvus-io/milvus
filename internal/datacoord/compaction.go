@@ -164,7 +164,6 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 		}
 		// if t.GetPlanID()
 	}
-	cnt += len(c.queueTasks)
 	c.mu.RUnlock()
 	c.executingMu.RLock()
 	for _, t := range c.executingTasks {
@@ -172,7 +171,6 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 			cnt += 1
 		}
 	}
-	cnt += len(c.queueTasks)
 	c.executingMu.RUnlock()
 	return cnt
 }
