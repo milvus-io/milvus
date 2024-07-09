@@ -50,6 +50,6 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 }
 
 func (t *createDatabaseTask) Execute(ctx context.Context) error {
-	db := model.NewDatabase(t.dbID, t.Req.GetDbName(), etcdpb.DatabaseState_DatabaseCreated)
+	db := model.NewDatabase(t.dbID, t.Req.GetDbName(), etcdpb.DatabaseState_DatabaseCreated, t.Req.GetProperties())
 	return t.core.meta.CreateDatabase(ctx, db, t.GetTs())
 }
