@@ -25,6 +25,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -88,6 +90,7 @@ type meta struct {
 	analyzeMeta        *analyzeMeta
 	partitionStatsMeta *partitionStatsMeta
 	compactionTaskMeta *compactionTaskMeta
+	statsTaskMeta      *statsTaskMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -1926,4 +1929,59 @@ func (m *meta) CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
 		return err
 	}
 	return nil
+}
+
+func (m *meta) saveStatsResultSegment(oldSegmentID int64, result *workerpb.StatsResult) (*segMetricMutation, error) {
+	log := log.With(zap.Int64("collectionID", result.GetCollectionID()),
+		zap.Int64("partitionID", result.GetPartitionID()),
+		zap.Int64("old segmentID", oldSegmentID),
+		zap.Int64("target segmentID", result.GetSegmentID()))
+
+	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]int)}
+
+	oldSegment := m.segments.GetSegment(oldSegmentID)
+	if oldSegment == nil {
+		log.Warn("old segment is not found with stats task")
+		return nil, merr.WrapErrSegmentNotFound(oldSegmentID)
+	}
+
+	cloned := oldSegment.Clone()
+	cloned.DroppedAt = uint64(time.Now().UnixNano())
+	cloned.Compacted = true
+
+	// metrics mutation for compaction from segments
+	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:                  result.GetSegmentID(),
+		CollectionID:        result.GetCollectionID(),
+		PartitionID:         result.GetPartitionID(),
+		InsertChannel:       result.GetChannel(),
+		NumOfRows:           result.GetNumRows(),
+		State:               commonpb.SegmentState_Flushed,
+		MaxRowNum:           oldSegment.GetMaxRowNum(),
+		Binlogs:             result.GetInsertLogs(),
+		Statslogs:           result.GetStatsLogs(),
+		FieldStatslogs:      result.GetFieldStatsLogs(),
+		CreatedByCompaction: true,
+		CompactionFrom:      []int64{oldSegmentID},
+		LastExpireTime:      oldSegment.GetLastExpireTime(),
+		Level:               oldSegment.GetLevel(),
+		StartPosition:       oldSegment.GetStartPosition(),
+		DmlPosition:         oldSegment.GetDmlPosition(),
+	}
+	segment := NewSegmentInfo(segmentInfo)
+	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+
+	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", result.GetNumRows()))
+
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{oldSegment.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
+		log.Warn("fail to alter segments and new segment", zap.Error(err))
+		return nil, err
+	}
+
+	m.segments.SetSegment(oldSegmentID, cloned)
+	m.segments.SetSegment(result.GetSegmentID(), segment)
+
+	return metricMutation, nil
 }

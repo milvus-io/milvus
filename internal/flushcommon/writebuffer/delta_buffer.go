@@ -27,18 +27,18 @@ func NewDeltaBuffer() *DeltaBuffer {
 	}
 }
 
-func (ib *DeltaBuffer) getTimestampRange(tss []typeutil.Timestamp) TimeRange {
-	tr := TimeRange{
-		timestampMin: math.MaxUint64,
-		timestampMax: 0,
+func (ib *DeltaBuffer) getTimestampRange(tss []typeutil.Timestamp) storage.TimeRange {
+	tr := storage.TimeRange{
+		TimestampMin: math.MaxUint64,
+		TimestampMax: 0,
 	}
 
 	for _, data := range tss {
-		if data < tr.timestampMin {
-			tr.timestampMin = data
+		if data < tr.TimestampMin {
+			tr.TimestampMin = data
 		}
-		if data > tr.timestampMax {
-			tr.timestampMax = data
+		if data > tr.TimestampMax {
+			tr.TimestampMax = data
 		}
 	}
 	return tr

@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -247,8 +246,8 @@ func (w *SegmentDeltaWriter) GetRowNum() int64 {
 	return w.deleteData.RowCount
 }
 
-func (w *SegmentDeltaWriter) GetTimeRange() *writebuffer.TimeRange {
-	return writebuffer.NewTimeRange(w.tsFrom, w.tsTo)
+func (w *SegmentDeltaWriter) GetTimeRange() *storage.TimeRange {
+	return storage.NewTimeRange(w.tsFrom, w.tsTo)
 }
 
 func (w *SegmentDeltaWriter) updateRange(ts typeutil.Timestamp) {
@@ -273,7 +272,7 @@ func (w *SegmentDeltaWriter) WriteBatch(pks []storage.PrimaryKey, tss []typeutil
 	}
 }
 
-func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *writebuffer.TimeRange, error) {
+func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *storage.TimeRange, error) {
 	blob, err := storage.NewDeleteCodec().Serialize(w.collectionID, w.partitionID, w.segmentID, w.deleteData)
 	if err != nil {
 		return nil, nil, err
@@ -359,11 +358,11 @@ func (w *SegmentWriter) FlushAndIsEmpty() bool {
 	return w.writer.WrittenMemorySize() == 0
 }
 
-func (w *SegmentWriter) GetTimeRange() *writebuffer.TimeRange {
-	return writebuffer.NewTimeRange(w.tsFrom, w.tsTo)
+func (w *SegmentWriter) GetTimeRange() *storage.TimeRange {
+	return storage.NewTimeRange(w.tsFrom, w.tsTo)
 }
 
-func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRange, error) {
+func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *storage.TimeRange, error) {
 	w.writer.Flush()
 	w.writer.Close()
 

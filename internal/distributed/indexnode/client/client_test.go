@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -72,32 +72,32 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r7, err)
 	}
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[workerpb.IndexNodeClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
-	newFunc1 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
+	newFunc1 := func(cc *grpc.ClientConn) workerpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[workerpb.IndexNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc2 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
+	newFunc2 := func(cc *grpc.ClientConn) workerpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: errors.New("dummy")}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[workerpb.IndexNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc3 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
+	newFunc3 := func(cc *grpc.ClientConn) workerpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc3)
@@ -123,7 +123,7 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	t.Run("CreatJob", func(t *testing.T) {
-		req := &indexpb.CreateJobRequest{
+		req := &workerpb.CreateJobRequest{
 			ClusterID: "0",
 			BuildID:   0,
 		}
@@ -132,13 +132,13 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	t.Run("QueryJob", func(t *testing.T) {
-		req := &indexpb.QueryJobsRequest{}
+		req := &workerpb.QueryJobsRequest{}
 		_, err := inc.QueryJobs(ctx, req)
 		assert.NoError(t, err)
 	})
 
 	t.Run("DropJob", func(t *testing.T) {
-		req := &indexpb.DropJobsRequest{}
+		req := &workerpb.DropJobsRequest{}
 		_, err := inc.DropJobs(ctx, req)
 		assert.NoError(t, err)
 	})
@@ -159,25 +159,25 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	t.Run("GetJobStats", func(t *testing.T) {
-		req := &indexpb.GetJobStatsRequest{}
+		req := &workerpb.GetJobStatsRequest{}
 		_, err := inc.GetJobStats(ctx, req)
 		assert.NoError(t, err)
 	})
 
 	t.Run("CreateJobV2", func(t *testing.T) {
-		req := &indexpb.CreateJobV2Request{}
+		req := &workerpb.CreateJobV2Request{}
 		_, err := inc.CreateJobV2(ctx, req)
 		assert.NoError(t, err)
 	})
 
 	t.Run("QueryJobsV2", func(t *testing.T) {
-		req := &indexpb.QueryJobsV2Request{}
+		req := &workerpb.QueryJobsV2Request{}
 		_, err := inc.QueryJobsV2(ctx, req)
 		assert.NoError(t, err)
 	})
 
 	t.Run("DropJobsV2", func(t *testing.T) {
-		req := &indexpb.DropJobsV2Request{}
+		req := &workerpb.DropJobsV2Request{}
 		_, err := inc.DropJobsV2(ctx, req)
 		assert.NoError(t, err)
 	})

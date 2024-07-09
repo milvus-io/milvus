@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -72,7 +73,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	}
 	s.taskScheduler.enqueue(&indexBuildTask{
 		taskID: buildID,
-		taskInfo: &indexpb.IndexTaskInfo{
+		taskInfo: &workerpb.IndexTaskInfo{
 			BuildID: buildID,
 			State:   commonpb.IndexState_Unissued,
 		},

@@ -83,7 +83,7 @@ func getCurrentIndexVersion(v int32) int32 {
 
 type taskKey struct {
 	ClusterID string
-	BuildID   UniqueID
+	TaskID    UniqueID
 }
 
 // IndexNode is a component that executes the task of building indexes.
@@ -109,6 +109,7 @@ type IndexNode struct {
 	stateLock    sync.Mutex
 	indexTasks   map[taskKey]*indexTaskInfo
 	analyzeTasks map[taskKey]*analyzeTaskInfo
+	statsTasks   map[taskKey]*statsTaskInfo
 }
 
 // NewIndexNode creates a new IndexNode component.
@@ -236,6 +237,21 @@ func (i *IndexNode) Start() error {
 	return startErr
 }
 
+func (i *IndexNode) deleteAllTasks() {
+	deletedIndexTasks := i.deleteAllIndexTasks()
+	for _, t := range deletedIndexTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
+	deletedAnalyzeTasks := i.deleteAllAnalyzeTasks()
+	for _, t := range deletedAnalyzeTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
+}
+
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
 	i.stopOnce.Do(func() {
@@ -253,18 +269,8 @@ func (i *IndexNode) Stop() error {
 		i.lifetime.Wait()
 		log.Info("Index node abnormal")
 		// cleanup all running tasks
-		deletedIndexTasks := i.deleteAllIndexTasks()
-		for _, t := range deletedIndexTasks {
-			if t.cancel != nil {
-				t.cancel()
-			}
-		}
-		deletedAnalyzeTasks := i.deleteAllAnalyzeTasks()
-		for _, t := range deletedAnalyzeTasks {
-			if t.cancel != nil {
-				t.cancel()
-			}
-		}
+		i.deleteAllTasks()
+
 		if i.sched != nil {
 			i.sched.Close()
 		}

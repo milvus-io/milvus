@@ -350,6 +350,11 @@ message SegmentInfo {
   SegmentLevel last_level = 23;
   // use in major compaction, if compaction fail, should revert partition stats version to last value 
   int64 last_partition_stats_version = 24;
+
+  // fieldStats is used to record information such as the tokenization index for fields.
+  repeated FieldStatsLog fieldStatslogs = 25;
+  // used to indicate whether the segment is sorted by primary key.
+  bool is_sorted = 26;
 }
 
 message SegmentStartPosition {
@@ -424,6 +429,11 @@ message SegmentBinlogs {
 message FieldBinlog{
   int64 fieldID = 1;
   repeated Binlog binlogs = 2;
+}
+
+message FieldStatsLog {
+  int64 FieldID = 1;
+  repeated string files = 2;
 }
 
 message Binlog {
@@ -603,6 +613,7 @@ message CompactionSegment {
   repeated FieldBinlog field2StatslogPaths = 5;
   repeated FieldBinlog deltalogs = 6;
   string channel = 7;
+  bool is_sorted = 8;
 }
 
 message CompactionPlanResult {

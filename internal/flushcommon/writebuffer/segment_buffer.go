@@ -50,10 +50,10 @@ func (buf *segmentBuffer) EarliestPosition() *msgpb.MsgPosition {
 	return getEarliestCheckpoint(buf.insertBuffer.startPos, buf.deltaBuffer.startPos)
 }
 
-func (buf *segmentBuffer) GetTimeRange() *TimeRange {
-	result := &TimeRange{
-		timestampMin: math.MaxUint64,
-		timestampMax: 0,
+func (buf *segmentBuffer) GetTimeRange() *storage.TimeRange {
+	result := &storage.TimeRange{
+		TimestampMin: math.MaxUint64,
+		TimestampMax: 0,
 	}
 	if buf.insertBuffer != nil {
 		result.Merge(buf.insertBuffer.GetTimeRange())
@@ -68,36 +68,6 @@ func (buf *segmentBuffer) GetTimeRange() *TimeRange {
 // MemorySize returns total memory size of insert buffer & delta buffer.
 func (buf *segmentBuffer) MemorySize() int64 {
 	return buf.insertBuffer.size + buf.deltaBuffer.size
-}
-
-// TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
-type TimeRange struct {
-	timestampMin typeutil.Timestamp
-	timestampMax typeutil.Timestamp
-}
-
-func NewTimeRange(min, max typeutil.Timestamp) *TimeRange {
-	return &TimeRange{
-		timestampMin: min,
-		timestampMax: max,
-	}
-}
-
-func (tr *TimeRange) GetMinTimestamp() typeutil.Timestamp {
-	return tr.timestampMin
-}
-
-func (tr *TimeRange) GetMaxTimestamp() typeutil.Timestamp {
-	return tr.timestampMax
-}
-
-func (tr *TimeRange) Merge(other *TimeRange) {
-	if other.timestampMin < tr.timestampMin {
-		tr.timestampMin = other.timestampMin
-	}
-	if other.timestampMax > tr.timestampMax {
-		tr.timestampMax = other.timestampMax
-	}
 }
 
 func getEarliestCheckpoint(cps ...*msgpb.MsgPosition) *msgpb.MsgPosition {

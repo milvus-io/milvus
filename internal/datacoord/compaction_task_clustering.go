@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -430,7 +431,7 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 	}
 	t.analyzeScheduler.enqueue(&analyzeTask{
 		taskID: t.GetAnalyzeTaskID(),
-		taskInfo: &indexpb.AnalyzeResult{
+		taskInfo: &workerpb.AnalyzeResult{
 			TaskID: t.GetAnalyzeTaskID(),
 			State:  indexpb.JobState_JobStateInit,
 		},

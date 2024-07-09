@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -110,7 +111,7 @@ func (s *taskScheduler) reloadFromKV() {
 				s.tasks[segIndex.BuildID] = &indexBuildTask{
 					taskID: segIndex.BuildID,
 					nodeID: segIndex.NodeID,
-					taskInfo: &indexpb.IndexTaskInfo{
+					taskInfo: &workerpb.IndexTaskInfo{
 						BuildID:    segIndex.BuildID,
 						State:      segIndex.IndexState,
 						FailReason: segIndex.FailReason,
@@ -129,7 +130,7 @@ func (s *taskScheduler) reloadFromKV() {
 			s.tasks[taskID] = &analyzeTask{
 				taskID: taskID,
 				nodeID: t.NodeID,
-				taskInfo: &indexpb.AnalyzeResult{
+				taskInfo: &workerpb.AnalyzeResult{
 					TaskID:     taskID,
 					State:      t.State,
 					FailReason: t.FailReason,
@@ -242,8 +243,10 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 
 	case indexpb.JobState_JobStateInit:
 		// 0. pre check task
-		skip := task.PreCheck(s.ctx, s)
-		if skip {
+		// Determine whether the task can be performed or if it is truly necessary.
+		// for example: flat index doesn't need to actually build. checkPass is false.
+		checkPass := task.PreCheck(s.ctx, s)
+		if !checkPass {
 			return true
 		}
 
