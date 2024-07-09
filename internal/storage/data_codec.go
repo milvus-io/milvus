@@ -892,7 +892,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 		deleteLog := &DeleteLog{}
 
-		for rr.Next() {
+		handleRecord := func() error {
 			rec := rr.Record()
 			defer rec.Release()
 			column := rec.Column(0)
@@ -904,6 +904,14 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 
 				result.Append(deleteLog.Pk, deleteLog.Ts)
+			}
+			return nil
+		}
+
+		for rr.Next() {
+			err := handleRecord()
+			if err != nil {
+				return err
 			}
 		}
 		return nil
