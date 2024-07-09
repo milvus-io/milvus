@@ -173,24 +173,21 @@ func (t *mixCompactionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
-	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
-	})
-	if err == nil {
-		t.resetSegmentCompacting()
-		UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-		log.Info("handleCompactionResult: success to handle merge compaction result")
+	}); err != nil {
+		log.Warn("mixCompactionTask processCompleted unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()))
 	}
 
-	return err == nil
+	t.resetSegmentCompacting()
+	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
+	log.Info("mixCompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
+
+	return true
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
-	var segmentIDs []UniqueID
-	for _, binLogs := range t.GetPlan().GetSegmentBinlogs() {
-		segmentIDs = append(segmentIDs, binLogs.GetSegmentID())
-	}
-	t.meta.SetSegmentsCompacting(segmentIDs, false)
+	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
 func (t *mixCompactionTask) processTimeout() bool {
@@ -227,14 +224,15 @@ func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compa
 }
 
 func (t *mixCompactionTask) processFailed() bool {
-	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
-	})
-	if err == nil {
-		t.resetSegmentCompacting()
+	}); err != nil {
+		log.Warn("mixCompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 	}
 
-	return err == nil
+	log.Info("mixCompactionTask processFailed done", zap.Int64("planID", t.GetPlanID()))
+	t.resetSegmentCompacting()
+	return true
 }
 
 func (t *mixCompactionTask) checkTimeout() bool {
