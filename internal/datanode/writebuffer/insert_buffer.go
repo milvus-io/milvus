@@ -107,7 +107,6 @@ func (ib *InsertBuffer) buffer(inData *storage.InsertData, tr TimeRange, startPo
 	// buffer := ib.currentBuffer()
 	// storage.MergeInsertData(buffer.buffer, inData)
 	ib.buffers = append(ib.buffers, inData)
-	ib.UpdateStatistics(int64(inData.GetRowNum()), int64(inData.GetMemorySize()), tr, startPos, endPos)
 }
 
 func (ib *InsertBuffer) Yield() []*storage.InsertData {

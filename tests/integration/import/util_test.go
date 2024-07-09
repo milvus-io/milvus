@@ -133,7 +133,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
@@ -144,7 +144,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector:
@@ -156,7 +156,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_BFloat16Vector:
@@ -168,7 +168,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			chunked := lo.Chunk(rows, rowBytes)
 			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
+				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
 		case schemapb.DataType_SparseFloatVector:

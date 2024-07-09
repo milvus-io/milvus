@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -712,7 +713,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
 	de.PayloadDataType = schemapb.DataType_Int64
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(dsw.memorySize))
-	de.descriptorEventData.AddExtra(version, MULTI_FIELD)
+	de.descriptorEventData.AddExtra(version, MultiField)
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -779,7 +780,7 @@ func NewDeltalogMultiFieldWriter(partitionID, segmentID UniqueID, eventWriter *M
 
 		for _, vv := range v {
 			builder.Field(1).(*array.Int64Builder).Append(int64(vv.Ts))
-			memorySize += uint64(vv.Ts)
+			memorySize += vv.Ts
 		}
 
 		arr := []arrow.Array{builder.Field(0).NewArray(), builder.Field(1).NewArray()}
@@ -849,14 +850,14 @@ func NewDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog]
 // check delta log description data to see if it is the format with
 // pk and ts column separately
 func supportMultiFieldFormat(blobs []*Blob) bool {
-	if blobs != nil && len(blobs) > 0 {
+	if len(blobs) > 0 {
 		reader, err := NewBinlogReader(blobs[0].Value)
 		defer reader.Close()
 		if err != nil {
 			return false
 		}
 		version := reader.descriptorEventData.Extras[version]
-		return version != nil && version.(string) == MULTI_FIELD
+		return version != nil && version.(string) == MultiField
 	}
 	return false
 }

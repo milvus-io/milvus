@@ -239,7 +239,7 @@ func TestCachedConfig(t *testing.T) {
 		assert.False(t, exist)
 		mgr.CASCachedValue("cd", "", "xxx")
 		_, exist = mgr.GetCachedValue("cd")
-		assert.False(t, exist)
+		assert.True(t, exist)
 
 		// after refresh, the cached value should be reset
 		ctx := context.Background()

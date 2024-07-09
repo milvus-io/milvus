@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestIndexVectorDefault(t *testing.T) {
@@ -129,13 +130,12 @@ func TestIndexAutoFloatVector(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, ip, hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
-
 	for _, invalidMt := range hp.SupportBinFlatMetricType {
 		idx := index.NewAutoIndex(invalidMt)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx))
 		common.CheckErr(t, err, false, fmt.Sprintf("float vector index does not support metric type: %s", invalidMt))
 	}
-		// auto index with different metric type on float vec
+	// auto index with different metric type on float vec
 	for _, mt := range hp.SupportFloatMetricType {
 		idx := index.NewAutoIndex(mt)
 		indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx))
@@ -248,7 +248,7 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	var expFields []string
 	var idx index.Index
 	for _, field := range schema.Fields {
-		if field.DataType == entity.FieldTypeArray || field.DataType == entity.FieldTypeJSON{
+		if field.DataType == entity.FieldTypeArray || field.DataType == entity.FieldTypeJSON {
 			idx = index.NewAutoIndex(entity.IP)
 			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 			common.CheckErr(t, err, false, fmt.Sprintf("create auto index on %s field is not supported", field.DataType))
@@ -549,8 +549,10 @@ func TestCreateScalarIndexVectorField(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	for _, idx := range []index.Index{index.NewInvertedIndex(), index.NewSortedIndex(), index.NewTrieIndex()} {
-		for _, fieldName := range []string{common.DefaultFloatVecFieldName, common.DefaultBinaryVecFieldName,
-			common.DefaultBFloat16VecFieldName, common.DefaultFloat16VecFieldName} {
+		for _, fieldName := range []string{
+			common.DefaultFloatVecFieldName, common.DefaultBinaryVecFieldName,
+			common.DefaultBFloat16VecFieldName, common.DefaultFloat16VecFieldName,
+		} {
 			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, false, "metric type not set for vector index")
 		}
@@ -607,7 +609,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idx).WithIndexName("json_index"))
 	common.CheckErr(t, err, false, "data type should be FloatVector, Float16Vector or BFloat16Vector")
 
-	//create scalar index on json field
+	// create scalar index on json field
 	type scalarIndexError struct {
 		idx    index.Index
 		errMsg string
@@ -1050,6 +1052,7 @@ func TestCreateIndexAsync(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	idx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
 	log.Debug("describe index", zap.Any("descIdx", idx))
 }
 
@@ -1071,6 +1074,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx).WithIndexName("index_1"))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloat16VecFieldName, idx).WithIndexName("index_1"))
 	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
@@ -1099,6 +1103,7 @@ func TestDropIndex(t *testing.T) {
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx).WithIndexName(idxName))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
 
 	// describe index with fieldName -> not found
 	_, errNotFound := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
@@ -1106,6 +1111,7 @@ func TestDropIndex(t *testing.T) {
 
 	// describe index with index name -> ok
 	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, idxName))
+	common.CheckErr(t, err, true)
 	require.EqualValues(t, index.NewGenericIndex(idxName, idx.Params()), descIdx)
 
 	// drop index with field name
@@ -1142,6 +1148,7 @@ func TestDropIndexCreateIndexWithIndexName(t *testing.T) {
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx).WithIndexName(idxName))
 	common.CheckErr(t, err, true)
 	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
 	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, idxName))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, index.NewGenericIndex(idxName, idx.Params()), descIdx)
@@ -1158,6 +1165,7 @@ func TestDropIndexCreateIndexWithIndexName(t *testing.T) {
 	idxTask, err2 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, ipIdx).WithIndexName(idxName))
 	common.CheckErr(t, err2, true)
 	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
 	descIdx2, err2 := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, idxName))
 	common.CheckErr(t, err2, true)
 	require.EqualValues(t, index.NewGenericIndex(idxName, ipIdx.Params()), descIdx2)

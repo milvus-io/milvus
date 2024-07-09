@@ -8,6 +8,9 @@ import (
 )
 
 type WALImpls interface {
+	// WALName returns the name of the wal.
+	WALName() string
+
 	// Channel returns the channel assignment info of the wal.
 	// Should be read-only.
 	Channel() types.PChannelInfo
