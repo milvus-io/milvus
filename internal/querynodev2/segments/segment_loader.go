@@ -1086,7 +1086,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 }
 
 func (loader *segmentLoader) LoadSegment(ctx context.Context,
-	// segment *LocalSegment,
 	seg Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
@@ -1665,7 +1664,6 @@ func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb
 }
 
 func (loader *segmentLoader) LoadIndex(ctx context.Context,
-	// segment *LocalSegment,
 	seg Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 	version int64,
