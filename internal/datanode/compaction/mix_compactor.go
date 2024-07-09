@@ -124,6 +124,7 @@ func (t *mixCompactionTask) merge(
 		syncBatchCount    int   // binlog batch count
 		remainingRowCount int64 // the number of remaining entities
 		expiredRowCount   int64 // the number of expired entities
+		deletedRowCount   int64 = 0
 		unflushedRowCount int64 = 0
 
 		// All binlog meta of a segment
@@ -177,6 +178,7 @@ func (t *mixCompactionTask) merge(
 			}
 			v := iter.Value()
 			if isValueDeleted(v) {
+				deletedRowCount++
 				continue
 			}
 
@@ -257,6 +259,7 @@ func (t *mixCompactionTask) merge(
 
 	log.Info("compact merge end",
 		zap.Int64("remaining row count", remainingRowCount),
+		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
 		zap.Int("binlog batch count", syncBatchCount),
 		zap.Duration("download binlogs elapse", downloadTimeCost),
