@@ -516,6 +516,10 @@ func TestComponentParam(t *testing.T) {
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
+		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
+		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "2")
+		assert.Equal(t, int64(2), Params.ClusteringCompactionSlotUsage.GetAsInt64())
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})

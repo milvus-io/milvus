@@ -566,6 +566,8 @@ dataNode:
 
   clusteringCompaction:
     memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.
+    workerPoolSize: 8
+    slotUsage: 2 # usage of clustering compaction in tasks scheduling slopCap, clustering compaction may cost more resource than normal compaction 
 
 # Configures the system log output.
 log:

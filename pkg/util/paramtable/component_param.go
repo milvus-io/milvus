@@ -3744,6 +3744,7 @@ type dataNodeConfig struct {
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
+	ClusteringCompactionSlotUsage         ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 }
@@ -4074,12 +4075,22 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize = ParamItem{
 		Key:          "dataNode.clusteringCompaction.workPoolSize",
 		Version:      "2.4.6",
-		Doc:          "worker pool size for one clustering compaction job.",
-		DefaultValue: "1",
+		Doc:          "inner worker pool size for one clustering compaction job.",
+		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
+
+	p.ClusteringCompactionSlotUsage = ParamItem{
+		Key:          "dataNode.clusteringCompaction.slotUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of clustering compaction job.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionSlotUsage.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "datanode.bloomFilterApplyParallelFactor",

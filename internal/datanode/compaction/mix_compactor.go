@@ -94,6 +94,10 @@ func (t *mixCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *mixCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 // return num rows of all segment compaction from
 func (t *mixCompactionTask) getNumRows() int64 {
 	numRows := int64(0)

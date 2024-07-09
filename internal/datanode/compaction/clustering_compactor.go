@@ -165,6 +165,10 @@ func (t *clusteringCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *clusteringCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 func (t *clusteringCompactionTask) GetCollection() int64 {
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }

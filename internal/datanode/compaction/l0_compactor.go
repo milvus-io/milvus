@@ -98,6 +98,10 @@ func (t *LevelZeroCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *LevelZeroCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 func (t *LevelZeroCompactionTask) GetCollection() int64 {
 	// The length of SegmentBinlogs is checked before task enqueueing.
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()

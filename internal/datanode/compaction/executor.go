@@ -81,6 +81,15 @@ func (e *executor) Execute(task Compactor) {
 }
 
 func (e *executor) Slots() int64 {
+	var usedSlot int64
+	e.executing.Range(func(key int64, comp Compactor) bool {
+		if comp.GetCompactionType() == datapb.CompactionType_ClusteringCompaction {
+			usedSlot += paramtable.Get().DataNodeCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+		} else {
+			usedSlot += 1
+		}
+		return true
+	})
 	return paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64() - int64(e.executing.Len())
 }
 
