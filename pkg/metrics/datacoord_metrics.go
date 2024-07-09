@@ -202,6 +202,8 @@ var (
 			Buckets:   longTaskBuckets,
 		}, []string{
 			isVectorFieldLabelName,
+			collectionIDLabelName,
+			channelNameLabelName,
 			compactionTypeLabelName,
 			stageLabelName,
 		})
