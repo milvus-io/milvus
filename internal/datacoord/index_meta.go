@@ -187,10 +187,14 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 		return false
 	}
 
+	useAutoIndex := false
 	userIndexParamsWithoutMmapKey := make([]*commonpb.KeyValuePair, 0)
 	for _, param := range fieldIndex.UserIndexParams {
 		if param.Key == common.MmapEnabledKey {
 			continue
+		}
+		if param.Key == common.IndexTypeKey && param.Value == common.AutoIndexName {
+			useAutoIndex = true
 		}
 		userIndexParamsWithoutMmapKey = append(userIndexParamsWithoutMmapKey, param)
 	}
@@ -200,8 +204,23 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	}
 	for _, param1 := range userIndexParamsWithoutMmapKey {
 		exist := false
-		for _, param2 := range req.GetUserIndexParams() {
+		for i, param2 := range req.GetUserIndexParams() {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
+				exist = true
+			} else if param1.Key == common.MetricTypeKey && param2.Key == param1.Key && useAutoIndex && !req.GetUserAutoindexMetricTypeSpecified() {
+				// when users use autoindex, metric type is the only thing they can specify
+				// if they do not specify metric type, will use autoindex default metric type
+				// when autoindex default config upgraded, remain the old metric type at the very first time for compatibility
+				// warn! replace request metric type
+				log.Warn("user not specify autoindex metric type, autoindex config has changed, use old metric for compatibility",
+					zap.String("old metric type", param1.Value), zap.String("new metric type", param2.Value))
+				req.GetUserIndexParams()[i].Value = param1.Value
+				for j, param := range req.GetIndexParams() {
+					if param.Key == common.MetricTypeKey {
+						req.GetIndexParams()[j].Value = param1.Value
+						break
+					}
+				}
 				exist = true
 			}
 		}

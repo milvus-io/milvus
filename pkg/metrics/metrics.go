@@ -75,6 +75,7 @@ const (
 
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"
+	segmentPruneLabelName    = "segment_prune_label"
 	stageLabelName           = "compaction_stage"
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"

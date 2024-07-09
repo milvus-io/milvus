@@ -205,6 +205,7 @@ func (c *dispatcherManager) tryMerge() {
 			delete(candidates, vchannel)
 		}
 	}
+	mergeTs := c.mainDispatcher.CurTs()
 	for vchannel := range candidates {
 		t, err := c.soloDispatchers[vchannel].GetTarget(vchannel)
 		if err == nil {
@@ -215,7 +216,7 @@ func (c *dispatcherManager) tryMerge() {
 		c.deleteMetric(vchannel)
 	}
 	c.mainDispatcher.Handle(resume)
-	log.Info("merge done", zap.Any("vchannel", candidates))
+	log.Info("merge done", zap.Any("vchannel", candidates), zap.Uint64("mergeTs", mergeTs))
 }
 
 func (c *dispatcherManager) split(t *target) {

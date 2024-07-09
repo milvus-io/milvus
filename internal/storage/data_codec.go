@@ -950,7 +950,8 @@ func (deleteCodec *DeleteCodec) deserializeBlob(blob *Blob, withSerialized bool)
 
 	deleteLog := &DeleteLog{}
 	data = NewEmptyDeleteData()
-	for rr.Next() {
+
+	handleRecord := func() error {
 		rec := rr.Record()
 		defer rec.Release()
 		column := rec.Column(0)
@@ -958,7 +959,7 @@ func (deleteCodec *DeleteCodec) deserializeBlob(blob *Blob, withSerialized bool)
 			strVal := column.ValueStr(i)
 
 			if err := deleteLog.Parse(strVal); err != nil {
-				return InvalidUniqueID, InvalidUniqueID, nil, err
+				return err
 			}
 
 			if withSerialized {
@@ -966,6 +967,14 @@ func (deleteCodec *DeleteCodec) deserializeBlob(blob *Blob, withSerialized bool)
 			} else {
 				data.Append(deleteLog.Pk, deleteLog.Ts)
 			}
+		}
+		return nil
+	}
+
+	for rr.Next() {
+		err := handleRecord()
+		if err != nil {
+			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
 	}
 	return partitionID, segmentID, data, nil

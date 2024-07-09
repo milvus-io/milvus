@@ -106,6 +106,7 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
+	log.Info("Compaction trigger manager start")
 	for {
 		select {
 		case <-m.closeSig:
@@ -117,11 +118,11 @@ func (m *CompactionTriggerManager) startLoop() {
 			}
 			if m.compactionHandler.isFull() {
 				log.RatedInfo(10, "Skip trigger l0 compaction since compactionHandler is full")
-				return
+				continue
 			}
 			events, err := m.l0Policy.Trigger()
 			if err != nil {
-				log.Warn("Fail to trigger policy", zap.Error(err))
+				log.Warn("Fail to trigger L0 policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
@@ -136,11 +137,11 @@ func (m *CompactionTriggerManager) startLoop() {
 			}
 			if m.compactionHandler.isFull() {
 				log.RatedInfo(10, "Skip trigger l0 compaction since compactionHandler is full")
-				return
+				continue
 			}
 			events, err := m.clusteringPolicy.Trigger()
 			if err != nil {
-				log.Warn("Fail to trigger policy", zap.Error(err))
+				log.Warn("Fail to trigger clustering policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
@@ -171,11 +172,6 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
 	for _, view := range views {
-		if m.compactionHandler.isFull() {
-			log.RatedInfo(10, "Skip trigger compaction for scheduler is full")
-			return
-		}
-
 		switch eventType {
 		case TriggerTypeLevelZeroViewChange:
 			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
@@ -234,6 +230,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		TriggerID:        taskID, // inner trigger, use task id as trigger id
 		PlanID:           taskID,
 		Type:             datapb.CompactionType_Level0DeleteCompaction,
+		StartTime:        time.Now().UnixMilli(),
 		InputSegments:    levelZeroSegs,
 		State:            datapb.CompactionTaskState_pipelining,
 		Channel:          view.GetGroupLabel().Channel,
@@ -275,7 +272,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          int64(view.(*ClusteringSegmentsView).compactionTime.startTime),
+		StartTime:          time.Now().UnixMilli(),
 		CollectionTtl:      view.(*ClusteringSegmentsView).compactionTime.collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_ClusteringCompaction,
