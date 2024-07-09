@@ -2459,7 +2459,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2490,20 +2490,6 @@ func TestOptions(t *testing.T) {
 	})
 }
 
-type mockPolicyFactory struct {
-	ChannelPolicyFactoryV1
-}
-
-// NewRegisterPolicy create a new register policy
-func (p *mockPolicyFactory) NewRegisterPolicy() RegisterPolicy {
-	return EmptyRegister
-}
-
-// NewDeregisterPolicy create a new dereigster policy
-func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
-	return EmptyDeregisterPolicy
-}
-
 func TestHandleSessionEvent(t *testing.T) {
 	kv := getWatchKV(t)
 	defer func() {
@@ -2514,7 +2500,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cancel()
 
 	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)

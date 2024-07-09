@@ -18,16 +18,10 @@ package datacoord
 
 // ChannelPolicyFactory is the abstract factory that creates policies for channel manager.
 type ChannelPolicyFactory interface {
-	// NewRegisterPolicy creates a new register policy.
-	NewRegisterPolicy() RegisterPolicy
-	// NewDeregisterPolicy creates a new deregister policy.
-	NewDeregisterPolicy() DeregisterPolicy
-	// NewAssignPolicy creates a new channel assign policy.
-	NewAssignPolicy() ChannelAssignPolicy
-	// NewReassignPolicy creates a new channel reassign policy.
-	NewReassignPolicy() ChannelReassignPolicy
 	// NewBalancePolicy creates a new channel balance policy.
 	NewBalancePolicy() BalanceChannelPolicy
+
+	NewAssignPolicy() AssignPolicy
 }
 
 // ChannelPolicyFactoryV1 equal to policy batch
@@ -38,26 +32,10 @@ func NewChannelPolicyFactoryV1() *ChannelPolicyFactoryV1 {
 	return &ChannelPolicyFactoryV1{}
 }
 
-// NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy.
-func (f *ChannelPolicyFactoryV1) NewRegisterPolicy() RegisterPolicy {
-	return AvgAssignRegisterPolicy
-}
-
-// NewDeregisterPolicy implementing ChannelPolicyFactory returns AvgAssignUnregisteredChannels.
-func (f *ChannelPolicyFactoryV1) NewDeregisterPolicy() DeregisterPolicy {
-	return AvgAssignUnregisteredChannels
-}
-
-// NewAssignPolicy implementing ChannelPolicyFactory returns AverageAssignPolicy.
-func (f *ChannelPolicyFactoryV1) NewAssignPolicy() ChannelAssignPolicy {
-	return AverageAssignPolicy
-}
-
-// NewReassignPolicy implementing ChannelPolicyFactory returns AverageReassignPolicy.
-func (f *ChannelPolicyFactoryV1) NewReassignPolicy() ChannelReassignPolicy {
-	return AverageReassignPolicy
-}
-
 func (f *ChannelPolicyFactoryV1) NewBalancePolicy() BalanceChannelPolicy {
 	return AvgBalanceChannelPolicy
+}
+
+func (f *ChannelPolicyFactoryV1) NewAssignPolicy() AssignPolicy {
+	return AvgAssignByCountPolicy
 }

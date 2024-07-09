@@ -116,7 +116,7 @@ func (s *ChannelManagerSuite) TearDownTest() {}
 func (s *ChannelManagerSuite) TestAddNode() {
 	s.Run("AddNode with empty store", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		var testNode int64 = 1
@@ -134,7 +134,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 			"ch2": bufferID,
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		var (
@@ -162,7 +162,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		chNodes := map[string]int64{testChannel: storedNodeID}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
 
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		s.checkAssignment(m, storedNodeID, testChannel, Watched)
@@ -189,7 +189,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
 
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		var testNodeID int64 = 100
@@ -205,7 +205,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 func (s *ChannelManagerSuite) TestWatch() {
 	s.Run("test Watch with empty store", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		var testCh string = "ch1"
@@ -217,7 +217,7 @@ func (s *ChannelManagerSuite) TestWatch() {
 	})
 	s.Run("test Watch with nodeID in store", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		var (
@@ -238,7 +238,7 @@ func (s *ChannelManagerSuite) TestWatch() {
 func (s *ChannelManagerSuite) TestRelease() {
 	s.Run("release not exist nodeID and channel", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		err = m.Release(1, "ch1")
@@ -253,7 +253,7 @@ func (s *ChannelManagerSuite) TestRelease() {
 
 	s.Run("release channel in bufferID", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		m.Watch(context.TODO(), getChannel("ch1", 1))
@@ -268,7 +268,7 @@ func (s *ChannelManagerSuite) TestRelease() {
 func (s *ChannelManagerSuite) TestDeleteNode() {
 	s.Run("delete not exsit node", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		info := m.store.GetNode(1)
 		s.Require().Nil(info)
@@ -278,7 +278,7 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 	})
 	s.Run("delete bufferID", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		info := m.store.GetNode(bufferID)
 		s.Require().NotNil(info)
@@ -289,7 +289,7 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 
 	s.Run("delete node without assigment", func() {
 		s.prepareMeta(nil, 0)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
 		err = m.AddNode(1)
@@ -309,7 +309,7 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 			"ch3": 1,
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", Watched)
 		s.checkAssignment(m, 1, "ch2", Watched)
@@ -342,7 +342,7 @@ func (s *ChannelManagerSuite) TestFindWatcher() {
 		"ch4": 1,
 	}
 	s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
-	m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 
 	tests := []struct {
@@ -382,7 +382,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 		s.checkAssignment(m, bufferID, "ch2", Standby)
@@ -400,7 +400,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
 		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false).Times(2)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 		s.checkAssignment(m, bufferID, "ch2", Standby)
@@ -417,7 +417,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -433,7 +433,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -455,7 +455,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -478,7 +478,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -500,7 +500,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -527,7 +527,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -549,7 +549,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -571,7 +571,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -598,7 +598,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -627,7 +627,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).
 			Return(fmt.Errorf("mock error")).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -643,7 +643,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -660,7 +660,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).
 			Return(fmt.Errorf("mock error")).Twice()
-		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
@@ -679,7 +679,7 @@ func (s *ChannelManagerSuite) TestStartup() {
 	}
 	s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 	s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-	m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 
 	var (
@@ -717,7 +717,7 @@ func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 
 	s.mockAlloc = NewNMockAllocator(s.T())
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(0, errors.New("mock rootcoord failure"))
-	m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 
 	err = m.Startup(context.TODO(), nil, []int64{2})

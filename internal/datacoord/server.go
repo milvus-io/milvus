@@ -464,7 +464,7 @@ func (s *Server) initCluster() error {
 	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
 
 	var err error
-	s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
 	if err != nil {
 		return err
 	}
