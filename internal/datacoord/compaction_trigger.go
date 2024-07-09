@@ -78,7 +78,7 @@ type compactionTrigger struct {
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
 	forceMu           lock.Mutex
-	closhCh           lifetime.SafeChan
+	closeCh           lifetime.SafeChan
 	closeWaiter       sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
@@ -106,7 +106,7 @@ func newCompactionTrigger(
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
-		closhCh:                      lifetime.NewSafeChan(),
+		closeCh:                      lifetime.NewSafeChan(),
 	}
 }
 
@@ -119,7 +119,7 @@ func (t *compactionTrigger) start() {
 
 		for {
 			select {
-			case <-t.closhCh.CloseCh():
+			case <-t.closeCh.CloseCh():
 				log.Info("compaction trigger quit")
 				return
 			case signal := <-t.signals:
@@ -155,7 +155,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 
 	for {
 		select {
-		case <-t.closhCh.CloseCh():
+		case <-t.closeCh.CloseCh():
 			t.globalTrigger.Stop()
 			log.Info("global compaction loop exit")
 			return
@@ -169,7 +169,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 }
 
 func (t *compactionTrigger) stop() {
-	t.closhCh.Close()
+	t.closeCh.Close()
 	t.closeWaiter.Wait()
 }
 
