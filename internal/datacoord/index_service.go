@@ -748,8 +748,12 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range indexIDToSegIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					indexFilePaths := metautil.BuildSegmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
-						segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+					var indexFilePaths = make([]string, 10)
+					if s.useCollectionIdBasedIndexPath {
+						indexFilePaths = metautil.BuildSegmentIndexFilePathsWithCollectionID(s.meta.chunkManager.RootPath(), segIdx.CollectionID, segIdx.BuildID, segIdx.IndexVersion, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+					} else {
+						indexFilePaths = metautil.BuildSegmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+					}
 					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,

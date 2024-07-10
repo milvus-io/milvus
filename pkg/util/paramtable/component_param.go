@@ -236,6 +236,8 @@ type commonConfig struct {
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
+
+	UseCollectionIdBasedIndexPath ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -691,6 +693,14 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.BloomFilterApplyBatchSize.Init(base.mgr)
+
+	p.UseCollectionIdBasedIndexPath = ParamItem{
+		Key:          "common.storage.useCollectionIdBasedIndexPath",
+		Version:      "2.4.2",
+		DefaultValue: "false",
+	}
+	p.UseCollectionIdBasedIndexPath.Init(base.mgr)
+
 }
 
 type traceConfig struct {
@@ -2122,9 +2132,9 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.3.6",
 		DefaultValue: "async",
-		Doc: `options: async, sync, off. 
-Specifies the necessity for warming up the chunk cache. 
-1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+		Doc: `options: async, sync, off.
+Specifies the necessity for warming up the chunk cache.
+1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the
 chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
 for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
 2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,

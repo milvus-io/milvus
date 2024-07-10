@@ -120,6 +120,14 @@ class ChunkManager {
      */
     virtual std::string
     GetRootPath() const = 0;
+
+    /**
+     * @brief collection id based index base path
+     * @return boolean
+     */
+    virtual bool
+    UseCollectionIdBasedIndexPath() const { return false; }
+
 };
 
 using ChunkManagerPtr = std::shared_ptr<ChunkManager>;

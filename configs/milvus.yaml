@@ -154,7 +154,7 @@ rocksmq:
 natsmq:
   server: # server side configuration for natsmq.
     port: 4222 # 4222 by default, Port for nats server listening.
-    storeDir: /var/lib/milvus/nats # /var/lib/milvus/nats by default, directory to use for JetStream storage of nats.
+    storeDir: /var/lib/milvus/nats # /tmp/milvus/nats by default, directory to use for JetStream storage of nats.
     maxFileStore: 17179869184 # (B) 16GB by default, Maximum size of the 'file' storage.
     maxPayload: 8388608 # (B) 8MB by default, Maximum number of bytes in a message payload.
     maxPending: 67108864 # (B) 64MB by default, Maximum number of bytes buffered for a connection Applies to client connections.
@@ -494,7 +494,7 @@ dataNode:
 
 # Configures the system log output.
 log:
-  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  level: debug # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
     rootPath: # root dir path to put logs, default "" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs
     maxSize: 300 # MB
@@ -598,6 +598,8 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+  storage:
+    useCollectionIdBasedIndexPath: false
   ttMsgEnabled: true # Whether the instance disable sending ts messages
   bloomFilterSize: 100000
   maxBloomFalsePositive: 0.05

@@ -9,6 +9,14 @@ x-ccache: &ccache
 
 services:
   builder:
+    deploy:
+      resources:
+        limits:
+          cpus: '10'
+          memory: 32G
+        reservations:
+          cpus: '10'
+          memory: 32G
     image: ${IMAGE_REPO}/milvus-env:${OS_NAME}-${DATE_VERSION}
     # Build devcontainer
     build:
