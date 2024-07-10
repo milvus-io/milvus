@@ -48,6 +48,7 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.ETCD())
 	assertNotNil(r.RootCoordClient())
+	assertNotNil(r.DataCoordClient())
 }
 
 // Resource access the underlying singleton of resources.
