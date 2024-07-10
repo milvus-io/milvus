@@ -182,7 +182,7 @@ func (c *dispatcherManager) tryMerge() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.mainDispatcher == nil {
+	if c.mainDispatcher == nil || c.mainDispatcher.CurTs() == 0 {
 		return
 	}
 	candidates := make(map[string]struct{})
