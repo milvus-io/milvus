@@ -516,7 +516,7 @@ func ValidatePartitionKeyIsolation(expr *planpb.Expr) error {
 		return err
 	}
 	if !foundPartitionKey {
-		return errors.New("partition key not found in expr when validating parititon key isolation")
+		return errors.New("partition key not found in expr when validating partition key isolation")
 	}
 	return nil
 }

@@ -800,7 +800,7 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
-			log.Info("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
+			log.Info("partition group not in partitionKey pattern", zap.String("partitionName", partitionName), zap.Error(err))
 			return result
 		}
 		partitionNames[index] = partitionName

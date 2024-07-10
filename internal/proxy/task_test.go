@@ -3833,16 +3833,6 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		assert.ErrorContains(t, alterTask.PreExecute(ctx), "partition key isolation mode is enabled but current Milvus does not support it")
 	})
 
-	t.Run("alter collection with vec index and isolation but same value", func(t *testing.T) {
-		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
-		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-		colName := collectionName + "AlterSameVal"
-		createIsoCollection(colName, true, true, false)
-		alterTask := getAlterCollectionTask(colName, true)
-		assert.ErrorContains(t, alterTask.PreExecute(ctx),
-			"partition key isolation mode is already set to true: invalid parameter")
-	})
-
 	t.Run("alter collection with vec index and isolation", func(t *testing.T) {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
@@ -3870,6 +3860,6 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		}
 		alterTask := getAlterCollectionTask(colName, false)
 		assert.ErrorContains(t, alterTask.PreExecute(ctx),
-			"can not alter partition key isolation mode if collection already has vector index. Please drop the index first")
+			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 	})
 }

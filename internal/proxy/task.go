@@ -918,11 +918,13 @@ func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, p
 	}
 
 	if !isPartitionKeyEnabled {
-		return false, merr.WrapErrCollectionIllegalSchema(colName, "partition key isolation mode is enabled but no partition key field is set")
+		return false, merr.WrapErrCollectionIllegalSchema(colName,
+			"partition key isolation mode is enabled but no partition key field is set. Please set the partition key first")
 	}
 
 	if !paramtable.Get().CommonCfg.EnableMaterializedView.GetAsBool() {
-		return false, merr.WrapErrCollectionIllegalSchema(colName, "partition key isolation mode is enabled but current Milvus does not support it")
+		return false, merr.WrapErrCollectionIllegalSchema(colName,
+			"partition key isolation mode is enabled but current Milvus does not support it. Please contact us")
 	}
 
 	log.Info("validated with partition key isolation", zap.String("collectionName", colName))
@@ -976,10 +978,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		zap.Bool("exist", exist))
 
 	// if the partition key isolation property is already exist and the new value is different from the old value
-	if exist {
-		if oldIsoValue == newIsoValue {
-			return merr.WrapErrParameterInvalidMsg("partition key isolation mode is already set to %v", oldIsoValue)
-		}
+	if exist && oldIsoValue != newIsoValue {
 		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 		if err != nil {
 			return err
@@ -1002,7 +1001,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 		if hasVecIndex {
 			return merr.WrapErrCollectionHasVectorIndex(t.CollectionName,
-				"can not alter partition key isolation mode if collection already has vector index. Please drop the index first")
+				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}
 
