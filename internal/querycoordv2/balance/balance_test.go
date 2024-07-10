@@ -19,6 +19,7 @@ package balance
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -37,6 +38,9 @@ func (suite *BalanceTestSuite) SetupTest() {
 	nodeManager := session.NewNodeManager()
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, nodeManager)
+
+	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
 func (suite *BalanceTestSuite) TestAssignBalance() {
@@ -84,13 +88,14 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupTest()
+			suite.mockScheduler.ExpectedCalls = nil
 			for i := range c.nodeIDs {
 				nodeInfo := session.NewNodeInfo(c.nodeIDs[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
 				if !nodeInfo.IsStoppingState() {
-					suite.mockScheduler.EXPECT().GetNodeSegmentDelta(c.nodeIDs[i]).Return(c.deltaCnts[i])
+					suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
 			plans := suite.roundRobinBalancer.AssignSegment(0, c.assignments, c.nodeIDs, false)
@@ -144,13 +149,14 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupTest()
+			suite.mockScheduler.ExpectedCalls = nil
 			for i := range c.nodeIDs {
 				nodeInfo := session.NewNodeInfo(c.nodeIDs[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithChannelCnt(c.channelCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
 				if !nodeInfo.IsStoppingState() {
-					suite.mockScheduler.EXPECT().GetNodeChannelDelta(c.nodeIDs[i]).Return(c.deltaCnts[i])
+					suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
 			plans := suite.roundRobinBalancer.AssignChannel(c.assignments, c.nodeIDs, false)
