@@ -334,11 +334,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 }
 
 func (t *clusteringCompactionTask) resetSegmentCompacting() {
-	var segmentIDs []UniqueID
-	for _, binLogs := range t.GetPlan().GetSegmentBinlogs() {
-		segmentIDs = append(segmentIDs, binLogs.GetSegmentID())
-	}
-	t.meta.SetSegmentsCompacting(segmentIDs, false)
+	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
