@@ -186,7 +186,7 @@ func (t *l0CompactionTask) SetStartTime(startTime int64) {
 }
 
 func (t *l0CompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == NullNodeID
+	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
 }
 
 func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
