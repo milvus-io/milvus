@@ -72,6 +72,12 @@ func TestManager(t *testing.T) {
 		_, err = c.Add(ctx, "mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
+		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
+		c.(*dispatcherManager).mu.RLock()
+		for _, d := range c.(*dispatcherManager).soloDispatchers {
+			d.curTs.Store(1000)
+		}
+		c.(*dispatcherManager).mu.RUnlock()
 
 		c.(*dispatcherManager).tryMerge()
 		assert.Equal(t, 1, c.Num())
@@ -97,6 +103,12 @@ func TestManager(t *testing.T) {
 		_, err = c.Add(ctx, "mock_vchannel_2", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
+		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
+		c.(*dispatcherManager).mu.RLock()
+		for _, d := range c.(*dispatcherManager).soloDispatchers {
+			d.curTs.Store(1000)
+		}
+		c.(*dispatcherManager).mu.RUnlock()
 
 		checkIntervalK := paramtable.Get().MQCfg.MergeCheckInterval.Key
 		paramtable.Get().Save(checkIntervalK, "0.01")
