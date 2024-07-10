@@ -1108,7 +1108,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			return err
 		}
 
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			log.Error("fail to init meta cache",
 				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
 				zap.String("reason", resp.GetStatus().GetReason()))
