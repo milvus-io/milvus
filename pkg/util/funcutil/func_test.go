@@ -142,6 +142,20 @@ func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestGetCollectionIDFromVChannel(t *testing.T) {
+	vChannel1 := "06b84fe16780ed1-rootcoord-dm_3_449684528748778322v0"
+	collectionID := GetCollectionIDFromVChannel(vChannel1)
+	assert.Equal(t, int64(449684528748778322), collectionID)
+
+	invailedVChannel := "06b84fe16780ed1-rootcoord-dm_3_v0"
+	collectionID = GetCollectionIDFromVChannel(invailedVChannel)
+	assert.Equal(t, int64(-1), collectionID)
+
+	invailedVChannel = "06b84fe16780ed1-rootcoord-dm_3_-1v0"
+	collectionID = GetCollectionIDFromVChannel(invailedVChannel)
+	assert.Equal(t, int64(-1), collectionID)
+}
+
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond
