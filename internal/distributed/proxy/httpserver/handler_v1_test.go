@@ -44,6 +44,7 @@ const (
 
 var StatusSuccess = commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_Success,
+	Code:      merr.Code(nil),
 	Reason:    "",
 }
 
