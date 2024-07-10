@@ -70,6 +70,7 @@ var (
 	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
+	ErrCollectionHasVectorIndex                = newMilvusError("collection already has vector index", 108, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)

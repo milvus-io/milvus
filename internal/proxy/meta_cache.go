@@ -99,6 +99,7 @@ type collectionBasicInfo struct {
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
+	properties          map[string]string
 }
 
 type collectionInfo struct {
@@ -108,6 +109,7 @@ type collectionInfo struct {
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
+	properties          map[string]string
 }
 
 type databaseInfo struct {
@@ -189,6 +191,7 @@ func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 		createdTimestamp:    info.createdTimestamp,
 		createdUtcTimestamp: info.createdUtcTimestamp,
 		consistencyLevel:    info.consistencyLevel,
+		properties:          info.properties,
 	}
 
 	return basicInfo
@@ -393,6 +396,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdTimestamp:    collection.CreatedTimestamp,
 		createdUtcTimestamp: collection.CreatedUtcTimestamp,
 		consistencyLevel:    collection.ConsistencyLevel,
+		properties:          funcutil.KeyValuePair2Map(collection.Properties),
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
@@ -714,6 +718,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 		ConsistencyLevel:     coll.ConsistencyLevel,
 		DbName:               coll.GetDbName(),
+		Properties:           coll.Properties,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {

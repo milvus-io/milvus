@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -72,6 +73,16 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		baseStep: baseStep{core: a.core},
 		req:      a.Req,
 		core:     a.core,
+	})
+
+	// properties needs to be refreshed in the cache
+	aliases := a.core.meta.ListAliasesByID(oldColl.CollectionID)
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: a.core},
+		dbName:          a.Req.GetDbName(),
+		collectionNames: append(aliases, a.Req.GetCollectionName()),
+		collectionID:    oldColl.CollectionID,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
 
 	return redoTask.Execute(ctx)
