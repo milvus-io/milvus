@@ -749,4 +749,4 @@ trace:
 
 autoIndex:
   params:
-    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
+    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}'

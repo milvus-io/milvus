@@ -772,6 +772,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
@@ -789,6 +790,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -807,6 +809,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -823,6 +826,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 
@@ -837,6 +841,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 
@@ -852,6 +857,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 }
