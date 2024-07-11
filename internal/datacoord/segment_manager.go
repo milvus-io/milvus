@@ -116,7 +116,7 @@ type SegmentManager struct {
 	segments            []UniqueID
 	estimatePolicy      calUpperLimitPolicy
 	allocPolicy         AllocatePolicy
-	segmentSealPolicies []segmentSealPolicy
+	segmentSealPolicies []SegmentSealPolicy
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
 }
@@ -161,7 +161,7 @@ func withAllocPolicy(policy AllocatePolicy) allocOption {
 }
 
 // get allocOption with segmentSealPolicies
-func withSegmentSealPolices(policies ...segmentSealPolicy) allocOption {
+func withSegmentSealPolices(policies ...SegmentSealPolicy) allocOption {
 	return allocFunc(func(manager *SegmentManager) {
 		// do override instead of append, to override default options
 		manager.segmentSealPolicies = policies
@@ -189,8 +189,8 @@ func defaultAllocatePolicy() AllocatePolicy {
 	return AllocatePolicyL1
 }
 
-func defaultSegmentSealPolicy() []segmentSealPolicy {
-	return []segmentSealPolicy{
+func defaultSegmentSealPolicy() []SegmentSealPolicy {
+	return []SegmentSealPolicy{
 		sealL1SegmentByBinlogFileNumber(Params.DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()),
 		sealL1SegmentByLifetime(Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)),
 		sealL1SegmentByCapacity(Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()),
@@ -633,7 +633,8 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		}
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
-			if policy(info, ts) {
+			if shouldSeal, reason := policy.ShouldSeal(info, ts); shouldSeal {
+				log.Info("Seal Segment for policy matched", zap.Int64("segmentID", info.GetID()), zap.String("reason", reason))
 				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}

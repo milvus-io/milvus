@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -105,35 +106,47 @@ func AllocatePolicyL1(segments []*SegmentInfo, count int64,
 	return newSegmentAllocations, existedSegmentAllocations
 }
 
+type SegmentSealPolicy interface {
+	ShouldSeal(segment *SegmentInfo, ts Timestamp) (bool, string)
+}
+
 // segmentSealPolicy seal policy applies to segment
-type segmentSealPolicy func(segment *SegmentInfo, ts Timestamp) bool
+type segmentSealPolicyFunc func(segment *SegmentInfo, ts Timestamp) (bool, string)
+
+func (f segmentSealPolicyFunc) ShouldSeal(segment *SegmentInfo, ts Timestamp) (bool, string) {
+	return f(segment, ts)
+}
 
 // sealL1SegmentByCapacity get segmentSealPolicy with segment size factor policy
-func sealL1SegmentByCapacity(sizeFactor float64) segmentSealPolicy {
-	return func(segment *SegmentInfo, ts Timestamp) bool {
-		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())
+func sealL1SegmentByCapacity(sizeFactor float64) segmentSealPolicyFunc {
+	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
+		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum()),
+			fmt.Sprintf("Row count capacity full, current rows: %d, max row: %d, seal factor: %f", segment.currRows, segment.GetMaxRowNum(), sizeFactor)
 	}
 }
 
 // sealL1SegmentByLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
-func sealL1SegmentByLifetime(lifetime time.Duration) segmentSealPolicy {
-	return func(segment *SegmentInfo, ts Timestamp) bool {
+func sealL1SegmentByLifetime(lifetime time.Duration) segmentSealPolicyFunc {
+	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
 		pts, _ := tsoutil.ParseTS(ts)
 		epts, _ := tsoutil.ParseTS(segment.GetLastExpireTime())
 		d := pts.Sub(epts)
-		return d >= lifetime
+		return d >= lifetime,
+			fmt.Sprintf("Segment Lifetime expired, segment last expire: %v, now:%v, max lifetime %v",
+				pts, epts, lifetime)
 	}
 }
 
 // sealL1SegmentByBinlogFileNumber seal L1 segment if binlog file number of segment exceed configured max number
-func sealL1SegmentByBinlogFileNumber(maxBinlogFileNumber int) segmentSealPolicy {
-	return func(segment *SegmentInfo, ts Timestamp) bool {
+func sealL1SegmentByBinlogFileNumber(maxBinlogFileNumber int) segmentSealPolicyFunc {
+	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
 		logFileCounter := 0
 		for _, fieldBinlog := range segment.GetStatslogs() {
 			logFileCounter += len(fieldBinlog.GetBinlogs())
 		}
 
-		return logFileCounter >= maxBinlogFileNumber
+		return logFileCounter >= maxBinlogFileNumber,
+			fmt.Sprintf("Segment binlog number too large, binlog number: %d, max binlog number: %d", logFileCounter, maxBinlogFileNumber)
 	}
 }
 
@@ -145,11 +158,12 @@ func sealL1SegmentByBinlogFileNumber(maxBinlogFileNumber int) segmentSealPolicy 
 // into this segment anymore, so sealLongTimeIdlePolicy will seal these segments to trigger handoff of query cluster.
 // Q: Why we don't decrease the expiry time directly?
 // A: We don't want to influence segments which are accepting `frequent small` batch entities.
-func sealL1SegmentByIdleTime(idleTimeTolerance time.Duration, minSizeToSealIdleSegment float64, maxSizeOfSegment float64) segmentSealPolicy {
-	return func(segment *SegmentInfo, ts Timestamp) bool {
+func sealL1SegmentByIdleTime(idleTimeTolerance time.Duration, minSizeToSealIdleSegment float64, maxSizeOfSegment float64) segmentSealPolicyFunc {
+	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
 		limit := (minSizeToSealIdleSegment / maxSizeOfSegment) * float64(segment.GetMaxRowNum())
 		return time.Since(segment.lastWrittenTime) > idleTimeTolerance &&
-			float64(segment.currRows) > limit
+				float64(segment.currRows) > limit,
+			fmt.Sprintf("segment idle, segment row number :%d, last written time: %v, max idle duration: %v", segment.currRows, segment.lastWrittenTime, idleTimeTolerance)
 	}
 }
 
