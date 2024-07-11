@@ -255,6 +255,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		zap.Int64("taskID", taskID),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
+		zap.Int64s("L0 segments", levelZeroSegs),
 	)
 }
 
