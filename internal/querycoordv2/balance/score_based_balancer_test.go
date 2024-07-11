@@ -295,6 +295,17 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 	defer suite.TearDownTest()
 	balancer := suite.balancer
 
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableEstimateGrowingRowCount.Key, "false")
+	suite.balancer.meta.PutCollection(&meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: 1,
+		},
+	}, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: 1,
+			PartitionID:  1,
+		},
+	})
 	distributions := map[int64][]*meta.Segment{
 		1: {
 			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20, CollectionID: 1}, Node: 1},
@@ -327,6 +338,18 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 	}
 	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
 	plans := balancer.AssignSegment(1, toAssign, lo.Keys(distributions), false)
+	for _, p := range plans {
+		suite.Equal(int64(2), p.To)
+	}
+
+	// test enable estimate growing row count
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableEstimateGrowingRowCount.Key, "true")
+	leaderView = &meta.LeaderView{
+		ID:           1,
+		CollectionID: 1,
+	}
+	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
+	plans = balancer.AssignSegment(1, toAssign, lo.Keys(distributions), false)
 	for _, p := range plans {
 		suite.Equal(int64(2), p.To)
 	}

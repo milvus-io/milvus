@@ -314,6 +314,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.checkExecutedFlagInterval", "200")
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
+
+		assert.Equal(t, true, Params.EnableEstimateGrowingRowCount.GetAsBool())
+		assert.Equal(t, 10000, Params.EstimateGrowingRowCountPerSegment.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

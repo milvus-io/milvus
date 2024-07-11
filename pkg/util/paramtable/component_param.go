@@ -1384,6 +1384,8 @@ type queryCoordConfig struct {
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
+	EnableEstimateGrowingRowCount       ParamItem `refreshable:"true"`
+	EstimateGrowingRowCountPerSegment   ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1554,6 +1556,26 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GrowingRowCountWeight.Init(base.mgr)
+
+	p.EnableEstimateGrowingRowCount = ParamItem{
+		Key:          "queryCoord.enableEstimateGrowingRowCount",
+		Version:      "2.3.19",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+		Doc:          "whether enable to estimate max row count of growing segment",
+		Export:       true,
+	}
+	p.EnableEstimateGrowingRowCount.Init(base.mgr)
+
+	p.EstimateGrowingRowCountPerSegment = ParamItem{
+		Key:          "queryCoord.estimateGrowingRowCountPerSegment",
+		Version:      "2.3.19",
+		DefaultValue: "10000",
+		PanicIfEmpty: true,
+		Doc:          "the estimate max row count of growing segment",
+		Export:       true,
+	}
+	p.EstimateGrowingRowCountPerSegment.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
