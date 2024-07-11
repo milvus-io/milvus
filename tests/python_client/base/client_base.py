@@ -301,7 +301,11 @@ class TestcaseBase(Base):
                 if len(multiple_dim_array) == 0 or is_all_data_type == False:
                     vector_name_list.append(ct.default_float_vec_field_name)
                 for vector_name in vector_name_list:
-                    collection_w.create_index(vector_name, ct.default_flat_index)
+                    # Unlike dense vectors, sparse vectors cannot create flat index.
+                    if ct.sparse_vector in vector_name:
+                        collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
+                    else:
+                        collection_w.create_index(vector_name, ct.default_flat_index)
 
             collection_w.load()
 
