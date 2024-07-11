@@ -307,8 +307,8 @@ func (v *ClusteringSegmentsView) Append(segments ...*SegmentView) {
 }
 
 func (v *ClusteringSegmentsView) String() string {
-	strs := lo.Map(v.segments, func(v *SegmentView, _ int) string {
-		return v.String()
+	strs := lo.Map(v.segments, func(segView *SegmentView, _ int) string {
+		return segView.String()
 	})
 	return fmt.Sprintf("label=<%s>,  segments=%v", v.label.String(), strs)
 }
