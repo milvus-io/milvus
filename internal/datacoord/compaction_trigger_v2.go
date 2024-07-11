@@ -85,7 +85,7 @@ func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHan
 		meta:     meta,
 		closeSig: make(chan struct{}),
 	}
-	m.l0Policy = newL0CompactionPolicy(meta, m.view)
+	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.view, m.allocator, m.compactionHandler, m.handler)
 	return m
 }
@@ -112,7 +112,7 @@ func (m *CompactionTriggerManager) startLoop() {
 	for {
 		select {
 		case <-m.closeSig:
-			log.Info("Compaction View checkLoop quit")
+			log.Info("Compaction trigger manager checkLoop quit")
 			return
 		case <-l0Ticker.C:
 			if !m.l0Policy.Enable() {
@@ -138,7 +138,7 @@ func (m *CompactionTriggerManager) startLoop() {
 				continue
 			}
 			if m.compactionHandler.isFull() {
-				log.RatedInfo(10, "Skip trigger l0 compaction since compactionHandler is full")
+				log.RatedInfo(10, "Skip trigger clustering compaction since compactionHandler is full")
 				continue
 			}
 			events, err := m.clusteringPolicy.Trigger()
@@ -214,7 +214,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, view CompactionView) {
 	taskID, err := m.allocator.allocID(ctx)
 	if err != nil {
-		log.Warn("fail to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
 		return
 	}
 
@@ -224,7 +224,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("fail to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
 		return
 	}
 
@@ -245,7 +245,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
-		log.Warn("failed to execute compaction task",
+		log.Warn("Failed to execute compaction task",
 			zap.Int64("collection", task.CollectionID),
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
@@ -253,6 +253,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	}
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
+		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 	)
 }
@@ -260,13 +261,13 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
 	taskID, _, err := m.allocator.allocN(2)
 	if err != nil {
-		log.Warn("fail to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
 		return
 	}
 	view.GetSegmentsView()
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("fail to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
 		return
 	}
 	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
@@ -292,7 +293,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
-		log.Warn("failed to execute compaction task",
+		log.Warn("Failed to execute compaction task",
 			zap.Int64("collection", task.CollectionID),
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
@@ -300,6 +301,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 	log.Info("Finish to submit a clustering compaction task",
 		zap.Int64("taskID", taskID),
+		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 	)
 }
