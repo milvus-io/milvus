@@ -45,7 +45,9 @@ class ChunkCache {
 
  public:
     std::shared_ptr<ColumnBase>
-    Read(const std::string& filepath, const MmapChunkDescriptorPtr& descriptor);
+    Read(const std::string& filepath,
+         const MmapChunkDescriptorPtr& descriptor,
+         const bool mem_not_need = false);
 
     void
     Remove(const std::string& filepath);
