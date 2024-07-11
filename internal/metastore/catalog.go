@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -185,4 +186,15 @@ type QueryCoordCatalog interface {
 	SaveCollectionTargets(target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(collectionID int64) error
 	GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error)
+}
+
+// StreamingCoordCataLog is the interface for streamingcoord catalog
+type StreamingCoordCataLog interface {
+	// physical channel watch related
+
+	// ListPChannel list all pchannels on milvus.
+	ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta, error)
+
+	// SavePChannel save a pchannel info to metastore.
+	SavePChannels(ctx context.Context, info []*streamingpb.PChannelMeta) error
 }

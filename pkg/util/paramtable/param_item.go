@@ -244,6 +244,18 @@ func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]st
 	return getAndConvert(pi.GetValue(), funcutil.JSONToRoleDetails, nil)
 }
 
+func (pi *ParamItem) GetAsDurationByParse() time.Duration {
+	val, _ := pi.get()
+	durationVal, err := time.ParseDuration(val)
+	if err != nil {
+		durationVal, err = time.ParseDuration(pi.DefaultValue)
+		if err != nil {
+			panic(fmt.Sprintf("unreachable: parse duration from default value failed, %s, err: %s", pi.DefaultValue, err.Error()))
+		}
+	}
+	return durationVal
+}
+
 func (pi *ParamItem) GetAsSize() int64 {
 	valueStr := strings.ToLower(pi.GetValue())
 	if strings.HasSuffix(valueStr, "g") || strings.HasSuffix(valueStr, "gb") {

@@ -308,12 +308,14 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 
 		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
 			dm := dataNodeMetric.QuotaMetrics
-			if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
-				minTt, _ := tsoutil.ParseTS(dm.Fgm.MinFlowGraphTt)
-				delay := now.Sub(minTt)
+			if dm != nil {
+				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
+					minTt, _ := tsoutil.ParseTS(dm.Fgm.MinFlowGraphTt)
+					delay := now.Sub(minTt)
 
-				if delay.Milliseconds() >= maxDelay.Milliseconds() {
-					dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel, delay)
+					if delay.Milliseconds() >= maxDelay.Milliseconds() {
+						dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel, delay)
+					}
 				}
 			}
 		}
