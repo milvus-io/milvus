@@ -9,3 +9,8 @@ type PChannelInfo struct {
 	Name string // name of pchannel.
 	Term int64  // term of pchannel.
 }
+
+type PChannelInfoAssigned struct {
+	Channel PChannelInfo
+	Node    StreamingNodeInfo
+}
