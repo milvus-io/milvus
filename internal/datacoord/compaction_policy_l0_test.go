@@ -193,11 +193,7 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 		meta.segments.SetSegment(id, segment)
 	}
 
-	views := &FullViews{
-		collections: make(map[int64][]*SegmentView),
-	}
-
-	s.l0_policy = newL0CompactionPolicy(meta, views)
+	s.l0_policy = newL0CompactionPolicy(meta)
 }
 
 func genTestSegmentInfo(label *CompactionGroupLabel, ID UniqueID, level datapb.SegmentLevel, state commonpb.SegmentState) *SegmentInfo {
