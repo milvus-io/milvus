@@ -269,11 +269,11 @@ func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
 		if collectionID == -1 {
-			log.Warn("can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
+			log.RatedWarn(60, "can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
 			continue
 		}
 		if meta.GetCollection(collectionID) == nil {
-			log.Warn("corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
+			log.RatedWarn(60, "corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
 			continue
 		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
