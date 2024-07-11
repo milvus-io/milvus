@@ -45,6 +45,8 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
     test_emb_matrix = test_emb_matrix[:test_data_size]
 
     train_emb_matrix = pd.read_parquet(f"{data_dir}/train-00-of-10.parquet")["emb"].values
+    if data_size > len(train_emb_matrix):
+        train_emb_matrix = np.concatenate([train_emb_matrix] * (data_size // len(train_emb_matrix) + 1), axis=0)
     train_emb_matrix = train_emb_matrix[:data_size]
     #
     # # generate data
