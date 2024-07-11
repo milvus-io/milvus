@@ -992,15 +992,13 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 	}
 
 	// invalid IvfPq params m dim ≡ 0 (mod m), nbits [1, 16]
-	t.Log("https://github.com/milvus-io/milvus/issues/34426")
-	/*for _, invalidNBits := range []int{0, 17} {
+	for _, invalidNBits := range []int{0, 65} {
 		// IvfFlat
 		idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 8, invalidNBits)
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfPq))
-		common.CheckErr(t, err, false, "nbits has to be in range [1, 16]")
-	}*/
+		common.CheckErr(t, err, false, "parameter `nbits` out of range, expect range [1,64]")
+	}
 
-	// TODO unclear error message
 	idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 7, 8)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfPq))
 	common.CheckErr(t, err, false, "dimension must be able to be divided by `m`")
