@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -161,8 +162,9 @@ const (
 
 // common properties
 const (
-	MmapEnabledKey    = "mmap.enabled"
-	LazyLoadEnableKey = "lazyload.enabled"
+	MmapEnabledKey           = "mmap.enabled"
+	LazyLoadEnableKey        = "lazyload.enabled"
+	PartitionKeyIsolationKey = "partitionkey.isolation"
 )
 
 const (
@@ -222,6 +224,31 @@ func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
 		}
 	}
 	return false
+}
+
+func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == PartitionKeyIsolationKey {
+			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse partition key isolation")
+			}
+			return val, nil
+		}
+	}
+	return false, nil
+}
+
+func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
+	val, ok := props[PartitionKeyIsolationKey]
+	if !ok {
+		return false, nil
+	}
+	iso, parseErr := strconv.ParseBool(val)
+	if parseErr != nil {
+		return false, errors.Wrap(parseErr, "failed to parse partition key isolation property")
+	}
+	return iso, nil
 }
 
 const (
