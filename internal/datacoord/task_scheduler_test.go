@@ -1752,5 +1752,111 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		waitTaskDoneFunc(scheduler)
 		resetMetaFunc()
 	})
+
+	s.Run("enqueue partitionKeyIsolation is false when schema is not set", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler.enqueue(t)
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
 	scheduler.Stop()
+
+	isoCollInfo := &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:               "coll",
+			Fields:             fieldsSchema,
+			EnableDynamicField: false,
+		},
+		Properties: map[string]string{
+			common.PartitionKeyIsolationKey: "false",
+		},
+	}
+	handler_isolation := NewNMockHandler(s.T())
+	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
+
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
+	scheduler_isolation.Start()
+
+	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is true when MV enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "true"
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, true)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is invalid when MV is enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "invalid"
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+	scheduler_isolation.Stop()
 }
