@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 

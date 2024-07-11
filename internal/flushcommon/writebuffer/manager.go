@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -19,6 +19,8 @@ import (
 )
 
 // BufferManager is the interface for WriteBuffer management.
+//
+//go:generate mockery --name=BufferManager --structname=MockBufferManager --output=./  --filename=mock_manager.go --with-expecter --inpackage
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error
