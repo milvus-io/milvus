@@ -95,21 +95,21 @@ type Cache interface {
 	AllocID(ctx context.Context) (int64, error)
 }
 type collectionBasicInfo struct {
-	collID              typeutil.UniqueID
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
-	properties          map[string]string
+	collID                typeutil.UniqueID
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type collectionInfo struct {
-	collID              typeutil.UniqueID
-	schema              *schemaInfo
-	partInfo            *partitionInfos
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
-	properties          map[string]string
+	collID                typeutil.UniqueID
+	schema                *schemaInfo
+	partInfo              *partitionInfos
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type databaseInfo struct {
@@ -187,11 +187,11 @@ type partitionInfo struct {
 func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 	// Do a deep copy for all fields.
 	basicInfo := &collectionBasicInfo{
-		collID:              info.collID,
-		createdTimestamp:    info.createdTimestamp,
-		createdUtcTimestamp: info.createdUtcTimestamp,
-		consistencyLevel:    info.consistencyLevel,
-		properties:          info.properties,
+		collID:                info.collID,
+		createdTimestamp:      info.createdTimestamp,
+		createdUtcTimestamp:   info.createdUtcTimestamp,
+		consistencyLevel:      info.consistencyLevel,
+		partitionKeyIsolation: info.partitionKeyIsolation,
 	}
 
 	return basicInfo
@@ -388,15 +388,20 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
+	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+
 	schemaInfo := newSchemaInfo(collection.Schema)
 	m.collInfo[database][collectionName] = &collectionInfo{
-		collID:              collection.CollectionID,
-		schema:              schemaInfo,
-		partInfo:            parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
-		createdTimestamp:    collection.CreatedTimestamp,
-		createdUtcTimestamp: collection.CreatedUtcTimestamp,
-		consistencyLevel:    collection.ConsistencyLevel,
-		properties:          funcutil.KeyValuePair2Map(collection.Properties),
+		collID:                collection.CollectionID,
+		schema:                schemaInfo,
+		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+		createdTimestamp:      collection.CreatedTimestamp,
+		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+		consistencyLevel:      collection.ConsistencyLevel,
+		partitionKeyIsolation: isolation,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))

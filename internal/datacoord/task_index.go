@@ -129,7 +129,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 					FieldType: int32(partitionKeyField.DataType),
 					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
 				})
-				iso, _, isoErr := common.IsPartitionKeyIsolationPropEnabled(collInfo.Properties)
+				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collInfo.Properties)
 				if isoErr != nil {
 					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
 				}

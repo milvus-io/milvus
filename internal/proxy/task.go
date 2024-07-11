@@ -965,26 +965,28 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	oldIsoValue, exist, err := common.IsPartitionKeyIsolationPropEnabled(collBasicInfo.properties)
-	if err != nil {
-		return err
-	}
+	oldIsoValue := collBasicInfo.partitionKeyIsolation
 
 	log.Info("alter collection pre check with partition key isolation",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
-		zap.Bool("oldIsoValue", oldIsoValue),
-		zap.Bool("exist", exist))
+		zap.Bool("oldIsoValue", oldIsoValue))
 
-	// if the partition key isolation property is already exist and the new value is different from the old value
-	if exist && oldIsoValue != newIsoValue {
+	// if the isolation flag in properties is not set, meta cache will assign partitionKeyIsolation in collection info to false
+	//   - None|false -> false, skip
+	//   - None|false -> true, check if the collection has vector index
+	//   - true -> false, check if the collection has vector index
+	//   - false -> true, check if the collection has vector index
+	//   - true -> true, skip
+	if oldIsoValue != newIsoValue {
 		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 		if err != nil {
 			return err
 		}
 
 		hasVecIndex := false
+		indexName := ""
 		indexResponse, err := t.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 			CollectionID: t.CollectionID,
 			IndexName:    "",
@@ -996,11 +998,12 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			for _, field := range collSchema.Fields {
 				if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
 					hasVecIndex = true
+					indexName = field.GetName()
 				}
 			}
 		}
 		if hasVecIndex {
-			return merr.WrapErrCollectionHasVectorIndex(t.CollectionName,
+			return merr.WrapErrIndexDuplicate(indexName,
 				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}

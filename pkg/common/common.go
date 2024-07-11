@@ -239,17 +239,16 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 	return false, nil
 }
 
-// returns - actual value, if exist, error
-func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, bool, error) {
+func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
 	val, ok := props[PartitionKeyIsolationKey]
 	if !ok {
-		return false, false, nil
+		return false, nil
 	}
 	iso, parseErr := strconv.ParseBool(val)
 	if parseErr != nil {
-		return false, true, errors.Wrap(parseErr, "failed to parse partition key isolation property")
+		return false, errors.Wrap(parseErr, "failed to parse partition key isolation property")
 	}
-	return iso, true, nil
+	return iso, nil
 }
 
 const (

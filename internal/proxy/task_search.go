@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -312,13 +311,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 				return err
 			}
 
-			iso, _, err := common.IsPartitionKeyIsolationPropEnabled(collInfo.properties)
-			if err != nil {
-				log.Warn("failed to get partition key isolation prop", zap.Error(err))
-				return err
-			}
-
-			if iso {
+			if collInfo.partitionKeyIsolation {
 				expr, err := exprutil.ParseExprFromPlan(plan)
 				if err != nil {
 					log.Warn("failed to parse expr from plan during MV", zap.Error(err))

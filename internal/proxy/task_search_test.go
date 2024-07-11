@@ -2631,10 +2631,8 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 		&collectionBasicInfo{
-			collID: s.colID,
-			properties: map[string]string{
-				common.PartitionKeyIsolationKey: "true",
-			},
+			collID:                s.colID,
+			partitionKeyIsolation: true,
 		}, nil)
 	globalMetaCache = s.mockMetaCache
 }
