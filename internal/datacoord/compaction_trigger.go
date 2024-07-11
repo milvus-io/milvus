@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -77,8 +78,8 @@ type compactionTrigger struct {
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
 	forceMu           lock.Mutex
-	quit              chan struct{}
-	wg                sync.WaitGroup
+	closeCh           lifetime.SafeChan
+	closeWaiter       sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -105,20 +106,20 @@ func newCompactionTrigger(
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
+		closeCh:                      lifetime.NewSafeChan(),
 	}
 }
 
 func (t *compactionTrigger) start() {
-	t.quit = make(chan struct{})
 	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
-	t.wg.Add(2)
+	t.closeWaiter.Add(2)
 	go func() {
 		defer logutil.LogPanic()
-		defer t.wg.Done()
+		defer t.closeWaiter.Done()
 
 		for {
 			select {
-			case <-t.quit:
+			case <-t.closeCh.CloseCh():
 				log.Info("compaction trigger quit")
 				return
 			case signal := <-t.signals:
@@ -145,7 +146,7 @@ func (t *compactionTrigger) start() {
 
 func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer logutil.LogPanic()
-	defer t.wg.Done()
+	defer t.closeWaiter.Done()
 
 	// If AutoCompaction disabled, global loop will not start
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
@@ -154,7 +155,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 
 	for {
 		select {
-		case <-t.quit:
+		case <-t.closeCh.CloseCh():
 			t.globalTrigger.Stop()
 			log.Info("global compaction loop exit")
 			return
@@ -168,8 +169,8 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 }
 
 func (t *compactionTrigger) stop() {
-	close(t.quit)
-	t.wg.Wait()
+	t.closeCh.Close()
+	t.closeWaiter.Wait()
 }
 
 func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInfo, error) {
@@ -241,7 +242,7 @@ func (t *compactionTrigger) triggerCompaction() error {
 // triggerSingleCompaction trigger a compaction bundled with collection-partition-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	// If AutoCompaction disabled, flush request will not trigger compaction
-	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
 		return nil
 	}
 

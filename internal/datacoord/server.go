@@ -375,11 +375,8 @@ func (s *Server) initDataCoord() error {
 	log.Info("init service discovery done")
 
 	s.initTaskScheduler(storageCli)
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.createCompactionHandler()
-		s.createCompactionTrigger()
-		log.Info("init compaction scheduler done")
-	}
+	s.initCompaction()
+	log.Info("init compaction done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -420,12 +417,6 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
-	s.taskScheduler.Start()
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.compactionHandler.start()
-		s.compactionTrigger.start()
-		s.compactionTriggerManager.Start()
-	}
 	s.startServerLoop()
 
 	// http.Register(&http.Handler{
@@ -525,24 +516,6 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 
 func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNodeClient, error)) {
 	s.indexNodeCreator = f
-}
-
-func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
-}
-
-func (s *Server) stopCompactionHandler() {
-	s.compactionHandler.stop()
-	s.compactionTriggerManager.Close()
-}
-
-func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
-}
-
-func (s *Server) stopCompactionTrigger() {
-	s.compactionTrigger.stop()
 }
 
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
@@ -703,7 +676,30 @@ func (s *Server) initIndexNodeManager() {
 	}
 }
 
+func (s *Server) initCompaction() {
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+}
+
+func (s *Server) stopCompaction() {
+	s.compactionHandler.stop()
+	s.compactionTrigger.stop()
+	s.compactionTriggerManager.Close()
+}
+
+func (s *Server) startCompaction() {
+	s.compactionHandler.start()
+	s.compactionTrigger.start()
+	s.compactionTriggerManager.Start()
+}
+
 func (s *Server) startServerLoop() {
+	s.taskScheduler.Start()
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		s.startCompaction()
+	}
+
 	if !Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 		s.serverLoopWg.Add(1)
 		s.startDataNodeTtLoop(s.serverLoopCtx)
@@ -1109,10 +1105,7 @@ func (s *Server) Stop() error {
 	s.importChecker.Close()
 	s.syncSegmentsScheduler.Stop()
 
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.stopCompactionTrigger()
-		s.stopCompactionHandler()
-	}
+	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
 	s.taskScheduler.Stop()
