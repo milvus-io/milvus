@@ -388,18 +388,13 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
-			log.RatedInfo(20, "collection auto compaction disabled",
-				zap.Int64("collectionID", group.collectionID),
-			)
+			log.RatedInfo(20, "collection auto compaction disabled")
 			return nil
 		}
 
 		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now(), 0), coll)
 		if err != nil {
-			log.Warn("get compact time failed, skip to handle compaction",
-				zap.Int64("collectionID", group.collectionID),
-				zap.Int64("partitionID", group.partitionID),
-				zap.String("channel", group.channelName))
+			log.Warn("get compact time failed, skip to handle compaction")
 			return err
 		}
 
@@ -412,9 +407,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			totalRows := plan.A
 			segIDs := plan.B
 			if !signal.isForce && t.compactionHandler.isFull() {
-				log.Warn("compaction plan skipped due to handler full",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64s("segmentIDs", segIDs))
+				log.Warn("compaction plan skipped due to handler full", zap.Int64s("segmentIDs", segIDs))
 				break
 			}
 			start := time.Now()
@@ -429,7 +422,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 				Type:             datapb.CompactionType_MixCompaction,
 				CollectionTtl:    ct.collectionTTL.Nanoseconds(),
-				CollectionID:     signal.collectionID,
+				CollectionID:     group.collectionID,
 				PartitionID:      group.partitionID,
 				Channel:          group.channelName,
 				InputSegments:    segIDs,
@@ -439,19 +432,13 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			err := t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
 				log.Warn("failed to execute compaction task",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64("planID", planID),
 					zap.Int64s("segmentIDs", segIDs),
 					zap.Error(err))
 				continue
 			}
 
 			log.Info("time cost of generating global compaction",
-				zap.Int64("planID", planID),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
-				zap.Int64("collectionID", signal.collectionID),
-				zap.String("channel", group.channelName),
-				zap.Int64("partitionID", group.partitionID),
 				zap.Int64s("segmentIDs", segIDs))
 		}
 	}
