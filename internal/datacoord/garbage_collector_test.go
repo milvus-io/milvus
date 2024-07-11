@@ -1469,6 +1469,54 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segB)
 }
 
+func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+
+	m := &meta{
+		catalog:    catalog,
+		channelCPs: newChannelCps(),
+	}
+
+	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
+		"cluster-id-rootcoord-dm_0_123v0": nil,
+		"cluster-id-rootcoord-dm_0_124v0": nil,
+	}
+
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{})
+
+	t.Run("list channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 2, len(m.channelCPs.checkpoints))
+	})
+
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
+		"cluster-id-rootcoord-dm_0_123v0":                   nil,
+		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
+		"cluster-id-rootcoord-dm_0_124v0":                   nil,
+	}, nil).Twice()
+
+	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
+			if collectionID == 123 {
+				return true
+			}
+			return false
+		})
+
+	t.Run("drop channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 2, len(m.channelCPs.checkpoints))
+	})
+
+	t.Run("gc ok", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Once()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+	})
+}
+
 func TestGarbageCollector_removeObjectPool(t *testing.T) {
 	paramtable.Init()
 	cm := mocks.NewChunkManager(t)
