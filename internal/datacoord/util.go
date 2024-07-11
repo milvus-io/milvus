@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -266,6 +267,15 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 
 func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
+		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
+		if collectionID == -1 {
+			log.Warn("can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
+			continue
+		}
+		if meta.GetCollection(collectionID) == nil {
+			log.Warn("corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
+			continue
+		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
 		lag := time.Since(ts)
 		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
