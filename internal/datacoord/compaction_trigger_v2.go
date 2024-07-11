@@ -252,6 +252,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
 		zap.String("type", task.GetType().String()),
+		zap.Int64s("L0 segments", levelZeroSegs),
 	)
 }
 
