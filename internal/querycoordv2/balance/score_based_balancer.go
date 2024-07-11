@@ -159,8 +159,21 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 
 	// calculate global growing segment row count
 	views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(nodeID))
-	for _, view := range views {
-		nodeRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
+	if paramtable.Get().QueryCoordCfg.EnableEstimateGrowingRowCount.GetAsBool() {
+		collectionViews := lo.GroupBy(views, func(v *meta.LeaderView) int64 { return v.CollectionID })
+		for cid, vs := range collectionViews {
+			partitionNum := len(b.meta.GetPartitionsByCollection(cid))
+			estimateRowCount := paramtable.Get().QueryCoordCfg.EstimateGrowingRowCountPerSegment.GetAsInt()
+			growingFactor := params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat()
+
+			// there will be at most (2* partition_num) growing segments, and each segment will have estimateRowCount rows
+			// for each growing row on qn, we need move out growingFactor sealed rows
+			nodeRowCount += int(float64(2*partitionNum*estimateRowCount)*growingFactor) * len(vs)
+		}
+	} else {
+		for _, view := range views {
+			nodeRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
+		}
 	}
 
 	// calculate executing task cost in scheduler
@@ -175,8 +188,18 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 
 	// calculate collection growing segment row count
 	collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(nodeID))
-	for _, view := range collectionViews {
-		collectionRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
+	if paramtable.Get().QueryCoordCfg.EnableEstimateGrowingRowCount.GetAsBool() {
+		partitionNum := len(b.meta.GetPartitionsByCollection(collectionID))
+		estimateRowCount := paramtable.Get().QueryCoordCfg.EstimateGrowingRowCountPerSegment.GetAsInt()
+		growingFactor := params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat()
+
+		// there will be at most (2* partition_num) growing segments, and each segment will have estimateRowCount rows
+		// for each growing row on qn, we need move out growingFactor sealed rows
+		collectionRowCount += int(float64(2*partitionNum*estimateRowCount)*growingFactor) * len(collectionViews)
+	} else {
+		for _, view := range collectionViews {
+			collectionRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
+		}
 	}
 
 	// calculate executing task cost in scheduler
