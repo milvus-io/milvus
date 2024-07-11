@@ -183,6 +183,9 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return()
 
+		t.sessions = s.mockSessMgr
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil).Once()
+
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_failed, t.State)
