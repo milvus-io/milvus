@@ -343,11 +343,18 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 
 func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	log.Info("clean task", zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()), zap.String("state", t.GetState().String()))
-	// revert segment level
+	// revert segments meta
 	var operators []UpdateOperator
+	// revert level of input segments
+	// L1 : L1 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L1
+	// L2 : L2 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L2
 	for _, segID := range t.InputSegments {
 		operators = append(operators, RevertSegmentLevelOperator(segID))
-		operators = append(operators, RevertSegmentPartitionStatsVersionOperator(segID))
+	}
+	// if result segments are generated but task fail in the other steps, mark them as L1 segments without partitions stats
+	for _, segID := range t.ResultSegments {
+		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L1))
+		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, 0))
 	}
 	err := t.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
