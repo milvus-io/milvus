@@ -45,6 +45,8 @@ type TriggerManager interface {
 	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error)
 }
 
+var _ TriggerManager = (*CompactionTriggerManager)(nil)
+
 // CompactionTriggerManager registers Triggers to TriggerType
 // so that when the certain TriggerType happens, the corresponding triggers can
 // trigger the correct compaction plans.
@@ -93,7 +95,7 @@ func (m *CompactionTriggerManager) Start() {
 	go m.startLoop()
 }
 
-func (m *CompactionTriggerManager) Close() {
+func (m *CompactionTriggerManager) Stop() {
 	close(m.closeSig)
 	m.closeWg.Wait()
 }
