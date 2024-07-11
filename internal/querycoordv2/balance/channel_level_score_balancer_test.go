@@ -303,6 +303,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 	defer suite.TearDownTest()
 	balancer := suite.balancer
 
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableEstimateGrowingRowCount.Key, "false")
+
 	distributions := map[int64][]*meta.Segment{
 		1: {
 			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20, CollectionID: 1}, Node: 1},
