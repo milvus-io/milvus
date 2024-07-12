@@ -195,6 +195,7 @@ struct SearchResult {
     std::vector<float> distances_;
     std::vector<int64_t> seg_offsets_;
     std::optional<std::vector<GroupByValueType>> group_by_values_;
+    std::optional<int64_t> group_size_;
 
     // first fill data during fillPrimaryKey, and then update data after reducing search results
     std::vector<PkType> primary_keys_;
@@ -209,7 +210,7 @@ struct SearchResult {
     std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data_;
 
     // used for reduce, filter invalid pk, get real topks count
-    std::vector<size_t> topk_per_nq_prefix_sum_;
+    std::vector<size_t> topk_per_nq_prefix_sum_{};
 
     //Vector iterators, used for group by
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>

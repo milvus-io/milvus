@@ -236,7 +236,8 @@ struct GeneratedData {
             uint64_t ts_offset,
             int repeat_count,
             int array_len,
-            bool random_pk);
+            bool random_pk,
+            bool random_val);
     friend GeneratedData
     DataGenForJsonArray(SchemaPtr schema,
                         int64_t N,
@@ -307,7 +308,8 @@ inline GeneratedData DataGen(SchemaPtr schema,
                              uint64_t ts_offset = 0,
                              int repeat_count = 1,
                              int array_len = 10,
-                             bool random_pk = false) {
+                             bool random_pk = false,
+                             bool random_val = true) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -414,24 +416,39 @@ inline GeneratedData DataGen(SchemaPtr schema,
             }
             case DataType::INT32: {
                 vector<int> data(N);
-                for (auto& x : data) {
-                    x = random() % (2 * N);
+                for (int i = 0; i < N; i++) {
+                    int x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
                 }
                 insert_cols(data, N, field_meta);
                 break;
             }
             case DataType::INT16: {
                 vector<int16_t> data(N);
-                for (auto& x : data) {
-                    x = random() % (2 * N);
+                for (int i = 0; i < N; i++) {
+                    int16_t x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
                 }
                 insert_cols(data, N, field_meta);
                 break;
             }
             case DataType::INT8: {
                 vector<int8_t> data(N);
-                for (auto& x : data) {
-                    x = random() % (2 * N);
+                for (int i = 0; i < N; i++) {
+                    int8_t x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -1175,7 +1192,6 @@ translate_text_plan_to_binary_plan(const char* text_plan) {
     auto ok =
         google::protobuf::TextFormat::ParseFromString(text_plan, &plan_node);
     AssertInfo(ok, "Failed to parse");
-
     std::string binary_plan;
     plan_node.SerializeToString(&binary_plan);
 
