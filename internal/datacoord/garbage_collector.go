@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -156,6 +157,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context) {
 			gc.recycleDroppedSegments(ctx)
+			gc.recycleChannelCPMeta(ctx)
 			gc.recycleUnusedIndexes(ctx)
 			gc.recycleUnusedSegIndexes(ctx)
 		})
@@ -473,16 +475,47 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			continue
 		}
 		log.Info("GC segment meta drop segment done")
+	}
+}
 
-		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
-			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
-			log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
-			// TODO: remove channel checkpoint may be lost, need to be handled before segment GC?
-			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
-				log.Warn("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
-			}
+func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
+	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
+	if err != nil {
+		log.Warn("list channel cp fail during GC", zap.Error(err))
+		return
+	}
+
+	collectionID2GcStatus := make(map[int64]bool)
+	skippedCnt := 0
+
+	log.Info("start to GC channel cp", zap.Int("vchannelCnt", len(channelCPs)))
+	for vChannel := range channelCPs {
+		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
+
+		// !!! Skip to GC if vChannel format is illegal, it will lead meta leak in this case
+		if collectionID == -1 {
+			skippedCnt++
+			log.Warn("parse collection id fail, skip to gc channel cp", zap.String("vchannel", vChannel))
+			continue
+		}
+
+		if _, ok := collectionID2GcStatus[collectionID]; !ok {
+			collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+		}
+
+		// Skip to GC if all segments meta of the corresponding collection are not removed
+		if gcConfirmed, _ := collectionID2GcStatus[collectionID]; !gcConfirmed {
+			skippedCnt++
+			continue
+		}
+
+		if err := gc.meta.DropChannelCheckpoint(vChannel); err != nil {
+			// Try to GC in the next gc cycle if drop channel cp meta fail.
+			log.Warn("failed to drop channel check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
 		}
 	}
+
+	log.Info("GC channel cp done", zap.Int("skippedChannelCP", skippedCnt))
 }
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
