@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -194,12 +195,10 @@ func sortSegmentsByLastExpires(segs []*SegmentInfo) {
 
 type flushPolicy func(segment *SegmentInfo, t Timestamp) bool
 
-const flushInterval = 2 * time.Second
-
 func flushPolicyL1(segment *SegmentInfo, t Timestamp) bool {
 	return segment.GetState() == commonpb.SegmentState_Sealed &&
 		segment.Level != datapb.SegmentLevel_L0 &&
-		time.Since(segment.lastFlushTime) >= flushInterval &&
+		time.Since(segment.lastFlushTime) >= paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second) &&
 		segment.GetLastExpireTime() <= t &&
 		segment.currRows != 0 &&
 		// Decoupling the importing segment from the flush process,
