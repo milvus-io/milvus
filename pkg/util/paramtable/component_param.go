@@ -1852,12 +1852,13 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
-	ChunkRows                 ParamItem `refreshable:"false"`
-	EnableInterimSegmentIndex ParamItem `refreshable:"false"`
-	InterimIndexNlist         ParamItem `refreshable:"false"`
-	InterimIndexNProbe        ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize        ParamItem `refreshable:"false"`
+	ChunkRows                     ParamItem `refreshable:"false"`
+	EnableInterimSegmentIndex     ParamItem `refreshable:"false"`
+	InterimIndexNlist             ParamItem `refreshable:"false"`
+	InterimIndexNProbe            ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2021,6 +2022,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.InterimIndexMemExpandRate.Init(base.mgr)
+
+	p.InterimIndexBuildParallelRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.buildParallelRate",
+		Version:      "2.3.19",
+		DefaultValue: "0.5",
+		Doc:          "the ratio of building interim index parallel matched with cpu num",
+		Export:       true,
+	}
+	p.InterimIndexBuildParallelRate.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
