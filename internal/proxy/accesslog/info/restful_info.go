@@ -95,11 +95,21 @@ func (i *RestfulInfo) MethodStatus() string {
 		return fmt.Sprintf("HttpError%d", i.params.StatusCode)
 	}
 
-	if code, ok := i.params.Keys[ContextReturnCode]; !ok || code.(int32) != 0 {
-		return "Failed"
+	value, ok := i.params.Keys[ContextReturnCode]
+	if !ok {
+		return Unknown
 	}
 
-	return "Successful"
+	code, ok := value.(int32)
+	if ok {
+		if code != 0 {
+			return "Failed"
+		}
+
+		return "Successful"
+	}
+
+	return Unknown
 }
 
 func (i *RestfulInfo) UserName() string {
