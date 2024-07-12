@@ -145,7 +145,7 @@ func composePaths(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 	return deltaPaths, allPath, nil
 }
 
-func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
+func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *storage.SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
 	defer span.End()
 
@@ -181,7 +181,7 @@ func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *
 	return
 }
 
-func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) (*datapb.FieldBinlog, error) {
+func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *storage.SegmentWriter) (*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
 	sblob, err := writer.Finish()

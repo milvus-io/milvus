@@ -23,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -39,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -470,8 +469,28 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	}
 }
 
-func createMeta(catalog metastore.DataCoordCatalog, am *analyzeMeta, im *indexMeta) *meta {
-	return &meta{
+type testMetaOption func(*meta)
+
+func withAnalyzeMeta(am *analyzeMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.analyzeMeta = am
+	}
+}
+
+func withIndexMeta(im *indexMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.indexMeta = im
+	}
+}
+
+func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.statsTaskMeta = stm
+	}
+}
+
+func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
+	mt := &meta{
 		catalog: catalog,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
@@ -639,9 +658,12 @@ func createMeta(catalog metastore.DataCoordCatalog, am *analyzeMeta, im *indexMe
 				},
 			},
 		},
-		analyzeMeta: am,
-		indexMeta:   im,
 	}
+
+	for _, opt := range opts {
+		opt(mt)
+	}
+	return mt
 }
 
 type taskSchedulerSuite struct {
@@ -747,6 +769,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		return nil
 	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+	//catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -810,12 +833,12 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
-	mt := createMeta(catalog, s.createAnalyzeMeta(catalog), createIndexMeta(catalog))
+	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)))
 
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 	s.Equal(9, len(scheduler.tasks))
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
 	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
@@ -937,7 +960,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager := session.NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
-			&analyzeMeta{
+			withAnalyzeMeta(&analyzeMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
 				tasks: map[int64]*indexpb.AnalyzeTask{
@@ -950,15 +973,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 						State:        indexpb.JobState_JobStateInit,
 					},
 				},
-			},
-			&indexMeta{
+			}),
+			withIndexMeta(&indexMeta{
 				RWMutex: sync.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
-			})
+			}))
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		mt.segments.DropSegment(1000)
 		scheduler.scheduleDuration = s.duration
@@ -993,11 +1016,11 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		workerManager := session.NewMockWorkerManager(s.T())
 
-		mt := createMeta(catalog, s.createAnalyzeMeta(catalog), &indexMeta{
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(&indexMeta{
 			RWMutex: sync.RWMutex{},
 			ctx:     ctx,
 			catalog: catalog,
-		})
+		}))
 
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
@@ -1015,7 +1038,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			},
 		}, nil)
 
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		// remove task in meta
 		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(1)
@@ -1228,11 +1251,11 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		workerManager := session.NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
-			&analyzeMeta{
+			withAnalyzeMeta(&analyzeMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-			},
-			&indexMeta{
+			}),
+			withIndexMeta(&indexMeta{
 				RWMutex: sync.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
@@ -1286,13 +1309,13 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 						},
 					},
 				},
-			})
+			}))
 
 		cm := mocks.NewChunkManager(s.T())
 		cm.EXPECT().RootPath().Return("ut-index")
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
@@ -1541,7 +1564,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
@@ -1778,7 +1801,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	handler_isolation := NewNMockHandler(s.T())
 	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
 
-	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil)
 	scheduler_isolation.Start()
 
 	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {

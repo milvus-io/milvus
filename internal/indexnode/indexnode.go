@@ -44,6 +44,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -105,6 +106,8 @@ type IndexNode struct {
 	etcdCli *clientv3.Client
 	address string
 
+	binlogIO io.BinlogIO
+
 	initOnce     sync.Once
 	stateLock    sync.Mutex
 	indexTasks   map[taskKey]*indexTaskInfo
@@ -124,6 +127,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 		storageFactory: NewChunkMgrFactory(),
 		indexTasks:     make(map[taskKey]*indexTaskInfo),
 		analyzeTasks:   make(map[taskKey]*analyzeTaskInfo),
+		statsTasks:     make(map[taskKey]*statsTaskInfo),
 		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 	sc := NewTaskScheduler(b.loopCtx)

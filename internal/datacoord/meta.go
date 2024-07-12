@@ -160,6 +160,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	stm, err := newStatsTaskMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -171,6 +176,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		chunkManager:       chunkManager,
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
+		statsTaskMeta:      stm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -1959,23 +1965,28 @@ func (m *meta) saveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		InsertChannel:       result.GetChannel(),
 		NumOfRows:           result.GetNumRows(),
 		State:               commonpb.SegmentState_Flushed,
-		MaxRowNum:           oldSegment.GetMaxRowNum(),
+		MaxRowNum:           cloned.GetMaxRowNum(),
 		Binlogs:             result.GetInsertLogs(),
 		Statslogs:           result.GetStatsLogs(),
 		FieldStatslogs:      result.GetFieldStatsLogs(),
 		CreatedByCompaction: true,
 		CompactionFrom:      []int64{oldSegmentID},
-		LastExpireTime:      oldSegment.GetLastExpireTime(),
-		Level:               oldSegment.GetLevel(),
-		StartPosition:       oldSegment.GetStartPosition(),
-		DmlPosition:         oldSegment.GetDmlPosition(),
+		LastExpireTime:      cloned.GetLastExpireTime(),
+		Level:               datapb.SegmentLevel_L1,
+		StartPosition:       cloned.GetStartPosition(),
+		DmlPosition:         cloned.GetDmlPosition(),
+		IsSorted:            true,
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+	if segment.GetNumOfRows() > 0 {
+		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+	} else {
+		segment.State = commonpb.SegmentState_Dropped
+	}
 
 	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", result.GetNumRows()))
 
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{oldSegment.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, err
 	}

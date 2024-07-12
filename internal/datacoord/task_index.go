@@ -50,6 +50,16 @@ type indexBuildTask struct {
 
 var _ Task = (*indexBuildTask)(nil)
 
+func newIndexBuildTask(taskID int64) *indexBuildTask {
+	return &indexBuildTask{
+		taskID: taskID,
+		taskInfo: &workerpb.IndexTaskInfo{
+			BuildID: taskID,
+			State:   commonpb.IndexState_Unissued,
+		},
+	}
+}
+
 func (it *indexBuildTask) GetTaskID() int64 {
 	return it.taskID
 }
@@ -58,7 +68,7 @@ func (it *indexBuildTask) GetNodeID() int64 {
 	return it.nodeID
 }
 
-func (it *indexBuildTask) ResetNodeID() {
+func (it *indexBuildTask) ResetTask(mt *meta) {
 	it.nodeID = 0
 }
 

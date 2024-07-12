@@ -4,11 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -292,6 +291,10 @@ type statsTaskInfo struct {
 	cancel         context.CancelFunc
 	state          indexpb.JobState
 	failReason     string
+	collID         UniqueID
+	partID         UniqueID
+	segID          UniqueID
+	insertChannel  string
 	numRows        int64
 	insertLogs     []*datapb.FieldBinlog
 	statsLogs      []*datapb.FieldBinlog
@@ -344,17 +347,27 @@ func (i *IndexNode) foreachStatsTaskInfo(fn func(clusterID string, taskID Unique
 func (i *IndexNode) storeStatsResult(
 	ClusterID string,
 	taskID UniqueID,
+	collID UniqueID,
+	partID UniqueID,
+	segID UniqueID,
+	channel string,
 	numRows int64,
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
+	fieldStatsLogs []*datapb.FieldStatsLog,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.statsTasks[key]; ok {
+		info.collID = collID
+		info.partID = partID
+		info.segID = segID
+		info.insertChannel = channel
 		info.numRows = numRows
 		info.insertLogs = insertLogs
 		info.statsLogs = statsLogs
+		info.fieldStatsLogs = fieldStatsLogs
 		return
 	}
 }

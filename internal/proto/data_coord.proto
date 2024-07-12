@@ -424,6 +424,7 @@ message SegmentBinlogs {
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
   string insert_channel = 6;
+  repeated FieldStatsLog fieldStatsLogs = 7;
 }
 
 message FieldBinlog{

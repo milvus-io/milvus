@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -52,7 +51,8 @@ type analyzeTask struct {
 func newAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
-	node *IndexNode) *analyzeTask {
+	node *IndexNode,
+) *analyzeTask {
 	return &analyzeTask{
 		ident:  fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
 		ctx:    ctx,

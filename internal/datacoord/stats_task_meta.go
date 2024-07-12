@@ -22,15 +22,15 @@ import (
 	"strconv"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type statsTaskMeta struct {
@@ -41,24 +41,37 @@ type statsTaskMeta struct {
 
 	// taskID -> analyzeStats
 	// TODO: when to mark as dropped?
-	tasks map[int64]*indexpb.StatsTask
+	tasks                 map[int64]*indexpb.StatsTask
+	segmentStatsTaskIndex map[int64]*indexpb.StatsTask
 }
 
-func newStatsTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) *statsTaskMeta {
-	return &statsTaskMeta{
-		ctx:     ctx,
-		catalog: catalog,
-		tasks:   make(map[int64]*indexpb.StatsTask),
+func newStatsTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*statsTaskMeta, error) {
+	stm := &statsTaskMeta{
+		ctx:                   ctx,
+		catalog:               catalog,
+		tasks:                 make(map[int64]*indexpb.StatsTask),
+		segmentStatsTaskIndex: make(map[int64]*indexpb.StatsTask),
 	}
+	if err := stm.reloadFromKV(); err != nil {
+		return nil, err
+	}
+	return stm, nil
 }
 
-func (stm *statsTaskMeta) saveTask(newTask *indexpb.StatsTask) error {
-	if err := stm.catalog.SaveStatsTask(stm.ctx, newTask); err != nil {
+func (stm *statsTaskMeta) reloadFromKV() error {
+	record := timerecord.NewTimeRecorder("statsTaskMeta-reloadFromKV")
+	// load stats task
+	statsTasks, err := stm.catalog.ListStatsTasks(stm.ctx)
+	if err != nil {
+		log.Error("statsTaskMeta reloadFromKV load stats tasks failed", zap.Error(err))
 		return err
 	}
+	for _, t := range statsTasks {
+		stm.tasks[t.GetTaskID()] = t
+		stm.tasks[t.GetSegmentID()] = t
+	}
 
-	stm.tasks[newTask.TaskID] = newTask
-	stm.updateMetrics()
+	log.Info("statsTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -89,9 +102,16 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	stm.Lock()
 	defer stm.Unlock()
 
+	if _, ok := stm.segmentStatsTaskIndex[t.GetSegmentID()]; ok {
+		log.Debug("stats task already exist in meta", zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("segmentID", t.GetSegmentID()))
+		return fmt.Errorf("stats task already exist in meta of segment %d", t.GetSegmentID())
+	}
+
 	log.Info("add stats task", zap.Int64("taskID", t.GetTaskID()), zap.Int64("segmentID", t.GetSegmentID()))
 	t.State = indexpb.JobState_JobStateInit
-	if err := stm.saveTask(t); err != nil {
+
+	if err := stm.catalog.SaveStatsTask(stm.ctx, t); err != nil {
 		log.Warn("adding stats task failed",
 			zap.Int64("taskID", t.GetTaskID()),
 			zap.Int64("segmentID", t.GetSegmentID()),
@@ -99,11 +119,15 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 		return err
 	}
 
+	stm.tasks[t.GetTaskID()] = t
+	stm.segmentStatsTaskIndex[t.GetSegmentID()] = t
+	stm.updateMetrics()
+
 	log.Info("add stats task success", zap.Int64("taskID", t.GetTaskID()), zap.Int64("segmentID", t.GetSegmentID()))
 	return nil
 }
 
-func (stm *statsTaskMeta) RemoveStatsTask(taskID int64) error {
+func (stm *statsTaskMeta) RemoveStatsTask(taskID, segmentID int64) error {
 	stm.Lock()
 	defer stm.Unlock()
 
@@ -115,6 +139,10 @@ func (stm *statsTaskMeta) RemoveStatsTask(taskID int64) error {
 			zap.Error(err))
 		return err
 	}
+
+	delete(stm.tasks, taskID)
+	delete(stm.segmentStatsTaskIndex, segmentID)
+
 	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", taskID))
 	return nil
 }
@@ -130,8 +158,20 @@ func (stm *statsTaskMeta) UpdateVersion(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.Version++
-	log.Info("update version", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.GetVersion()))
-	return stm.saveTask(cloneT)
+
+	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
+		log.Warn("update stats task version failed",
+			zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("segmentID", t.GetSegmentID()),
+			zap.Error(err))
+		return err
+	}
+
+	stm.tasks[t.TaskID] = cloneT
+	stm.segmentStatsTaskIndex[t.SegmentID] = cloneT
+	stm.updateMetrics()
+	log.Info("update stats task version success", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.GetVersion()))
+	return nil
 }
 
 func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
@@ -146,8 +186,21 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID, nodeID int64) error {
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.NodeID = nodeID
 	cloneT.State = indexpb.JobState_JobStateInProgress
-	log.Info("update building stats task", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
-	return stm.saveTask(cloneT)
+
+	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
+		log.Warn("update stats task state building failed",
+			zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("segmentID", t.GetSegmentID()),
+			zap.Error(err))
+		return err
+	}
+
+	stm.tasks[t.TaskID] = cloneT
+	stm.segmentStatsTaskIndex[t.SegmentID] = cloneT
+	stm.updateMetrics()
+
+	log.Info("update building stats task success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
+	return nil
 }
 
 func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult) error {
@@ -159,10 +212,23 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 		return fmt.Errorf("task %d not found", taskID)
 	}
 
-	log.Info("finish task meta", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID),
-		zap.String("state", result.GetState().String()), zap.String("failReason", t.GetFailReason()))
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
-	return stm.saveTask(cloneT)
+
+	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
+		log.Warn("finish stats task state failed",
+			zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("segmentID", t.GetSegmentID()),
+			zap.Error(err))
+		return err
+	}
+
+	stm.tasks[t.TaskID] = cloneT
+	stm.segmentStatsTaskIndex[t.SegmentID] = cloneT
+	stm.updateMetrics()
+
+	log.Info("finish stats task meta success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID),
+		zap.String("state", result.GetState().String()), zap.String("failReason", t.GetFailReason()))
+	return nil
 }

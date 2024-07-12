@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -414,7 +413,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 }
 
 func (t *clusteringCompactionTask) doAnalyze() error {
-	newAnalyzeTask := &indexpb.AnalyzeTask{
+	analyzeTask := &indexpb.AnalyzeTask{
 		CollectionID: t.GetCollectionID(),
 		PartitionID:  t.GetPartitionID(),
 		FieldID:      t.GetClusteringKeyField().FieldID,
@@ -424,18 +423,14 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 		TaskID:       t.GetAnalyzeTaskID(),
 		State:        indexpb.JobState_JobStateInit,
 	}
-	err := t.meta.GetAnalyzeMeta().AddAnalyzeTask(newAnalyzeTask)
+	err := t.meta.GetAnalyzeMeta().AddAnalyzeTask(analyzeTask)
 	if err != nil {
 		log.Warn("failed to create analyze task", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 		return err
 	}
-	t.analyzeScheduler.enqueue(&analyzeTask{
-		taskID: t.GetAnalyzeTaskID(),
-		taskInfo: &workerpb.AnalyzeResult{
-			TaskID: t.GetAnalyzeTaskID(),
-			State:  indexpb.JobState_JobStateInit,
-		},
-	})
+
+	t.analyzeScheduler.enqueue(newAnalyzeTask(t.GetAnalyzeTaskID()))
+
 	log.Info("submit analyze task", zap.Int64("planID", t.GetPlanID()), zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("collectionID", t.GetCollectionID()), zap.Int64("id", t.GetAnalyzeTaskID()))
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
 }

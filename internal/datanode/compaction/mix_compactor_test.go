@@ -54,7 +54,7 @@ type MixCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 
 	meta      *etcdpb.CollectionMeta
-	segWriter *SegmentWriter
+	segWriter *storage.SegmentWriter
 
 	task *mixCompactionTask
 	plan *datapb.CompactionPlan
@@ -130,7 +130,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 			Value:     row,
 		}
 		err := s.segWriter.Write(v)
-		s.segWriter.writer.Flush()
+		s.segWriter.FlushAndIsFull()
 		s.Require().NoError(err)
 
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
@@ -261,10 +261,17 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 				})
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
+<<<<<<< HEAD
 			s.task.collectionID = CollectionID
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
 			res, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions)
+=======
+			segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 100, 19530, PartitionID, CollectionID)
+			s.Require().NoError(err)
+
+			compactionSegment, err := s.task.merge(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions, segWriter)
+>>>>>>> 4b715d6ed (Remove sement writer to storage package)
 			s.NoError(err)
 			s.EqualValues(test.expectedRes, len(res))
 			if test.expectedRes > 0 {
@@ -498,7 +505,7 @@ func getRow(magic int64) map[int64]interface{} {
 }
 
 func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID)
+	segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID)
 	s.Require().NoError(err)
 
 	v := storage.Value{
@@ -508,7 +515,7 @@ func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
 	}
 	err = segWriter.Write(&v)
 	s.Require().NoError(err)
-	segWriter.writer.Flush()
+	segWriter.FlushAndIsFull()
 
 	s.segWriter = segWriter
 }

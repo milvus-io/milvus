@@ -50,6 +50,16 @@ type analyzeTask struct {
 	req *workerpb.AnalyzeRequest
 }
 
+func newAnalyzeTask(taskID int64) *analyzeTask {
+	return &analyzeTask{
+		taskID: taskID,
+		taskInfo: &workerpb.AnalyzeResult{
+			TaskID: taskID,
+			State:  indexpb.JobState_JobStateInit,
+		},
+	}
+}
+
 func (at *analyzeTask) GetTaskID() int64 {
 	return at.taskID
 }
@@ -58,7 +68,7 @@ func (at *analyzeTask) GetNodeID() int64 {
 	return at.nodeID
 }
 
-func (at *analyzeTask) ResetNodeID() {
+func (at *analyzeTask) ResetTask(mt *meta) {
 	at.nodeID = 0
 }
 
@@ -172,7 +182,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 
 	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
 	if err != nil {
-		log.Ctx(ctx).Info("analyze task get collection info failed", zap.Int64("collectionID",
+		log.Ctx(ctx).Warn("analyze task get collection info failed", zap.Int64("collectionID",
 			segments[0].GetCollectionID()), zap.Error(err))
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
 		return false

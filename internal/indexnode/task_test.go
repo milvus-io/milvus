@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -90,7 +91,7 @@ func (suite *IndexBuildTaskSuite) serializeData() ([]*storage.Blob, error) {
 
 func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &indexpb.CreateJobRequest{
+	req := &workerpb.CreateJobRequest{
 		BuildID:      1,
 		IndexVersion: 1,
 		DataPaths:    []string{suite.dataPath},
@@ -184,7 +185,7 @@ func (suite *AnalyzeTaskSuite) serializeData() ([]*storage.Blob, error) {
 
 func (suite *AnalyzeTaskSuite) TestAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &indexpb.AnalyzeRequest{
+	req := &workerpb.AnalyzeRequest{
 		ClusterID:    "test",
 		TaskID:       1,
 		CollectionID: suite.collectionID,

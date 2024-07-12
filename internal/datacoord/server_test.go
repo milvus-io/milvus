@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -48,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -1315,7 +1316,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		IndexID:   1,
 	})
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+	err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 		BuildID: 1,
 		State:   commonpb.IndexState_Finished,
 	})
@@ -1682,7 +1683,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 1,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1710,7 +1711,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 2,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1897,7 +1898,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1907,7 +1908,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -2079,7 +2080,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})

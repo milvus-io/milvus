@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -27,7 +28,13 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
+
+func (s *Server) startStatsTasksCheckLoop(ctx context.Context) {
+	s.serverLoopWg.Add(1)
+	go s.checkStatsTaskLoop(ctx)
+}
 
 func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 	log.Info("start check stats task for segment loop...")
@@ -41,13 +48,15 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 			log.Warn("DataCoord context done, exit...")
 			return
 		case <-ticker.C:
-			segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-				return isFlush(seg) && !seg.GetIsSorted() && !seg.isCompacting
-			}))
-			for _, segment := range segments {
-				if err := s.createStatsSegmentTask(segment); err != nil {
-					log.Warn("create stats task for segment fail, wait for retry", zap.Int64("segmentID", segment.GetID()))
-					continue
+			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+				segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
+					return isFlush(seg) && !seg.GetIsSorted() && !seg.isCompacting
+				}))
+				for _, segment := range segments {
+					if err := s.createStatsSegmentTask(segment); err != nil {
+						log.Warn("create stats task for segment fail, wait for retry", zap.Int64("segmentID", segment.GetID()))
+						continue
+					}
 				}
 			}
 		}
@@ -115,8 +124,11 @@ func (st *statsTask) GetNodeID() int64 {
 	return st.nodeID
 }
 
-func (st *statsTask) ResetNodeID() {
+func (st *statsTask) ResetTask(mt *meta) {
 	st.nodeID = 0
+	// reset isCompacting
+
+	mt.SetSegmentsCompacting([]UniqueID{st.segmentID}, false)
 }
 
 func (at *statsTask) SetQueueTime(t time.Time) {
@@ -148,7 +160,7 @@ func (it *statsTask) GetTaskType() string {
 }
 
 func (st *statsTask) CheckTaskHealthy(mt *meta) bool {
-	seg := mt.GetHealthySegment(st.req.GetSegmentID())
+	seg := mt.GetHealthySegment(st.segmentID)
 	return seg != nil
 }
 
@@ -166,6 +178,14 @@ func (st *statsTask) GetFailReason() string {
 }
 
 func (st *statsTask) UpdateVersion(ctx context.Context, meta *meta) error {
+	// mark compacting
+	if exist, canDo := meta.CheckAndSetSegmentsCompacting([]UniqueID{st.segmentID}); !exist || !canDo {
+		log.Warn("segment is not exist or is compacting, skip stats",
+			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
+		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
+	}
+
 	return meta.statsTaskMeta.UpdateVersion(st.taskID)
 }
 
@@ -176,24 +196,59 @@ func (st *statsTask) UpdateMetaBuildingState(nodeID int64, meta *meta) error {
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
 	// set segment compacting
+	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	segment := dependency.meta.GetHealthySegment(st.segmentID)
 	if segment == nil {
-		log.Warn("segment is node healthy, skip stats", zap.Int64("segmentID", st.segmentID))
+		log.Warn("segment is node healthy, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
 		return false
 	}
 
 	if segment.GetIsSorted() {
-		log.Info("stats task is marked as sorted, skip stats", zap.Int64("segmentID", segment.GetID()))
+		log.Info("stats task is marked as sorted, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is marked as sorted")
 		return false
 	}
 
-	if exist, canDo := dependency.meta.CheckAndSetSegmentsCompacting([]UniqueID{st.segmentID}); !exist || !canDo {
-		log.Warn("segment is not exist or is compacting, skip stats", zap.Int64("segmentID", st.segmentID),
-			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+	collInfo, err := dependency.handler.GetCollection(ctx, segment.GetCollectionID())
+	if err != nil {
+		log.Warn("stats task get collection info failed", zap.Int64("collectionID",
+			segment.GetCollectionID()), zap.Error(err))
+		st.SetState(indexpb.JobState_JobStateInit, err.Error())
 		return false
+	}
+
+	collTtl, err := getCollectionTTL(collInfo.Properties)
+	if err != nil {
+		log.Warn("stats task get collection ttl failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+		st.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false
+	}
+
+	start, end, err := dependency.allocator.allocN(segment.getSegmentSize() / Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() * int64(len(collInfo.Schema.GetFields())) * 2)
+	if err != nil {
+		log.Warn("stats task alloc logID failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+		st.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false
+	}
+
+	st.req = &workerpb.CreateStatsRequest{
+		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskID:          st.GetTaskID(),
+		CollectionID:    segment.GetCollectionID(),
+		PartitionID:     segment.GetPartitionID(),
+		InsertChannel:   segment.GetInsertChannel(),
+		SegmentID:       segment.GetID(),
+		InsertLogs:      segment.GetBinlogs(),
+		DeltaLogs:       segment.GetDeltalogs(),
+		StorageConfig:   createStorageConfig(),
+		Schema:          collInfo.Schema,
+		TargetSegmentID: start,
+		StartLogID:      start + 1,
+		EndLogID:        end,
+		NumRows:         segment.GetNumOfRows(),
+		CollectionTtl:   collTtl.Nanoseconds(),
+		CurrentTs:       tsoutil.GetCurrentTime(),
 	}
 
 	return true
@@ -216,6 +271,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	if err != nil {
 		log.Ctx(ctx).Warn("assign stats task failed", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))
+		st.SetState(indexpb.JobState_JobStateRetry, err.Error())
 		return false
 	}
 
@@ -271,7 +327,7 @@ func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNod
 		err = merr.Error(resp)
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("notify worker drop the analysis task failed", zap.Int64("taskID", st.GetTaskID()),
+		log.Ctx(ctx).Warn("notify worker drop the stats task failed", zap.Int64("taskID", st.GetTaskID()),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))
 		return false
 	}
@@ -291,9 +347,11 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 
 	// second update the task meta
 	if err = meta.statsTaskMeta.FinishTask(st.taskID, st.taskInfo); err != nil {
-		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID))
+		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID), zap.Error(err))
+		return err
 	}
 
 	metricMutation.commit()
+	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	return nil
 }

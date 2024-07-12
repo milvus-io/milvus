@@ -59,6 +59,7 @@ type taskScheduler struct {
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
 	handler                   Handler
+	allocator                 allocator
 }
 
 func newTaskScheduler(
@@ -67,6 +68,7 @@ func newTaskScheduler(
 	chunkManager storage.ChunkManager,
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,
+	allocator allocator,
 ) *taskScheduler {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -84,6 +86,7 @@ func newTaskScheduler(
 		chunkManager:              chunkManager,
 		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
+		allocator:                 allocator,
 	}
 	ts.reloadFromKV()
 	return ts
@@ -320,7 +323,7 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 			}
 		}
 		task.SetState(indexpb.JobState_JobStateInit, "")
-		task.ResetNodeID()
+		task.ResetTask(s.meta)
 
 	default:
 		// state: in_progress

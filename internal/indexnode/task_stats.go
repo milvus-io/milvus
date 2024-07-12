@@ -24,19 +24,16 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storage/io"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -59,22 +56,24 @@ type statsTask struct {
 	node     *IndexNode
 	binlogIO io.BinlogIO
 
-	insertLogs   [][]string
-	deltaLogs    []string
-	logIDOffset  int64
-	binlogSorted bool
+	insertLogs  [][]string
+	deltaLogs   []string
+	logIDOffset int64
 }
 
 func newStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
-	node *IndexNode) *statsTask {
+	node *IndexNode,
+	binlogIO io.BinlogIO,
+) *statsTask {
 	return &statsTask{
 		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
 		ctx:         ctx,
 		cancel:      cancel,
 		req:         req,
 		node:        node,
+		binlogIO:    binlogIO,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		logIDOffset: 0,
 	}
@@ -106,7 +105,9 @@ func (st *statsTask) GetState() indexpb.JobState {
 }
 
 func (st *statsTask) PreExecute(ctx context.Context) error {
-	// nothing to do
+	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
+	defer span.End()
+
 	st.queueDur = st.tr.RecordSpan()
 	log.Ctx(ctx).Info("Begin to prepare stats task",
 		zap.String("clusterID", st.req.GetClusterID()),
@@ -129,18 +130,19 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 	}
 
 	st.insertLogs = make([][]string, 0)
-	st.binlogSorted = true
 	binlogNum := len(st.req.GetInsertLogs()[0].GetBinlogs())
 	for idx := 0; idx < binlogNum; idx++ {
 		var batchPaths []string
-		for _, f := range st.req.GetInsertLogs()[0].GetBinlogs() {
-			batchPaths = append(batchPaths, f.GetLogPath())
+		for _, f := range st.req.GetInsertLogs() {
+			batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
 		}
 		st.insertLogs = append(st.insertLogs, batchPaths)
 	}
 
-	for _, l := range st.req.GetInsertLogs()[0].GetBinlogs() {
-		st.deltaLogs = append(st.deltaLogs, l.GetLogPath())
+	for _, d := range st.req.GetDeltaLogs() {
+		for _, l := range d.GetBinlogs() {
+			st.deltaLogs = append(st.deltaLogs, l.GetLogPath())
+		}
 	}
 
 	return nil
@@ -148,7 +150,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 
 func (st *statsTask) Execute(ctx context.Context) error {
 	// sort segment and check need to do text index.
-	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(st.ctx, fmt.Sprintf("Stats-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
+	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-Execute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
@@ -167,7 +169,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 
 	var (
 		flushBatchCount   int   // binlog batch count
-		unflushedRowCount int64 = 0
+		unFlushedRowCount int64 = 0
 
 		// All binlog meta of a segment
 		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
@@ -195,9 +197,9 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			log.Warn("write value wrong, failed to writer row", zap.Error(err))
 			return err
 		}
-		unflushedRowCount++
+		unFlushedRowCount++
 
-		if (unflushedRowCount+1)%100 == 0 && writer.IsFull() {
+		if (unFlushedRowCount+1)%100 == 0 && writer.IsFull() {
 			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
@@ -205,8 +207,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 				return err
 			}
 			serWriteTimeCost += time.Since(serWriteStart)
-
-			st.logIDOffset += binlogNum
 
 			uploadStart := time.Now()
 			if err := st.binlogIO.Upload(ctx, kvs); err != nil {
@@ -218,11 +218,16 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			mergeFieldBinlogs(allBinlogs, partialBinlogs)
 
 			flushBatchCount++
-			unflushedRowCount = 0
+			unFlushedRowCount = 0
+			st.logIDOffset += binlogNum
+			if st.req.GetStartLogID()+st.logIDOffset >= st.req.GetEndLogID() {
+				log.Warn("binlog files too much, log is not enough")
+				return fmt.Errorf("binlog files too much, log is not enough")
+			}
 		}
 	}
 
-	if !writer.IsEmpty() {
+	if !writer.FlushAndIsEmpty() {
 		serWriteStart := time.Now()
 		binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 		if err != nil {
@@ -240,7 +245,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 
 		mergeFieldBinlogs(allBinlogs, partialBinlogs)
 		flushBatchCount++
-		unflushedRowCount = 0
 	}
 
 	serWriteStart := time.Now()
@@ -256,7 +260,15 @@ func (st *statsTask) Execute(ctx context.Context) error {
 
 	totalElapse := st.tr.RecordSpan()
 
-	st.node.storeStatsResult(st.req.GetClusterID(), st.req.GetTaskID(), int64(len(values)), lo.Values(allBinlogs), []*datapb.FieldBinlog{sPath})
+	insertLogs := lo.Values(allBinlogs)
+	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
+		return err
+	}
+
+	statsLogs := []*datapb.FieldBinlog{sPath}
+	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
+		return err
+	}
 
 	log.Info("sort segment end",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
@@ -268,19 +280,25 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	err = st.createTextIndex(ctx, lo.Values(allBinlogs))
+	fieldStatsLog, err := st.createTextIndex(ctx, lo.Values(allBinlogs))
 	if err != nil {
 		log.Warn("stats wrong, failed to create text index", zap.Error(err))
 		return err
 	}
 
+	st.node.storeStatsResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		int64(len(values)), insertLogs, statsLogs, fieldStatsLog)
+
 	return nil
 }
 
 func (st *statsTask) PostExecute(ctx context.Context) error {
-	// nothing to do
-	//TODO implement me
-	panic("implement me")
+	return nil
 }
 
 func (st *statsTask) Reset() {
@@ -514,194 +532,7 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 	return binlogNum, statFieldLog, nil
 }
 
-//func mergeSortMultipleBinlogs(ctx context.Context,
-//	planID int64,
-//	binlogIO io.BinlogIO,
-//	startID int64,
-//	binlogs map[int64]*datapb.FieldBinlog,
-//	delta map[interface{}]typeutil.Timestamp,
-//	writer *storage.SegmentWriter,
-//	tr *timerecord.TimeRecorder,
-//	currentTs typeutil.Timestamp,
-//	collectionTtl int64,
-//) (*datapb.CompactionSegment, error) {
-//	_ = tr.RecordSpan()
-//
-//	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "mergeSortMultipleSegments")
-//	defer span.End()
-//
-//	log := log.With(zap.Int64("planID", planID), zap.Int64("compactTo segment", writer.GetSegmentID()))
-//
-//	var (
-//		syncBatchCount    int   // binlog batch count
-//		remainingRowCount int64 // the number of remaining entities
-//		expiredRowCount   int64 // the number of expired entities
-//		unflushedRowCount int64 = 0
-//
-//		// All binlog meta of a segment
-//		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
-//	)
-//
-//	isValueDeleted := func(v *storage.Value) bool {
-//		ts, ok := delta[v.PK.GetValue()]
-//		// insert task and delete task has the same ts when upsert
-//		// here should be < instead of <=
-//		// to avoid the upsert data to be deleted after compact
-//		if ok && uint64(v.Timestamp) < ts {
-//			return true
-//		}
-//		return false
-//	}
-//
-//	downloadTimeCost := time.Duration(0)
-//	serWriteTimeCost := time.Duration(0)
-//	uploadTimeCost := time.Duration(0)
-//
-//	//SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
-//	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
-//	for i, s := range binlogs {
-//		var binlogBatchCount int
-//		for _, b := range s.GetFieldBinlogs() {
-//			if b != nil {
-//				binlogBatchCount = len(b.GetBinlogs())
-//				break
-//			}
-//		}
-//
-//		if binlogBatchCount == 0 {
-//			log.Warn("compacting empty segment", zap.Int64("segmentID", s.GetSegmentID()))
-//			continue
-//		}
-//
-//		binlogPaths := make([][]string, binlogBatchCount)
-//		for idx := 0; idx < binlogBatchCount; idx++ {
-//			var batchPaths []string
-//			for _, f := range s.GetFieldBinlogs() {
-//				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
-//			}
-//			binlogPaths[idx] = batchPaths
-//		}
-//		segmentReaders[i] = NewSegmentDeserializeReader(binlogPaths, binlogIO, writer.GetPkID())
-//	}
-//
-//	pq := make(PriorityQueue, 0)
-//	heap.Init(&pq)
-//
-//	for i, r := range segmentReaders {
-//		if r.Next() == nil {
-//			heap.Push(&pq, &PQItem{
-//				Value: r.Value(),
-//				Index: i,
-//			})
-//		}
-//	}
-//
-//	for pq.Len() > 0 {
-//		smallest := heap.Pop(&pq).(*PQItem)
-//		v := smallest.Value
-//
-//		if isValueDeleted(v) {
-//			continue
-//		}
-//
-//		// Filtering expired entity
-//		if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
-//			expiredRowCount++
-//			continue
-//		}
-//
-//		err := writer.Write(v)
-//		if err != nil {
-//			log.Warn("compact wrong, failed to writer row", zap.Error(err))
-//			return nil, err
-//		}
-//		unflushedRowCount++
-//		remainingRowCount++
-//
-//		if (unflushedRowCount+1)%100 == 0 && writer.IsFull() {
-//			serWriteStart := time.Now()
-//			kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
-//			if err != nil {
-//				log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-//				return nil, err
-//			}
-//			serWriteTimeCost += time.Since(serWriteStart)
-//
-//			uploadStart := time.Now()
-//			if err := binlogIO.Upload(ctx, kvs); err != nil {
-//				log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-//			}
-//			uploadTimeCost += time.Since(uploadStart)
-//			mergeFieldBinlogs(allBinlogs, partialBinlogs)
-//			syncBatchCount++
-//			unflushedRowCount = 0
-//		}
-//
-//		err = segmentReaders[smallest.Index].Next()
-//		if err != nil && err != sio.EOF {
-//			return nil, err
-//		}
-//		if err == nil {
-//			next := &PQItem{
-//				Value: segmentReaders[smallest.Index].Value(),
-//				Index: smallest.Index,
-//			}
-//			heap.Push(&pq, next)
-//		}
-//	}
-//
-//	if !writer.IsEmpty() {
-//		serWriteStart := time.Now()
-//		kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
-//		if err != nil {
-//			log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-//			return nil, err
-//		}
-//		serWriteTimeCost += time.Since(serWriteStart)
-//
-//		uploadStart := time.Now()
-//		if err := binlogIO.Upload(ctx, kvs); err != nil {
-//			log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-//		}
-//		uploadTimeCost += time.Since(uploadStart)
-//
-//		mergeFieldBinlogs(allBinlogs, partialBinlogs)
-//		syncBatchCount++
-//	}
-//
-//	serWriteStart := time.Now()
-//	sPath, err := statSerializeWrite(ctx, binlogIO, allocator, writer, remainingRowCount)
-//	if err != nil {
-//		log.Warn("compact wrong, failed to serialize write segment stats",
-//			zap.Int64("remaining row count", remainingRowCount), zap.Error(err))
-//		return nil, err
-//	}
-//	serWriteTimeCost += time.Since(serWriteStart)
-//
-//	pack := &datapb.CompactionSegment{
-//		SegmentID:           writer.GetSegmentID(),
-//		InsertLogs:          lo.Values(allBinlogs),
-//		Field2StatslogPaths: []*datapb.FieldBinlog{sPath},
-//		NumOfRows:           remainingRowCount,
-//		IsSorted:            true,
-//	}
-//
-//	totalElapse := tr.RecordSpan()
-//
-//	log.Info("mergeSortMultipleSegments merge end",
-//		zap.Int64("remaining row count", remainingRowCount),
-//		zap.Int64("expired entities", expiredRowCount),
-//		zap.Int("binlog batch count", syncBatchCount),
-//		zap.Duration("download binlogs elapse", downloadTimeCost),
-//		zap.Duration("upload binlogs elapse", uploadTimeCost),
-//		zap.Duration("serWrite elapse", serWriteTimeCost),
-//		zap.Duration("deRead elapse", totalElapse-serWriteTimeCost-downloadTimeCost-uploadTimeCost),
-//		zap.Duration("total elapse", totalElapse))
-//
-//	return pack, nil
-//}
-
-func (st *statsTask) createTextIndex(ctx context.Context, insertBinlogs []*datapb.FieldBinlog) error {
+func (st *statsTask) createTextIndex(ctx context.Context, insertBinlogs []*datapb.FieldBinlog) ([]*datapb.FieldStatsLog, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -733,5 +564,5 @@ func (st *statsTask) createTextIndex(ctx context.Context, insertBinlogs []*datap
 	log.Info("create text index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))
-	return nil
+	return fieldStatsLogs, nil
 }
