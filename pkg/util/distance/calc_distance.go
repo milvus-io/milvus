@@ -155,8 +155,7 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 		waitGroup.Done()
 	}
 	// avoid too many goroutines by ants pool
-	pool := conc.NewDefaultPool[any]()
-	defer pool.Release()
+	pool := GetCalcPool()
 	for i := int64(0); i < leftNum; i++ {
 		waitGroup.Add(1)
 		index := i
