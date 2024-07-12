@@ -118,6 +118,8 @@ linters-settings:
             desc: not allowed, use github.com/tikv/client-go/v2/txnkv
           - pkg: "github.com/tikv/client-go/v2/rawkv"
             desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+          - pkg: "github.com/gogo/protobuf"
+            desc: "not allowed, gogo protobuf is deprecated"
   forbidigo:
     forbid:
       - '^time\.Tick$'
