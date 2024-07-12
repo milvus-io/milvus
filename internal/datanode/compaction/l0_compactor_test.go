@@ -451,9 +451,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
 		s.task.allocator = mockAlloc
 
-		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer := storage.NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
+		writers := map[int64]*storage.SegmentDeltaWriter{100: writer}
 
 		result, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
@@ -464,9 +464,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.SetupTest()
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
-		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer := storage.NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
+		writers := map[int64]*storage.SegmentDeltaWriter{100: writer}
 
 		results, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
@@ -478,9 +478,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 
-		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer := storage.NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
+		writers := map[int64]*storage.SegmentDeltaWriter{100: writer}
 
 		results, err := s.task.serializeUpload(ctx, writers)
 		s.NoError(err)
@@ -515,9 +515,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	s.EqualValues(1, deltaWriters[101].GetRowNum())
 	s.EqualValues(1, deltaWriters[102].GetRowNum())
 
-	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, deltaWriters[100].deleteData.Pks)
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[101].deleteData.Pks[0])
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[102].deleteData.Pks[0])
+	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, deltaWriters[100].GetDeltaData().Pks)
+	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[101].GetDeltaData().Pks[0])
+	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[102].GetDeltaData().Pks[0])
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {

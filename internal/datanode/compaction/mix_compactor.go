@@ -116,7 +116,7 @@ func (t *mixCompactionTask) merge(
 	ctx context.Context,
 	binlogPaths [][]string,
 	delta map[interface{}]typeutil.Timestamp,
-	writer *SegmentWriter,
+	writer *storage.SegmentWriter,
 ) (*datapb.CompactionSegment, error) {
 	_ = t.tr.RecordSpan()
 
@@ -317,7 +317,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	targetSegID := t.plan.GetPreAllocatedSegments().GetBegin()
 	previousRowCount := t.getNumRows()
 
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), previousRowCount, targetSegID, partitionID, collectionID)
+	writer, err := storage.NewSegmentWriter(t.plan.GetSchema(), previousRowCount, targetSegID, partitionID, collectionID)
 	if err != nil {
 		log.Warn("compact wrong, unable to init segment writer", zap.Error(err))
 		return nil, err

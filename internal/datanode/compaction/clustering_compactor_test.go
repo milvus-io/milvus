@@ -51,7 +51,7 @@ type ClusteringCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
 	mockID       atomic.Int64
-	segWriter    *SegmentWriter
+	segWriter    *storage.SegmentWriter
 
 	task *clusteringCompactionTask
 
@@ -173,7 +173,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
+	segWriter, err := storage.NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
 	s.Require().NoError(err)
 
 	for i := 0; i < 1000; i++ {
@@ -185,7 +185,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		err = segWriter.Write(&v)
 		s.Require().NoError(err)
 	}
-	segWriter.writer.Flush()
+	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)

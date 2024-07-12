@@ -105,7 +105,7 @@ type clusteringCompactionTask struct {
 type ClusterBuffer struct {
 	id int
 
-	writer    *SegmentWriter
+	writer    *storage.SegmentWriter
 	flushLock lock.RWMutex
 
 	bufferMemorySize atomic.Int64
@@ -122,7 +122,7 @@ type ClusterBuffer struct {
 }
 
 type FlushSignal struct {
-	writer *SegmentWriter
+	writer *storage.SegmentWriter
 	pack   bool
 	id     int
 	done   bool
@@ -825,7 +825,7 @@ func (t *clusteringCompactionTask) flushAll(ctx context.Context) error {
 	return nil
 }
 
-func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buffer *ClusterBuffer, writer *SegmentWriter) error {
+func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buffer *ClusterBuffer, writer *storage.SegmentWriter) error {
 	if binlogs, ok := buffer.flushedBinlogs[writer.GetSegmentID()]; !ok || len(binlogs) == 0 {
 		return nil
 	}
@@ -871,7 +871,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	return nil
 }
 
-func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *ClusterBuffer, writer *SegmentWriter, pack bool) error {
+func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *ClusterBuffer, writer *storage.SegmentWriter, pack bool) error {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("flushBinlog-%d", writer.GetSegmentID()))
 	defer span.End()
 	if writer == nil {
@@ -1183,7 +1183,7 @@ func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBu
 		buffer.currentSegmentRowNum.Store(0)
 	}
 
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	writer, err := storage.NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
 	if err != nil {
 		return pack, err
 	}
@@ -1198,7 +1198,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) er
 	segmentID = buffer.writer.GetSegmentID()
 	buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
 
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	writer, err := storage.NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
 	if err != nil {
 		return err
 	}
