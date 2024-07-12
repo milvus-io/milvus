@@ -134,7 +134,7 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.UpsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLUpsert, proto.Size(r), err
+		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
