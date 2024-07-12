@@ -1,10 +1,15 @@
 package flusher
 
 import (
+	"github.com/milvus-io/milvus-storage/go/common/log"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"sync"
+	"time"
 )
 
 type Flusher interface {
@@ -14,13 +19,24 @@ type Flusher interface {
 
 	// Close SYNCHRONOUSLY stops and removes flowgraphs belonging to the pchannel.
 	Close(pchannel string)
+
+	// Start flusher service.
+	Start()
+
+	// Stop flusher, will synchronously flush all remaining data.
+	Stop()
 }
 
 type flusher struct {
+	tasks typeutil.ConcurrentMap[string, *datapb.ChannelWatchInfo]
+
 	fgMgr     pipeline.FlowgraphManager
 	syncMgr   syncmgr.SyncManager
 	wbMgr     writebuffer.BufferManager
 	cpUpdater *util.ChannelCheckpointUpdater
+
+	stopOnce sync.Once
+	stopChan chan struct{}
 }
 
 func (f *flusher) Open() {
@@ -29,4 +45,27 @@ func (f *flusher) Open() {
 	//for _, vchannel := range vchannels {
 	//	ds, err := pipeline.NewDataSyncService()
 	//}
+}
+
+func (f *flusher) Start() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-f.stopChan:
+				// TODO: trigger flush all
+				log.Info("flusher stopped")
+				return
+			case <-ticker.C:
+
+			}
+		}
+	}()
+}
+
+func (f *flusher) Stop() {
+	f.stopOnce.Do(func() {
+		close(f.stopChan)
+	})
 }
