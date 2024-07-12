@@ -312,6 +312,7 @@ queryNode:
       nlist: 128 # segment index nlist
       nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
+      buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
