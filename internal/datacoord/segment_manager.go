@@ -271,18 +271,24 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	defer s.mu.Unlock()
 
 	// filter segments
+	validSegments := make(map[UniqueID]struct{})
+	invalidSegments := make(map[UniqueID]struct{})
 	segments := make([]*SegmentInfo, 0)
 	for _, segmentID := range s.segments {
 		segment := s.meta.GetHealthySegment(segmentID)
 		if segment == nil {
-			log.Warn("Failed to get segment info from meta", zap.Int64("id", segmentID))
+			invalidSegments[segmentID] = struct{}{}
 			continue
 		}
+		validSegments[segmentID] = struct{}{}
 		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
 			continue
 		}
 		segments = append(segments, segment)
 	}
+
+	log.Warn("Failed to get segments infos from meta, clear them", zap.Int64s("segmentIDs", lo.Keys(invalidSegments)))
+	s.segments = lo.Keys(validSegments)
 
 	// Apply allocation policy.
 	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
@@ -477,11 +483,23 @@ func (s *SegmentManager) FlushImportSegments(ctx context.Context, collectionID U
 	// We set the importing segment state directly to 'Flushed' rather than
 	// 'Sealed' because all data has been imported, and there is no data
 	// in the datanode flowgraph that needs to be synced.
+	candidatesMap := make(map[UniqueID]struct{})
 	for _, id := range candidates {
 		if err := s.meta.SetState(id, commonpb.SegmentState_Flushed); err != nil {
 			return err
 		}
+		candidatesMap[id] = struct{}{}
 	}
+
+	validSegments := make(map[UniqueID]struct{})
+	for _, id := range s.segments {
+		if _, ok := candidatesMap[id]; !ok {
+			validSegments[id] = struct{}{}
+		}
+	}
+
+	s.segments = lo.Keys(validSegments)
+
 	return nil
 }
 
