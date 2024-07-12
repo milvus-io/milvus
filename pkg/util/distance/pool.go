@@ -16,16 +16,22 @@
 
 package distance
 
+import (
+    "sync"
+
+    "github.com/milvus-io/milvus/pkg/util/conc"
+)
+
 var (
-	calcPool         *conc.Pool[any]
-	calcPoolInitOnce = new(sync.Once)
+    calcPool         *conc.Pool[any]
+    calcPoolInitOnce = new(sync.Once)
 )
 
 func initCalcPool() {
-	calcPool = conc.NewDefaultPool[any]()
+    calcPool = conc.NewDefaultPool[any]()
 }
 
 func GetCalcPool() *conc.Pool[any] {
-	calcPoolInitOnce.Do(initCalcPool)
-	return calcPool
+    calcPoolInitOnce.Do(initCalcPool)
+    return calcPool
 }
