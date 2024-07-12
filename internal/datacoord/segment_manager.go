@@ -295,7 +295,9 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		segments = append(segments, segment)
 	}
 
-	log.Warn("Failed to get segments infos from meta, clear them", zap.Int64s("segmentIDs", lo.Keys(invalidSegments)))
+	if len(invalidSegments) > 0 {
+		log.Warn("Failed to get segments infos from meta, clear them", zap.Int64s("segmentIDs", lo.Keys(invalidSegments)))
+	}
 	s.segments = lo.Keys(validSegments)
 
 	// Apply allocation policy.
