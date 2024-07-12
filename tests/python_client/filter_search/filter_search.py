@@ -16,7 +16,7 @@ def _(parser):
     parser.add_argument("--filter_op", type=str, env_var="LOCUST_FILTER", default="==", help="filter op")
     parser.add_argument("--filter_value", type=str, env_var="LOCUST_FILTER", default="0", help="filter value")
     parser.add_argument("--data_dir", type=str, env_var="DATA_DIR", default="/root/dataset/laion_with_scalar_medium_10m", help="data dir")
-
+    parser.add_argument("--duration_time", type=str, env_var="DT", default="", help="data dir")
 
 @events.test_start.add_listener
 def _(environment, **kw):
@@ -139,9 +139,7 @@ class StagesShape(LoadTestShape):
     """
 
     stages = [
-        {"duration": 60, "users": 200, "spawn_rate": 50},
-        {"duration": 120, "users": 200, "spawn_rate": 50},
-        {"duration": 240, "users": 200, "spawn_rate": 50, "stop": True},
+        {"duration": 3600, "users": 200, "spawn_rate": 50, "stop": True},
     ]
 
     def tick(self):

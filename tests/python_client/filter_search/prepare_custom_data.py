@@ -16,7 +16,7 @@ import glob
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir="."):
+def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir=".", bucket_name="milvus-bucket"):
 
     connections.connect(
         host=host,
@@ -113,7 +113,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", data_size
         )
         for file in batch_files:
             f_name = file.split("/")[-1]
-            client.fput_object("milvus-bucket", f_name, file)
+            client.fput_object(bucket_name, f_name, file)
             logger.info(f"upload file {file}")
         batch_files = [file.split("/")[-1] for file in batch_files]
         task_ids = []
@@ -167,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
     parser.add_argument("--insert_mode", type=str, default="insert")
+    parser.add_argument("--bucket_name", type=str, default="milvus-bucket")
     parser.add_argument("--data_dir", type=str, default=".")
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir)
+    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir, bucket_name=args.bucket_name)
