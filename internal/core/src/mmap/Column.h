@@ -95,7 +95,9 @@ class ColumnBase {
 
         size_ = size;
         cap_size_ = size;
-        size_t mapped_size = cap_size_ + padding_;
+        // use exactly same size of file, padding shall be written in file already
+        // see also https://github.com/milvus-io/milvus/issues/34442
+        size_t mapped_size = cap_size_;
         data_ = static_cast<char*>(mmap(
             nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
@@ -122,7 +124,9 @@ class ColumnBase {
           is_map_anonymous_(false) {
         SetPaddingSize(data_type);
 
-        size_t mapped_size = cap_size_ + padding_;
+        // use exactly same size of file, padding shall be written in file already
+        // see also https://github.com/milvus-io/milvus/issues/34442
+        size_t mapped_size = cap_size_;
         data_ = static_cast<char*>(mmap(
             nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
