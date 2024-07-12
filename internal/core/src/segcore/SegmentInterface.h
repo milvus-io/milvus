@@ -118,6 +118,9 @@ class SegmentInterface {
     virtual void
     LoadFieldDataV2(const LoadFieldDataInfo& info) = 0;
 
+    virtual void
+    RemoveDuplicatePkRecords() = 0;
+
     virtual int64_t
     get_segment_id() const = 0;
 
@@ -386,6 +389,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
+
+    virtual void
+    check_retrieve(const query::RetrievePlan* plan) const = 0;
 
     virtual const ConcurrentVector<Timestamp>&
     get_timestamps() const = 0;
