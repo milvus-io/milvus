@@ -16,10 +16,11 @@ type l0CompactionPolicy struct {
 	emptyLoopCount *atomic.Int64
 }
 
-func newL0CompactionPolicy(meta *meta, view *FullViews) *l0CompactionPolicy {
+func newL0CompactionPolicy(meta *meta) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
-		meta:           meta,
-		view:           view,
+		meta: meta,
+		// donot share views with other compaction policy
+		view:           &FullViews{collections: make(map[int64][]*SegmentView)},
 		emptyLoopCount: atomic.NewInt64(0),
 	}
 }
@@ -39,13 +40,11 @@ func (policy *l0CompactionPolicy) Trigger() (map[CompactionTriggerType][]Compact
 	policy.emptyLoopCount.Inc()
 
 	if policy.emptyLoopCount.Load() >= 3 {
-		idleEvents := policy.generateEventForLevelZeroViewIDLE()
-		if len(idleEvents) > 0 {
-			policy.emptyLoopCount.Store(0)
-		}
-		return idleEvents, nil
+		policy.emptyLoopCount.Store(0)
+		return policy.generateEventForLevelZeroViewIDLE(), nil
 	}
-	return make(map[CompactionTriggerType][]CompactionView, 0), nil
+
+	return make(map[CompactionTriggerType][]CompactionView), nil
 }
 
 func (policy *l0CompactionPolicy) generateEventForLevelZeroViewChange() (events map[CompactionTriggerType][]CompactionView) {
@@ -73,7 +72,6 @@ func (policy *l0CompactionPolicy) RefreshLevelZeroViews(latestCollSegs map[int64
 		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
 			return info.GetLevel() == datapb.SegmentLevel_L0
 		})
-
 		latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 		needRefresh, collRefreshedViews := policy.getChangedLevelZeroViews(collID, latestL0Segments)
 		if needRefresh {

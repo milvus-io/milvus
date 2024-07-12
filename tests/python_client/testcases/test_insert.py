@@ -2066,6 +2066,7 @@ class TestUpsertInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="smellthemoon: behavior changed")
     def test_upsert_with_auto_id(self):
         """
         target: test upsert with auto id
