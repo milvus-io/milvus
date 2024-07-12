@@ -320,8 +320,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
 
-		assert.Equal(t, true, Params.EnableEstimateGrowingRowCount.GetAsBool())
-		assert.Equal(t, 10000, Params.EstimateGrowingRowCountPerSegment.GetAsInt())
+		assert.Equal(t, 0.3, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
