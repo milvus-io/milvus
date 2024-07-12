@@ -286,8 +286,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			invalidSegments[segmentID] = struct{}{}
 			continue
 		}
+		validSegments[segmentID] = struct{}{}
 		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
-			validSegments[segmentID] = struct{}{}
 			continue
 		}
 		segments = append(segments, segment)
