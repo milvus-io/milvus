@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
@@ -64,7 +65,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 		SegmentInfo:   info,
 		currRows:      info.GetNumOfRows(),
 		allocations:   make([]*Allocation, 0, 16),
-		lastFlushTime: time.Now().Add(-1 * flushInterval),
+		lastFlushTime: time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second)),
 		// A growing segment from recovery can be also considered idle.
 		lastWrittenTime: getZeroTime(),
 	}
