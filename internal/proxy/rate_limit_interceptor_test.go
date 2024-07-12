@@ -96,7 +96,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 			PartitionName:  "p1",
 			DbName:         "db1",
 		}), size)
-		assert.Equal(t, internalpb.RateType_DMLUpsert, rt)
+		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
 		assert.Equal(t, database, int64(100))
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
