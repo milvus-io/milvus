@@ -556,7 +556,7 @@ class VariableColumn : public ColumnBase {
             views_.emplace_back(data_ + indices_[i],
                                 indices_[i + 1] - indices_[i]);
         }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
+        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back() - padding_);
     }
 
  private:
