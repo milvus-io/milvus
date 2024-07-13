@@ -590,6 +590,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{},
 					},
+					ValidData: fieldData.GetValidData(),
 				}
 			}
 			dstScalar := dst[i].GetScalars()
@@ -1096,7 +1097,7 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 }
 
 func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
-	return fieldSchema.DataType == schemapb.DataType_VarChar || fieldSchema.DataType == schemapb.DataType_String
+	return IsIntegerType(fieldSchema.DataType) || IsStringType(fieldSchema.DataType)
 }
 
 // HasClusterKey check if a collection schema has ClusterKey field
@@ -1350,6 +1351,10 @@ type ResultWithID interface {
 	GetHasMoreResult() bool
 }
 
+type ResultWithTimestamp interface {
+	GetTimestamps() []int64
+}
+
 // SelectMinPK select the index of the minPK in results T of the cursors.
 func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	var (
@@ -1380,6 +1385,54 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 			if pk < minIntPK {
 				minIntPK = pk
 				sel = i
+			}
+		default:
+			continue
+		}
+	}
+
+	return sel, drainResult
+}
+
+func SelectMinPKWithTimestamp[T interface {
+	ResultWithID
+	ResultWithTimestamp
+}](results []T, cursors []int64) (int, bool) {
+	var (
+		sel                = -1
+		drainResult        = false
+		maxTimestamp int64 = 0
+		minIntPK     int64 = math.MaxInt64
+
+		firstStr = true
+		minStrPK string
+	)
+	for i, cursor := range cursors {
+		timestamps := results[i].GetTimestamps()
+		// if cursor has run out of all results from one result and this result has more matched results
+		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+			drainResult = true
+			continue
+		}
+
+		pkInterface := GetPK(results[i].GetIds(), cursor)
+
+		switch pk := pkInterface.(type) {
+		case string:
+			ts := timestamps[cursor]
+			if firstStr || pk < minStrPK || (pk == minStrPK && ts > maxTimestamp) {
+				firstStr = false
+				minStrPK = pk
+				sel = i
+				maxTimestamp = ts
+			}
+		case int64:
+			ts := timestamps[cursor]
+			if pk < minIntPK || (pk == minIntPK && ts > maxTimestamp) {
+				minIntPK = pk
+				sel = i
+				maxTimestamp = ts
 			}
 		default:
 			continue

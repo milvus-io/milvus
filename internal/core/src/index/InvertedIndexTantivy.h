@@ -70,6 +70,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                   "BuildWithDataset should be deprecated");
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::INVERTED;
+    }
+    
     void
     Build(const Config& config = {}) override;
 
@@ -110,6 +115,18 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     const TargetBitmap
     In(size_t n, const T* values) override;
+
+    const TargetBitmap
+    InApplyFilter(
+        size_t n,
+        const T* values,
+        const std::function<bool(size_t /* offset */)>& filter) override;
+
+    void
+    InApplyCallback(
+        size_t n,
+        const T* values,
+        const std::function<void(size_t /* offset */)>& callback) override;
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override;

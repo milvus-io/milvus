@@ -123,7 +123,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
 void
 StringIndexMarisa::Build(const Config& config) {
     if (built_) {
-        throw SegcoreError(IndexAlreadyBuild, "index has been built");
+        PanicInfo(IndexAlreadyBuild, "index has been built");
     }
 
     auto insert_files =
@@ -175,7 +175,7 @@ StringIndexMarisa::BuildWithFieldData(
 void
 StringIndexMarisa::Build(size_t n, const std::string* values) {
     if (built_) {
-        throw SegcoreError(IndexAlreadyBuild, "index has been built");
+        PanicInfo(IndexAlreadyBuild, "index has been built");
     }
 
     marisa::Keyset keyset;
@@ -267,9 +267,8 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     if (written != len) {
         file.Close();
         remove(file_name.c_str());
-        throw SegcoreError(
-            ErrorCode::UnistdError,
-            fmt::format("write index to fd error: {}", strerror(errno)));
+        PanicInfo(ErrorCode::UnistdError,
+                  fmt::format("write index to fd error: {}", strerror(errno)));
     }
 
     file.Seek(0, SEEK_SET);
@@ -442,7 +441,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             break;
         }
         default:
-            throw SegcoreError(
+            PanicInfo(
                 OpTypeInvalid,
                 fmt::format("Invalid OperatorType: {}", static_cast<int>(op)));
     }

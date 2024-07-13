@@ -41,17 +41,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context,
         std::shared_ptr<milvus_storage::Space> space);
 
-    explicit ScalarIndexSort(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager)
-        : file_manager_(file_manager) {
-    }
-
-    explicit ScalarIndexSort(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager,
-        std::shared_ptr<milvus_storage::Space> space)
-        : file_manager_(file_manager), space_(space) {
-    }
-
     BinarySet
     Serialize(const Config& config) override;
 
@@ -67,6 +56,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     int64_t
     Count() override {
         return data_.size();
+    }
+
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::STLSORT;
     }
 
     void

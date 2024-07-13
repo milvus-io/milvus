@@ -61,7 +61,7 @@ ParsePlaceholderGroup(const Plan* plan,
         } else {
             auto line_size = info.values().Get(0).size();
             if (field_meta.get_sizeof() != line_size) {
-                throw SegcoreError(
+                PanicInfo(
                     DimNotMatch,
                     fmt::format("vector dimension mismatch, expected vector "
                                 "size(byte) {}, actual {}.",
@@ -90,6 +90,12 @@ CreateSearchPlanByExpr(const Schema& schema,
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
+std::unique_ptr<Plan>
+CreateSearchPlanFromPlanNode(const Schema& schema,
+                             const proto::plan::PlanNode& plan_node) {
+    return ProtoParser(schema).CreatePlan(plan_node);
+}
+
 std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,
@@ -102,7 +108,7 @@ CreateRetrievePlanByExpr(const Schema& schema,
 
     auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
     if (!res) {
-        throw SegcoreError(UnexpectedError, "parse plan node proto failed");
+        PanicInfo(UnexpectedError, "parse plan node proto failed");
     }
     return ProtoParser(schema).CreateRetrievePlan(plan_node);
 }

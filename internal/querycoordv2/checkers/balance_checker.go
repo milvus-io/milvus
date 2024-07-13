@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -43,12 +44,12 @@ type BalanceChecker struct {
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
-	targetMgr                            *meta.TargetManager
+	targetMgr                            meta.TargetManagerInterface
 	getBalancerFunc                      GetBalancerFunc
 }
 
 func NewBalanceChecker(meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	getBalancerFunc GetBalancerFunc,
@@ -74,7 +75,7 @@ func (b *BalanceChecker) Description() string {
 
 func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (b.meta.GetCollection(collectionID) != nil)
-	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID)
+	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
 }
@@ -128,7 +129,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
-			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
+			log.Debug("ScoreBasedBalancer is balancing this collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}

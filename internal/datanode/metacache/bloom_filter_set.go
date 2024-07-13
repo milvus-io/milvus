@@ -70,6 +70,36 @@ func (bfs *BloomFilterSet) PkExists(lc *storage.LocationsCache) bool {
 	return false
 }
 
+func (bfs *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	bfs.mut.RLock()
+	defer bfs.mut.RUnlock()
+
+	hits := make([]bool, lc.Size())
+	if bfs.current != nil {
+		bfs.current.BatchPkExist(lc, hits)
+	}
+
+	for _, bf := range bfs.history {
+		bf.BatchPkExist(lc, hits)
+	}
+	return hits
+}
+
+func (bfs *BloomFilterSet) BatchPkExistWithHits(lc *storage.BatchLocationsCache, hits []bool) []bool {
+	bfs.mut.RLock()
+	defer bfs.mut.RUnlock()
+
+	if bfs.current != nil {
+		bfs.current.BatchPkExist(lc, hits)
+	}
+
+	for _, bf := range bfs.history {
+		bf.BatchPkExist(lc, hits)
+	}
+
+	return hits
+}
+
 func (bfs *BloomFilterSet) UpdatePKRange(ids storage.FieldData) error {
 	bfs.mut.Lock()
 	defer bfs.mut.Unlock()

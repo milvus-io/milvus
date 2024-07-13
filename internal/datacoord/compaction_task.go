@@ -32,6 +32,7 @@ type CompactionTask interface {
 	GetState() datapb.CompactionTaskState
 	GetChannel() string
 	GetLabel() string
+
 	GetType() datapb.CompactionType
 	GetCollectionID() int64
 	GetPartitionID() int64
@@ -42,15 +43,13 @@ type CompactionTask interface {
 
 	GetPlan() *datapb.CompactionPlan
 	GetResult() *datapb.CompactionPlanResult
+
 	GetNodeID() UniqueID
 	GetSpan() trace.Span
 	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
 	SetNodeID(UniqueID) error
-	// SetState(datapb.CompactionTaskState)
 	SetTask(*datapb.CompactionTask)
 	SetSpan(trace.Span)
-	// SetPlan(*datapb.CompactionPlan)
-	// SetStartTime(startTime int64)
 	SetResult(*datapb.CompactionPlanResult)
 	EndSpan()
 	CleanLogPath()
@@ -99,5 +98,17 @@ func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 func setStartTime(startTime int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.StartTime = startTime
+	}
+}
+
+func setRetryTimes(retryTimes int32) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.RetryTimes = retryTimes
+	}
+}
+
+func setLastStateStartTime(lastStateStartTime int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.LastStateStartTime = lastStateStartTime
 	}
 }

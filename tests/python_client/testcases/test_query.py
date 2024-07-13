@@ -2275,6 +2275,41 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, output_fields=["*"], check_items=CheckTasks.check_query_results,
                            check_task={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_growing", [True])
+    def test_query_to_get_latest_entity_with_dup_ids(self, with_growing):
+        """
+        target: test query to get latest entity with duplicate primary keys
+        method: 1.create collection and insert dup primary key = 0
+                2.query with expr=dup_id
+        expected: return the latest entity; verify the result is same as dedup entities
+        """
+        collection_w = self.init_collection_general(prefix, dim=16, is_flush=False, insert_data=False, is_index=False,
+                                                    vector_data_type=ct.float_type, with_json=False)[0]
+        nb = 50
+        rounds = 10
+        for i in range(rounds):
+            df = cf.gen_default_dataframe_data(dim=16, nb=nb, start=i * nb, with_json=False)
+            df[ct.default_int64_field_name] = i
+            collection_w.insert(df)
+            # re-insert the last piece of data in df to refresh the timestamp
+            last_piece = df.iloc[-1:]
+            collection_w.insert(last_piece)
+
+        if not with_growing:
+            collection_w.flush()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_index)
+        collection_w.load()
+        # verify the result returns the latest entity if there are duplicate primary keys
+        expr = f'{ct.default_int64_field_name} == 0'
+        res = collection_w.query(expr=expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == 1 and res[0][ct.default_float_field_name] == (nb - 1) * 1.0
+
+        # verify the result is same as dedup entities
+        expr = f'{ct.default_int64_field_name} >= 0'
+        res = collection_w.query(expr=expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        assert len(res) == rounds
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self):
         """
@@ -2361,6 +2396,20 @@ class TestQueryOperation(TestcaseBase):
         assert collection_w.has_index()[0]
         collection_w.load()
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_binary_vec_field_name])
+        assert res[0].keys() == set(fields)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_query_output_all_vector_type(self, vector_data_type):
+        """
+        target: test query output different vector type
+        method: create index and specify vec field as output field
+        expected: return primary field and vec field
+        """
+        collection_w, vectors = self.init_collection_general(prefix, True,
+                                                             vector_data_type=vector_data_type)[0:2]
+        fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_float_vec_field_name])
         assert res[0].keys() == set(fields)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3677,6 +3726,37 @@ class TestQueryCount(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: res}]})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_counts_expression_sparse_vectors(self, index):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data)
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "metric_type": "IP", "params": params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        collection_w.load()
+        collection_w.query(expr=default_expr, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: ct.default_nb}]})
+        expr = "int64 > 50 && int64 < 100 && float < 75"
+        collection_w.query(expr=expr, output_fields=[count],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: 24}]})
+        batch_size = 100
+        collection_w.query_iterator(batch_size=batch_size, expr=default_expr,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
+                                                 "batch_size": batch_size})
+
 
 class TestQueryIterator(TestcaseBase):
     """
@@ -3739,6 +3819,27 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
+                                                 "batch_size": batch_size})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def test_query_iterator_output_different_vector_type(self, vector_data_type):
+        """
+        target: test query iterator with output fields
+        method: 1. query iterator output different vector type
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        batch_size = 400
+        collection_w = self.init_collection_general(prefix, True,
+                                                    vector_data_type=vector_data_type)[0]
+        # 2. query iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(batch_size, expr=expr,
+                                    output_fields=[ct.default_float_vec_field_name],
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)

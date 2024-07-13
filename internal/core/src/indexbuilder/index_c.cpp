@@ -142,6 +142,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->opt_fields().size()) {
         config["opt_fields"] = get_opt_field(info->opt_fields());
     }
+    if (info->partition_key_isolation()) {
+        config["partition_key_isolation"] = info->partition_key_isolation();
+    }
 
     return config;
 }
@@ -274,7 +277,8 @@ CreateIndexV2(CIndex* res_index,
             build_index_info->collectionid(),
             build_index_info->partitionid(),
             build_index_info->segmentid(),
-            build_index_info->field_schema().fieldid()};
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
         milvus::storage::IndexMeta index_meta{
             build_index_info->segmentid(),
             build_index_info->field_schema().fieldid(),

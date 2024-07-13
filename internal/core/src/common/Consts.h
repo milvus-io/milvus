@@ -35,6 +35,7 @@ const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
+const char NULLABLE[] = "nullable";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";

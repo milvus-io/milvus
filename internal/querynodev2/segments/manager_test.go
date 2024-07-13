@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/samber/lo"
@@ -11,7 +12,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ManagerSuite struct {
@@ -37,10 +40,14 @@ func (s *ManagerSuite) SetupSuite() {
 	s.channels = []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_200v0", "by-dev-rootcoord-dml_2_300v0", "by-dev-rootcoord-dml_3_400v0"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitMmapManager(paramtable.Get())
 }
 
 func (s *ManagerSuite) SetupTest() {
 	s.mgr = NewSegmentManager()
+	s.segments = nil
 
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
@@ -64,6 +71,19 @@ func (s *ManagerSuite) SetupTest() {
 
 		s.mgr.Put(context.Background(), s.types[i], segment)
 	}
+}
+
+func (s *ManagerSuite) TestExist() {
+	for _, segment := range s.segments {
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.removeSegmentWithType(segment.Type(), segment.ID())
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.release(context.Background(), segment)
+		s.False(s.mgr.Exist(segment.ID(), segment.Type()))
+	}
+
+	s.False(s.mgr.Exist(10086, SegmentTypeGrowing))
+	s.False(s.mgr.Exist(10086, SegmentTypeSealed))
 }
 
 func (s *ManagerSuite) TestGetBy() {

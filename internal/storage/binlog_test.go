@@ -37,25 +37,25 @@ import (
 
 /* #nosec G103 */
 func TestInsertBinlog(t *testing.T) {
-	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 
-	e1, err := w.NextInsertEventWriter()
+	e1, err := w.NextInsertEventWriter(false)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
-	e2, err := w.NextInsertEventWriter()
+	e2, err := w.NextInsertEventWriter(false)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]int64{7, 8, 9})
+	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]bool{true, false, true})
+	err = e2.AddDataToPayload([]bool{true, false, true}, nil)
 	assert.Error(t, err)
-	err = e2.AddDataToPayload([]int64{10, 11, 12})
+	err = e2.AddDataToPayload([]int64{10, 11, 12}, nil)
 	assert.NoError(t, err)
 	e2.SetEventTimestamp(300, 400)
 
@@ -201,11 +201,12 @@ func TestInsertBinlog(t *testing.T) {
 
 	// insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	e1r.Close()
 
 	// start of e2
@@ -243,11 +244,12 @@ func TestInsertBinlog(t *testing.T) {
 
 	// insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
+	assert.Nil(t, valids)
 	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
@@ -258,8 +260,9 @@ func TestInsertBinlog(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, InsertEventType)
 	ed1, ok := (event1.eventData).(*insertEventData)
@@ -270,9 +273,10 @@ func TestInsertBinlog(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
+	assert.Nil(t, valids)
 	assert.Equal(t, event2.TypeCode, InsertEventType)
 	ed2, ok := (event2.eventData).(*insertEventData)
 	assert.True(t, ok)
@@ -288,21 +292,21 @@ func TestDeleteBinlog(t *testing.T) {
 
 	e1, err := w.NextDeleteEventWriter()
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDeleteEventWriter()
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]int64{7, 8, 9})
+	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]bool{true, false, true})
+	err = e2.AddDataToPayload([]bool{true, false, true}, nil)
 	assert.Error(t, err)
-	err = e2.AddDataToPayload([]int64{10, 11, 12})
+	err = e2.AddDataToPayload([]int64{10, 11, 12}, nil)
 	assert.NoError(t, err)
 	e2.SetEventTimestamp(300, 400)
 
@@ -448,11 +452,12 @@ func TestDeleteBinlog(t *testing.T) {
 
 	// insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	e1r.Close()
 
 	// start of e2
@@ -490,10 +495,11 @@ func TestDeleteBinlog(t *testing.T) {
 
 	// insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
 	assert.NoError(t, err)
+	assert.Nil(t, valids)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
 
@@ -505,7 +511,8 @@ func TestDeleteBinlog(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, DeleteEventType)
@@ -517,7 +524,8 @@ func TestDeleteBinlog(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DeleteEventType)
@@ -535,21 +543,21 @@ func TestDDLBinlog1(t *testing.T) {
 
 	e1, err := w.NextCreateCollectionEventWriter()
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDropCollectionEventWriter()
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]int64{7, 8, 9})
+	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]bool{true, false, true})
+	err = e2.AddDataToPayload([]bool{true, false, true}, nil)
 	assert.Error(t, err)
-	err = e2.AddDataToPayload([]int64{10, 11, 12})
+	err = e2.AddDataToPayload([]int64{10, 11, 12}, nil)
 	assert.NoError(t, err)
 	e2.SetEventTimestamp(300, 400)
 
@@ -695,9 +703,10 @@ func TestDDLBinlog1(t *testing.T) {
 
 	// insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
 	e1r.Close()
@@ -737,9 +746,10 @@ func TestDDLBinlog1(t *testing.T) {
 
 	// insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
@@ -752,7 +762,8 @@ func TestDDLBinlog1(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, CreateCollectionEventType)
@@ -764,7 +775,8 @@ func TestDDLBinlog1(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DropCollectionEventType)
@@ -782,21 +794,21 @@ func TestDDLBinlog2(t *testing.T) {
 
 	e1, err := w.NextCreatePartitionEventWriter()
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDropPartitionEventWriter()
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]int64{7, 8, 9})
+	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
-	err = e2.AddDataToPayload([]bool{true, false, true})
+	err = e2.AddDataToPayload([]bool{true, false, true}, nil)
 	assert.Error(t, err)
-	err = e2.AddDataToPayload([]int64{10, 11, 12})
+	err = e2.AddDataToPayload([]int64{10, 11, 12}, nil)
 	assert.NoError(t, err)
 	e2.SetEventTimestamp(300, 400)
 
@@ -941,9 +953,10 @@ func TestDDLBinlog2(t *testing.T) {
 
 	// insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
 	e1r.Close()
@@ -983,9 +996,10 @@ func TestDDLBinlog2(t *testing.T) {
 
 	// insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
@@ -998,7 +1012,8 @@ func TestDDLBinlog2(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, CreatePartitionEventType)
@@ -1010,7 +1025,8 @@ func TestDDLBinlog2(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DropPartitionEventType)
@@ -1042,7 +1058,7 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	e, err := w.NextIndexFileEventWriter()
 	assert.NoError(t, err)
-	err = e.AddByteToPayload(payload)
+	err = e.AddByteToPayload(payload, nil)
 	assert.NoError(t, err)
 	e.SetEventTimestamp(timestamp, timestamp)
 
@@ -1171,7 +1187,7 @@ func TestIndexFileBinlogV2(t *testing.T) {
 
 	e, err := w.NextIndexFileEventWriter()
 	assert.NoError(t, err)
-	err = e.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload))
+	err = e.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload), true)
 	assert.NoError(t, err)
 	e.SetEventTimestamp(timestamp, timestamp)
 
@@ -1309,17 +1325,17 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.Nil(t, reader)
 	assert.Error(t, err)
 
-	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 
 	w.SetEventTimeStamp(1000, 2000)
 
-	e1, err := w.NextInsertEventWriter()
+	e1, err := w.NextInsertEventWriter(false)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
-	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	err = e1.AddDataToPayload([]int32{4, 5, 6}, nil)
 	assert.Error(t, err)
-	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	err = e1.AddDataToPayload([]int64{4, 5, 6}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
@@ -1348,7 +1364,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 }
 
 func TestNewBinlogWriterTsError(t *testing.T) {
-	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 
 	_, err := w.GetBuffer()
 	assert.Error(t, err)
@@ -1376,21 +1392,21 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 }
 
 func TestInsertBinlogWriterCloseError(t *testing.T) {
-	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
-	e1, err := insertWriter.NextInsertEventWriter()
+	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
+	e1, err := insertWriter.NextInsertEventWriter(false)
 	assert.NoError(t, err)
 
 	sizeTotal := 2000000
 	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 	insertWriter.SetEventTimeStamp(1000, 2000)
 	err = insertWriter.Finish()
 	assert.NoError(t, err)
 	assert.NotNil(t, insertWriter.buffer)
-	insertEventWriter, err := insertWriter.NextInsertEventWriter()
+	insertEventWriter, err := insertWriter.NextInsertEventWriter(false)
 	assert.Nil(t, insertEventWriter)
 	assert.Error(t, err)
 	insertWriter.Close()
@@ -1402,7 +1418,7 @@ func TestDeleteBinlogWriteCloseError(t *testing.T) {
 	assert.NoError(t, err)
 	sizeTotal := 2000000
 	deleteWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 	deleteWriter.SetEventTimeStamp(1000, 2000)
@@ -1423,7 +1439,7 @@ func TestDDBinlogWriteCloseError(t *testing.T) {
 	sizeTotal := 2000000
 	ddBinlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
-	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
@@ -1499,7 +1515,7 @@ func (e *testEvent) SetOffset(offset int32) {
 var _ EventWriter = (*testEvent)(nil)
 
 func TestWriterListError(t *testing.T) {
-	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 	sizeTotal := 2000000
 	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	errorEvent := &testEvent{}

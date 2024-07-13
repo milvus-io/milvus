@@ -69,7 +69,8 @@ func Test_binaryVectorBaseChecker_CheckValidDataType(t *testing.T) {
 
 	c := newBinaryVectorBaseChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		fieldSchema := &schemapb.FieldSchema{DataType: test.dType}
+		err := c.CheckValidDataType(fieldSchema)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

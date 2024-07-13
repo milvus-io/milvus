@@ -22,7 +22,7 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 

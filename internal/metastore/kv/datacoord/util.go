@@ -261,6 +261,24 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
+func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
+	valueBytes, err := proto.Marshal(info)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+	}
+	key := buildPartitionStatsInfoPath(info)
+	return key, string(valueBytes), nil
+}
+
+// buildPartitionStatsInfoPath
+func buildPartitionStatsInfoPath(info *datapb.PartitionStatsInfo) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d", PartitionStatsInfoPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
+}
+
+func buildCurrentPartitionStatsVersionPath(collID, partID int64, channel string) string {
+	return fmt.Sprintf("%s/%d/%d/%s", PartitionStatsCurrentVersionPrefix, collID, partID, channel)
+}
+
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
 func buildSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentPrefix, collectionID, partitionID, segmentID)

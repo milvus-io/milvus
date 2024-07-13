@@ -24,8 +24,6 @@ set(SEGCORE_FILES
         SegmentGrowingImpl.cpp
         SegmentSealedImpl.cpp
         FieldIndexing.cpp
-        Reduce.cpp
-        StreamReduce.cpp
         metrics_c.cpp
         plan_c.cpp
         reduce_c.cpp
@@ -38,9 +36,13 @@ set(SEGCORE_FILES
         TimestampIndex.cpp
         Utils.cpp
         ConcurrentVector.cpp
-        ReduceUtils.cpp)
+        ReduceUtils.cpp
+        check_vec_index_c.cpp
+        reduce/Reduce.cpp
+        reduce/StreamReduce.cpp
+        reduce/GroupReduce.cpp)
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
-target_link_libraries(milvus_segcore milvus_query milvus_bitset milvus_exec ${OpenMP_CXX_FLAGS} milvus-storage)
+target_link_libraries(milvus_segcore milvus_query milvus_bitset milvus_exec ${OpenMP_CXX_FLAGS} milvus-storage milvus_futures)
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")

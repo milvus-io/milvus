@@ -20,14 +20,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -47,6 +48,7 @@ type L0ImportTask struct {
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
 
+	allocator  allocator.Interface
 	manager    TaskManager
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
@@ -59,6 +61,8 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 	cm storage.ChunkManager,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
+	// Setting end as math.MaxInt64 to incrementally allocate logID.
+	alloc := allocator.NewLocalAllocator(req.GetAutoIDRange().GetBegin(), math.MaxInt64)
 	task := &L0ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),
@@ -70,6 +74,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
 		cm:           cm,
@@ -104,11 +109,15 @@ func (t *L0ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 
 func (t *L0ImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
+	infos := make(map[int64]*datapb.ImportSegmentInfo)
+	for id, info := range t.segmentsInfo {
+		infos[id] = typeutil.Clone(info)
+	}
 	return &L0ImportTask{
-		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
 		ctx:          ctx,
 		cancel:       cancel,
-		segmentsInfo: t.segmentsInfo,
+		segmentsInfo: infos,
 		req:          t.req,
 		metaCaches:   t.metaCaches,
 	}
@@ -143,7 +152,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 			return
 		}
 		start := time.Now()
-		err = t.importL0(reader, t)
+		err = t.importL0(reader)
 		if err != nil {
 			return
 		}
@@ -160,8 +169,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	return []*conc.Future[any]{f}
 }
 
-func (t *L0ImportTask) importL0(reader binlog.L0Reader, task Task) error {
-	iTask := task.(*L0ImportTask)
+func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -172,11 +180,11 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader, task Task) error {
 			}
 			return err
 		}
-		delData, err := HashDeleteData(iTask, data)
+		delData, err := HashDeleteData(t, data)
 		if err != nil {
 			return err
 		}
-		fs, sts, err := t.syncDelete(iTask, delData)
+		fs, sts, err := t.syncDelete(delData)
 		if err != nil {
 			return err
 		}
@@ -188,33 +196,33 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader, task Task) error {
 		return err
 	}
 	for _, syncTask := range syncTasks {
-		segmentInfo, err := NewImportSegmentInfo(syncTask, iTask.metaCaches)
+		segmentInfo, err := NewImportSegmentInfo(syncTask, t.metaCaches)
 		if err != nil {
 			return err
 		}
-		t.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		log.Info("sync l0 data done", WrapLogFields(task, zap.Any("segmentInfo", segmentInfo))...)
+		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		log.Info("sync l0 data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
-func (t *L0ImportTask) syncDelete(task *L0ImportTask, delData []*storage.DeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Info("start to sync l0 delete data", WrapLogFields(task)...)
+func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
+	log.Info("start to sync l0 delete data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, data := range delData {
-		channel := task.GetVchannels()[channelIdx]
+		channel := t.GetVchannels()[channelIdx]
 		if data.RowCount == 0 {
 			continue
 		}
-		partitionID := task.GetPartitionIDs()[0]
-		segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
-		syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
-			segmentID, partitionID, task.GetCollectionID(), channel, nil, data)
+		partitionID := t.GetPartitionIDs()[0]
+		segmentID := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+			segmentID, partitionID, t.GetCollectionID(), channel, nil, data)
 		if err != nil {
 			return nil, nil, err
 		}
-		future := t.syncMgr.SyncData(task.ctx, syncTask)
+		future := t.syncMgr.SyncData(t.ctx, syncTask)
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)
 	}

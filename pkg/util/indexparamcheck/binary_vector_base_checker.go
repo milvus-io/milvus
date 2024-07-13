@@ -27,14 +27,14 @@ func (c binaryVectorBaseChecker) CheckTrain(params map[string]string) error {
 	return c.staticCheck(params)
 }
 
-func (c binaryVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if dType != schemapb.DataType_BinaryVector {
+func (c binaryVectorBaseChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if field.GetDataType() != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("binary vector is only supported")
 	}
 	return nil
 }
 
-func (c binaryVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {
+func (c binaryVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
 	setDefaultIfNotExist(params, common.MetricTypeKey, BinaryVectorDefaultMetricType)
 }
 

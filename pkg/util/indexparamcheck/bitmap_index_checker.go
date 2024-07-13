@@ -20,9 +20,18 @@ func (c *BITMAPChecker) CheckTrain(params map[string]string) error {
 	return c.scalarIndexChecker.CheckTrain(params)
 }
 
-func (c *BITMAPChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) {
-		return fmt.Errorf("bitmap index are only supported on numeric and string field")
+func (c *BITMAPChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	mainType := field.GetDataType()
+	elemType := field.GetElementType()
+	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&
+		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) {
+		return fmt.Errorf("bitmap index are only supported on bool, int, string and array field")
+	}
+	if typeutil.IsArrayType(mainType) {
+		if !typeutil.IsBoolType(elemType) && !typeutil.IsIntegerType(elemType) &&
+			!typeutil.IsStringType(elemType) {
+			return fmt.Errorf("bitmap index are only supported on bool, int, string for array field")
+		}
 	}
 	return nil
 }

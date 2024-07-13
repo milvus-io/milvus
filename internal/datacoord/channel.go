@@ -19,14 +19,13 @@ package datacoord
 import (
 	"fmt"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ROChannel interface {
@@ -50,17 +49,7 @@ func NewRWChannel(name string,
 	schema *schemapb.CollectionSchema,
 	createTs uint64,
 ) RWChannel {
-	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-		return &StateChannel{
-			Name:            name,
-			CollectionID:    collectionID,
-			StartPositions:  startPos,
-			Schema:          schema,
-			CreateTimestamp: createTs,
-		}
-	}
-
-	return &channelMeta{
+	return &StateChannel{
 		Name:            name,
 		CollectionID:    collectionID,
 		StartPositions:  startPos,

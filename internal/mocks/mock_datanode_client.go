@@ -142,8 +142,8 @@ func (_c *MockDataNodeClient_Close_Call) RunAndReturn(run func() error) *MockDat
 	return _c
 }
 
-// Compaction provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataNodeClient) Compaction(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+// CompactionV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) CompactionV2(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -175,21 +175,21 @@ func (_m *MockDataNodeClient) Compaction(ctx context.Context, in *datapb.Compact
 	return r0, r1
 }
 
-// MockDataNodeClient_Compaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Compaction'
-type MockDataNodeClient_Compaction_Call struct {
+// MockDataNodeClient_CompactionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompactionV2'
+type MockDataNodeClient_CompactionV2_Call struct {
 	*mock.Call
 }
 
-// Compaction is a helper method to define mock.On call
+// CompactionV2 is a helper method to define mock.On call
 //   - ctx context.Context
 //   - in *datapb.CompactionPlan
 //   - opts ...grpc.CallOption
-func (_e *MockDataNodeClient_Expecter) Compaction(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_Compaction_Call {
-	return &MockDataNodeClient_Compaction_Call{Call: _e.mock.On("Compaction",
+func (_e *MockDataNodeClient_Expecter) CompactionV2(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_CompactionV2_Call {
+	return &MockDataNodeClient_CompactionV2_Call{Call: _e.mock.On("CompactionV2",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockDataNodeClient_Compaction_Call) Run(run func(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption)) *MockDataNodeClient_Compaction_Call {
+func (_c *MockDataNodeClient_CompactionV2_Call) Run(run func(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption)) *MockDataNodeClient_CompactionV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -202,12 +202,12 @@ func (_c *MockDataNodeClient_Compaction_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockDataNodeClient_Compaction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_Compaction_Call {
+func (_c *MockDataNodeClient_CompactionV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_CompactionV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataNodeClient_Compaction_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_Compaction_Call {
+func (_c *MockDataNodeClient_CompactionV2_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_CompactionV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

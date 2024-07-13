@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -34,14 +35,14 @@ func TestNatsConsumer_Subscription(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	proOpts := mqwrapper.ProducerOptions{Topic: topic}
+	proOpts := common.ProducerOptions{Topic: topic}
 	_, err = client.CreateProducer(proOpts)
 	assert.NoError(t, err)
 
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -71,7 +72,7 @@ func Test_BadLatestMessageID(t *testing.T) {
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -87,13 +88,13 @@ func TestComsumeMessage(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -101,7 +102,7 @@ func TestComsumeMessage(t *testing.T) {
 
 	msg := []byte("test the first message")
 	prop := map[string]string{"k1": "v1", "k2": "v2"}
-	_, err = p.Send(context.Background(), &mqwrapper.ProducerMessage{
+	_, err = p.Send(context.Background(), &common.ProducerMessage{
 		Payload:    msg,
 		Properties: prop,
 	})
@@ -121,7 +122,7 @@ func TestComsumeMessage(t *testing.T) {
 
 	msg2 := []byte("test the second message")
 	prop2 := map[string]string{"k1": "v3", "k4": "v4"}
-	_, err = p.Send(context.Background(), &mqwrapper.ProducerMessage{
+	_, err = p.Send(context.Background(), &common.ProducerMessage{
 		Payload:    msg2,
 		Properties: prop2,
 	})
@@ -151,7 +152,7 @@ func TestNatsConsumer_Close(t *testing.T) {
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -179,7 +180,7 @@ func TestNatsClientErrorOnUnsubscribeTwice(t *testing.T) {
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -201,7 +202,7 @@ func TestCheckTopicValid(t *testing.T) {
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -219,11 +220,11 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.Error(t, err)
 
 	// not empty topic can pass
-	pub, err := client.CreateProducer(mqwrapper.ProducerOptions{
+	pub, err := client.CreateProducer(common.ProducerOptions{
 		Topic: topic,
 	})
 	assert.NoError(t, err)
-	_, err = pub.Send(context.TODO(), &mqwrapper.ProducerMessage{
+	_, err = pub.Send(context.TODO(), &common.ProducerMessage{
 		Payload: []byte("123123123"),
 	})
 	assert.NoError(t, err)
@@ -236,7 +237,7 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func newTestConsumer(t *testing.T, topic string, position mqwrapper.SubscriptionInitialPosition) (mqwrapper.Consumer, error) {
+func newTestConsumer(t *testing.T, topic string, position common.SubscriptionInitialPosition) (mqwrapper.Consumer, error) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
 	return client.Subscribe(mqwrapper.ConsumerOptions{
@@ -250,14 +251,14 @@ func newTestConsumer(t *testing.T, topic string, position mqwrapper.Subscription
 func newProducer(t *testing.T, topic string) (*nmqClient, mqwrapper.Producer) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
-	producer, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	producer, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	return client, producer
 }
 
 func process(t *testing.T, msgs []string, p mqwrapper.Producer) {
 	for _, msg := range msgs {
-		_, err := p.Send(context.Background(), &mqwrapper.ProducerMessage{
+		_, err := p.Send(context.Background(), &common.ProducerMessage{
 			Payload:    []byte(msg),
 			Properties: map[string]string{},
 		})
@@ -271,13 +272,13 @@ func TestNmqConsumer_GetLatestMsgID(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -300,7 +301,7 @@ func TestNmqConsumer_ConsumeFromLatest(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	msgs := []string{"111", "222", "333"}
@@ -309,7 +310,7 @@ func TestNmqConsumer_ConsumeFromLatest(t *testing.T) {
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
+		SubscriptionInitialPosition: common.SubscriptionPositionLatest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -330,7 +331,7 @@ func TestNmqConsumer_ConsumeFromEarliest(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	msgs := []string{"111", "222"}
@@ -339,7 +340,7 @@ func TestNmqConsumer_ConsumeFromEarliest(t *testing.T) {
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -356,7 +357,7 @@ func TestNmqConsumer_ConsumeFromEarliest(t *testing.T) {
 	c2, err := client.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
 	assert.NoError(t, err)
@@ -381,7 +382,7 @@ func TestNatsConsumer_SeekExclusive(t *testing.T) {
 	process(t, msgs, p)
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newTestConsumer(t, topic, common.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, false)
@@ -404,7 +405,7 @@ func TestNatsConsumer_SeekInclusive(t *testing.T) {
 	process(t, msgs, p)
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newTestConsumer(t, topic, common.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, true)
@@ -423,7 +424,7 @@ func TestNatsConsumer_NoDoubleSeek(t *testing.T) {
 	defer p.Close()
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newTestConsumer(t, topic, common.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, true)
@@ -441,7 +442,7 @@ func TestNatsConsumer_ChanWithNoAssign(t *testing.T) {
 	msgs := []string{"111", "222", "333", "444", "555"}
 	process(t, msgs, p)
 
-	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
+	consumer, err := newTestConsumer(t, topic, common.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 

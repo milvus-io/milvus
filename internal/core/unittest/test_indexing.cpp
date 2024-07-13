@@ -28,7 +28,7 @@
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
 #include "query/SearchBruteForce.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "index/IndexFactory.h"
 #include "common/QueryResult.h"
 #include "segcore/Types.h"
@@ -329,8 +329,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
             is_sparse = true;
             vec_field_data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
-        } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
-                   index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        } else if (IsBinaryVectorMetricType(metric_type)) {
             is_binary = true;
             vec_field_data_type = milvus::DataType::VECTOR_BINARY;
         } else {
@@ -450,8 +449,7 @@ TEST(Indexing, Iterator) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
 
-    knowhere::expected<
-        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         kw_iterators = vec_index->VectorIterators(
             query_ds, searchInfo.search_params_, view);
     ASSERT_TRUE(kw_iterators.has_value());

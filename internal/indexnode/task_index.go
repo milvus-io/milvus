@@ -149,25 +149,26 @@ func (it *indexBuildTaskV2) Execute(ctx context.Context) error {
 	}
 
 	buildIndexParams := &indexcgopb.BuildIndexInfo{
-		ClusterID:           it.req.GetClusterID(),
-		BuildID:             it.req.GetBuildID(),
-		CollectionID:        it.req.GetCollectionID(),
-		PartitionID:         it.req.GetPartitionID(),
-		SegmentID:           it.req.GetSegmentID(),
-		IndexVersion:        it.req.GetIndexVersion(),
-		CurrentIndexVersion: it.req.GetCurrentIndexVersion(),
-		NumRows:             it.req.GetNumRows(),
-		Dim:                 it.req.GetDim(),
-		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
-		InsertFiles:         it.req.GetDataPaths(),
-		FieldSchema:         it.req.GetField(),
-		StorageConfig:       storageConfig,
-		IndexParams:         mapToKVPairs(it.newIndexParams),
-		TypeParams:          mapToKVPairs(it.newTypeParams),
-		StorePath:           it.req.GetStorePath(),
-		StoreVersion:        it.req.GetStoreVersion(),
-		IndexStorePath:      it.req.GetIndexStorePath(),
-		OptFields:           optFields,
+		ClusterID:             it.req.GetClusterID(),
+		BuildID:               it.req.GetBuildID(),
+		CollectionID:          it.req.GetCollectionID(),
+		PartitionID:           it.req.GetPartitionID(),
+		SegmentID:             it.req.GetSegmentID(),
+		IndexVersion:          it.req.GetIndexVersion(),
+		CurrentIndexVersion:   it.req.GetCurrentIndexVersion(),
+		NumRows:               it.req.GetNumRows(),
+		Dim:                   it.req.GetDim(),
+		IndexFilePrefix:       it.req.GetIndexFilePrefix(),
+		InsertFiles:           it.req.GetDataPaths(),
+		FieldSchema:           it.req.GetField(),
+		StorageConfig:         storageConfig,
+		IndexParams:           mapToKVPairs(it.newIndexParams),
+		TypeParams:            mapToKVPairs(it.newTypeParams),
+		StorePath:             it.req.GetStorePath(),
+		StoreVersion:          it.req.GetStoreVersion(),
+		IndexStorePath:        it.req.GetIndexStorePath(),
+		OptFields:             optFields,
+		PartitionKeyIsolation: it.req.GetPartitionKeyIsolation(),
 	}
 
 	var err error
@@ -261,7 +262,7 @@ func newIndexBuildTask(ctx context.Context,
 
 func (it *indexBuildTask) parseParams() {
 	// fill field for requests before v2.5.0
-	if it.req.GetField() == nil || it.req.GetField().GetDataType() == schemapb.DataType_None {
+	if it.req.GetField() == nil || it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
 		it.req.Field = &schemapb.FieldSchema{
 			FieldID:  it.req.GetFieldID(),
 			Name:     it.req.GetFieldName(),
@@ -367,7 +368,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if it.req.GetCollectionID() == 0 {
+	if it.req.GetCollectionID() == 0 || it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
 		err := it.parseFieldMetaFromBinlog(ctx)
 		if err != nil {
 			log.Ctx(ctx).Warn("parse field meta from binlog failed", zap.Error(err))
@@ -451,25 +452,26 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	buildIndexParams := &indexcgopb.BuildIndexInfo{
-		ClusterID:           it.req.GetClusterID(),
-		BuildID:             it.req.GetBuildID(),
-		CollectionID:        it.req.GetCollectionID(),
-		PartitionID:         it.req.GetPartitionID(),
-		SegmentID:           it.req.GetSegmentID(),
-		IndexVersion:        it.req.GetIndexVersion(),
-		CurrentIndexVersion: it.req.GetCurrentIndexVersion(),
-		NumRows:             it.req.GetNumRows(),
-		Dim:                 it.req.GetDim(),
-		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
-		InsertFiles:         it.req.GetDataPaths(),
-		FieldSchema:         it.req.GetField(),
-		StorageConfig:       storageConfig,
-		IndexParams:         mapToKVPairs(it.newIndexParams),
-		TypeParams:          mapToKVPairs(it.newTypeParams),
-		StorePath:           it.req.GetStorePath(),
-		StoreVersion:        it.req.GetStoreVersion(),
-		IndexStorePath:      it.req.GetIndexStorePath(),
-		OptFields:           optFields,
+		ClusterID:             it.req.GetClusterID(),
+		BuildID:               it.req.GetBuildID(),
+		CollectionID:          it.req.GetCollectionID(),
+		PartitionID:           it.req.GetPartitionID(),
+		SegmentID:             it.req.GetSegmentID(),
+		IndexVersion:          it.req.GetIndexVersion(),
+		CurrentIndexVersion:   it.req.GetCurrentIndexVersion(),
+		NumRows:               it.req.GetNumRows(),
+		Dim:                   it.req.GetDim(),
+		IndexFilePrefix:       it.req.GetIndexFilePrefix(),
+		InsertFiles:           it.req.GetDataPaths(),
+		FieldSchema:           it.req.GetField(),
+		StorageConfig:         storageConfig,
+		IndexParams:           mapToKVPairs(it.newIndexParams),
+		TypeParams:            mapToKVPairs(it.newTypeParams),
+		StorePath:             it.req.GetStorePath(),
+		StoreVersion:          it.req.GetStoreVersion(),
+		IndexStorePath:        it.req.GetIndexStorePath(),
+		OptFields:             optFields,
+		PartitionKeyIsolation: it.req.GetPartitionKeyIsolation(),
 	}
 
 	log.Info("debug create index", zap.Any("buildIndexParams", buildIndexParams))
@@ -557,7 +559,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	it.req.CollectionID = collectionID
 	it.req.PartitionID = partitionID
 	it.req.SegmentID = segmentID
-	if it.req.GetField().GetFieldID() == 0 {
+	if it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
 		for fID, value := range insertData.Data {
 			it.req.Field.DataType = value.GetDataType()
 			it.req.Field.FieldID = fID

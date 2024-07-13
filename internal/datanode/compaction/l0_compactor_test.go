@@ -79,6 +79,36 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.dBlob = blob.GetValue()
 }
 
+func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
+	tests := []struct {
+		baseMem        float64
+		memLimit       float64
+		batchSizeLimit string
+
+		expected    int
+		description string
+	}{
+		{10, 100, "-1", 10, "no limitation on maxBatchSize"},
+		{10, 100, "0", 10, "no limitation on maxBatchSize v2"},
+		{10, 100, "11", 10, "maxBatchSize == 11"},
+		{10, 100, "1", 1, "maxBatchSize == 1"},
+		{10, 12, "-1", 1, "no limitation on maxBatchSize"},
+		{10, 12, "100", 1, "maxBatchSize == 100"},
+	}
+
+	maxSizeK := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.Key
+	defer paramtable.Get().Reset(maxSizeK)
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			paramtable.Get().Save(maxSizeK, test.batchSizeLimit)
+			defer paramtable.Get().Reset(maxSizeK)
+
+			actual := getMaxBatchSize(test.baseMem, test.memLimit)
+			s.Equal(test.expected, actual)
+		})
+	}
+}
+
 func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 	plan := &datapb.CompactionPlan{
 		PlanID: 19530,
@@ -258,7 +288,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
@@ -480,7 +510,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), []*storage.DeleteData{s.dData}, segmentBFs)
+	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
 
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
@@ -523,16 +553,16 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
 	}
 
 	for _, test := range tests {
-		dDatas, err := s.task.loadDelta(ctx, test.paths)
+		dData, err := s.task.loadDelta(ctx, test.paths)
 
 		if test.expectError {
 			s.Error(err)
 		} else {
 			s.NoError(err)
-			s.NotEmpty(dDatas)
-			s.EqualValues(1, len(dDatas))
-			s.ElementsMatch(s.dData.Pks, dDatas[0].Pks)
-			s.Equal(s.dData.RowCount, dDatas[0].RowCount)
+			s.NotEmpty(dData)
+			s.NotNil(dData)
+			s.ElementsMatch(s.dData.Pks, dData.Pks)
+			s.Equal(s.dData.RowCount, dData.RowCount)
 		}
 	}
 }

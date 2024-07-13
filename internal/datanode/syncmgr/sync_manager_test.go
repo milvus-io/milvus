@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -144,7 +145,8 @@ func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
 		WithSchema(s.schema).
 		WithChunkManager(s.chunkManager).
 		WithAllocator(s.allocator).
-		WithMetaCache(s.metacache)
+		WithMetaCache(s.metacache).
+		WithAllocator(s.allocator)
 
 	return task
 }
@@ -158,7 +160,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
@@ -184,12 +186,11 @@ func (s *SyncManagerSuite) TestCompacted() {
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
-	metacache.CompactTo(1001)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
@@ -209,7 +210,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 }
 
 func (s *SyncManagerSuite) TestResizePool() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	syncMgr, ok := manager.(*syncManager)
@@ -245,7 +246,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 }
 
 func (s *SyncManagerSuite) TestNewSyncManager() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	_, ok := manager.(*syncManager)
@@ -257,36 +258,18 @@ func (s *SyncManagerSuite) TestNewSyncManager() {
 
 	params.Save(configKey, "0")
 
-	_, err = NewSyncManager(s.chunkManager, s.allocator)
+	_, err = NewSyncManager(s.chunkManager)
 	s.Error(err)
 }
 
-func (s *SyncManagerSuite) TestTargetUpdated() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
-	s.NoError(err)
-
-	task := NewMockTask(s.T())
-	task.EXPECT().SegmentID().Return(1000)
-	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
-	task.EXPECT().CalcTargetSegment().Return(1001, nil).Once()
-	task.EXPECT().Run().Return(errTargetSegmentNotMatch).Once()
-	task.EXPECT().Run().Return(nil).Once()
-
-	f := manager.SyncData(context.Background(), task)
-	_, err = f.Await()
-	s.NoError(err)
-}
-
 func (s *SyncManagerSuite) TestUnexpectedError() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
-	task.EXPECT().Run().Return(merr.WrapErrServiceInternal("mocked")).Once()
+	task.EXPECT().Run(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
 	f := manager.SyncData(context.Background(), task)
@@ -294,56 +277,14 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	s.Error(err)
 }
 
-func (s *SyncManagerSuite) TestCalcTargetError() {
-	s.Run("fail_before_submit", func() {
-		manager, err := NewSyncManager(s.chunkManager, s.allocator)
-		s.NoError(err)
-
-		mockErr := merr.WrapErrServiceInternal("mocked")
-
-		task := NewMockTask(s.T())
-		task.EXPECT().SegmentID().Return(1000)
-		task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-		task.EXPECT().CalcTargetSegment().Return(0, mockErr).Once()
-		task.EXPECT().HandleError(mock.Anything)
-
-		f := manager.SyncData(context.Background(), task)
-		_, err = f.Await()
-		s.Error(err)
-		s.ErrorIs(err, mockErr)
-	})
-
-	s.Run("fail_during_rerun", func() {
-		manager, err := NewSyncManager(s.chunkManager, s.allocator)
-		s.NoError(err)
-
-		mockErr := merr.WrapErrServiceInternal("mocked")
-
-		task := NewMockTask(s.T())
-		task.EXPECT().SegmentID().Return(1000)
-		task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-		task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
-		task.EXPECT().CalcTargetSegment().Return(0, mockErr).Once()
-		task.EXPECT().Run().Return(errTargetSegmentNotMatch).Once()
-		task.EXPECT().HandleError(mock.Anything)
-
-		f := manager.SyncData(context.Background(), task)
-		_, err = f.Await()
-		s.Error(err)
-		s.ErrorIs(err, mockErr)
-	})
-}
-
 func (s *SyncManagerSuite) TestTargetUpdateSameID() {
-	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager)
 	s.NoError(err)
 
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
-	task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
-	task.EXPECT().Run().Return(errTargetSegmentNotMatch).Once()
+	task.EXPECT().Run(mock.Anything).Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
 	f := manager.SyncData(context.Background(), task)

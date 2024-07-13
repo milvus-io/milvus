@@ -176,7 +176,7 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 			Timestamp:   1000,
 			ChannelName: s.channelName,
 		})
-	pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+	pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 	pack.WithDeleteData(s.getDeleteBuffer())
 
 	storageCache, err := metacache.NewStorageV2Cache(s.schema)
@@ -184,7 +184,7 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 
 	s.metacache.EXPECT().Collection().Return(s.collectionID)
 	s.metacache.EXPECT().Schema().Return(s.schema)
-	serializer, err := NewStorageV2Serializer(storageCache, s.metacache, nil)
+	serializer, err := NewStorageV2Serializer(storageCache, s.allocator, s.metacache, nil)
 	s.Require().NoError(err)
 	task, err := serializer.EncodeBuffer(context.Background(), pack)
 	s.Require().NoError(err)
@@ -196,6 +196,8 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 }
 
 func (s *SyncTaskSuiteV2) TestRunNormal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
@@ -203,7 +205,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}
@@ -229,7 +231,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
@@ -243,7 +245,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 			Timestamp:   100,
 		})
 
-		err := task.Run()
+		err := task.Run(ctx)
 		s.NoError(err)
 	})
 }
@@ -308,6 +310,81 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 					[]byte(`{"batch":2}`),
 					[]byte(`{"key":"world"}`),
 				},
+			},
+			14: &storage.Float16VectorFieldData{
+				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
+				Dim:  4,
+			},
+		},
+	}
+
+	err = typeutil.BuildRecord(b, data, fieldSchemas)
+	s.NoError(err)
+	s.EqualValues(2, b.NewRecord().NumRows())
+}
+
+func (s *SyncTaskSuiteV2) TestBuildRecordNullable() {
+	fieldSchemas := []*schemapb.FieldSchema{
+		{FieldID: 1, Name: "field0", DataType: schemapb.DataType_Bool},
+		{FieldID: 2, Name: "field1", DataType: schemapb.DataType_Int8},
+		{FieldID: 3, Name: "field2", DataType: schemapb.DataType_Int16},
+		{FieldID: 4, Name: "field3", DataType: schemapb.DataType_Int32},
+		{FieldID: 5, Name: "field4", DataType: schemapb.DataType_Int64},
+		{FieldID: 6, Name: "field5", DataType: schemapb.DataType_Float},
+		{FieldID: 7, Name: "field6", DataType: schemapb.DataType_Double},
+		{FieldID: 8, Name: "field7", DataType: schemapb.DataType_String},
+		{FieldID: 9, Name: "field8", DataType: schemapb.DataType_VarChar},
+		{FieldID: 10, Name: "field9", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+		{FieldID: 11, Name: "field10", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		{FieldID: 12, Name: "field11", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
+		{FieldID: 14, Name: "field12", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+	}
+
+	schema, err := typeutil.ConvertToArrowSchema(fieldSchemas)
+	s.NoError(err)
+
+	b := array.NewRecordBuilder(memory.NewGoAllocator(), schema)
+	defer b.Release()
+
+	data := &storage.InsertData{
+		Data: map[int64]storage.FieldData{
+			1:  &storage.BoolFieldData{Data: []bool{true, false}, ValidData: []bool{true, true}},
+			2:  &storage.Int8FieldData{Data: []int8{3, 4}, ValidData: []bool{true, true}},
+			3:  &storage.Int16FieldData{Data: []int16{3, 4}, ValidData: []bool{true, true}},
+			4:  &storage.Int32FieldData{Data: []int32{3, 4}, ValidData: []bool{true, true}},
+			5:  &storage.Int64FieldData{Data: []int64{3, 4}, ValidData: []bool{true, true}},
+			6:  &storage.FloatFieldData{Data: []float32{3, 4}, ValidData: []bool{true, true}},
+			7:  &storage.DoubleFieldData{Data: []float64{3, 4}, ValidData: []bool{true, true}},
+			8:  &storage.StringFieldData{Data: []string{"3", "4"}, ValidData: []bool{true, true}},
+			9:  &storage.StringFieldData{Data: []string{"3", "4"}, ValidData: []bool{true, true}},
+			10: &storage.BinaryVectorFieldData{Data: []byte{0, 255}, Dim: 8},
+			11: &storage.FloatVectorFieldData{
+				Data: []float32{4, 5, 6, 7, 4, 5, 6, 7},
+				Dim:  4,
+			},
+			12: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{6, 5, 4}},
+						},
+					},
+				},
+				ValidData: []bool{true, true},
+			},
+			13: &storage.JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{"batch":2}`),
+					[]byte(`{"key":"world"}`),
+				},
+				ValidData: []bool{true, true},
 			},
 			14: &storage.Float16VectorFieldData{
 				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},

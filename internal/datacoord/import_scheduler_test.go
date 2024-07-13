@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -56,8 +57,9 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = NewNMockAllocator(s.T())
@@ -249,7 +251,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	})
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{ID: id, IsImporting: true},
+			SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Importing, IsImporting: true},
 		}
 		err = s.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
@@ -260,11 +262,11 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	}
 
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().DropSegment(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := s.meta.GetSegment(id)
-		s.Nil(segment)
+		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 	}
 	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())

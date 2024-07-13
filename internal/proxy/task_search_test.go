@@ -2104,6 +2104,26 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+	t.Run("check iterator and topK", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		resetSearchParamsValue(normalParam, TopKKey, `1024000`)
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema, false)
+		assert.NotNil(t, info)
+		assert.NoError(t, err)
+		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
@@ -2608,11 +2628,12 @@ func (s *MaterializedViewTestSuite) TearDownSuite() {
 
 func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
-	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
 	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 		&collectionBasicInfo{
-			collID: s.colID,
-		}, nil).Maybe()
+			collID:                s.colID,
+			partitionKeyIsolation: true,
+		}, nil)
 	globalMetaCache = s.mockMetaCache
 }
 
@@ -2692,7 +2713,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
-	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
@@ -2709,6 +2730,33 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	task.request.Dsl = testVarCharField + " == \"a\""
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalid() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	task.request.Dsl = testVarCharField + " in [\"a\", \"b\"]"
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+	s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 }
 
 func TestMaterializedView(t *testing.T) {

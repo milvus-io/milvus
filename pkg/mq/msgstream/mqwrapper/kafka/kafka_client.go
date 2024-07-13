@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -43,15 +44,32 @@ func getBasicConfig(address string) kafka.ConfigMap {
 	}
 }
 
+func ConfigtoString(config kafka.ConfigMap) string {
+	configString := "["
+	for key := range config {
+		if key == "sasl.password" || key == "sasl.username" {
+			configString += key + ":" + "*** "
+		} else {
+			value, _ := config.Get(key, nil)
+			configString += key + ":" + fmt.Sprintf("%v ", value)
+		}
+	}
+	if len(configString) > 1 {
+		configString = configString[:len(configString)-1]
+	}
+	configString += "]"
+	return configString
+}
+
 func NewKafkaClientInstance(address string) *kafkaClient {
 	config := getBasicConfig(address)
 	return NewKafkaClientInstanceWithConfigMap(config, kafka.ConfigMap{}, kafka.ConfigMap{})
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	log.Info("init kafka Config ", zap.String("commonConfig", fmt.Sprintf("+%v", config)),
-		zap.String("extraConsumerConfig", fmt.Sprintf("+%v", extraConsumerConfig)),
-		zap.String("extraProducerConfig", fmt.Sprintf("+%v", extraProducerConfig)),
+	log.Info("init kafka Config ", zap.String("commonConfig", ConfigtoString(config)),
+		zap.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
+		zap.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
@@ -168,7 +186,7 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	return newConf
 }
 
-func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.SubscriptionInitialPosition) *kafka.ConfigMap {
+func (kc *kafkaClient) newConsumerConfig(group string, offset common.SubscriptionInitialPosition) *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
 
 	newConf.SetKey("group.id", group)
@@ -182,7 +200,7 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 	return newConf
 }
 
-func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+func (kc *kafkaClient) CreateProducer(options common.ProducerOptions) (mqwrapper.Producer, error) {
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -217,11 +235,11 @@ func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.C
 	return consumer, nil
 }
 
-func (kc *kafkaClient) EarliestMessageID() mqwrapper.MessageID {
+func (kc *kafkaClient) EarliestMessageID() common.MessageID {
 	return &kafkaID{messageID: int64(kafka.OffsetBeginning)}
 }
 
-func (kc *kafkaClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
+func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
 	offset, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return nil, err
@@ -240,7 +258,7 @@ func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafk
 	}
 }
 
-func (kc *kafkaClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+func (kc *kafkaClient) BytesToMsgID(id []byte) (common.MessageID, error) {
 	offset := DeserializeKafkaID(id)
 	return &kafkaID{messageID: offset}, nil
 }

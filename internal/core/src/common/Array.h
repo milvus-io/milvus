@@ -275,6 +275,11 @@ class Array {
         return offsets_;
     }
 
+    std::vector<uint64_t>
+    get_offsets_in_copy() const {
+        return offsets_;
+    }
+
     ScalarArray
     output_data() const {
         ScalarArray data_array;
@@ -572,6 +577,11 @@ class ArrayView {
     const void*
     data() const {
         return data_;
+    }
+    // copy to result
+    std::vector<uint64_t>
+    get_offsets_in_copy() const {
+        return offsets_;
     }
 
     bool

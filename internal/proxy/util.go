@@ -109,10 +109,10 @@ func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	return nil
 }
 
-func validateTopKLimit(topK int64) error {
+func validateLimit(limit int64) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
-	if topK <= 0 || topK > topKLimit {
-		return fmt.Errorf("top k should be in range [1, %d], but got %d", topKLimit, topK)
+	if limit <= 0 || limit > topKLimit {
+		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
 	}
 	return nil
 }
@@ -268,7 +268,7 @@ func validateFieldName(fieldName string) error {
 	for i := 1; i < fieldNameSize; i++ {
 		c := fieldName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Field name cannot only contain numbers, letters, and underscores."
+			msg := invalidMsg + "Field name can only contain numbers, letters, and underscores."
 			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
@@ -646,10 +646,10 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 				StrId: scalarField.GetStringData(),
 			}
 		default:
-			return nil, errors.New("currently only support DataType Int64 or VarChar as PrimaryField")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as PrimaryField")
 		}
 	default:
-		return nil, errors.New("currently not support vector field as PrimaryField")
+		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as PrimaryField")
 	}
 
 	return primaryData, nil
@@ -1073,7 +1073,7 @@ func validateIndexName(indexName string) error {
 	for i := 1; i < indexNameSize; i++ {
 		c := indexName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Index name cannot only contain numbers, letters, and underscores."
+			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
 			return errors.New(msg)
 		}
 	}
@@ -1123,7 +1123,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	return false, nil
 }
 
-func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
@@ -1142,16 +1142,20 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
+
 		if fieldSchema.IsPrimaryKey {
 			primaryKeyNum++
 		}
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
+		if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
+			autoGenFieldNum++
+		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
-				// no need to pass when pk is autoid and SkipAutoIDCheck is false
-				autoGenFieldNum++
+			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+				// autoGenField
 				continue
 			}
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
@@ -1175,7 +1179,8 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 	}
 
 	expectedNum := len(schema.Fields)
-	actualNum := autoGenFieldNum + len(insertMsg.FieldsData)
+	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
+
 	if expectedNum != actualNum {
 		log.Warn("the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
 		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
@@ -1184,20 +1189,21 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 	return nil
 }
 
-func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.MutationResult, insertMsg *msgstream.InsertMsg, inInsert bool) (*schemapb.IDs, error) {
+func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) (*schemapb.IDs, error) {
+	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg, inInsert); err != nil {
 		return nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
+		log.Error("get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -1215,18 +1221,18 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 			primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 			if err != nil {
-				log.Info("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+				log.Info("get primary field data failed", zap.Error(err))
 				return nil, err
 			}
 		} else {
 			// check primary key data not exist
 			if typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) {
-				return nil, fmt.Errorf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name))
 			}
 			// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 			primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 			if err != nil {
-				log.Info("generate primary field data failed when autoID == true", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+				log.Info("generate primary field data failed when autoID == true", zap.Error(err))
 				return nil, err
 			}
 			// if autoID == true, set the primary field data
@@ -1234,26 +1240,35 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 			insertMsg.FieldsData = append(insertMsg.FieldsData, primaryFieldData)
 		}
 	} else {
-		// when checkPrimaryFieldData in upsert
-		if primaryFieldSchema.AutoID {
-			// upsert has not supported when autoID == true
-			log.Info("can not upsert when auto id enabled",
-				zap.String("primaryFieldSchemaName", primaryFieldSchema.Name))
-			err := merr.WrapErrParameterInvalidMsg(fmt.Sprintf("upsert can not assign primary field data when auto id enabled %v", primaryFieldSchema.GetName()))
-			result.Status = merr.Status(err)
-			return nil, err
+		primaryFieldID := primaryFieldSchema.FieldID
+		primaryFieldName := primaryFieldSchema.Name
+		for i, field := range insertMsg.GetFieldsData() {
+			if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
+				primaryFieldData = field
+				if primaryFieldSchema.AutoID {
+					// use the passed pk as new pk when autoID == false
+					// automatic generate pk as new pk wehen autoID == true
+					newPrimaryFieldData, err := autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
+					if err != nil {
+						log.Info("generate new primary field data failed when upsert", zap.Error(err))
+						return nil, err
+					}
+					insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
+					insertMsg.FieldsData = append(insertMsg.FieldsData, newPrimaryFieldData)
+				}
+				break
+			}
 		}
-		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
-		if err != nil {
-			log.Error("get primary field data failed when upsert", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
-			return nil, err
+		// must assign primary field data when upsert
+		if primaryFieldData == nil {
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldName))
 		}
 	}
 
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn("parse primary field data to IDs failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+		log.Warn("parse primary field data to IDs failed", zap.Error(err))
 		return nil, err
 	}
 

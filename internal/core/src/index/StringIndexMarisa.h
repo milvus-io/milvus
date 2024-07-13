@@ -37,17 +37,6 @@ class StringIndexMarisa : public StringIndex {
         const storage::FileManagerContext& file_manager_context,
         std::shared_ptr<milvus_storage::Space> space);
 
-    explicit StringIndexMarisa(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager)
-        : file_manager_(file_manager) {
-    }
-
-    explicit StringIndexMarisa(
-        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager,
-        std::shared_ptr<milvus_storage::Space> space)
-        : file_manager_(file_manager), space_(space) {
-    }
-
     int64_t
     Size() override;
 
@@ -66,6 +55,11 @@ class StringIndexMarisa : public StringIndex {
     int64_t
     Count() override {
         return str_ids_.size();
+    }
+
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::MARISA;
     }
 
     void

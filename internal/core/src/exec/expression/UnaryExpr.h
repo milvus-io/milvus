@@ -25,6 +25,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
 #include "common/RegexQuery.h"
@@ -310,6 +311,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplArray();
 
+    template <typename T>
+    VectorPtr
+    ExecRangeVisitorImplArrayForIndex();
+
+    template <typename T>
+    VectorPtr
+    ExecArrayEqualForIndex(bool reverse);
+
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
@@ -317,7 +326,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     bool
-    CanUseIndex() const;
+    CanUseIndex();
+
+    template <typename T>
+    bool
+    CanUseIndexForArray();
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

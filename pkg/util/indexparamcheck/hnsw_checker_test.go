@@ -158,17 +158,56 @@ func Test_hnswChecker_CheckValidDataType(t *testing.T) {
 		},
 		{
 			dType:    schemapb.DataType_BinaryVector,
-			errIsNil: false,
+			errIsNil: true,
 		},
 	}
 
 	c := newHnswChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		err := c.CheckValidDataType(&schemapb.FieldSchema{DataType: test.dType})
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {
 			assert.Error(t, err)
 		}
+	}
+}
+
+func Test_hnswChecker_SetDefaultMetricType(t *testing.T) {
+	cases := []struct {
+		dType      schemapb.DataType
+		metricType string
+	}{
+		{
+			dType:      schemapb.DataType_FloatVector,
+			metricType: metric.COSINE,
+		},
+		{
+			dType:      schemapb.DataType_Float16Vector,
+			metricType: metric.COSINE,
+		},
+		{
+			dType:      schemapb.DataType_BFloat16Vector,
+			metricType: metric.COSINE,
+		},
+		{
+			dType:      schemapb.DataType_SparseFloatVector,
+			metricType: metric.IP,
+		},
+		{
+			dType:      schemapb.DataType_BinaryVector,
+			metricType: metric.HAMMING,
+		},
+	}
+
+	c := newHnswChecker()
+	for _, test := range cases {
+		p := map[string]string{
+			DIM:            strconv.Itoa(128),
+			HNSWM:          strconv.Itoa(16),
+			EFConstruction: strconv.Itoa(200),
+		}
+		c.SetDefaultMetricTypeIfNotExist(p, test.dType)
+		assert.Equal(t, p[Metric], test.metricType)
 	}
 }

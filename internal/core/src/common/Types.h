@@ -133,9 +133,21 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         // method must handle this case themselves and must not pass
         // VECTOR_SPARSE_FLOAT data_type.
         default: {
-            throw SegcoreError(DataTypeInvalid,
-                               fmt::format("invalid type is {}", data_type));
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("failed to get data type size, invalid type {}",
+                            data_type));
         }
+    }
+}
+
+template <typename T>
+inline size_t
+GetVecRowSize(int64_t dim) {
+    if constexpr (std::is_same_v<T, bin1>) {
+        return (dim / 8) * sizeof(bin1);
+    } else {
+        return dim * sizeof(T);
     }
 }
 
@@ -259,6 +271,34 @@ IsBinaryDataType(DataType data_type) {
 }
 
 inline bool
+IsPrimitiveType(proto::schema::DataType type) {
+    switch (type) {
+        case proto::schema::DataType::Bool:
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double:
+        case proto::schema::DataType::String:
+        case proto::schema::DataType::VarChar:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsJsonType(proto::schema::DataType type) {
+    return type == proto::schema::DataType::JSON;
+}
+
+inline bool
+IsArrayType(proto::schema::DataType type) {
+    return type == proto::schema::DataType::Array;
+}
+
+inline bool
 IsBinaryVectorDataType(DataType data_type) {
     return data_type == DataType::VECTOR_BINARY;
 }
@@ -363,6 +403,18 @@ inline bool
 IndexIsSparse(const IndexType& index_type) {
     return index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
            index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+}
+
+inline bool
+IsFloatVectorMetricType(const MetricType& metric_type) {
+    return metric_type == knowhere::metric::L2 ||
+           metric_type == knowhere::metric::IP ||
+           metric_type == knowhere::metric::COSINE;
+}
+
+inline bool
+IsBinaryVectorMetricType(const MetricType& metric_type) {
+    return !IsFloatVectorMetricType(metric_type);
 }
 
 // Plus 1 because we can't use greater(>) symbol

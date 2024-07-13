@@ -17,11 +17,14 @@
 package task
 
 import (
+	"fmt"
+
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,6 +51,7 @@ type Action interface {
 	Node() int64
 	Type() ActionType
 	IsFinished(distMgr *meta.DistributionManager) bool
+	String() string
 }
 
 type BaseAction struct {
@@ -74,6 +78,10 @@ func (action *BaseAction) Type() ActionType {
 
 func (action *BaseAction) Shard() string {
 	return action.shard
+}
+
+func (action *BaseAction) String() string {
+	return fmt.Sprintf(`{[type=%v][node=%d][shard=%v]}`, action.Type(), action.Node(), action.Shard())
 }
 
 type SegmentAction struct {
@@ -109,11 +117,20 @@ func (action *SegmentAction) Scope() querypb.DataScope {
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	if action.Type() == ActionTypeGrow {
+		// rpc finished
+		if !action.rpcReturned.Load() {
+			return false
+		}
+
+		// segment found in leader view
 		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
-		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
-		return len(views) > 0 &&
-			lo.Contains(nodeSegmentDist, action.Node()) &&
-			action.rpcReturned.Load()
+		if len(views) == 0 {
+			return false
+		}
+
+		// segment found in dist
+		segmentInTargetNode := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()), meta.WithSegmentID(action.SegmentID()))
+		return len(segmentInTargetNode) > 0
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
 		// loading segment replaces the node ID with the new one,
@@ -140,6 +157,10 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 	}
 
 	return true
+}
+
+func (action *SegmentAction) String() string {
+	return action.BaseAction.String() + fmt.Sprintf(`{[segmentID=%d][scope=%d]}`, action.SegmentID(), action.Scope())
 }
 
 type ChannelAction struct {
@@ -173,7 +194,8 @@ type LeaderAction struct {
 	segmentID typeutil.UniqueID
 	version   typeutil.UniqueID // segment load ts, 0 means not set
 
-	rpcReturned atomic.Bool
+	partStatsVersions map[int64]int64
+	rpcReturned       atomic.Bool
 }
 
 func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, version typeutil.UniqueID) *LeaderAction {
@@ -188,12 +210,35 @@ func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard
 	return action
 }
 
+func NewLeaderUpdatePartStatsAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, partStatsVersions map[int64]int64) *LeaderAction {
+	action := &LeaderAction{
+		BaseAction:        NewBaseAction(workerID, typ, shard),
+		leaderID:          leaderID,
+		partStatsVersions: partStatsVersions,
+	}
+	action.rpcReturned.Store(false)
+	return action
+}
+
 func (action *LeaderAction) SegmentID() typeutil.UniqueID {
 	return action.segmentID
 }
 
 func (action *LeaderAction) Version() typeutil.UniqueID {
 	return action.version
+}
+
+func (action *LeaderAction) PartStats() map[int64]int64 {
+	return action.partStatsVersions
+}
+
+func (action *LeaderAction) String() string {
+	partStatsStr := ""
+	if action.PartStats() != nil {
+		partStatsStr = fmt.Sprintf("%v", action.PartStats())
+	}
+	return action.BaseAction.String() + fmt.Sprintf(`{[leaderID=%v][segmentID=%d][version=%d][partStats=%s]}`,
+		action.GetLeaderID(), action.SegmentID(), action.Version(), partStatsStr)
 }
 
 func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
@@ -214,6 +259,8 @@ func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 		return action.rpcReturned.Load() && dist != nil && dist.NodeID == action.Node()
 	case ActionTypeReduce:
 		return action.rpcReturned.Load() && (dist == nil || dist.NodeID != action.Node())
+	case ActionTypeUpdate:
+		return action.rpcReturned.Load() && common.MapEquals(action.partStatsVersions, view.PartitionStatsVersions)
 	}
 	return false
 }

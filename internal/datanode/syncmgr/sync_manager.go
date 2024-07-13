@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -52,12 +51,11 @@ type SyncManager interface {
 type syncManager struct {
 	*keyLockDispatcher[int64]
 	chunkManager storage.ChunkManager
-	allocator    allocator.Interface
 
 	tasks *typeutil.ConcurrentMap[string, Task]
 }
 
-func NewSyncManager(chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
+func NewSyncManager(chunkManager storage.ChunkManager) (SyncManager, error) {
 	params := paramtable.Get()
 	initPoolSize := params.DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt()
 	if initPoolSize < 1 {
@@ -69,7 +67,6 @@ func NewSyncManager(chunkManager storage.ChunkManager, allocator allocator.Inter
 	syncMgr := &syncManager{
 		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
-		allocator:         allocator,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
 	}
 	// setup config update watcher
@@ -101,77 +98,31 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	switch t := task.(type) {
 	case *SyncTask:
-		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
+		t.WithChunkManager(mgr.chunkManager)
 	case *SyncTaskV2:
-		t.WithAllocator(mgr.allocator)
 	}
 
-	return mgr.safeSubmitTask(task, callbacks...)
+	return mgr.safeSubmitTask(ctx, task, callbacks...)
 }
 
-// safeSubmitTask handles submitting task logic with optimistic target check logic
-// when task returns errTargetSegmentNotMatch error
-// perform refetch then retry logic
-func (mgr *syncManager) safeSubmitTask(task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+// safeSubmitTask submits task to SyncManager
+func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
-	key, err := task.CalcTargetSegment()
-	if err != nil {
-		task.HandleError(err)
-		return conc.Go(func() (struct{}, error) { return struct{}{}, err })
-	}
-
-	return mgr.submit(key, task, callbacks...)
+	key := task.SegmentID()
+	return mgr.submit(ctx, key, task, callbacks...)
 }
 
-func (mgr *syncManager) submit(key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
 		if err == nil {
 			return nil
 		}
-		// unexpected error
-		if !errors.Is(err, errTargetSegmentNotMatch) {
-			task.HandleError(err)
-			return err
-		}
-
-		targetID, err := task.CalcTargetSegment()
-		// shall not reach, segment meta lost during sync
-		if err != nil {
-			task.HandleError(err)
-			return err
-		}
-		if targetID == key {
-			err = merr.WrapErrServiceInternal("recaluated with same key", fmt.Sprint(targetID))
-			task.HandleError(err)
-			return err
-		}
-		log.Info("task calculated target segment id",
-			zap.Int64("targetID", targetID),
-			zap.Int64("segmentID", task.SegmentID()),
-		)
-		return mgr.submit(targetID, task).Err()
+		task.HandleError(err)
+		return err
 	}
 	callbacks = append([]func(error) error{handler}, callbacks...)
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
-	return mgr.Submit(key, task, callbacks...)
-}
-
-func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
-	var cp *msgpb.MsgPosition
-	var segmentID int64
-	mgr.tasks.Range(func(_ string, task Task) bool {
-		if task.StartPosition() == nil {
-			return true
-		}
-		if task.ChannelName() == channel {
-			if cp == nil || task.StartPosition().GetTimestamp() < cp.GetTimestamp() {
-				cp = task.StartPosition()
-				segmentID = task.SegmentID()
-			}
-		}
-		return true
-	})
-	return segmentID, cp
+	return mgr.Submit(ctx, key, task, callbacks...)
 }

@@ -21,9 +21,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -44,8 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var errTargetSegmentNotMatch = errors.New("target segment not match")
-
 type SyncTask struct {
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
@@ -63,9 +59,6 @@ type SyncTask struct {
 	// not the total num of rows of segemnt
 	batchSize int64
 	level     datapb.SegmentLevel
-
-	// targetSegmentID stores the "current" segmentID task shall be handling
-	targetSegmentID atomic.Int64
 
 	tsFrom typeutil.Timestamp
 	tsTo   typeutil.Timestamp
@@ -110,9 +103,6 @@ func (t *SyncTask) getLogger() *log.MLogger {
 }
 
 func (t *SyncTask) HandleError(err error) {
-	if errors.Is(err, errTargetSegmentNotMatch) {
-		return
-	}
 	if t.failureCallback != nil {
 		t.failureCallback(err)
 	}
@@ -123,7 +113,7 @@ func (t *SyncTask) HandleError(err error) {
 	}
 }
 
-func (t *SyncTask) Run() (err error) {
+func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
 	log := t.getLogger()
@@ -145,26 +135,6 @@ func (t *SyncTask) Run() (err error) {
 		return err
 	}
 
-	if t.segment.CompactTo() == metacache.NullSegment {
-		log.Info("segment compacted to zero-length segment, discard sync task")
-		return nil
-	}
-
-	if t.segment.CompactTo() > 0 {
-		// current task does not hold the key lock for "true" target segment id
-		if t.segment.CompactTo() != t.targetSegmentID.Load() {
-			log.Info("sync task does not hold target segment id lock, return error and retry",
-				zap.Int64("compactTo", t.segment.CompactTo()),
-				zap.Int64("currentTarget", t.targetSegmentID.Load()),
-			)
-			return errors.Wrap(errTargetSegmentNotMatch, "task does not hold target segment id lock")
-		}
-		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", t.segment.CompactTo()))
-		// update sync task segment id
-		// it's ok to use compactTo segmentID here, since there shall be no insert for compacted segment
-		t.segmentID = t.segment.CompactTo()
-	}
-
 	err = t.prefetchIDs()
 	if err != nil {
 		log.Warn("failed allocate ids for sync task", zap.Error(err))
@@ -175,7 +145,7 @@ func (t *SyncTask) Run() (err error) {
 	t.processStatsBlob()
 	t.processDeltaBlob()
 
-	err = t.writeLogs()
+	err = t.writeLogs(ctx)
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
 		return err
@@ -194,7 +164,7 @@ func (t *SyncTask) Run() (err error) {
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
-		err = t.writeMeta()
+		err = t.writeMeta(ctx)
 		if err != nil {
 			log.Warn("failed to save serialized data into storage", zap.Error(err))
 			return err
@@ -209,6 +179,7 @@ func (t *SyncTask) Run() (err error) {
 
 	if t.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segment.SegmentID()))
+		log.Info("segment removed", zap.Int64("segmentID", t.segment.SegmentID()), zap.String("channel", t.channelName))
 	}
 
 	log.Info("task done", zap.Float64("flushedSize", totalSize))
@@ -342,33 +313,23 @@ func (t *SyncTask) appendDeltalog(deltalog *datapb.Binlog) {
 }
 
 // writeLogs writes log files (binlog/deltalog/statslog) into storage via chunkManger.
-func (t *SyncTask) writeLogs() error {
-	return retry.Do(context.Background(), func() error {
-		return t.chunkManager.MultiWrite(context.Background(), t.segmentData)
+func (t *SyncTask) writeLogs(ctx context.Context) error {
+	return retry.Handle(ctx, func() (bool, error) {
+		err := t.chunkManager.MultiWrite(ctx, t.segmentData)
+		if err != nil {
+			return !merr.IsCanceledOrTimeout(err), err
+		}
+		return false, nil
 	}, t.writeRetryOpts...)
 }
 
 // writeMeta updates segments via meta writer in option.
-func (t *SyncTask) writeMeta() error {
-	return t.metaWriter.UpdateSync(t)
+func (t *SyncTask) writeMeta(ctx context.Context) error {
+	return t.metaWriter.UpdateSync(ctx, t)
 }
 
 func (t *SyncTask) SegmentID() int64 {
 	return t.segmentID
-}
-
-func (t *SyncTask) CalcTargetSegment() (int64, error) {
-	segment, has := t.metacache.GetSegmentByID(t.segmentID)
-	if !has {
-		return -1, merr.WrapErrSegmentNotFound(t.segmentID)
-	}
-	target := segment.SegmentID()
-	if compactTo := segment.CompactTo(); compactTo > 0 {
-		target = compactTo
-	}
-	t.targetSegmentID.Store(target)
-
-	return target, nil
 }
 
 func (t *SyncTask) Checkpoint() *msgpb.MsgPosition {

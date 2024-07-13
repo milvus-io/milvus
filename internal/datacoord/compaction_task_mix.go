@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -33,6 +32,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 	}
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
+	// Segment not found
 	if err != nil {
 		err2 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		return err2 == nil
@@ -40,7 +40,7 @@ func (t *mixCompactionTask) processPipelining() bool {
 	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
 		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
@@ -60,12 +60,12 @@ func (t *mixCompactionTask) processExecuting() bool {
 	result, err := t.sessions.GetCompactionPlanResult(t.GetNodeID(), t.GetPlanID())
 	if err != nil || result == nil {
 		if errors.Is(err, merr.ErrNodeNotFound) {
-			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(0))
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		}
 		return false
 	}
 	switch result.GetState() {
-	case commonpb.CompactionState_Executing:
+	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err == nil {
@@ -73,7 +73,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 		}
 		return false
-	case commonpb.CompactionState_Completed:
+	case datapb.CompactionTaskState_completed:
 		t.result = result
 		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
 			log.Info("illegal compaction results")
@@ -83,14 +83,27 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 			return t.processFailed()
 		}
-		saveSuccess := t.saveSegmentMeta()
-		if !saveSuccess {
+		err2 := t.saveSegmentMeta()
+		if err2 != nil {
+			if errors.Is(err2, merr.ErrIllegalCompactionPlan) {
+				err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+				if err3 != nil {
+					log.Warn("fail to updateAndSaveTaskMeta")
+				}
+				return true
+			}
 			return false
 		}
 		segments := []UniqueID{t.newSegment.GetID()}
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
-		if err == nil {
+		err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
+		if err3 == nil {
 			return t.processMetaSaved()
+		}
+		return false
+	case datapb.CompactionTaskState_failed:
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		if err != nil {
+			log.Warn("fail to updateAndSaveTaskMeta")
 		}
 		return false
 	}
@@ -105,18 +118,18 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 	return t.saveTaskMeta(t.CompactionTask)
 }
 
-func (t *mixCompactionTask) saveSegmentMeta() bool {
+func (t *mixCompactionTask) saveSegmentMeta() error {
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
 	// Also prepare metric updates.
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.GetPlan(), t.result)
+	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(t.CompactionTask, t.result)
 	if err != nil {
-		return false
+		return err
 	}
 	// Apply metrics after successful meta update.
 	t.newSegment = newSegments[0]
 	metricMutation.commit()
 	log.Info("mixCompactionTask success to save segment meta")
-	return true
+	return nil
 }
 
 func (t *mixCompactionTask) Process() bool {
@@ -156,26 +169,25 @@ func (t *mixCompactionTask) GetLabel() string {
 }
 
 func (t *mixCompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == 0
+	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == NullNodeID
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
-	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
-	})
-	if err == nil {
-		t.resetSegmentCompacting()
-		UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-		log.Info("handleCompactionResult: success to handle merge compaction result")
+	}); err != nil {
+		log.Warn("mixCompactionTask processCompleted unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()))
 	}
 
-	return err == nil
+	t.resetSegmentCompacting()
+	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
+	log.Info("mixCompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
+
+	return true
 }
 
 func (t *mixCompactionTask) resetSegmentCompacting() {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
-	}
+	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
 func (t *mixCompactionTask) processTimeout() bool {
@@ -212,14 +224,15 @@ func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compa
 }
 
 func (t *mixCompactionTask) processFailed() bool {
-	err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 		PlanID: t.GetPlanID(),
-	})
-	if err == nil {
-		t.resetSegmentCompacting()
+	}); err != nil {
+		log.Warn("mixCompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 	}
 
-	return err == nil
+	log.Info("mixCompactionTask processFailed done", zap.Int64("planID", t.GetPlanID()))
+	t.resetSegmentCompacting()
+	return true
 }
 
 func (t *mixCompactionTask) checkTimeout() bool {

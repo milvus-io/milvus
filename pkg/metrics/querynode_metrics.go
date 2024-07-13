@@ -59,6 +59,30 @@ var (
 			msgTypeLabelName,
 		})
 
+	QueryNodeApplyBFCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "apply_bf_latency",
+			Help:      "apply bf cost in ms",
+			Buckets:   buckets,
+		}, []string{
+			functionLabelName,
+			nodeIDLabelName,
+		})
+
+	QueryNodeForwardDeleteCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "forward_delete_latency",
+			Help:      "forward delete cost in ms",
+			Buckets:   buckets,
+		}, []string{
+			functionLabelName,
+			nodeIDLabelName,
+		})
+
 	QueryNodeWaitProcessingMsgCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -336,6 +360,43 @@ var (
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_ratio",
+			Help:      "ratio of segments pruned by segment_pruner",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
+		})
+
+	QueryNodeSegmentPruneBias = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_bias",
+			Help:      "bias of workload when enabling segment prune",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
+		})
+
+	QueryNodeSegmentPruneLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_latency",
+			Help:      "latency of segment prune",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentPruneLabelName,
 		})
 
 	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
@@ -753,6 +814,13 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
+	registry.MustRegister(QueryNodeSegmentPruneRatio)
+	registry.MustRegister(QueryNodeSegmentPruneLatency)
+	registry.MustRegister(QueryNodeSegmentPruneBias)
+	registry.MustRegister(QueryNodeApplyBFCost)
+	registry.MustRegister(QueryNodeForwardDeleteCost)
+	// Add cgo metrics
+	RegisterCGOMetrics(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

@@ -33,7 +33,8 @@ namespace index {
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
     const storage::FileManagerContext& file_manager_context)
-    : is_built_(false) {
+    : is_built_(false),
+      schema_(file_manager_context.fieldDataMeta.field_schema) {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -45,7 +46,9 @@ template <typename T>
 BitmapIndex<T>::BitmapIndex(
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space)
-    : is_built_(false), data_(), space_(space) {
+    : is_built_(false),
+      schema_(file_manager_context.fieldDataMeta.field_schema),
+      space_(space) {
     if (file_manager_context.Valid()) {
         file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
             file_manager_context, space);
@@ -67,27 +70,7 @@ BitmapIndex<T>::Build(const Config& config) {
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
 
-    int total_num_rows = 0;
-    for (const auto& field_data : field_datas) {
-        total_num_rows += field_data->get_num_rows();
-    }
-    if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "scalar bitmap index can not build null values");
-    }
-
-    total_num_rows_ = total_num_rows;
-
-    int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            auto val = reinterpret_cast<const T*>(data->RawValue(i));
-            data_[*val].add(offset);
-            offset++;
-        }
-    }
-    is_built_ = true;
+    BuildWithFieldData(field_datas);
 }
 
 template <typename T>
@@ -97,8 +80,7 @@ BitmapIndex<T>::Build(size_t n, const T* data) {
         return;
     }
     if (n == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "BitmapIndex can not build null values");
+        PanicInfo(DataIsEmpty, "BitmapIndex can not build null values");
     }
 
     T* p = const_cast<T*>(data);
@@ -146,18 +128,8 @@ BitmapIndex<T>::BuildV2(const Config& config) {
 
 template <typename T>
 void
-BitmapIndex<T>::BuildWithFieldData(
+BitmapIndex<T>::BuildPrimitiveField(
     const std::vector<FieldDataPtr>& field_datas) {
-    int total_num_rows = 0;
-    for (auto& field_data : field_datas) {
-        total_num_rows += field_data->get_num_rows();
-    }
-    if (total_num_rows == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "scalar bitmap index can not build null values");
-    }
-    total_num_rows_ = total_num_rows;
-
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
@@ -167,8 +139,61 @@ BitmapIndex<T>::BuildWithFieldData(
             offset++;
         }
     }
+}
 
+template <typename T>
+void
+BitmapIndex<T>::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas) {
+    int total_num_rows = 0;
+    for (auto& field_data : field_datas) {
+        total_num_rows += field_data->get_num_rows();
+    }
+    if (total_num_rows == 0) {
+        PanicInfo(DataIsEmpty, "scalar bitmap index can not build null values");
+    }
+    total_num_rows_ = total_num_rows;
+
+    switch (schema_.data_type()) {
+        case proto::schema::DataType::Bool:
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double:
+        case proto::schema::DataType::String:
+        case proto::schema::DataType::VarChar:
+            BuildPrimitiveField(field_datas);
+            break;
+        case proto::schema::DataType::Array:
+            BuildArrayField(field_datas);
+            break;
+        default:
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("Invalid data type: {} for build bitmap index",
+                            proto::schema::DataType_Name(schema_.data_type())));
+    }
     is_built_ = true;
+}
+
+template <typename T>
+void
+BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
+    int64_t offset = 0;
+    for (const auto& data : field_datas) {
+        auto slice_row_num = data->get_num_rows();
+        for (size_t i = 0; i < slice_row_num; ++i) {
+            auto array =
+                reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+            for (size_t j = 0; j < array->length(); ++j) {
+                auto val = array->template get_data<T>(j);
+                data_[val].add(offset);
+            }
+            offset++;
+        }
+    }
 }
 
 template <typename T>
@@ -563,8 +588,8 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
             break;
         }
         default: {
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
         }
     }
 
@@ -633,8 +658,8 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
             break;
         }
         default: {
-            throw SegcoreError(OpTypeInvalid,
-                               fmt::format("Invalid OperatorType: {}", op));
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
         }
     }
 
@@ -798,11 +823,10 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
             }
         }
     }
-    throw SegcoreError(
-        UnexpectedError,
-        fmt::format(
-            "scalar bitmap index can not lookup target value of index {}",
-            idx));
+    PanicInfo(UnexpectedError,
+              fmt::format(
+                  "scalar bitmap index can not lookup target value of index {}",
+                  idx));
 }
 
 template <typename T>
@@ -840,11 +864,10 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                throw SegcoreError(
-                    OpTypeInvalid,
-                    fmt::format("Invalid OperatorType for "
-                                "checking scalar index optimization: {}",
-                                op));
+                PanicInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType for "
+                                      "checking scalar index optimization: {}",
+                                      op));
         }
         return should_skip;
     };

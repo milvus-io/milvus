@@ -13,7 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -765,7 +765,7 @@ func consume(ctx context.Context, mq MsgStream) *MsgPack {
 func createAndSeekConsumer(ctx context.Context, t *testing.T, newer streamNewer, channels []string, seekPositions []*msgpb.MsgPosition) MsgStream {
 	consumer, err := newer(ctx)
 	assert.NoError(t, err)
-	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
+	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), common.SubscriptionPositionUnknown)
 	err = consumer.Seek(context.Background(), seekPositions, false)
 	assert.NoError(t, err)
 	return consumer
@@ -781,14 +781,14 @@ func createProducer(ctx context.Context, t *testing.T, newer streamNewer, channe
 func createConsumer(ctx context.Context, t *testing.T, newer streamNewer, channels []string) MsgStream {
 	consumer, err := newer(ctx)
 	assert.NoError(t, err)
-	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionEarliest)
+	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), common.SubscriptionPositionEarliest)
 	return consumer
 }
 
 func createLatestConsumer(ctx context.Context, t *testing.T, newer streamNewer, channels []string) MsgStream {
 	consumer, err := newer(ctx)
 	assert.NoError(t, err)
-	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionLatest)
+	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), common.SubscriptionPositionLatest)
 	return consumer
 }
 
@@ -802,7 +802,7 @@ func createStream(ctx context.Context, t *testing.T, newer []streamNewer, channe
 
 	consumer, err := newer[1](ctx)
 	assert.NoError(t, err)
-	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionEarliest)
+	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), common.SubscriptionPositionEarliest)
 
 	return producer, consumer
 }

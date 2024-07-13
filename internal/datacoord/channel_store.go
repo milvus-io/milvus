@@ -28,11 +28,10 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -44,8 +43,6 @@ type ROChannelStore interface {
 	// GetNode returns the channel info of a specific node.
 	// Returns nil if the node doesn't belong to the cluster
 	GetNode(nodeID int64) *NodeChannelInfo
-	// HasChannel checks if store already has the channel
-	HasChannel(channel string) bool
 	// GetNodesChannels returns the channels that are assigned to nodes.
 	// without bufferID node
 	GetNodesChannels() []*NodeChannelInfo
@@ -53,12 +50,9 @@ type ROChannelStore interface {
 	GetBufferChannelInfo() *NodeChannelInfo
 	// GetNodes gets all node ids in store.
 	GetNodes() []int64
-	// GetNodeChannelCount
-	GetNodeChannelCount(nodeID int64) int
 	// GetNodeChannels for given collection
 	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
 
-	// GetNodeChannelsBy used by channel_store_v2 and channel_manager_v2 only
 	GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo
 }
 
@@ -118,22 +112,6 @@ func NewChannelOp(ID int64, opType ChannelOpType, channels ...RWChannel) *Channe
 	}
 }
 
-func NewAddOp(id int64, channels ...RWChannel) *ChannelOp {
-	return &ChannelOp{
-		NodeID:   id,
-		Type:     Add,
-		Channels: channels,
-	}
-}
-
-func NewDeleteOp(id int64, channels ...RWChannel) *ChannelOp {
-	return &ChannelOp{
-		NodeID:   id,
-		Type:     Delete,
-		Channels: channels,
-	}
-}
-
 func (op *ChannelOp) Append(channels ...RWChannel) {
 	op.Channels = append(op.Channels, channels...)
 }
@@ -154,9 +132,7 @@ func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
 		switch op.Type {
 		case Add, Watch, Release:
 			tmpWatchInfo := proto.Clone(ch.GetWatchInfo()).(*datapb.ChannelWatchInfo)
-			if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-				tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
-			}
+			tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
 			info, err := proto.Marshal(tmpWatchInfo)
 			if err != nil {
 				return saves, removals, err
@@ -272,15 +248,6 @@ func (c *ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 	return nil
 }
 
-// ChannelStore must satisfy RWChannelStore.
-var _ RWChannelStore = (*ChannelStore)(nil)
-
-// ChannelStore maintains a mapping between channels and data nodes.
-type ChannelStore struct {
-	store        kv.TxnKV                   // A kv store with (NodeChannelKey) -> (ChannelWatchInfos) information.
-	channelsInfo map[int64]*NodeChannelInfo // A map of (nodeID) -> (NodeChannelInfo).
-}
-
 // NodeChannelInfo stores the nodeID and its channels.
 type NodeChannelInfo struct {
 	NodeID   int64
@@ -318,261 +285,6 @@ func (info *NodeChannelInfo) GetChannels() []RWChannel {
 	return lo.Values(info.Channels)
 }
 
-// NewChannelStore creates and returns a new ChannelStore.
-func NewChannelStore(kv kv.TxnKV) *ChannelStore {
-	c := &ChannelStore{
-		store:        kv,
-		channelsInfo: make(map[int64]*NodeChannelInfo),
-	}
-	c.channelsInfo[bufferID] = &NodeChannelInfo{
-		NodeID:   bufferID,
-		Channels: make(map[string]RWChannel),
-	}
-	return c
-}
-
-// Reload restores the buffer channels and node-channels mapping from kv.
-func (c *ChannelStore) Reload() error {
-	record := timerecord.NewTimeRecorder("datacoord")
-	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
-	if err != nil {
-		return err
-	}
-	for i := 0; i < len(keys); i++ {
-		k := keys[i]
-		v := values[i]
-		nodeID, err := parseNodeKey(k)
-		if err != nil {
-			return err
-		}
-
-		cw := &datapb.ChannelWatchInfo{}
-		if err := proto.Unmarshal([]byte(v), cw); err != nil {
-			return err
-		}
-		reviseVChannelInfo(cw.GetVchan())
-
-		c.AddNode(nodeID)
-		channel := &channelMeta{
-			Name:         cw.GetVchan().GetChannelName(),
-			CollectionID: cw.GetVchan().GetCollectionID(),
-			Schema:       cw.GetSchema(),
-			WatchInfo:    cw,
-		}
-		c.channelsInfo[nodeID].AddChannel(channel)
-
-		log.Info("channel store reload channel",
-			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
-		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
-	}
-	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
-	return nil
-}
-
-// AddNode creates a new node-channels mapping for the given node, and assigns no channels to it.
-// Returns immediately if the node's already in the channel.
-func (c *ChannelStore) AddNode(nodeID int64) {
-	if _, ok := c.channelsInfo[nodeID]; ok {
-		return
-	}
-
-	c.channelsInfo[nodeID] = NewNodeChannelInfo(nodeID)
-}
-
-// Update applies the channel operations in opSet.
-func (c *ChannelStore) Update(opSet *ChannelOpSet) error {
-	totalChannelNum := opSet.GetChannelNumber()
-	if totalChannelNum <= maxOperationsPerTxn {
-		return c.update(opSet)
-	}
-
-	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
-	perChOps := opSet.SplitByChannel()
-
-	// Execute a txn for every 64 operations.
-	count := 0
-	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
-	for _, opset := range perChOps {
-		if count+opset.Len() > maxOperationsPerTxn {
-			if err := c.update(NewChannelOpSet(operations...)); err != nil {
-				return err
-			}
-			count = 0
-			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
-		}
-		count += opset.Len()
-		operations = append(operations, opset.Collect()...)
-	}
-	if count == 0 {
-		return nil
-	}
-	return c.update(NewChannelOpSet(operations...))
-}
-
-func (c *ChannelStore) checkIfExist(nodeID int64, channel RWChannel) bool {
-	if info, ok := c.channelsInfo[nodeID]; ok {
-		if ch, ok := info.Channels[channel.GetName()]; ok {
-			return ch.GetCollectionID() == channel.GetCollectionID()
-		}
-	}
-	return false
-}
-
-// update applies the ADD/DELETE operations to the current channel store.
-func (c *ChannelStore) update(opSet *ChannelOpSet) error {
-	// Update ChannelStore's kv store.
-	if err := c.txn(opSet); err != nil {
-		return err
-	}
-
-	// Update node id -> channel mapping.
-	for _, op := range opSet.Collect() {
-		switch op.Type {
-		case Add, Watch, Release:
-			for _, ch := range op.Channels {
-				if c.checkIfExist(op.NodeID, ch) {
-					continue // prevent adding duplicated channel info
-				}
-				// Append target channels to channel store.
-				c.channelsInfo[op.NodeID].AddChannel(ch)
-			}
-		case Delete:
-			info := c.channelsInfo[op.NodeID]
-			for _, channelName := range op.GetChannelNames() {
-				info.RemoveChannel(channelName)
-			}
-		default:
-			return errUnknownOpType
-		}
-		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(op.NodeID, 10)).Set(float64(len(c.channelsInfo[op.NodeID].Channels)))
-	}
-	return nil
-}
-
-// GetChannels returns information of all channels.
-func (c *ChannelStore) GetChannels() []*NodeChannelInfo {
-	ret := make([]*NodeChannelInfo, 0, len(c.channelsInfo))
-	for _, info := range c.channelsInfo {
-		ret = append(ret, info)
-	}
-	return ret
-}
-
-// GetNodesChannels returns the channels assigned to real nodes.
-func (c *ChannelStore) GetNodesChannels() []*NodeChannelInfo {
-	ret := make([]*NodeChannelInfo, 0, len(c.channelsInfo))
-	for id, info := range c.channelsInfo {
-		if id != bufferID {
-			ret = append(ret, info)
-		}
-	}
-	return ret
-}
-
-func (c *ChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
-	nodeChs := make(map[UniqueID][]string)
-	for id, info := range c.channelsInfo {
-		if id == bufferID {
-			continue
-		}
-		var channelNames []string
-		for name, ch := range info.Channels {
-			if ch.GetCollectionID() == collectionID {
-				channelNames = append(channelNames, name)
-			}
-		}
-		nodeChs[id] = channelNames
-	}
-	return nodeChs
-}
-
-// GetBufferChannelInfo returns all unassigned channels.
-func (c *ChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
-	if info, ok := c.channelsInfo[bufferID]; ok {
-		return info
-	}
-	return nil
-}
-
-// GetNode returns the channel info of a given node.
-func (c *ChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
-	if info, ok := c.channelsInfo[nodeID]; ok {
-		return info
-	}
-	return nil
-}
-
-func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
-	if info, ok := c.channelsInfo[nodeID]; ok {
-		return len(info.Channels)
-	}
-	return 0
-}
-
-// RemoveNode removes the given node from the channel store and returns its channels.
-func (c *ChannelStore) RemoveNode(nodeID int64) {
-	delete(c.channelsInfo, nodeID)
-}
-
-// GetNodes returns a slice of all nodes ids in the current channel store.
-func (c *ChannelStore) GetNodes() []int64 {
-	ids := make([]int64, 0, len(c.channelsInfo))
-	for id := range c.channelsInfo {
-		if id != bufferID {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-// remove deletes kv pairs from the kv store where keys have given nodeID as prefix.
-func (c *ChannelStore) remove(nodeID int64) error {
-	k := buildKeyPrefix(nodeID)
-	return c.store.RemoveWithPrefix(k)
-}
-
-// txn updates the channelStore's kv store with the given channel ops.
-func (c *ChannelStore) txn(opSet *ChannelOpSet) error {
-	var (
-		saves    = make(map[string]string)
-		removals []string
-	)
-	for _, op := range opSet.Collect() {
-		opSaves, opRemovals, err := op.BuildKV()
-		if err != nil {
-			return err
-		}
-
-		saves = lo.Assign(opSaves, saves)
-		removals = append(removals, opRemovals...)
-	}
-	return c.store.MultiSaveAndRemove(saves, removals)
-}
-
-func (c *ChannelStore) HasChannel(channel string) bool {
-	for _, info := range c.channelsInfo {
-		for _, ch := range info.Channels {
-			if ch.GetName() == channel {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (c *ChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo {
-	log.Error("ChannelStore doesn't implement GetNodeChannelsBy")
-	return nil
-}
-
-func (c *ChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
-	log.Error("ChannelStore doesn't implement UpdateState")
-}
-
-func (c *ChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
-	log.Error("ChannelStore doesn't implement SetLegacyChannelByNode")
-}
-
 // buildNodeChannelKey generates a key for kv store, where the key is a concatenation of ChannelWatchSubPath, nodeID and channel name.
 // ${WatchSubPath}/${nodeID}/${channelName}
 func buildNodeChannelKey(nodeID int64, chName string) string {
@@ -591,4 +303,438 @@ func parseNodeKey(key string) (int64, error) {
 		return -1, fmt.Errorf("wrong node key in etcd %s", key)
 	}
 	return strconv.ParseInt(s[len(s)-2], 10, 64)
+}
+
+type StateChannelStore struct {
+	store        kv.TxnKV
+	channelsInfo map[int64]*NodeChannelInfo // A map of (nodeID) -> (NodeChannelInfo).
+}
+
+var _ RWChannelStore = (*StateChannelStore)(nil)
+
+var errChannelNotExistInNode = errors.New("channel doesn't exist in given node")
+
+func NewChannelStoreV2(kv kv.TxnKV) RWChannelStore {
+	return NewStateChannelStore(kv)
+}
+
+func NewStateChannelStore(kv kv.TxnKV) *StateChannelStore {
+	c := StateChannelStore{
+		store:        kv,
+		channelsInfo: make(map[int64]*NodeChannelInfo),
+	}
+	c.channelsInfo[bufferID] = &NodeChannelInfo{
+		NodeID:   bufferID,
+		Channels: make(map[string]RWChannel),
+	}
+	return &c
+}
+
+func (c *StateChannelStore) Reload() error {
+	record := timerecord.NewTimeRecorder("datacoord")
+	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(keys); i++ {
+		k := keys[i]
+		v := values[i]
+		nodeID, err := parseNodeKey(k)
+		if err != nil {
+			return err
+		}
+
+		info := &datapb.ChannelWatchInfo{}
+		if err := proto.Unmarshal([]byte(v), info); err != nil {
+			return err
+		}
+		reviseVChannelInfo(info.GetVchan())
+
+		c.AddNode(nodeID)
+
+		channel := NewStateChannelByWatchInfo(nodeID, info)
+		c.channelsInfo[nodeID].AddChannel(channel)
+		log.Info("channel store reload channel",
+			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
+		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
+	}
+	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
+	return nil
+}
+
+func (c *StateChannelStore) AddNode(nodeID int64) {
+	if _, ok := c.channelsInfo[nodeID]; ok {
+		return
+	}
+	c.channelsInfo[nodeID] = &NodeChannelInfo{
+		NodeID:   nodeID,
+		Channels: make(map[string]RWChannel),
+	}
+}
+
+func (c *StateChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
+	lo.ForEach(channels, func(ch RWChannel, _ int) {
+		for _, cInfo := range c.channelsInfo {
+			if stateChannel, ok := cInfo.Channels[ch.GetName()]; ok {
+				if isSuccessful {
+					stateChannel.(*StateChannel).TransitionOnSuccess()
+				} else {
+					stateChannel.(*StateChannel).TransitionOnFailure()
+				}
+			}
+		}
+	})
+}
+
+func (c *StateChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
+	lo.ForEach(nodeIDs, func(nodeID int64, _ int) {
+		if cInfo, ok := c.channelsInfo[nodeID]; ok {
+			for _, ch := range cInfo.Channels {
+				ch.(*StateChannel).setState(Legacy)
+			}
+		}
+	})
+}
+
+func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
+	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
+	perChOps := opSet.SplitByChannel()
+
+	// Execute a txn for every 64 operations.
+	count := 0
+	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
+	for _, opset := range perChOps {
+		if !c.sanityCheckPerChannelOpSet(opset) {
+			log.Error("unsupported ChannelOpSet", zap.Any("OpSet", opset))
+			continue
+		}
+		if opset.Len() > maxOperationsPerTxn {
+			log.Error("Operations for one channel exceeds maxOperationsPerTxn",
+				zap.Any("opset size", opset.Len()),
+				zap.Int("limit", maxOperationsPerTxn))
+		}
+		if count+opset.Len() > maxOperationsPerTxn {
+			if err := c.updateMeta(NewChannelOpSet(operations...)); err != nil {
+				return err
+			}
+			count = 0
+			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
+		}
+		count += opset.Len()
+		operations = append(operations, opset.Collect()...)
+	}
+	if count == 0 {
+		return nil
+	}
+
+	return c.updateMeta(NewChannelOpSet(operations...))
+}
+
+// remove from the assignments
+func (c *StateChannelStore) removeAssignment(nodeID int64, channelName string) {
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		delete(cInfo.Channels, channelName)
+	}
+}
+
+func (c *StateChannelStore) addAssignment(nodeID int64, channel RWChannel) {
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		cInfo.Channels[channel.GetName()] = channel
+	} else {
+		c.channelsInfo[nodeID] = &NodeChannelInfo{
+			NodeID: nodeID,
+			Channels: map[string]RWChannel{
+				channel.GetName(): channel,
+			},
+		}
+	}
+}
+
+// updateMeta applies the WATCH/RELEASE/DELETE operations to the current channel store.
+// DELETE + WATCH ---> from bufferID    to nodeID
+// DELETE + WATCH ---> from lagecyID    to nodeID
+// DELETE + WATCH ---> from deletedNode to nodeID/bufferID
+// DELETE + WATCH ---> from releasedNode to nodeID/bufferID
+// RELEASE        ---> release from nodeID
+// WATCH          ---> watch to a new channel
+// DELETE         ---> remove the channel
+func (c *StateChannelStore) sanityCheckPerChannelOpSet(opSet *ChannelOpSet) bool {
+	if opSet.Len() == 2 {
+		ops := opSet.Collect()
+		return (ops[0].Type == Delete && ops[1].Type == Watch) || (ops[1].Type == Delete && ops[0].Type == Watch)
+	} else if opSet.Len() == 1 {
+		t := opSet.Collect()[0].Type
+		return t == Delete || t == Watch || t == Release
+	}
+	return false
+}
+
+// DELETE + WATCH
+func (c *StateChannelStore) updateMetaMemoryForPairOp(chName string, opSet *ChannelOpSet) error {
+	if !c.sanityCheckPerChannelOpSet(opSet) {
+		return errUnknownOpType
+	}
+	ops := opSet.Collect()
+	op1 := ops[1]
+	op2 := ops[0]
+	if ops[0].Type == Delete {
+		op1 = ops[0]
+		op2 = ops[1]
+	}
+	cInfo, ok := c.channelsInfo[op1.NodeID]
+	if !ok {
+		return errChannelNotExistInNode
+	}
+	var ch *StateChannel
+	if channel, ok := cInfo.Channels[chName]; ok {
+		ch = channel.(*StateChannel)
+		c.addAssignment(op2.NodeID, ch)
+		c.removeAssignment(op1.NodeID, chName)
+	} else {
+		if cInfo, ok = c.channelsInfo[op2.NodeID]; ok {
+			if channel2, ok := cInfo.Channels[chName]; ok {
+				ch = channel2.(*StateChannel)
+			}
+		}
+	}
+	// update channel
+	if ch != nil {
+		ch.Assign(op2.NodeID)
+		if op2.NodeID == bufferID {
+			ch.setState(Standby)
+		} else {
+			ch.setState(ToWatch)
+		}
+	}
+	return nil
+}
+
+func (c *StateChannelStore) getChannel(nodeID int64, channelName string) *StateChannel {
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		if storedChannel, ok := cInfo.Channels[channelName]; ok {
+			return storedChannel.(*StateChannel)
+		}
+		log.Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
+	} else {
+		log.Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
+	}
+	return nil
+}
+
+func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
+	lo.ForEach(op.Channels, func(ch RWChannel, _ int) {
+		switch op.Type {
+		case Release: // release an already exsits storedChannel-node pair
+			if channel := c.getChannel(op.NodeID, ch.GetName()); channel != nil {
+				channel.setState(ToRelease)
+			}
+		case Watch:
+			storedChannel := c.getChannel(op.NodeID, ch.GetName())
+			if storedChannel == nil { // New Channel
+				//  set the correct assigment and state for NEW stateChannel
+				newChannel := NewStateChannel(ch)
+				newChannel.Assign(op.NodeID)
+
+				if op.NodeID != bufferID {
+					newChannel.setState(ToWatch)
+				}
+
+				// add channel to memory
+				c.addAssignment(op.NodeID, newChannel)
+			} else { // assign to the original nodes
+				storedChannel.setState(ToWatch)
+			}
+		case Delete: // Remove Channel
+			// if not Delete from bufferID, remove from channel
+			if op.NodeID != bufferID {
+				c.removeAssignment(op.NodeID, ch.GetName())
+			}
+		default:
+			log.Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
+		}
+	})
+	return nil
+}
+
+func (c *StateChannelStore) updateMeta(opSet *ChannelOpSet) error {
+	// Update ChannelStore's kv store.
+	if err := c.txn(opSet); err != nil {
+		return err
+	}
+
+	// Update memory
+	chOpSet := opSet.SplitByChannel()
+	for chName, ops := range chOpSet {
+		// DELETE + WATCH
+		if ops.Len() == 2 {
+			c.updateMetaMemoryForPairOp(chName, ops)
+			// RELEASE, DELETE, WATCH
+		} else if ops.Len() == 1 {
+			c.updateMetaMemoryForSingleOp(ops.Collect()[0])
+		} else {
+			log.Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
+		}
+	}
+	return nil
+}
+
+// txn updates the channelStore's kv store with the given channel ops.
+func (c *StateChannelStore) txn(opSet *ChannelOpSet) error {
+	var (
+		saves    = make(map[string]string)
+		removals []string
+	)
+	for _, op := range opSet.Collect() {
+		opSaves, opRemovals, err := op.BuildKV()
+		if err != nil {
+			return err
+		}
+
+		saves = lo.Assign(opSaves, saves)
+		removals = append(removals, opRemovals...)
+	}
+	return c.store.MultiSaveAndRemove(saves, removals)
+}
+
+func (c *StateChannelStore) RemoveNode(nodeID int64) {
+	delete(c.channelsInfo, nodeID)
+}
+
+func (c *StateChannelStore) HasChannel(channel string) bool {
+	for _, info := range c.channelsInfo {
+		if _, ok := info.Channels[channel]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+type (
+	ChannelSelector func(ch *StateChannel) bool
+	NodeSelector    func(ID int64) bool
+)
+
+func WithAllNodes() NodeSelector {
+	return func(ID int64) bool {
+		return true
+	}
+}
+
+func WithoutBufferNode() NodeSelector {
+	return func(ID int64) bool {
+		return ID != int64(bufferID)
+	}
+}
+
+func WithNodeIDs(IDs ...int64) NodeSelector {
+	return func(ID int64) bool {
+		return lo.Contains(IDs, ID)
+	}
+}
+
+func WithoutNodeIDs(IDs ...int64) NodeSelector {
+	return func(ID int64) bool {
+		return !lo.Contains(IDs, ID)
+	}
+}
+
+func WithChannelName(channel string) ChannelSelector {
+	return func(ch *StateChannel) bool {
+		return ch.GetName() == channel
+	}
+}
+
+func WithCollectionIDV2(collectionID int64) ChannelSelector {
+	return func(ch *StateChannel) bool {
+		return ch.GetCollectionID() == collectionID
+	}
+}
+
+func WithChannelStates(states ...ChannelState) ChannelSelector {
+	return func(ch *StateChannel) bool {
+		return lo.Contains(states, ch.currentState)
+	}
+}
+
+func (c *StateChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo {
+	var nodeChannels []*NodeChannelInfo
+	for nodeID, cInfo := range c.channelsInfo {
+		if nodeSelector(nodeID) {
+			selected := make(map[string]RWChannel)
+			for chName, channel := range cInfo.Channels {
+				var sel bool = true
+				for _, selector := range channelSelectors {
+					if !selector(channel.(*StateChannel)) {
+						sel = false
+						break
+					}
+				}
+				if sel {
+					selected[chName] = channel
+				}
+			}
+			nodeChannels = append(nodeChannels, &NodeChannelInfo{
+				NodeID:   nodeID,
+				Channels: selected,
+			})
+		}
+	}
+	return nodeChannels
+}
+
+func (c *StateChannelStore) GetNodesChannels() []*NodeChannelInfo {
+	ret := make([]*NodeChannelInfo, 0, len(c.channelsInfo))
+	for id, info := range c.channelsInfo {
+		if id != bufferID {
+			ret = append(ret, info)
+		}
+	}
+	return ret
+}
+
+func (c *StateChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
+	nodeChs := make(map[UniqueID][]string)
+	for id, info := range c.channelsInfo {
+		if id == bufferID {
+			continue
+		}
+		var channelNames []string
+		for name, ch := range info.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channelNames = append(channelNames, name)
+			}
+		}
+		nodeChs[id] = channelNames
+	}
+	return nodeChs
+}
+
+func (c *StateChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
+	return c.GetNode(bufferID)
+}
+
+func (c *StateChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		return info
+	}
+	return nil
+}
+
+func (c *StateChannelStore) GetNodeChannelCount(nodeID int64) int {
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		return len(cInfo.Channels)
+	}
+	return 0
+}
+
+func (c *StateChannelStore) GetNodes() []int64 {
+	return lo.Filter(lo.Keys(c.channelsInfo), func(ID int64, _ int) bool {
+		return ID != bufferID
+	})
+}
+
+// remove deletes kv pairs from the kv store where keys have given nodeID as prefix.
+func (c *StateChannelStore) remove(nodeID int64) error {
+	k := buildKeyPrefix(nodeID)
+	return c.store.RemoveWithPrefix(k)
 }

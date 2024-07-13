@@ -56,7 +56,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Dummy) {
 auto
 GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext();
-    ctx.fieldDataMeta.schema.set_data_type(
+    ctx.fieldDataMeta.field_schema.set_data_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
     return ctx;
 }
@@ -355,60 +355,6 @@ template <>
 struct TypedScalarIndexTestV2<double>::Helper {
     using C = arrow::DoubleType;
 };
-
-TYPED_TEST_SUITE_P(TypedScalarIndexTestV2);
-
-TYPED_TEST_P(TypedScalarIndexTestV2, Base) {
-    using T = TypeParam;
-    auto dtype = milvus::GetDType<T>();
-    auto index_types = GetIndexTypesV2<T>();
-    for (const auto& index_type : index_types) {
-        milvus::index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = milvus::DataType(dtype);
-        create_index_info.index_type = index_type;
-        create_index_info.field_name = "scalar";
-
-        auto storage_config = get_default_local_storage_config();
-        auto chunk_manager =
-            milvus::storage::CreateChunkManager(storage_config);
-
-        milvus::test::TmpPath tmp_path;
-        auto temp_path = tmp_path.get();
-        auto vec_size = DIM * 4;
-        auto dataset = GenDataset(nb, knowhere::metric::L2, false);
-        auto scalars = GenSortedArr<T>(nb);
-        auto space = TestSpace<T>(temp_path, vec_size, dataset, scalars);
-        milvus::storage::FileManagerContext file_manager_context(
-            {}, {.field_name = "scalar"}, chunk_manager, space);
-        file_manager_context.fieldDataMeta.schema.set_data_type(
-            static_cast<milvus::proto::schema::DataType>(dtype));
-        auto index =
-            milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info, file_manager_context, space);
-        auto scalar_index =
-            dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        milvus::Config config;
-        if (index_type == "BITMAP") {
-            config["bitmap_cardinality_limit"] = "1000";
-        }
-        scalar_index->BuildV2(config);
-        scalar_index->UploadV2();
-
-        auto new_index =
-            milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info, file_manager_context, space);
-        auto new_scalar_index =
-            dynamic_cast<milvus::index::ScalarIndex<T>*>(new_index.get());
-        new_scalar_index->LoadV2();
-        ASSERT_EQ(nb, new_scalar_index->Count());
-    }
-}
-
-REGISTER_TYPED_TEST_SUITE_P(TypedScalarIndexTestV2, Base);
-
-INSTANTIATE_TYPED_TEST_SUITE_P(ArithmeticCheck,
-                               TypedScalarIndexTestV2,
-                               ScalarT);
 
 using namespace milvus::index;
 template <typename T>

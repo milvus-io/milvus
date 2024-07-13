@@ -57,6 +57,7 @@ mkdir -p indexpb
 mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
+mkdir -p streamingpb
 
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
@@ -74,6 +75,7 @@ ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./streamingpb streaming.proto|| { echo 'generate streamingpb.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
   --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }

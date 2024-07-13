@@ -1,5 +1,7 @@
 import random
 from time import sleep
+
+import numpy as np
 import pytest
 import copy
 
@@ -20,7 +22,8 @@ prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
 default_index_params = ct.default_index
-default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
+default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE"}
+default_sparse_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
 uid = "test_index"
@@ -1442,6 +1445,47 @@ class TestIndexInvalid(TestcaseBase):
                                  check_items={ct.err_code: 1,
                                               ct.err_msg: f"<'int' object has no attribute 'items'"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
+    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    def test_invalid_sparse_metric_type(self, metric_type, index):
+        """
+        target: unsupported metric_type create index
+        method: unsupported metric_type creates an index
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        param = cf.get_index_params_params(index)
+        params = {"index_type": index, "metric_type": metric_type, "params": param}
+        error = {ct.err_code: 65535, ct.err_msg: "only IP is the supported metric type for sparse index"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                            check_task=CheckTasks.err_res,
+                            check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    def test_invalid_sparse_ratio(self, ratio, index):
+        """
+        target: index creation for unsupported ratio parameter
+        method: indexing of unsupported ratio parameters
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid drop_ratio_build: {ratio}, must be in range [0, 1): invalid parameter[expected=valid index params"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                                              check_task=CheckTasks.err_res,
+                                              check_items=error)
+
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexAsync(TestcaseBase):
@@ -2014,6 +2058,7 @@ class TestIndexDiskann(TestcaseBase):
                                  check_items={ct.err_code: 104,
                                               ct.err_msg: f"index type DISKANN does not support mmap"})
 
+
 @pytest.mark.tags(CaseLabel.GPU)
 class TestAutoIndex(TestcaseBase):
     """ Test case of Auto index """
@@ -2030,7 +2075,7 @@ class TestAutoIndex(TestcaseBase):
         actual_index_params = collection_w.index()[0].params
         assert default_autoindex_params == actual_index_params
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_params", cf.gen_autoindex_params())
     def test_create_autoindex_with_params(self, index_params):
         """
@@ -2065,7 +2110,7 @@ class TestAutoIndex(TestcaseBase):
                                                "err_msg": "only metric type can be "
                                                           "passed when use AutoIndex"})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_binary_vectors(self):
         """
         target: test create auto index on binary vectors
@@ -2073,12 +2118,32 @@ class TestAutoIndex(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
-        collection_w.create_index(binary_field_name, {},
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "HNSW only support float vector data type: invalid "
-                                                           "parameter[expected=valid index params][actual=invalid "
-                                                           "index params]"})
+        collection_w.create_index(binary_field_name, {})
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING'}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_autoindex_on_all_vector_type(self):
+        """
+        target: test create auto index on all vector type
+        method: create index on all vector type
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float16_vec_field("fp16"),
+                  cf.gen_bfloat16_vec_field("bf16"), cf.gen_sparse_vec_field("sparse")]
+        schema = cf.gen_collection_schema(fields=fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        collection_w.create_index("fp16", index_name="fp16")
+        assert all(item in default_autoindex_params.items() for item in
+                   collection_w.index()[0].params.items())
+
+        collection_w.create_index("bf16", index_name="bf16")
+        assert all(item in default_autoindex_params.items() for item in
+                   collection_w.index(index_name="bf16")[0].params.items())
+
+        collection_w.create_index("sparse", index_name="sparse")
+        assert all(item in default_sparse_autoindex_params.items() for item in
+                   collection_w.index(index_name="sparse")[0].params.items())
 
 
 @pytest.mark.tags(CaseLabel.GPU)

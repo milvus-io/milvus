@@ -33,7 +33,7 @@ namespace milvus::index {
 
 template <typename T>
 ScalarIndexPtr<T>
-IndexFactory::CreateScalarIndex(
+IndexFactory::CreatePrimitiveScalarIndex(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context) {
     if (index_type == INVERTED_INDEX_TYPE) {
@@ -54,7 +54,7 @@ IndexFactory::CreateScalarIndex(
 
 template <>
 ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex<std::string>(
+IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context) {
 #if defined(__linux__) || defined(__APPLE__)
@@ -68,13 +68,13 @@ IndexFactory::CreateScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    throw SegcoreError(Unsupported, "unsupported platform");
+    PanicInfo(Unsupported, "unsupported platform");
 #endif
 }
 
 template <typename T>
 ScalarIndexPtr<T>
-IndexFactory::CreateScalarIndex(
+IndexFactory::CreatePrimitiveScalarIndex(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space) {
@@ -91,7 +91,7 @@ IndexFactory::CreateScalarIndex(
 
 template <>
 ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex<std::string>(
+IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space) {
@@ -106,7 +106,7 @@ IndexFactory::CreateScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context, space);
 #else
-    throw SegcoreError(Unsupported, "unsupported platform");
+    PanicInfo(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -142,47 +142,90 @@ IndexFactory::CreatePrimitiveScalarIndex(
     switch (data_type) {
         // create scalar index
         case DataType::BOOL:
-            return CreateScalarIndex<bool>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<bool>(index_type,
+                                                    file_manager_context);
         case DataType::INT8:
-            return CreateScalarIndex<int8_t>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<int8_t>(index_type,
+                                                      file_manager_context);
         case DataType::INT16:
-            return CreateScalarIndex<int16_t>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<int16_t>(index_type,
+                                                       file_manager_context);
         case DataType::INT32:
-            return CreateScalarIndex<int32_t>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<int32_t>(index_type,
+                                                       file_manager_context);
         case DataType::INT64:
-            return CreateScalarIndex<int64_t>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<int64_t>(index_type,
+                                                       file_manager_context);
         case DataType::FLOAT:
-            return CreateScalarIndex<float>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<float>(index_type,
+                                                     file_manager_context);
         case DataType::DOUBLE:
-            return CreateScalarIndex<double>(index_type, file_manager_context);
+            return CreatePrimitiveScalarIndex<double>(index_type,
+                                                      file_manager_context);
 
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
-            return CreateScalarIndex<std::string>(index_type,
-                                                  file_manager_context);
+            return CreatePrimitiveScalarIndex<std::string>(
+                index_type, file_manager_context);
         default:
-            throw SegcoreError(
+            PanicInfo(
                 DataTypeInvalid,
                 fmt::format("invalid data type to build index: {}", data_type));
     }
 }
 
 IndexBasePtr
+IndexFactory::CreateCompositeScalarIndex(
+    IndexType index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    if (index_type == BITMAP_INDEX_TYPE) {
+        auto element_type = static_cast<DataType>(
+            file_manager_context.fieldDataMeta.field_schema.element_type());
+        return CreatePrimitiveScalarIndex(
+            element_type, index_type, file_manager_context);
+    } else if (index_type == INVERTED_INDEX_TYPE) {
+        auto element_type = static_cast<DataType>(
+            file_manager_context.fieldDataMeta.field_schema.element_type());
+        return CreatePrimitiveScalarIndex(
+            element_type, index_type, file_manager_context);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateComplexScalarIndex(
+    IndexType index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    PanicInfo(Unsupported, "Complex index not supported now");
+}
+
+IndexBasePtr
 IndexFactory::CreateScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
-    switch (create_index_info.field_type) {
-        case DataType::ARRAY:
+    auto data_type = create_index_info.field_type;
+    switch (data_type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+        case DataType::VARCHAR:
+        case DataType::STRING:
             return CreatePrimitiveScalarIndex(
-                static_cast<DataType>(
-                    file_manager_context.fieldDataMeta.schema.element_type()),
-                create_index_info.index_type,
-                file_manager_context);
-        default:
-            return CreatePrimitiveScalarIndex(create_index_info.field_type,
-                                              create_index_info.index_type,
+                data_type, create_index_info.index_type, file_manager_context);
+        case DataType::ARRAY: {
+            return CreateCompositeScalarIndex(create_index_info.index_type,
                                               file_manager_context);
+        }
+        case DataType::JSON: {
+            return CreateComplexScalarIndex(create_index_info.index_type,
+                                            file_manager_context);
+        }
+        default:
+            PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
     }
 }
 
@@ -213,8 +256,12 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -227,7 +274,7 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
@@ -239,48 +286,11 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));
         }
-    }
-}
-
-IndexBasePtr
-IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info,
-                                const storage::FileManagerContext& file_manager,
-                                std::shared_ptr<milvus_storage::Space> space) {
-    auto data_type = create_index_info.field_type;
-    auto index_type = create_index_info.index_type;
-
-    switch (data_type) {
-        // create scalar index
-        case DataType::BOOL:
-            return CreateScalarIndex<bool>(index_type, file_manager, space);
-        case DataType::INT8:
-            return CreateScalarIndex<int8_t>(index_type, file_manager, space);
-        case DataType::INT16:
-            return CreateScalarIndex<int16_t>(index_type, file_manager, space);
-        case DataType::INT32:
-            return CreateScalarIndex<int32_t>(index_type, file_manager, space);
-        case DataType::INT64:
-            return CreateScalarIndex<int64_t>(index_type, file_manager, space);
-        case DataType::FLOAT:
-            return CreateScalarIndex<float>(index_type, file_manager, space);
-        case DataType::DOUBLE:
-            return CreateScalarIndex<double>(index_type, file_manager, space);
-
-            // create string index
-        case DataType::STRING:
-        case DataType::VARCHAR:
-            return CreateScalarIndex<std::string>(
-                index_type, file_manager, space);
-        default:
-            throw SegcoreError(
-                DataTypeInvalid,
-                fmt::format("invalid data type to build mem index: {}",
-                            data_type));
     }
 }
 
@@ -328,8 +338,16 @@ IndexFactory::CreateVectorIndex(
                     space,
                     file_manager_context);
             }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -342,7 +360,7 @@ IndexFactory::CreateVectorIndex(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<uint8_t>>(
+                return std::make_unique<VectorMemIndex<bin1>>(
                     create_index_info, file_manager_context, space);
             }
             case DataType::VECTOR_FLOAT16: {
@@ -354,7 +372,7 @@ IndexFactory::CreateVectorIndex(
                     create_index_info, file_manager_context, space);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));

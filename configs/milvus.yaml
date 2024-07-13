@@ -185,7 +185,7 @@ natsmq:
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  maxPartitionNum: 1024 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
@@ -226,7 +226,8 @@ proxy:
     localPath: /tmp/milvus_access
     filename:  # Log filename, leave empty to use stdout.
     maxSize: 64 # Max size for a single file, in MB.
-    cacheSize: 10240 # Size of log of memory cache, in B
+    cacheSize: 0 # Size of log write cache, in B
+    cacheFlushInterval: 3 # time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)
     rotatedTime: 0 # Max time for single access log file in seconds
     remotePath: access_log/ # File path in minIO
     remoteMaxTime: 0 # Max time for log file in minIO, in hours
@@ -343,6 +344,9 @@ queryNode:
     warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
+    growingMmapEnabled: false # Enable mmap for growing segment
+    fixedFileSizeForMmapAlloc: 4 #MB, fixed file size for mmap chunk manager to store chunk data
+    maxDiskUsagePercentageForMmapAlloc: 20 # max percentage of disk usage in memory mapping
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
@@ -416,8 +420,7 @@ indexNode:
 dataCoord:
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
-    balanceWithRpc: true # Whether to enable balance with RPC, default to use etcd watch
-    legacyVersionWithoutRPCWatch: 2.4.0 # Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels
+    legacyVersionWithoutRPCWatch: 2.4.1 # Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels
     balanceSilentDuration: 300 # The duration after which the channel manager start background channel balancing
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
@@ -445,6 +448,7 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
+    segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:
@@ -485,11 +489,11 @@ dataCoord:
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
   enableGarbageCollection: true
   gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 3600
+    interval: 3600 # meta-based gc scanning interval in seconds
+    missingTolerance: 86400 # orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)
+    dropTolerance: 10800 # meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
-    scanInterval: 168 # garbage collection scan residue interval in hours
+    scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
@@ -533,15 +537,12 @@ dataNode:
     checkInterval: 3000 # the interal to check datanode memory usage, in milliseconds
     forceSyncWatermark: 0.5 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
   timetick:
-    byRPC: true
     interval: 500
   channel:
     # specify the size of global work pool of all channels
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
-    # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 10
     updateChannelCheckpointMaxParallel: 10
     updateChannelCheckpointInterval: 60 # the interval duration(in seconds) for datanode to update channel checkpoint of each channel
     updateChannelCheckpointRPCTimeout: 20 # timeout in seconds for UpdateChannelCheckpoint RPC call
@@ -553,6 +554,7 @@ dataNode:
     readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
   compaction:
     levelZeroBatchMemoryRatio: 0.05 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
+    levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   ip:  # if not specified, use the first unicastable address
   port: 21124
@@ -647,8 +649,10 @@ common:
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
+  # clustering key/compaction related
   usePartitionKeyAsClusteringKey: false
   useVectorAsClusteringKey: false
+  enableVectorClusteringKey: false
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -688,10 +692,10 @@ quotaAndLimits:
     db:
       max: -1 # qps of db level, default no limit, rate for CreateIndex, DropIndex
   flushRate:
-    enabled: false
+    enabled: true
     max: -1 # qps, default no limit, rate for flush
     collection:
-      max: -1 # qps, default no limit, rate for flush at collection level.
+      max: 0.1 # qps, default no limit, rate for flush at collection level.
     db:
       max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:

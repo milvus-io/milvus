@@ -209,12 +209,35 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                 IndexMetaPtr indexMeta,
                                 const SegcoreConfig& segcore_config,
                                 int64_t segment_id)
-        : segcore_config_(segcore_config),
+        : mmap_descriptor_(storage::MmapManager::GetInstance()
+                                   .GetMmapConfig()
+                                   .GetEnableGrowingMmap()
+                               ? storage::MmapChunkDescriptorPtr(
+                                     new storage::MmapChunkDescriptor(
+                                         {segment_id, SegmentType::Growing}))
+                               : nullptr),
+          segcore_config_(segcore_config),
           schema_(std::move(schema)),
           index_meta_(indexMeta),
-          insert_record_(*schema_, segcore_config.get_chunk_rows()),
+          insert_record_(
+              *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id) {
+        if (mmap_descriptor_ != nullptr) {
+            LOG_INFO("growing segment {} use mmap to hold raw data",
+                     this->get_segment_id());
+            auto mcm =
+                storage::MmapManager::GetInstance().GetMmapChunkManager();
+            mcm->Register(mmap_descriptor_);
+        }
+    }
+
+    ~SegmentGrowingImpl() {
+        if (mmap_descriptor_ != nullptr) {
+            auto mcm =
+                storage::MmapManager::GetInstance().GetMmapChunkManager();
+            mcm->UnRegister(mmap_descriptor_);
+        }
     }
 
     void
@@ -276,12 +299,30 @@ class SegmentGrowingImpl : public SegmentGrowing {
             limit, bitset, false_filtered_out);
     }
 
+    bool
+    is_mmap_field(FieldId id) const override {
+        return false;
+    }
+
  protected:
     int64_t
     num_chunk() const override;
 
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::vector<std::string_view>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    BufferView
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const override {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "get_chunk_buffer interface not supported for growing segment");
+    }
 
     void
     check_search(const query::Plan* plan) const override {
@@ -294,6 +335,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  private:
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
     IndexMetaPtr index_meta_;

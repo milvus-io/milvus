@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -53,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -280,7 +280,7 @@ func (c *Core) Register() error {
 		go func() {
 			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
 				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()
@@ -867,7 +867,6 @@ func (c *Core) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfDatabases.Inc()
 	log.Ctx(ctx).Info("done to create database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()),
 		zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
@@ -912,7 +911,6 @@ func (c *Core) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseReques
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfDatabases.Dec()
 	metrics.CleanupRootCoordDBMetrics(in.GetDbName())
 	log.Ctx(ctx).Info("done to drop database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
@@ -2775,9 +2773,8 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	mu := &sync.Mutex{}
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
+	errs := typeutil.NewConcurrentSet[error]()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
@@ -2786,28 +2783,41 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		group.Go(func() error {
 			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
+				errs.Insert(err)
 				return err
 			}
 
 			err = merr.AnalyzeState("Proxy", nodeID, sta)
 			if err != nil {
-				mu.Lock()
-				defer mu.Unlock()
-				errReasons = append(errReasons, err.Error())
+				errs.Insert(err)
 			}
-			return nil
+
+			return err
 		})
 		return true
 	})
 
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	if maxDelay > 0 {
+		group.Go(func() error {
+			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
+			if err != nil {
+				errs.Insert(err)
+			}
+			return err
+		})
+	}
+
 	err := group.Wait()
-	if err != nil || len(errReasons) != 0 {
+	if err != nil {
 		return &milvuspb.CheckHealthResponse{
 			Status:    merr.Success(),
 			IsHealthy: false,
-			Reasons:   errReasons,
+			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
+				return err.Error()
+			}),
 		}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }

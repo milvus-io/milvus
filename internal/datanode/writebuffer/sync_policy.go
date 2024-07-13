@@ -56,13 +56,6 @@ func GetFullBufferPolicy() SyncPolicy {
 		}, "buffer full")
 }
 
-func GetCompactedSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
-	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
-		segmentIDs := lo.Map(buffers, func(buffer *segmentBuffer, _ int) int64 { return buffer.segmentID })
-		return meta.GetSegmentIDsBy(metacache.WithSegmentIDs(segmentIDs...), metacache.WithCompacted())
-	}, "segment compacted")
-}
-
 func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
 		current := tsoutil.PhysicalTime(ts)

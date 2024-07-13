@@ -44,6 +44,7 @@ const (
 
 var StatusSuccess = commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_Success,
+	Code:      merr.Code(nil),
 	Reason:    "",
 }
 
@@ -335,7 +336,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		expectedBody: PrintErr(ErrDefault),
 	})
 
-	err := merr.WrapErrCollectionNumLimitExceeded(65535)
+	err := merr.WrapErrCollectionNumLimitExceeded("default", 65535)
 	mp2 := mocks.NewMockProxy(t)
 	mp2.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Status(err), nil).Once()
 	testCases = append(testCases, testCase{

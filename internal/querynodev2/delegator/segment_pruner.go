@@ -2,10 +2,13 @@ package delegator
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -15,15 +18,16 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-const defaultFilterRatio float64 = 0.5
 
 type PruneInfo struct {
 	filterRatio float64
@@ -37,14 +41,32 @@ func PruneSegments(ctx context.Context,
 	sealedSegments []SnapshotItem,
 	info PruneInfo,
 ) {
-	log := log.Ctx(ctx)
-	// 1. calculate filtered segments
-	filteredSegments := make(map[UniqueID]struct{}, 0)
-	clusteringKeyField := typeutil.GetClusteringKeyField(schema.Fields)
+	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
+	defer span.End()
+	// 1. select collection, partitions and expr
+	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
+		// no need to prune
 		return
 	}
+	tr := timerecord.NewTimeRecorder("PruneSegments")
+	var collectionID int64
+	var expr []byte
+	var partitionIDs []int64
 	if searchReq != nil {
+		collectionID = searchReq.CollectionID
+		expr = searchReq.GetSerializedExprPlan()
+		partitionIDs = searchReq.GetPartitionIDs()
+	} else {
+		collectionID = queryReq.CollectionID
+		expr = queryReq.GetSerializedExprPlan()
+		partitionIDs = queryReq.GetPartitionIDs()
+	}
+
+	filteredSegments := make(map[UniqueID]struct{}, 0)
+	pruneType := "scalar"
+	// currently we only prune based on one column
+	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
 		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
@@ -61,53 +83,108 @@ func PruneSegments(ctx context.Context,
 		if err != nil {
 			return
 		}
-		for _, partID := range searchReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
+		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
-	} else if queryReq != nil {
+		pruneType = "vector"
+	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
-		err := proto.Unmarshal(queryReq.GetSerializedExprPlan(), &plan)
+		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
-			log.Error("failed to unmarshall serialized expr from bytes, failed the operation")
+			log.Ctx(ctx).Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return
 		}
-		expr, err := exprutil.ParseExprFromPlan(&plan)
+		exprPb, err := exprutil.ParseExprFromPlan(&plan)
 		if err != nil {
-			log.Error("failed to parse expr from plan, failed the operation")
+			log.Ctx(ctx).Error("failed to parse expr from plan, failed the operation")
 			return
 		}
-		targetRanges, matchALL := exprutil.ParseRanges(expr, exprutil.ClusteringKey)
-		if matchALL || targetRanges == nil {
-			return
+
+		// 1. parse expr for prune
+		expr := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
+
+		// 2. prune segments by scalar field
+		targetSegmentStats := make([]storage.SegmentStats, 0, 32)
+		targetSegmentIDs := make([]int64, 0, 32)
+		if len(partitionIDs) > 0 {
+			for _, partID := range partitionIDs {
+				partStats := partitionStats[partID]
+				for segID, segStat := range partStats.SegmentStats {
+					targetSegmentIDs = append(targetSegmentIDs, segID)
+					targetSegmentStats = append(targetSegmentStats, segStat)
+				}
+			}
+		} else {
+			for _, partStats := range partitionStats {
+				for segID, segStat := range partStats.SegmentStats {
+					targetSegmentIDs = append(targetSegmentIDs, segID)
+					targetSegmentStats = append(targetSegmentStats, segStat)
+				}
+			}
 		}
-		for _, partID := range queryReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
-			FilterSegmentsOnScalarField(partStats, targetRanges, clusteringKeyField, filteredSegments)
-		}
+
+		PruneByScalarField(expr, targetSegmentStats, targetSegmentIDs, filteredSegments)
 	}
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
+		realFilteredSegments := 0
 		totalSegNum := 0
+		minSegmentCount := math.MaxInt
+		maxSegmentCount := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
 			totalSegNum += len(item.Segments)
 			for _, segment := range item.Segments {
-				if _, ok := filteredSegments[segment.SegmentID]; !ok {
+				_, exist := filteredSegments[segment.SegmentID]
+				if exist {
+					realFilteredSegments++
+				} else {
 					newSegments = append(newSegments, segment)
 				}
 			}
 			item.Segments = newSegments
 			sealedSegments[idx] = item
+			segmentCount := len(item.Segments)
+			if segmentCount > maxSegmentCount {
+				maxSegmentCount = segmentCount
+			}
+			if segmentCount < minSegmentCount {
+				minSegmentCount = segmentCount
+			}
 		}
-		log.RatedInfo(30, "Pruned segment for search/query",
-			zap.Int("filtered_segment_num[excluded]", len(filteredSegments)),
+		bias := 1.0
+		if maxSegmentCount != 0 && minSegmentCount != math.MaxInt {
+			bias = float64(maxSegmentCount) / float64(minSegmentCount)
+		}
+		metrics.QueryNodeSegmentPruneBias.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(bias)
+
+		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
+		metrics.QueryNodeSegmentPruneRatio.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(float64(filterRatio))
+		log.Ctx(ctx).Debug("Pruned segment for search/query",
+			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
+			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
+			zap.Float32("filtered_ratio", filterRatio),
 		)
 	}
+
+	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(collectionID),
+		pruneType).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Ctx(ctx).Debug("Pruned segment for search/query",
+		zap.Duration("duration", tr.ElapseSpan()))
 }
 
 type segmentDisStruct struct {
@@ -152,6 +229,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 					}
 					// currently, we only support float vector and only one center one segment
 					if disErr != nil {
+						log.Error("calculate distance error", zap.Error(disErr))
 						neededSegments[segId] = struct{}{}
 						break
 					}
@@ -178,13 +256,20 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 
 		// 3. filtered non-target segments
 		segmentCount := len(segmentsToSearch)
-		targetSegNum := int(float64(segmentCount) * filterRatio)
+		targetSegNum := int(math.Sqrt(float64(segmentCount)) * filterRatio)
+		if targetSegNum > segmentCount {
+			log.Debug("Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
+				zap.Int("targetSegNum", targetSegNum),
+				zap.Int("segmentCount", segmentCount),
+				zap.Float64("filterRatio", filterRatio))
+			targetSegNum = segmentCount
+		}
 		optimizedRowCount := 0
 		// set the last n - targetSegNum as being filtered
 		for i := 0; i < segmentCount; i++ {
 			optimizedRowCount += segmentsToSearch[i].rows
 			neededSegments[segmentsToSearch[i].segmentID] = struct{}{}
-			if int64(optimizedRowCount) >= searchReq.GetTopk() && i >= targetSegNum {
+			if int64(optimizedRowCount) >= searchReq.GetTopk() && i+1 >= targetSegNum {
 				break
 			}
 		}
@@ -207,10 +292,23 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 	overlap := func(min storage.ScalarFieldValue, max storage.ScalarFieldValue) bool {
 		for _, tRange := range targetRanges {
 			switch keyField.DataType {
-			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+			case schemapb.DataType_Int8:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int8)), int64(max.GetValue().(int8)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int16:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int16)), int64(max.GetValue().(int16)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int32:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int32)), int64(max.GetValue().(int32)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int64:
 				targetRange := tRange.ToIntRange()
 				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
+			// todo: add float/double pruner
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				targetRange := tRange.ToStrRange()
 				statRange := exprutil.NewStrRange(min.GetValue().(string), max.GetValue().(string), true, true)

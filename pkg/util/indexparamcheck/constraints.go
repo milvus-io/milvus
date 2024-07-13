@@ -46,8 +46,10 @@ const (
 	SparseDropRatioBuild = "drop_ratio_build"
 )
 
-// METRICS is a set of all metrics types supported for float vector.
-var METRICS = []string{metric.L2, metric.IP, metric.COSINE} // const
+var (
+	FloatVectorMetrics  = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
+	BinaryVectorMetrics = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
+)
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
 var (
@@ -62,7 +64,7 @@ var (
 )
 
 const (
-	FloatVectorDefaultMetricType       = metric.IP
+	FloatVectorDefaultMetricType       = metric.COSINE
 	SparseFloatVectorDefaultMetricType = metric.IP
-	BinaryVectorDefaultMetricType      = metric.JACCARD
+	BinaryVectorDefaultMetricType      = metric.HAMMING
 )

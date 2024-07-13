@@ -27,6 +27,7 @@ import (
 type Candidate interface {
 	// MayPkExist checks whether primary key could exists in this candidate.
 	MayPkExist(lc *storage.LocationsCache) bool
+	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
 	ID() int64
 	Partition() int64
@@ -51,7 +52,8 @@ func WithSegmentType(typ commonpb.SegmentState) CandidateFilter {
 // WithWorkerID returns CandidateFilter with provided worker id.
 func WithWorkerID(workerID int64) CandidateFilter {
 	return func(candidate candidateWithWorker) bool {
-		return candidate.workerID == workerID
+		return candidate.workerID == workerID ||
+			workerID == -1 // wildcard for offline node
 	}
 }
 

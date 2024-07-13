@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1253,7 +1253,6 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 
 func (suite *TaskSuite) TestLeaderTaskSet() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -1305,9 +1304,8 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 			InsertChannel: channel.ChannelName,
 			PartitionID:   1,
 		})
-		task := NewLeaderTask(
+		task := NewLeaderSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1393,7 +1391,7 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(context.TODO(), WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1550,7 +1548,6 @@ func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {
 
 func (suite *TaskSuite) TestLeaderTaskRemove() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -1580,9 +1577,8 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 			},
 		})
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
-		task := NewLeaderTask(
+		task := NewLeaderSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,

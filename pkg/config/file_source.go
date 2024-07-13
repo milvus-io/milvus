@@ -17,7 +17,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"sync"
 
@@ -55,7 +54,7 @@ func (fs *FileSource) GetConfigurationByKey(key string) (string, error) {
 	v, ok := fs.configs[key]
 	fs.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+		return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
 	}
 	return v, nil
 }
@@ -181,10 +180,10 @@ func (fs *FileSource) update(configs map[string]string) error {
 		return err
 	}
 	fs.configs = configs
+	fs.Unlock()
 	if fs.manager != nil {
 		fs.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
-	fs.Unlock()
 
 	fs.configRefresher.fireEvents(events...)
 	return nil

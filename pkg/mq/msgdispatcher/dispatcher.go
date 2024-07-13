@@ -28,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -96,8 +96,9 @@ func NewDispatcher(ctx context.Context,
 		return nil, err
 	}
 	if position != nil && len(position.MsgID) != 0 {
+		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
-		err = stream.AsConsumer(ctx, []string{pchannel}, subName, mqwrapper.SubscriptionPositionUnknown)
+		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)
 		if err != nil {
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
@@ -110,8 +111,8 @@ func NewDispatcher(ctx context.Context,
 			return nil, err
 		}
 		posTime := tsoutil.PhysicalTime(position.GetTimestamp())
-		log.Info("seek successfully", zap.Time("posTime", posTime),
-			zap.Duration("tsLag", time.Since(posTime)))
+		log.Info("seek successfully", zap.Uint64("posTs", position.GetTimestamp()),
+			zap.Time("posTime", posTime), zap.Duration("tsLag", time.Since(posTime)))
 	} else {
 		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
 		if err != nil {
@@ -234,7 +235,7 @@ func (d *Dispatcher) work() {
 					}
 				}
 				if err != nil {
-					t.pos = pack.StartPositions[0]
+					t.pos = typeutil.Clone(pack.StartPositions[0])
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
 					d.lagTargets.Insert(t.vchannel, t)

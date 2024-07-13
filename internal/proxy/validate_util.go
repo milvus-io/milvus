@@ -141,7 +141,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 	}
 	errDimMismatch := func(fieldName string, dataDim int64, schemaDim int64) error {
 		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
-		return merr.WrapErrParameterInvalid(dataDim, schemaDim, msg)
+		return merr.WrapErrParameterInvalid(schemaDim, dataDim, msg)
 	}
 	for _, field := range data {
 		switch field.GetType() {
@@ -651,8 +651,8 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		}
 
 		if i, ok := verifyLengthPerRow(strArr, maxLength); !ok {
-			return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth VarChar %s exceeds max length (%d)",
-				len(strArr[i]), i, fieldSchema.GetName(), i, maxLength)
+			return merr.WrapErrParameterInvalidMsg("length of varchar field %s exceeds max length, row number: %d, length: %d, max length: %d",
+				fieldSchema.GetName(), i, len(strArr[i]), maxLength)
 		}
 		return nil
 	}
@@ -863,8 +863,9 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		}
 		for rowCnt, row := range data.GetData() {
 			if i, ok := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); !ok {
-				return merr.WrapErrParameterInvalidMsg("the length (%d) of %dth %s %s[%d] exceeds max length (%d)",
-					len(row.GetStringData().GetData()[i]), rowCnt, fieldSchema.GetDataType().String(), fieldSchema.GetName(), i, maxLength)
+				return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
+					fieldSchema.GetDataType().String(), fieldSchema.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
+				)
 			}
 		}
 	}

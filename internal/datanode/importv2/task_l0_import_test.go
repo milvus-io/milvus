@@ -141,7 +141,7 @@ func (s *L0ImportSuite) TestL0Import() {
 			s.cm.(*mocks.ChunkManager).EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(nil)
 			task.(*syncmgr.SyncTask).WithChunkManager(s.cm)
 
-			err := task.Run()
+			err := task.Run(context.Background())
 			s.NoError(err)
 
 			future := conc.Go(func() (struct{}, error) {
@@ -164,6 +164,10 @@ func (s *L0ImportSuite) TestL0Import() {
 				PartitionID: s.partitionID,
 				Vchannel:    s.channel,
 			},
+		},
+		AutoIDRange: &datapb.AutoIDRange{
+			Begin: 0,
+			End:   int64(s.delCnt),
 		},
 	}
 	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm)

@@ -62,7 +62,7 @@ TEST(Util, GetDeleteBitmap) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
-
+    uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
     DeletedRecord delete_record;
 
@@ -211,4 +211,14 @@ TEST(Util, get_common_prefix) {
     str2 = "";
     common_prefix = milvus::GetCommonPrefix(str1, str2);
     EXPECT_STREQ(common_prefix.c_str(), "");
+}
+
+TEST(Util, dis_closer){
+    EXPECT_TRUE(milvus::query::dis_closer(0.1, 0.2, "L2"));
+    EXPECT_FALSE(milvus::query::dis_closer(0.2, 0.1, "L2"));
+    EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.1, "L2"));
+
+    EXPECT_TRUE(milvus::query::dis_closer(0.2, 0.1, "IP"));
+    EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.2, "IP"));
+    EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.1, "IP"));
 }

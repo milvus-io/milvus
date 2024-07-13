@@ -88,3 +88,64 @@ func TestDatabaseProperties(t *testing.T) {
 	_, err = DatabaseLevelResourceGroups(props)
 	assert.Error(t, err)
 }
+
+func TestCommonPartitionKeyIsolation(t *testing.T) {
+	getProto := func(val string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   PartitionKeyIsolationKey,
+				Value: val,
+			},
+		}
+	}
+
+	getMp := func(val string) map[string]string {
+		return map[string]string{
+			PartitionKeyIsolationKey: val,
+		}
+	}
+
+	t.Run("pb", func(t *testing.T) {
+		props := getProto("true")
+		res, err := IsPartitionKeyIsolationKvEnabled(props...)
+		assert.NoError(t, err)
+		assert.True(t, res)
+
+		props = getProto("false")
+		res, err = IsPartitionKeyIsolationKvEnabled(props...)
+		assert.NoError(t, err)
+		assert.False(t, res)
+
+		props = getProto("")
+		res, err = IsPartitionKeyIsolationKvEnabled(props...)
+		assert.ErrorContains(t, err, "failed to parse partition key isolation")
+		assert.False(t, res)
+
+		props = getProto("invalid")
+		res, err = IsPartitionKeyIsolationKvEnabled(props...)
+		assert.ErrorContains(t, err, "failed to parse partition key isolation")
+		assert.False(t, res)
+	})
+
+	t.Run("map", func(t *testing.T) {
+		props := getMp("true")
+		res, err := IsPartitionKeyIsolationPropEnabled(props)
+		assert.NoError(t, err)
+		assert.True(t, res)
+
+		props = getMp("false")
+		res, err = IsPartitionKeyIsolationPropEnabled(props)
+		assert.NoError(t, err)
+		assert.False(t, res)
+
+		props = getMp("")
+		res, err = IsPartitionKeyIsolationPropEnabled(props)
+		assert.ErrorContains(t, err, "failed to parse partition key isolation property")
+		assert.False(t, res)
+
+		props = getMp("invalid")
+		res, err = IsPartitionKeyIsolationPropEnabled(props)
+		assert.ErrorContains(t, err, "failed to parse partition key isolation property")
+		assert.False(t, res)
+	})
+}

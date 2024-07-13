@@ -18,6 +18,7 @@ package io
 
 import (
 	"context"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -55,6 +56,7 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 			var val []byte
 			var err error
 
+			start := time.Now()
 			log.Debug("BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
@@ -63,6 +65,9 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 				}
 				return err
 			})
+
+			log.Debug("BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
+				zap.Error(err))
 
 			return val, err
 		})
@@ -88,6 +93,7 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 		innerK, innerV := k, v
 		future := b.pool.Submit(func() (any, error) {
 			var err error
+			start := time.Now()
 			log.Debug("BinlogIO upload", zap.String("paths", innerK))
 			err = retry.Do(ctx, func() error {
 				err = b.Write(ctx, innerK, innerV)
@@ -96,6 +102,7 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 				}
 				return err
 			})
+			log.Debug("BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
 			return struct{}{}, err
 		})
 		futures = append(futures, future)

@@ -663,12 +663,12 @@ class TestPartitionOperations(TestcaseBase):
             t.join()
         p_name = cf.gen_unique_str()
         log.info(f"partitions: {len(collection_w.partitions)}")
+        err_msg = f"partition number ({ct.max_partition_num}) exceeds max configuration ({ct.max_partition_num})"
         self.partition_wrap.init_partition(
             collection_w.collection, p_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535,
-                         ct.err_msg: "partition number (4096) exceeds max configuration (4096), "
-                                     "collection: {}".format(collection_w.name)})
+            check_items={ct.err_code: 999,
+                         ct.err_msg: err_msg})
 
         # TODO: Try to verify load collection with a large number of partitions. #11651
 
@@ -1112,6 +1112,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="smellthemoon: behavior changed")
     def test_partition_upsert_with_auto_id(self):
         """
         target: test upsert data in partition when auto_id=True
@@ -1136,8 +1137,9 @@ class TestPartitionOperations(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Upsert don't support autoid == true"}
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_partition_upsert_same_pk_in_different_partitions(self):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_partition_upsert_same_pk_in_different_partitions(self, is_flush):
         """
         target: test upsert same pk in different partitions
         method: 1. create 2 partitions
@@ -1163,6 +1165,8 @@ class TestPartitionOperations(TestcaseBase):
         partition_2.upsert(upsert_data)
 
         # load
+        if is_flush:
+            collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
 

@@ -114,7 +114,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.collectionName = collectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
-		return err
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 
 	t.SearchRequest.DbID = 0 // todo
@@ -135,8 +135,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
-			"because the mustUsePartitionKey config is true")
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
+			"because the mustUsePartitionKey config is true"))
 	}
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
@@ -297,7 +297,7 @@ func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 	return nq, nil
 }
 
-func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask) error {
+func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *planpb.PlanNode) error {
 	if t.enableMaterializedView {
 		partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(t.schema.CollectionSchema)
 		if err != nil {
@@ -305,7 +305,26 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask) error {
 			return err
 		}
 		if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyFieldSchema) {
+			collInfo, colErr := globalMetaCache.GetCollectionInfo(t.ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
+			if colErr != nil {
+				log.Warn("failed to get collection info", zap.Error(colErr))
+				return err
+			}
+
+			if collInfo.partitionKeyIsolation {
+				expr, err := exprutil.ParseExprFromPlan(plan)
+				if err != nil {
+					log.Warn("failed to parse expr from plan during MV", zap.Error(err))
+					return err
+				}
+				err = exprutil.ValidatePartitionKeyIsolation(expr)
+				if err != nil {
+					return err
+				}
+			}
 			queryInfo.MaterializedViewInvolved = true
+		} else {
+			return errors.New("partition key field data type is not supported in materialized view")
 		}
 	}
 	return nil
@@ -350,7 +369,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if len(partitionIDs) > 0 {
 				internalSubReq.PartitionIDs = partitionIDs
 				t.partitionIDsSet.Upsert(partitionIDs...)
-				setQueryInfoIfMvEnable(queryInfo, t)
+				mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+				if mvErr != nil {
+					return mvErr
+				}
 			}
 		} else {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
@@ -406,7 +428,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 		if len(partitionIDs) > 0 {
 			t.SearchRequest.PartitionIDs = partitionIDs
-			setQueryInfoIfMvEnable(queryInfo, t)
+			mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+			if mvErr != nil {
+				return mvErr
+			}
 		}
 	}
 

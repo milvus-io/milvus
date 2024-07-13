@@ -27,11 +27,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -134,31 +132,26 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	}
 
 	var (
-		totalSize      int64
-		totalDeltalogs = make(map[int64][]string)
+		memorySize     int64
+		totalDeltalogs = []string{}
 	)
 	for _, s := range l0Segments {
-		paths := []string{}
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
-				paths = append(paths, l.GetLogPath())
-				totalSize += l.GetMemorySize()
+				totalDeltalogs = append(totalDeltalogs, l.GetLogPath())
+				memorySize += l.GetMemorySize()
 			}
-		}
-		if len(paths) > 0 {
-			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
 
-	batchSize := getMaxBatchSize(totalSize)
-	resultSegments, err := t.process(ctx, batchSize, targetSegments, lo.Values(totalDeltalogs)...)
+	resultSegments, err := t.process(ctx, memorySize, targetSegments, totalDeltalogs)
 	if err != nil {
 		return nil, err
 	}
 
 	result := &datapb.CompactionPlanResult{
 		PlanID:   t.plan.GetPlanID(),
-		State:    commonpb.CompactionState_Completed,
+		State:    datapb.CompactionTaskState_completed,
 		Segments: resultSegments,
 		Channel:  t.plan.GetChannel(),
 		Type:     t.plan.GetType(),
@@ -171,18 +164,27 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	return result, nil
 }
 
-// batch size means segment count
-func getMaxBatchSize(totalSize int64) int {
-	max := 1
-	memLimit := float64(hardware.GetFreeMemoryCount()) * paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
-	if memLimit > float64(totalSize) {
-		max = int(memLimit / float64(totalSize))
+// BatchSize refers to the L1/L2 segments count that in one batch, batchSize controls the expansion ratio
+// of deltadata in memory.
+func getMaxBatchSize(baseMemSize, memLimit float64) int {
+	batchSize := 1
+	if memLimit > baseMemSize {
+		batchSize = int(memLimit / baseMemSize)
 	}
 
-	return max
+	maxSizeLimit := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.GetAsInt()
+	// Set batch size to maxSizeLimit if it is larger than maxSizeLimit.
+	// When maxSizeLimit <= 0, it means no limit.
+	if maxSizeLimit > 0 && batchSize > maxSizeLimit {
+		return maxSizeLimit
+	}
+
+	return batchSize
 }
 
 func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
+	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact serializeUpload")
+	defer span.End()
 	allBlobs := make(map[string][]byte)
 	results := make([]*datapb.CompactionSegment, 0)
 	for segID, writer := range segmentWriters {
@@ -222,7 +224,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 		return nil, nil
 	}
 
-	if err := t.Upload(ctx, allBlobs); err != nil {
+	if err := t.Upload(traceCtx, allBlobs); err != nil {
 		log.Warn("L0 compaction serializeUpload upload failed", zap.Error(err))
 		return nil, err
 	}
@@ -232,60 +234,99 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 
 func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
-	allDelta []*storage.DeleteData,
+	allDelta *storage.DeleteData,
 	segmentBfs map[int64]*metacache.BloomFilterSet,
 ) map[int64]*SegmentDeltaWriter {
-	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
+	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
-
-	split := func(pk storage.PrimaryKey) []int64 {
-		lc := storage.NewLocationsCache(pk)
-		predicts := make([]int64, 0, len(segmentBfs))
-		for segmentID, bf := range segmentBfs {
-			if bf.PkExists(lc) {
-				predicts = append(predicts, segmentID)
-			}
-		}
-		return predicts
-	}
 
 	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) (int64, *datapb.CompactionSegmentBinlogs) {
 		return segment.GetSegmentID(), segment
 	})
 
 	// spilt all delete data to segments
-	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
-	for _, delta := range allDelta {
-		for i, pk := range delta.Pks {
-			predicted := split(pk)
 
-			for _, gotSeg := range predicted {
-				writer, ok := targetSegBuffer[gotSeg]
-				if !ok {
-					segment := allSeg[gotSeg]
-					writer = NewSegmentDeltaWriter(gotSeg, segment.GetPartitionID(), segment.GetCollectionID())
-					targetSegBuffer[gotSeg] = writer
+	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
+
+	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		startIdx := value.StartIdx
+		pk2SegmentIDs := value.Segment2Hits
+
+		for segmentID, hits := range pk2SegmentIDs {
+			for i, hit := range hits {
+				if hit {
+					writer, ok := targetSegBuffer[segmentID]
+					if !ok {
+						segment := allSeg[segmentID]
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
+						targetSegBuffer[segmentID] = writer
+					}
+					writer.Write(allDelta.Pks[startIdx+i], allDelta.Tss[startIdx+i])
 				}
-				writer.Write(pk, delta.Tss[i])
 			}
 		}
-	}
-
+		return true
+	})
 	return targetSegBuffer
 }
 
-func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+type BatchApplyRet = struct {
+	StartIdx     int
+	Segment2Hits map[int64][]bool
+}
+
+func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
+	defer span.End()
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+
+	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
+		segment2Hits := make(map[int64][]bool, 0)
+		lc := storage.NewBatchLocationsCache(pks)
+		for segmentID, bf := range segmentBfs {
+			hits := bf.BatchPkExist(lc)
+			segment2Hits[segmentID] = hits
+		}
+		return segment2Hits
+	}
+
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	var futures []*conc.Future[any]
+	pks := deltaData.Pks
+	for idx := 0; idx < len(pks); idx += batchSize {
+		startIdx := idx
+		endIdx := startIdx + batchSize
+		if endIdx > len(pks) {
+			endIdx = len(pks)
+		}
+
+		retIdx += 1
+		tmpRetIndex := retIdx
+		future := pool.Submit(func() (any, error) {
+			ret := batchPredict(pks[startIdx:endIdx])
+			retMap.Insert(tmpRetIndex, &BatchApplyRet{
+				StartIdx:     startIdx,
+				Segment2Hits: ret,
+			})
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+	conc.AwaitAll(futures...)
+	return retMap
+}
+
+func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
-	results := make([]*datapb.CompactionSegment, 0)
-	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := log.Ctx(t.ctx).With(
-		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int("max conc segment counts", batchSize),
-		zap.Int("total segment counts", len(targetSegments)),
-		zap.Int("total batch", batch),
-	)
+	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
+	memLimit := float64(hardware.GetFreeMemoryCount()) * ratio
+	if float64(l0MemSize) > memLimit {
+		return nil, errors.Newf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit)
+	}
 
 	log.Info("L0 compaction process start")
 	allDelta, err := t.loadDelta(ctx, lo.Flatten(deltaLogs))
@@ -294,6 +335,16 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 		return nil, err
 	}
 
+	batchSize := getMaxBatchSize(float64(allDelta.Size()), memLimit)
+	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
+	log := log.Ctx(ctx).With(
+		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Int("max conc segment counts", batchSize),
+		zap.Int("total segment counts", len(targetSegments)),
+		zap.Int("total batch", batch),
+	)
+
+	results := make([]*datapb.CompactionSegment, 0)
 	for i := 0; i < batch; i++ {
 		left, right := i*batchSize, (i+1)*batchSize
 		if right >= len(targetSegments) {
@@ -313,7 +364,10 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 			return nil, err
 		}
 
-		log.Info("L0 compaction finished one batch", zap.Int("batch no.", i), zap.Int("batch segment count", len(batchResults)))
+		log.Info("L0 compaction finished one batch",
+			zap.Int("batch no.", i),
+			zap.Int("total deltaRowCount", int(allDelta.RowCount)),
+			zap.Int("batch segment count", len(batchResults)))
 		results = append(results, batchResults...)
 	}
 
@@ -321,27 +375,24 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 	return results, nil
 }
 
-func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs ...[]string) ([]*storage.DeleteData, error) {
+func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []string) (*storage.DeleteData, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadDelta")
 	defer span.End()
-	allData := make([]*storage.DeleteData, 0, len(deltaLogs))
-	for _, paths := range deltaLogs {
-		blobBytes, err := t.Download(ctx, paths)
-		if err != nil {
-			return nil, err
-		}
-		blobs := make([]*storage.Blob, 0, len(blobBytes))
-		for _, blob := range blobBytes {
-			blobs = append(blobs, &storage.Blob{Value: blob})
-		}
-		_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
-		if err != nil {
-			return nil, err
-		}
 
-		allData = append(allData, dData)
+	blobBytes, err := t.Download(ctx, deltaLogs)
+	if err != nil {
+		return nil, err
 	}
-	return allData, nil
+	blobs := make([]*storage.Blob, 0, len(blobBytes))
+	for _, blob := range blobBytes {
+		blobs = append(blobs, &storage.Blob{Value: blob})
+	}
+	_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
+	if err != nil {
+		return nil, err
+	}
+
+	return dData, nil
 }
 
 func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
@@ -362,7 +413,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 		future := pool.Submit(func() (any, error) {
 			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
-			pks, err := util.LoadStats(innerCtx, t.cm,
+			pks, err := LoadStats(innerCtx, t.cm,
 				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {
 				log.Warn("failed to load segment stats log",

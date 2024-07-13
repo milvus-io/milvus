@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -156,8 +157,10 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context) {
 			gc.recycleDroppedSegments(ctx)
+			gc.recycleChannelCPMeta(ctx)
 			gc.recycleUnusedIndexes(ctx)
 			gc.recycleUnusedSegIndexes(ctx)
+			gc.recycleUnusedAnalyzeFiles()
 		})
 	}()
 	go func() {
@@ -473,16 +476,47 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			continue
 		}
 		log.Info("GC segment meta drop segment done")
+	}
+}
 
-		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
-			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
-			log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
-			// TODO: remove channel checkpoint may be lost, need to be handled before segment GC?
-			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
-				log.Warn("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
-			}
+func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
+	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
+	if err != nil {
+		log.Warn("list channel cp fail during GC", zap.Error(err))
+		return
+	}
+
+	collectionID2GcStatus := make(map[int64]bool)
+	skippedCnt := 0
+
+	log.Info("start to GC channel cp", zap.Int("vchannelCnt", len(channelCPs)))
+	for vChannel := range channelCPs {
+		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
+
+		// !!! Skip to GC if vChannel format is illegal, it will lead meta leak in this case
+		if collectionID == -1 {
+			skippedCnt++
+			log.Warn("parse collection id fail, skip to gc channel cp", zap.String("vchannel", vChannel))
+			continue
+		}
+
+		if _, ok := collectionID2GcStatus[collectionID]; !ok {
+			collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+		}
+
+		// Skip to GC if all segments meta of the corresponding collection are not removed
+		if gcConfirmed, _ := collectionID2GcStatus[collectionID]; !gcConfirmed {
+			skippedCnt++
+			continue
+		}
+
+		if err := gc.meta.DropChannelCheckpoint(vChannel); err != nil {
+			// Try to GC in the next gc cycle if drop channel cp meta fail.
+			log.Warn("failed to drop channel check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
 		}
 	}
+
+	log.Info("GC channel cp done", zap.Int("skippedChannelCP", skippedCnt))
 }
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
@@ -696,4 +730,67 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 		filesMap[filepath] = struct{}{}
 	}
 	return filesMap
+}
+
+// recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.
+func (gc *garbageCollector) recycleUnusedAnalyzeFiles() {
+	log.Info("start recycleUnusedAnalyzeFiles")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startTs := time.Now()
+	prefix := path.Join(gc.option.cli.RootPath(), common.AnalyzeStatsPath) + "/"
+	// list dir first
+	keys := make([]string, 0)
+	err := gc.option.cli.WalkWithPrefix(ctx, prefix, false, func(chunkInfo *storage.ChunkObjectInfo) bool {
+		keys = append(keys, chunkInfo.FilePath)
+		return true
+	})
+	if err != nil {
+		log.Warn("garbageCollector recycleUnusedAnalyzeFiles list keys from chunk manager failed", zap.Error(err))
+		return
+	}
+	log.Info("recycleUnusedAnalyzeFiles, finish list object", zap.Duration("time spent", time.Since(startTs)), zap.Int("task ids", len(keys)))
+	for _, key := range keys {
+		log.Debug("analyze keys", zap.String("key", key))
+		taskID, err := parseBuildIDFromFilePath(key)
+		if err != nil {
+			log.Warn("garbageCollector recycleUnusedAnalyzeFiles parseAnalyzeResult failed", zap.String("key", key), zap.Error(err))
+			continue
+		}
+		log.Info("garbageCollector will recycle analyze stats files", zap.Int64("taskID", taskID))
+		canRecycle, task := gc.meta.analyzeMeta.CheckCleanAnalyzeTask(taskID)
+		if !canRecycle {
+			// Even if the analysis task is marked as deleted, the analysis stats file will not be recycled, wait for the next gc,
+			// and delete all index files about the taskID at one time.
+			log.Info("garbageCollector no need to recycle analyze stats files", zap.Int64("taskID", taskID))
+			continue
+		}
+		if task == nil {
+			// taskID no longer exists in meta, remove all analysis files
+			log.Info("garbageCollector recycleUnusedAnalyzeFiles find meta has not exist, remove index files",
+				zap.Int64("taskID", taskID))
+			err = gc.option.cli.RemoveWithPrefix(ctx, key)
+			if err != nil {
+				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files failed",
+					zap.Int64("taskID", taskID), zap.String("prefix", key), zap.Error(err))
+				continue
+			}
+			log.Info("garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files success",
+				zap.Int64("taskID", taskID), zap.String("prefix", key))
+			continue
+		}
+
+		log.Info("remove analyze stats files which version is less than current task",
+			zap.Int64("taskID", taskID), zap.Int64("current version", task.Version))
+		var i int64
+		for i = 0; i < task.Version; i++ {
+			removePrefix := prefix + fmt.Sprintf("%d/", task.Version)
+			if err := gc.option.cli.RemoveWithPrefix(ctx, removePrefix); err != nil {
+				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove files with prefix failed",
+					zap.Int64("taskID", taskID), zap.String("removePrefix", removePrefix))
+				continue
+			}
+		}
+		log.Info("analyze stats files recycle success", zap.Int64("taskID", taskID))
+	}
 }

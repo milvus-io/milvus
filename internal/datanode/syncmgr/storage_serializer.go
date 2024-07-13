@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -44,11 +45,12 @@ type storageV1Serializer struct {
 	inCodec  *storage.InsertCodec
 	delCodec *storage.DeleteCodec
 
+	allocator  allocator.Interface
 	metacache  metacache.MetaCache
 	metaWriter MetaWriter
 }
 
-func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
+func NewStorageSerializer(allocator allocator.Interface, metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
 	collectionID := metacache.Collection()
 	schema := metacache.Schema()
 	pkField := lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
@@ -67,6 +69,7 @@ func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) 
 
 		inCodec:    inCodec,
 		delCodec:   storage.NewDeleteCodec(),
+		allocator:  allocator,
 		metacache:  metacache,
 		metaWriter: metaWriter,
 	}, nil
@@ -82,10 +85,12 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		zap.String("channel", pack.channelName),
 	)
 
-	if pack.insertData != nil {
+	if len(pack.insertData) > 0 {
 		memSize := make(map[int64]int64)
-		for fieldID, fieldData := range pack.insertData.Data {
-			memSize[fieldID] = int64(fieldData.GetMemorySize())
+		for _, chunk := range pack.insertData {
+			for fieldID, fieldData := range chunk.Data {
+				memSize[fieldID] += int64(fieldData.GetMemorySize())
+			}
 		}
 		task.binlogMemsize = memSize
 
@@ -133,6 +138,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	s.setTaskMeta(task, pack)
+	task.WithAllocator(s.allocator)
 
 	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pack.level.String()).Observe(float64(tr.RecordSpan().Milliseconds()))
 	return task, nil
@@ -159,7 +165,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
 	log := log.Ctx(ctx)
-	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData)
+	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,14 +184,21 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 }
 
 func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
-	pkFieldData := pack.insertData.Data[s.pkField.GetFieldID()]
-	rowNum := int64(pkFieldData.RowNum())
+	var rowNum int64
+	var pkFieldData []storage.FieldData
+	for _, chunk := range pack.insertData {
+		chunkPKData := chunk.Data[s.pkField.GetFieldID()]
+		pkFieldData = append(pkFieldData, chunkPKData)
+		rowNum += int64(chunkPKData.RowNum())
+	}
 
 	stats, err := storage.NewPrimaryKeyStats(s.pkField.GetFieldID(), int64(s.pkField.GetDataType()), rowNum)
 	if err != nil {
 		return nil, nil, err
 	}
-	stats.UpdateByMsgs(pkFieldData)
+	for _, chunkPkData := range pkFieldData {
+		stats.UpdateByMsgs(chunkPkData)
+	}
 
 	blob, err := s.inCodec.SerializePkStats(stats, pack.batchSize)
 	if err != nil {

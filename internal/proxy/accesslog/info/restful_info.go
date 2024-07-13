@@ -40,7 +40,7 @@ type RestfulInfo struct {
 }
 
 func NewRestfulInfo() *RestfulInfo {
-	return &RestfulInfo{start: time.Now()}
+	return &RestfulInfo{start: time.Now(), params: &gin.LogFormatterParams{}}
 }
 
 func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
@@ -95,11 +95,21 @@ func (i *RestfulInfo) MethodStatus() string {
 		return fmt.Sprintf("HttpError%d", i.params.StatusCode)
 	}
 
-	if code, ok := i.params.Keys[ContextReturnCode]; !ok || code.(int32) != 0 {
-		return "Failed"
+	value, ok := i.params.Keys[ContextReturnCode]
+	if !ok {
+		return Unknown
 	}
 
-	return "Successful"
+	code, ok := value.(int32)
+	if ok {
+		if code != 0 {
+			return "Failed"
+		}
+
+		return "Successful"
+	}
+
+	return Unknown
 }
 
 func (i *RestfulInfo) UserName() string {
@@ -129,6 +139,10 @@ func (i *RestfulInfo) ErrorMsg() string {
 		return ""
 	}
 	return fmt.Sprint(message)
+}
+
+func (i *RestfulInfo) ErrorType() string {
+	return Unknown
 }
 
 func (i *RestfulInfo) SdkVersion() string {

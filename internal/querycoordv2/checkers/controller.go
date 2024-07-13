@@ -42,7 +42,7 @@ type CheckerController struct {
 	manualCheckChs map[utils.CheckerType]chan struct{}
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
-	targetMgr      *meta.TargetManager
+	targetMgr      meta.TargetManagerInterface
 	broker         meta.Broker
 	nodeMgr        *session.NodeManager
 	balancer       balance.Balance
@@ -56,7 +56,7 @@ type CheckerController struct {
 func NewCheckerController(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	broker meta.Broker,
@@ -68,8 +68,10 @@ func NewCheckerController(
 		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
 		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
 		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, nodeMgr, scheduler, getBalancerFunc),
-		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
-		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
+		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr, targetMgr),
+		// todo temporary work around must fix
+		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
+		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
 
 	manualCheckChs := map[utils.CheckerType]chan struct{}{

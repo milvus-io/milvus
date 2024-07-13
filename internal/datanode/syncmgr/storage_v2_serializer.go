@@ -29,6 +29,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -54,10 +55,11 @@ type storageV2Serializer struct {
 
 func NewStorageV2Serializer(
 	storageV2Cache *metacache.StorageV2Cache,
+	allocator allocator.Interface,
 	metacache metacache.MetaCache,
 	metaWriter MetaWriter,
 ) (*storageV2Serializer, error) {
-	v1Serializer, err := NewStorageSerializer(metacache, metaWriter)
+	v1Serializer, err := NewStorageSerializer(allocator, metacache, metaWriter)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +84,7 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	task.space = space
-	if pack.insertData != nil {
+	if len(pack.insertData) > 0 {
 		insertReader, err := s.serializeInsertData(pack)
 		if err != nil {
 			log.Warn("failed to serialize insert data with storagev2", zap.Error(err))
@@ -155,8 +157,10 @@ func (s *storageV2Serializer) serializeInsertData(pack *SyncPack) (array.RecordR
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, s.arrowSchema)
 	defer builder.Release()
 
-	if err := iTypeutil.BuildRecord(builder, pack.insertData, s.schema.GetFields()); err != nil {
-		return nil, err
+	for _, chunk := range pack.insertData {
+		if err := iTypeutil.BuildRecord(builder, chunk, s.schema.GetFields()); err != nil {
+			return nil, err
+		}
 	}
 
 	rec := builder.NewRecord()

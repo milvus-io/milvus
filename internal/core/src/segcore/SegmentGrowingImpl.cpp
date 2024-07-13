@@ -421,6 +421,12 @@ SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     return vec->get_span_base(chunk_id);
 }
 
+std::vector<std::string_view>
+SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk view impl not implement for growing segment");
+}
+
 int64_t
 SegmentGrowingImpl::num_chunk() const {
     auto size = get_insert_record().ack_responder_.GetAck();
@@ -663,7 +669,11 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) = std::move(T(src[offset]));
+        if (IsVariableTypeSupportInChunk<S> && mmap_descriptor_ != nullptr) {
+            dst->at(i) = std::move(T(src.view_element(offset)));
+        } else {
+            dst->at(i) = std::move(T(src[offset]));
+        }
     }
 }
 

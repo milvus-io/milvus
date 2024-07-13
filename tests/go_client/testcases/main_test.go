@@ -10,14 +10,15 @@ import (
 	"go.uber.org/zap"
 
 	clientv2 "github.com/milvus-io/milvus/client/v2"
-
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
-var addr = flag.String("addr", "localhost:19530", "server host and port")
-var defaultCfg clientv2.ClientConfig
+var (
+	addr       = flag.String("addr", "localhost:19530", "server host and port")
+	defaultCfg clientv2.ClientConfig
+)
 
 // teardown
 func teardown() {
@@ -53,6 +54,24 @@ func createDefaultMilvusClient(ctx context.Context, t *testing.T) *base.MilvusCl
 		err error
 	)
 	mc, err = base.NewMilvusClient(ctx, &defaultCfg)
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		mc.Close(ctx)
+	})
+
+	return mc
+}
+
+// create connect
+func createMilvusClient(ctx context.Context, t *testing.T, cfg *clientv2.ClientConfig) *base.MilvusClient {
+	t.Helper()
+
+	var (
+		mc  *base.MilvusClient
+		err error
+	)
+	mc, err = base.NewMilvusClient(ctx, cfg)
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {

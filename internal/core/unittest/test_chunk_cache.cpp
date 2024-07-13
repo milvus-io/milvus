@@ -27,18 +27,30 @@
 #include "storage/LocalChunkManagerSingleton.h"
 
 #define DEFAULT_READ_AHEAD_POLICY "willneed"
+class ChunkCacheTest : public testing::Test {
+ public:
+    void
+    SetUp() override {
+        mcm = milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
+        mcm->Register(descriptor);
+    }
+    void
+    TearDown() override {
+        mcm->UnRegister(descriptor);
+    }
+    const char* file_name = "chunk_cache_test/insert_log/2/101/1000000";
+    milvus::storage::MmapChunkManagerPtr mcm;
+    milvus::segcore::SegcoreConfig config;
+    milvus::storage::MmapChunkDescriptorPtr descriptor =
+        std::shared_ptr<milvus::storage::MmapChunkDescriptor>(
+            new milvus::storage::MmapChunkDescriptor(
+                {101, SegmentType::Sealed}));
+};
 
-TEST(ChunkCacheTest, Read) {
+TEST_F(ChunkCacheTest, Read) {
     auto N = 10000;
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-
-    auto mmap_dir = "/tmp/test_chunk_cache/mmap";
-    auto local_storage_path = "/tmp/test_chunk_cache/local";
-    auto file_name = std::string("chunk_cache_test/insert_log/1/101/1000000");
-
-    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
-        local_storage_path);
 
     auto schema = std::make_shared<milvus::Schema>();
     auto fake_id = schema->AddDebugField(
@@ -59,7 +71,7 @@ TEST(ChunkCacheTest, Read) {
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
     auto data = dataset.get_col<float>(fake_id);
-    auto data_slices = std::vector<const uint8_t*>{(uint8_t*)data.data()};
+    auto data_slices = std::vector<void*>{data.data()};
     auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
     auto slice_names = std::vector<std::string>{file_name};
     PutFieldData(lcm.get(),
@@ -69,9 +81,8 @@ TEST(ChunkCacheTest, Read) {
                  field_data_meta,
                  field_meta);
 
-    auto cc = std::make_shared<milvus::storage::ChunkCache>(
-        mmap_dir, DEFAULT_READ_AHEAD_POLICY, lcm);
-    const auto& column = cc->Read(file_name);
+    auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
+    const auto& column = cc->Read(file_name, descriptor);
     Assert(column->ByteSize() == dim * N * 4);
 
     auto actual = (float*)column->Data();
@@ -82,25 +93,12 @@ TEST(ChunkCacheTest, Read) {
 
     cc->Remove(file_name);
     lcm->Remove(file_name);
-    std::filesystem::remove_all(mmap_dir);
-
-    auto exist = lcm->Exist(file_name);
-    Assert(!exist);
-    exist = std::filesystem::exists(mmap_dir);
-    Assert(!exist);
 }
 
-TEST(ChunkCacheTest, TestMultithreads) {
+TEST_F(ChunkCacheTest, TestMultithreads) {
     auto N = 1000;
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-
-    auto mmap_dir = "/tmp/test_chunk_cache/mmap";
-    auto local_storage_path = "/tmp/test_chunk_cache/local";
-    auto file_name = std::string("chunk_cache_test/insert_log/2/101/1000000");
-
-    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
-        local_storage_path);
 
     auto schema = std::make_shared<milvus::Schema>();
     auto fake_id = schema->AddDebugField(
@@ -121,7 +119,7 @@ TEST(ChunkCacheTest, TestMultithreads) {
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
     auto data = dataset.get_col<float>(fake_id);
-    auto data_slices = std::vector<const uint8_t*>{(uint8_t*)data.data()};
+    auto data_slices = std::vector<void*>{data.data()};
     auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
     auto slice_names = std::vector<std::string>{file_name};
     PutFieldData(lcm.get(),
@@ -131,13 +129,12 @@ TEST(ChunkCacheTest, TestMultithreads) {
                  field_data_meta,
                  field_meta);
 
-    auto cc = std::make_shared<milvus::storage::ChunkCache>(
-        mmap_dir, DEFAULT_READ_AHEAD_POLICY, lcm);
+    auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
     auto executor = [&](int thread_id) {
-        const auto& column = cc->Read(file_name);
+        const auto& column = cc->Read(file_name, descriptor);
         Assert(column->ByteSize() == dim * N * 4);
 
         auto actual = (float*)column->Data();
@@ -156,10 +153,4 @@ TEST(ChunkCacheTest, TestMultithreads) {
 
     cc->Remove(file_name);
     lcm->Remove(file_name);
-    std::filesystem::remove_all(mmap_dir);
-
-    auto exist = lcm->Exist(file_name);
-    Assert(!exist);
-    exist = std::filesystem::exists(mmap_dir);
-    Assert(!exist);
 }

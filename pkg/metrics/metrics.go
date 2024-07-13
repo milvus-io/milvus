@@ -29,6 +29,7 @@ const (
 	AbandonLabel = "abandon"
 	SuccessLabel = "success"
 	FailLabel    = "fail"
+	CancelLabel  = "cancel"
 	TotalLabel   = "total"
 
 	HybridSearchLabel = "hybrid_search"
@@ -74,6 +75,9 @@ const (
 	Done      = "done"
 
 	compactionTypeLabelName  = "compaction_type"
+	isVectorFieldLabelName   = "is_vector_field"
+	segmentPruneLabelName    = "segment_prune_label"
+	stageLabelName           = "compaction_stage"
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
@@ -81,6 +85,7 @@ const (
 	collectionIDLabelName    = "collection_id"
 	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
+	channelTermLabelName     = "channel_term"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"

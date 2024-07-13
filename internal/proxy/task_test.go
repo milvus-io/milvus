@@ -1033,7 +1033,7 @@ func TestHasCollectionTask(t *testing.T) {
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, false, task.result.Value)
-	// createCollection in RootCood and fill GlobalMetaCache
+	// createIsoCollection in RootCood and fill GlobalMetaCache
 	rc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
@@ -3527,81 +3527,6 @@ func TestClusteringKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("create collection clustering key can not be partition key", func(t *testing.T) {
-		fieldName2Type := make(map[string]schemapb.DataType)
-		fieldName2Type["int64_field"] = schemapb.DataType_Int64
-		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
-		fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
-		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
-		clusterKeyField := &schemapb.FieldSchema{
-			Name:            "cluster_key_field",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-			IsPartitionKey:  true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField)
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
-
-		createCollectionTask := &createCollectionTask{
-			Condition: NewTaskCondition(ctx),
-			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{
-					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-					Timestamp: Timestamp(time.Now().UnixNano()),
-				},
-				DbName:         "",
-				CollectionName: collectionName,
-				Schema:         marshaledSchema,
-				ShardsNum:      shardsNum,
-			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
-		}
-		err = createCollectionTask.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("create collection clustering key can not be primary key", func(t *testing.T) {
-		fieldName2Type := make(map[string]schemapb.DataType)
-		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
-		fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
-		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
-		clusterKeyField := &schemapb.FieldSchema{
-			Name:            "cluster_key_field",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-			IsPrimaryKey:    true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField)
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
-
-		createCollectionTask := &createCollectionTask{
-			Condition: NewTaskCondition(ctx),
-			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{
-					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-					Timestamp: Timestamp(time.Now().UnixNano()),
-				},
-				DbName:         "",
-				CollectionName: collectionName,
-				Schema:         marshaledSchema,
-				ShardsNum:      shardsNum,
-			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
-		}
-		err = createCollectionTask.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
 	t.Run("create collection not support more than one clustering key", func(t *testing.T) {
 		fieldName2Type := make(map[string]schemapb.DataType)
 		fieldName2Type["int64_field"] = schemapb.DataType_Int64
@@ -3620,6 +3545,41 @@ func TestClusteringKey(t *testing.T) {
 			IsClusteringKey: true,
 		}
 		schema.Fields = append(schema.Fields, clusterKeyField2)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createCollectionTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+		err = createCollectionTask.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("create collection with vector clustering key", func(t *testing.T) {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+		clusterKeyField := &schemapb.FieldSchema{
+			Name:            "vec_field",
+			DataType:        schemapb.DataType_FloatVector,
+			IsClusteringKey: true,
+		}
+		schema.Fields = append(schema.Fields, clusterKeyField)
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
@@ -3681,4 +3641,225 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}
+
+func TestTaskPartitionKeyIsolation(t *testing.T) {
+	rc := NewRootCoordMock()
+	defer rc.Close()
+	dc := NewDataCoordMock()
+	defer dc.Close()
+	qc := getQueryCoordClient()
+	defer qc.Close()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rc, qc, mgr)
+	assert.NoError(t, err)
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestPartitionKeyIsolation"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	getSchema := func(colName string, hasPartitionKey bool) *schemapb.CollectionSchema {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
+		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+		if hasPartitionKey {
+			partitionKeyField := &schemapb.FieldSchema{
+				Name:           "partition_key_field",
+				DataType:       schemapb.DataType_Int64,
+				IsPartitionKey: true,
+			}
+			fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
+			schema.Fields = append(schema.Fields, partitionKeyField)
+		}
+		return schema
+	}
+
+	getCollectionTask := func(colName string, isIso bool, marshaledSchema []byte) *createCollectionTask {
+		isoStr := "false"
+		if isIso {
+			isoStr = "true"
+		}
+
+		return &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: colName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+	}
+
+	createIsoCollection := func(colName string, hasPartitionKey bool, isIsolation bool, isIsoNil bool) {
+		isoStr := "false"
+		if isIsolation {
+			isoStr = "true"
+		}
+		schema := getSchema(colName, hasPartitionKey)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         marshaledSchema,
+			ShardsNum:      1,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
+		}
+		if isIsoNil {
+			createColReq.Properties = nil
+		}
+
+		stats, err := rc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stats.ErrorCode)
+	}
+
+	getAlterCollectionTask := func(colName string, isIsolation bool) *alterCollectionTask {
+		isoStr := "false"
+		if isIsolation {
+			isoStr = "true"
+		}
+
+		return &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
+			},
+			queryCoord: qc,
+			dataCoord:  dc,
+		}
+	}
+
+	t.Run("create collection valid", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		schema := getSchema(collectionName, true)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createCollectionTask := getCollectionTask(collectionName, true, marshaledSchema)
+		err = createCollectionTask.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = createCollectionTask.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create collection without isolation", func(t *testing.T) {
+		schema := getSchema(collectionName, true)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createCollectionTask := getCollectionTask(collectionName, false, marshaledSchema)
+		err = createCollectionTask.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = createCollectionTask.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create collection isolation but no partition key", func(t *testing.T) {
+		schema := getSchema(collectionName, false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createCollectionTask := getCollectionTask(collectionName, true, marshaledSchema)
+		assert.ErrorContains(t, createCollectionTask.PreExecute(ctx), "partition key isolation mode is enabled but no partition key field is set")
+	})
+
+	t.Run("create collection with isolation and partition key but MV is not enabled", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		schema := getSchema(collectionName, true)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createCollectionTask := getCollectionTask(collectionName, true, marshaledSchema)
+		assert.ErrorContains(t, createCollectionTask.PreExecute(ctx), "partition key isolation mode is enabled but current Milvus does not support it")
+	})
+
+	t.Run("alter collection from valid", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "AlterValid"
+		createIsoCollection(colName, true, false, false)
+		alterTask := getAlterCollectionTask(colName, true)
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter collection without isolation", func(t *testing.T) {
+		colName := collectionName + "AlterNoIso"
+		createIsoCollection(colName, true, false, true)
+		alterTask := alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     nil,
+			},
+			queryCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter collection isolation but no partition key", func(t *testing.T) {
+		colName := collectionName + "AlterNoPartkey"
+		createIsoCollection(colName, false, false, false)
+		alterTask := getAlterCollectionTask(colName, true)
+		assert.ErrorContains(t, alterTask.PreExecute(ctx), "partition key isolation mode is enabled but no partition key field is set")
+	})
+
+	t.Run("alter collection with isolation and partition key but MV is not enabled", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "AlterNoMv"
+		createIsoCollection(colName, true, false, false)
+		alterTask := getAlterCollectionTask(colName, true)
+		assert.ErrorContains(t, alterTask.PreExecute(ctx), "partition key isolation mode is enabled but current Milvus does not support it")
+	})
+
+	t.Run("alter collection with vec index and isolation", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "AlterVecIndex"
+		createIsoCollection(colName, true, true, false)
+		resp, err := rc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
+		assert.NoError(t, err)
+		var vecFieldID int64 = 0
+		for _, field := range resp.Schema.Fields {
+			if field.DataType == schemapb.DataType_FloatVector {
+				vecFieldID = field.FieldID
+				break
+			}
+		}
+		assert.NotEqual(t, vecFieldID, int64(0))
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						FieldID: vecFieldID,
+					},
+				},
+			}, nil
+		}
+		alterTask := getAlterCollectionTask(colName, false)
+		assert.ErrorContains(t, alterTask.PreExecute(ctx),
+			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+	})
 }

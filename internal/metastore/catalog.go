@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -157,6 +158,14 @@ type DataCoordCatalog interface {
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
 	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
+	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+
+	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
+	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
+	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error
 }
 
 type QueryCoordCatalog interface {
@@ -177,4 +186,15 @@ type QueryCoordCatalog interface {
 	SaveCollectionTargets(target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(collectionID int64) error
 	GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error)
+}
+
+// StreamingCoordCataLog is the interface for streamingcoord catalog
+type StreamingCoordCataLog interface {
+	// physical channel watch related
+
+	// ListPChannel list all pchannels on milvus.
+	ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta, error)
+
+	// SavePChannel save a pchannel info to metastore.
+	SavePChannels(ctx context.Context, info []*streamingpb.PChannelMeta) error
 }

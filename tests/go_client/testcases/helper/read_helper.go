@@ -10,9 +10,9 @@ type LoadParams struct {
 	Replica        int
 }
 
-func NewLoadParams(name string) *LoadParams {
+func NewLoadParams(collectionName string) *LoadParams {
 	return &LoadParams{
-		CollectionName: name,
+		CollectionName: collectionName,
 	}
 }
 

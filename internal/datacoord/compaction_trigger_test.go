@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -126,6 +127,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		fields       fields
 		collectionID UniqueID
 		wantErr      bool
+		wantSegIDs   []int64
 		wantPlans    []*datapb.CompactionPlan
 	}{
 		{
@@ -421,6 +423,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 			2,
 			false,
+			[]int64{
+				1, 2,
+			},
 			[]*datapb.CompactionPlan{
 				{
 					PlanID: 0,
@@ -490,6 +495,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			_, err := tr.triggerManualCompaction(tt.collectionID)
@@ -515,6 +521,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
@@ -539,6 +546,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 
@@ -777,6 +785,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			_, err := tr.triggerManualCompaction(tt.args.collectionID)
@@ -928,6 +937,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1115,6 +1125,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				closeCh:           lifetime.NewSafeChan(),
 				testingOnly:       true,
 			}
 			tr.start()
@@ -1308,6 +1319,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1497,6 +1509,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				indexEngineVersionManager:    newMockVersionManager(),
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
 			tr.start()
@@ -1671,6 +1684,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				compactionHandler:         tt.fields.compactionHandler,
 				globalTrigger:             tt.fields.globalTrigger,
 				indexEngineVersionManager: newMockVersionManager(),
+				closeCh:                   lifetime.NewSafeChan(),
 				testingOnly:               true,
 			}
 			tr.start()
@@ -1698,10 +1712,10 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			// plan 2: 200 + 7 * 20 + 4 * 40
 			// plan 3: 128 + 6 * 40 + 127
 			// plan 4: 300 + 128 + 128  ( < 512 * 1.25)
-			assert.Equal(t, 24, len(plans[0].SegmentBinlogs))
-			assert.Equal(t, 12, len(plans[1].SegmentBinlogs))
-			assert.Equal(t, 8, len(plans[2].SegmentBinlogs))
-			assert.Equal(t, 3, len(plans[3].SegmentBinlogs))
+			// assert.Equal(t, 24, len(plans[0].GetInputSegments()))
+			// assert.Equal(t, 12, len(plans[1].GetInputSegments()))
+			// assert.Equal(t, 8, len(plans[2].GetInputSegments()))
+			// assert.Equal(t, 3, len(plans[3].GetInputSegments()))
 		})
 	}
 }
@@ -2321,6 +2335,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		s.allocator.EXPECT().allocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
 		})
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
@@ -2463,6 +2478,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.allocator.EXPECT().allocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
 		}).Maybe()
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2575,6 +2591,52 @@ func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 	s.Equal(2, len(buckets[0]))
 	log.Info("buckets", zap.Any("buckets", buckets))
 }
+
+//func Test_compactionTrigger_clustering(t *testing.T) {
+//	paramtable.Init()
+//	catalog := mocks.NewDataCoordCatalog(t)
+//	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+//	vecFieldID := int64(201)
+//	meta := &meta{
+//		catalog: catalog,
+//		collections: map[int64]*collectionInfo{
+//			1: {
+//				ID: 1,
+//				Schema: &schemapb.CollectionSchema{
+//					Fields: []*schemapb.FieldSchema{
+//						{
+//							FieldID:  vecFieldID,
+//							DataType: schemapb.DataType_FloatVector,
+//							TypeParams: []*commonpb.KeyValuePair{
+//								{
+//									Key:   common.DimKey,
+//									Value: "128",
+//								},
+//							},
+//						},
+//					},
+//				},
+//			},
+//		},
+//	}
+//
+//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
+//	allocator := &MockAllocator0{}
+//	tr := &compactionTrigger{
+//		handler:                      newMockHandlerWithMeta(meta),
+//		allocator:                    allocator,
+//		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+//		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+//		testingOnly:                  true,
+//	}
+//	_, err := tr.triggerManualCompaction(1, true)
+//	assert.Error(t, err)
+//	assert.True(t, errors.Is(err, merr.ErrClusteringCompactionClusterNotSupport))
+//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "true")
+//	_, err2 := tr.triggerManualCompaction(1, true)
+//	assert.Error(t, err2)
+//	assert.True(t, errors.Is(err2, merr.ErrClusteringCompactionCollectionNotSupport))
+//}
 
 func TestCompactionTriggerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerSuite))

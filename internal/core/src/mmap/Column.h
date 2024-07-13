@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "common/FieldMeta.h"
@@ -39,11 +40,12 @@
 #include "common/Array.h"
 #include "knowhere/dataset.h"
 #include "storage/prometheus_client.h"
+#include "storage/MmapChunkManager.h"
 
 namespace milvus {
 
 /*
-* If string field's value all empty, need a string padding to avoid 
+* If string field's value all empty, need a string padding to avoid
 * mmap failing because size_ is zero which causing invalid arguement
 * array has the same problem
 * TODO: remove it when support NULL value
@@ -51,14 +53,21 @@ namespace milvus {
 constexpr size_t STRING_PADDING = 1;
 constexpr size_t ARRAY_PADDING = 1;
 
+constexpr size_t BLOCK_SIZE = 8192;
+
 class ColumnBase {
  public:
+    enum MappingType {
+        MAP_WITH_ANONYMOUS = 0,
+        MAP_WITH_FILE = 1,
+        MAP_WITH_MANAGER = 2,
+    };
     // memory mode ctor
     ColumnBase(size_t reserve, const FieldMeta& field_meta)
         : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
                          ? 1
                          : field_meta.get_sizeof()),
-          is_map_anonymous_(true) {
+          mapping_type_(MappingType::MAP_WITH_ANONYMOUS) {
         SetPaddingSize(field_meta.get_data_type());
 
         if (IsVariableDataType(field_meta.get_data_type())) {
@@ -83,18 +92,46 @@ class ColumnBase {
         UpdateMetricWhenMmap(mapped_size);
     }
 
+    // use mmap manager ctor, used in growing segment fixed data type
+    ColumnBase(size_t reserve,
+               int dim,
+               const DataType& data_type,
+               storage::MmapChunkManagerPtr mcm,
+               storage::MmapChunkDescriptorPtr descriptor)
+        : mcm_(mcm),
+          mmap_descriptor_(descriptor),
+          type_size_(GetDataTypeSize(data_type, dim)),
+          num_rows_(0),
+          size_(0),
+          cap_size_(reserve),
+          mapping_type_(MAP_WITH_MANAGER) {
+        AssertInfo((mcm != nullptr) && descriptor != nullptr,
+                   "use wrong mmap chunk manager and mmap chunk descriptor to "
+                   "create column.");
+
+        SetPaddingSize(data_type);
+        size_t mapped_size = cap_size_ + padding_;
+        data_ = (char*)mcm_->Allocate(mmap_descriptor_, (uint64_t)mapped_size);
+        AssertInfo(data_ != nullptr,
+                   "fail to create with mmap manager: map_size = {}",
+                   mapped_size);
+    }
+
     // mmap mode ctor
+    // User must call Seal to build the view for variable length column.
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
         : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
                          ? 1
                          : field_meta.get_sizeof()),
-          is_map_anonymous_(false),
+          mapping_type_(MappingType::MAP_WITH_FILE),
           num_rows_(size / type_size_) {
         SetPaddingSize(field_meta.get_data_type());
 
         size_ = size;
         cap_size_ = size;
-        size_t mapped_size = cap_size_ + padding_;
+        // use exactly same size of file, padding shall be written in file already
+        // see also https://github.com/milvus-io/milvus/issues/34442
+        size_t mapped_size = cap_size_;
         data_ = static_cast<char*>(mmap(
             nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
@@ -106,18 +143,24 @@ class ColumnBase {
     }
 
     // mmap mode ctor
+    // User must call Seal to build the view for variable length column.
     ColumnBase(const File& file,
                size_t size,
                int dim,
                const DataType& data_type)
-        : type_size_(GetDataTypeSize(data_type, dim)),
-          num_rows_(size / GetDataTypeSize(data_type, dim)),
+        : type_size_(IsSparseFloatVectorDataType(data_type)
+                         ? 1
+                         : GetDataTypeSize(data_type, dim)),
+          num_rows_(
+              IsSparseFloatVectorDataType(data_type) ? 1 : (size / type_size_)),
           size_(size),
           cap_size_(size),
-          is_map_anonymous_(false) {
+          mapping_type_(MappingType::MAP_WITH_FILE) {
         SetPaddingSize(data_type);
 
-        size_t mapped_size = cap_size_ + padding_;
+        // use exact same size of file, padding shall be written in file already
+        // see also https://github.com/milvus-io/milvus/issues/34442
+        size_t mapped_size = cap_size_;
         data_ = static_cast<char*>(mmap(
             nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
@@ -129,13 +172,15 @@ class ColumnBase {
 
     virtual ~ColumnBase() {
         if (data_ != nullptr) {
-            size_t mapped_size = cap_size_ + padding_;
-            if (munmap(data_, mapped_size)) {
-                AssertInfo(true,
-                           "failed to unmap variable field, err={}",
-                           strerror(errno));
+            if (mapping_type_ != MappingType::MAP_WITH_MANAGER) {
+                size_t mapped_size = cap_size_ + padding_;
+                if (munmap(data_, mapped_size)) {
+                    AssertInfo(true,
+                               "failed to unmap variable field, err={}",
+                               strerror(errno));
+                }
             }
-            UpdateMetricWhenMunmap(mapped_size);
+            UpdateMetricWhenMunmap(cap_size_ + padding_);
         }
     }
 
@@ -153,8 +198,15 @@ class ColumnBase {
         column.size_ = 0;
     }
 
+    // Data() points at an addr that contains the elements
     virtual const char*
     Data() const {
+        return data_;
+    }
+
+    // MmappedData() returns the mmaped address
+    const char*
+    MmappedData() const {
         return data_;
     }
 
@@ -177,6 +229,19 @@ class ColumnBase {
 
     virtual SpanBase
     Span() const = 0;
+
+    // used for sequential access for search
+    virtual BufferView
+    GetBatchBuffer(int64_t start_offset, int64_t length) {
+        PanicInfo(ErrorCode::Unsupported,
+                  "GetBatchBuffer only supported for VariableColumn");
+    }
+
+    virtual std::vector<std::string_view>
+    StringViews() const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "StringViews only supported for VariableColumn");
+    }
 
     virtual void
     AppendBatch(const FieldDataPtr data) {
@@ -226,68 +291,86 @@ class ColumnBase {
     }
 
  protected:
-    // only for memory mode, not mmap
+    // only for memory mode and mmap manager mode, not mmap
     void
     Expand(size_t new_size) {
         if (new_size == 0) {
             return;
         }
+        AssertInfo(
+            mapping_type_ == MappingType::MAP_WITH_ANONYMOUS ||
+                mapping_type_ == MappingType::MAP_WITH_MANAGER,
+            "expand function only use in anonymous or with mmap manager");
+        if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
+            size_t new_mapped_size = new_size + padding_;
+            auto data = static_cast<char*>(mmap(nullptr,
+                                                new_mapped_size,
+                                                PROT_READ | PROT_WRITE,
+                                                MAP_PRIVATE | MAP_ANON,
+                                                -1,
+                                                0));
+            UpdateMetricWhenMmap(true, new_mapped_size);
 
-        size_t new_mapped_size = new_size + padding_;
-        auto data = static_cast<char*>(mmap(nullptr,
-                                            new_mapped_size,
-                                            PROT_READ | PROT_WRITE,
-                                            MAP_PRIVATE | MAP_ANON,
-                                            -1,
-                                            0));
-        UpdateMetricWhenMmap(true, new_mapped_size);
+            AssertInfo(data != MAP_FAILED,
+                       "failed to expand map: {}, new_map_size={}",
+                       strerror(errno),
+                       new_size + padding_);
 
-        AssertInfo(data != MAP_FAILED,
-                   "failed to expand map: {}, new_map_size={}",
-                   strerror(errno),
-                   new_size + padding_);
+            if (data_ != nullptr) {
+                std::memcpy(data, data_, size_);
+                if (munmap(data_, cap_size_ + padding_)) {
+                    auto err = errno;
+                    size_t mapped_size = new_size + padding_;
+                    munmap(data, mapped_size);
+                    UpdateMetricWhenMunmap(mapped_size);
 
-        if (data_ != nullptr) {
-            std::memcpy(data, data_, size_);
-            if (munmap(data_, cap_size_ + padding_)) {
-                auto err = errno;
-                size_t mapped_size = new_size + padding_;
-                munmap(data, mapped_size);
-                UpdateMetricWhenMunmap(mapped_size);
-
-                AssertInfo(
-                    false,
-                    "failed to unmap while expanding: {}, old_map_size={}",
-                    strerror(err),
-                    cap_size_ + padding_);
+                    AssertInfo(
+                        false,
+                        "failed to unmap while expanding: {}, old_map_size={}",
+                        strerror(err),
+                        cap_size_ + padding_);
+                }
+                UpdateMetricWhenMunmap(cap_size_ + padding_);
             }
-            UpdateMetricWhenMunmap(cap_size_ + padding_);
-        }
 
-        data_ = data;
-        cap_size_ = new_size;
-        is_map_anonymous_ = true;
+            data_ = data;
+            cap_size_ = new_size;
+            mapping_type_ = MappingType::MAP_WITH_ANONYMOUS;
+        } else if (mapping_type_ == MappingType::MAP_WITH_MANAGER) {
+            size_t new_mapped_size = new_size + padding_;
+            auto data = mcm_->Allocate(mmap_descriptor_, new_mapped_size);
+            AssertInfo(data != nullptr,
+                       "fail to create with mmap manager: map_size = {}",
+                       new_mapped_size);
+            std::memcpy(data, data_, size_);
+            // allocate space only append in one growing segment, so no need to munmap()
+            data_ = (char*)data;
+            cap_size_ = new_size;
+            mapping_type_ = MappingType::MAP_WITH_MANAGER;
+        }
     }
 
     char* data_{nullptr};
     // capacity in bytes
     size_t cap_size_{0};
     size_t padding_{0};
+    // type_size_ is not used for sparse float vector column.
     const size_t type_size_{1};
     size_t num_rows_{0};
 
     // length in bytes
     size_t size_{0};
+    storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
 
  private:
     void
     UpdateMetricWhenMmap(size_t mmaped_size) {
-        UpdateMetricWhenMmap(is_map_anonymous_, mmaped_size);
+        UpdateMetricWhenMmap(mapping_type_, mmaped_size);
     }
 
     void
     UpdateMetricWhenMmap(bool is_map_anonymous, size_t mapped_size) {
-        if (is_map_anonymous) {
+        if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
             milvus::storage::internal_mmap_allocated_space_bytes_anon.Observe(
                 mapped_size);
             milvus::storage::internal_mmap_in_used_space_bytes_anon.Increment(
@@ -302,7 +385,7 @@ class ColumnBase {
 
     void
     UpdateMetricWhenMunmap(size_t mapped_size) {
-        if (is_map_anonymous_) {
+        if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
             milvus::storage::internal_mmap_in_used_space_bytes_anon.Decrement(
                 mapped_size);
         } else {
@@ -312,8 +395,9 @@ class ColumnBase {
     }
 
  private:
-    // is MAP_ANONYMOUS
-    bool is_map_anonymous_;
+    // mapping_type_
+    MappingType mapping_type_;
+    storage::MmapChunkManagerPtr mcm_ = nullptr;
 };
 
 class Column : public ColumnBase {
@@ -333,6 +417,14 @@ class Column : public ColumnBase {
         : ColumnBase(file, size, dim, data_type) {
     }
 
+    Column(size_t reserve,
+           int dim,
+           const DataType& data_type,
+           storage::MmapChunkManagerPtr mcm,
+           storage::MmapChunkDescriptorPtr descriptor)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+    }
+
     Column(Column&& column) noexcept : ColumnBase(std::move(column)) {
     }
 
@@ -344,8 +436,7 @@ class Column : public ColumnBase {
     }
 };
 
-// mmap not yet supported, thus SparseFloatColumn is not using fields in super
-// class such as ColumnBase::data.
+// when mmap is used, size_, data_ and num_rows_ of ColumnBase are used.
 class SparseFloatColumn : public ColumnBase {
  public:
     // memory mode ctor
@@ -356,7 +447,21 @@ class SparseFloatColumn : public ColumnBase {
                       size_t size,
                       const FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
-        AssertInfo(false, "SparseFloatColumn mmap mode not supported");
+    }
+    // mmap mode ctor
+    SparseFloatColumn(const File& file,
+                      size_t size,
+                      int dim,
+                      const DataType& data_type)
+        : ColumnBase(file, size, dim, data_type) {
+    }
+    // mmap with mmap manager
+    SparseFloatColumn(size_t reserve,
+                      int dim,
+                      const DataType& data_type,
+                      storage::MmapChunkManagerPtr mcm,
+                      storage::MmapChunkDescriptorPtr descriptor)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 
     SparseFloatColumn(SparseFloatColumn&& column) noexcept
@@ -372,23 +477,16 @@ class SparseFloatColumn : public ColumnBase {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
     }
 
-    // This is used to advice mmap prefetch, we don't currently support mmap for
-    // sparse float vector thus not implemented for now.
-    size_t
-    ByteSize() const override {
-        throw std::runtime_error(
-            "ByteSize not supported for sparse float column");
-    }
-
     size_t
     Capacity() const override {
-        throw std::runtime_error(
-            "Capacity not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Capacity not supported for sparse float column");
     }
 
     SpanBase
     Span() const override {
-        throw std::runtime_error("Span not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Span not supported for sparse float column");
     }
 
     void
@@ -404,13 +502,41 @@ class SparseFloatColumn : public ColumnBase {
 
     void
     Append(const char* data, size_t size) override {
-        throw std::runtime_error(
-            "Append not supported for sparse float column");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Append not supported for sparse float column");
     }
 
     int64_t
     Dim() const {
         return dim_;
+    }
+
+    void
+    Seal(std::vector<uint64_t> indices) {
+        AssertInfo(!indices.empty(),
+                   "indices should not be empty, Seal() of "
+                   "SparseFloatColumn must be called only "
+                   "at mmap mode");
+        AssertInfo(data_,
+                   "data_ should not be nullptr, Seal() of "
+                   "SparseFloatColumn must be called only "
+                   "at mmap mode");
+        num_rows_ = indices.size();
+        // so that indices[num_rows_] - indices[num_rows_ - 1] is the size of
+        // the last row.
+        indices.push_back(size_);
+        for (size_t i = 0; i < num_rows_; i++) {
+            auto vec_size = indices[i + 1] - indices[i];
+            AssertInfo(
+                vec_size % knowhere::sparse::SparseRow<float>::element_size() ==
+                    0,
+                "Incorrect sparse vector size: {}",
+                vec_size);
+            vec_.emplace_back(
+                vec_size / knowhere::sparse::SparseRow<float>::element_size(),
+                (uint8_t*)(data_) + indices[i],
+                false);
+        }
     }
 
  private:
@@ -433,42 +559,104 @@ class VariableColumn : public ColumnBase {
     VariableColumn(const File& file, size_t size, const FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
     }
+    // mmap with mmap manager
+    VariableColumn(size_t reserve,
+                   int dim,
+                   const DataType& data_type,
+                   storage::MmapChunkManagerPtr mcm,
+                   storage::MmapChunkDescriptorPtr descriptor)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+    }
 
     VariableColumn(VariableColumn&& column) noexcept
-        : ColumnBase(std::move(column)),
-          indices_(std::move(column.indices_)),
-          views_(std::move(column.views_)) {
+        : ColumnBase(std::move(column)), indices_(std::move(column.indices_)) {
     }
 
     ~VariableColumn() override = default;
 
     SpanBase
     Span() const override {
-        return SpanBase(views_.data(), views_.size(), sizeof(ViewType));
+        PanicInfo(ErrorCode::NotImplemented,
+                  "span() interface is not implemented for variable column");
     }
 
-    [[nodiscard]] const std::vector<ViewType>&
+    std::vector<std::string_view>
+    StringViews() const override {
+        std::vector<std::string_view> res;
+        char* pos = data_;
+        for (size_t i = 0; i < num_rows_; ++i) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t);
+            res.emplace_back(std::string_view(pos, size));
+            pos += size;
+        }
+        return res;
+    }
+
+    [[nodiscard]] std::vector<ViewType>
     Views() const {
-        return views_;
+        std::vector<ViewType> res;
+        char* pos = data_;
+        for (size_t i = 0; i < num_rows_; ++i) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t);
+            res.emplace_back(ViewType(pos, size));
+            pos += size;
+        }
+        return res;
+    }
+
+    BufferView
+    GetBatchBuffer(int64_t start_offset, int64_t length) override {
+        if (start_offset < 0 || start_offset > num_rows_ ||
+            start_offset + length > num_rows_) {
+            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        }
+
+        char* pos = data_ + indices_[start_offset / BLOCK_SIZE];
+        for (size_t j = 0; j < start_offset % BLOCK_SIZE; j++) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t) + size;
+        }
+
+        return BufferView{pos, size_ - (pos - data_)};
     }
 
     ViewType
     operator[](const int i) const {
-        return views_[i];
+        if (i < 0 || i > num_rows_) {
+            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        }
+        size_t batch_id = i / BLOCK_SIZE;
+        size_t offset = i % BLOCK_SIZE;
+
+        // located in batch start location
+        char* pos = data_ + indices_[batch_id];
+        for (size_t j = 0; j < offset; j++) {
+            uint32_t size;
+            size = *reinterpret_cast<uint32_t*>(pos);
+            pos += sizeof(uint32_t) + size;
+        }
+
+        uint32_t size;
+        size = *reinterpret_cast<uint32_t*>(pos);
+        return ViewType(pos + sizeof(uint32_t), size);
     }
 
     std::string_view
     RawAt(const int i) const {
-        return std::string_view(views_[i]);
+        return std::string_view((*this)[i]);
     }
 
     void
     Append(FieldDataPtr chunk) {
         for (auto i = 0; i < chunk->get_num_rows(); i++) {
-            auto data = static_cast<const T*>(chunk->RawValue(i));
-
             indices_.emplace_back(size_);
-            size_ += data->size();
+            auto data = static_cast<const T*>(chunk->RawValue(i));
+            size_ += sizeof(uint32_t) + data->size();
         }
         load_buf_.emplace(std::move(chunk));
     }
@@ -491,40 +679,42 @@ class VariableColumn : public ColumnBase {
                 auto chunk = std::move(load_buf_.front());
                 load_buf_.pop();
 
+                // data_ as: |size|data|size|data......
                 for (auto i = 0; i < chunk->get_num_rows(); i++) {
+                    auto current_size = (uint32_t)chunk->Size(i);
+                    std::memcpy(data_ + size_, &current_size, sizeof(uint32_t));
+                    size_ += sizeof(uint32_t);
                     auto data = static_cast<const T*>(chunk->RawValue(i));
-                    std::copy_n(data->c_str(), data->size(), data_ + size_);
+                    std::memcpy(data_ + size_, data->c_str(), data->size());
                     size_ += data->size();
                 }
             }
         }
 
-        ConstructViews();
-
-        // Not need indices_ after
-        indices_.clear();
-        std::vector<uint64_t>().swap(indices_);
+        shrink_indice();
     }
 
  protected:
     void
-    ConstructViews() {
-        views_.reserve(indices_.size());
-        for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i],
-                                indices_[i + 1] - indices_[i]);
+    shrink_indice() {
+        std::vector<uint64_t> tmp_indices;
+        tmp_indices.reserve((indices_.size() + BLOCK_SIZE - 1) / BLOCK_SIZE);
+
+        for (size_t i = 0; i < indices_.size();) {
+            tmp_indices.push_back(indices_[i]);
+            i += BLOCK_SIZE;
         }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
+
+        indices_.swap(tmp_indices);
     }
 
  private:
     // loading states
     std::queue<FieldDataPtr> load_buf_{};
 
+    // raw data index, record indices located 0, interval, 2 * interval, 3 * interval
+    // ... just like page index, interval set to 8192 that matches search engine's batch size
     std::vector<uint64_t> indices_{};
-
-    // Compatible with current Span type
-    std::vector<ViewType> views_{};
 };
 
 class ArrayColumn : public ColumnBase {
@@ -539,6 +729,14 @@ class ArrayColumn : public ColumnBase {
     ArrayColumn(const File& file, size_t size, const FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta),
           element_type_(field_meta.get_element_type()) {
+    }
+
+    ArrayColumn(size_t reserve,
+                int dim,
+                const DataType& data_type,
+                storage::MmapChunkManagerPtr mcm,
+                storage::MmapChunkDescriptorPtr descriptor)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
     }
 
     ArrayColumn(ArrayColumn&& column) noexcept

@@ -12,5 +12,4 @@ pytest-xdist==2.5.0
 minio==7.1.14
 tenacity==8.1.0
 # for bf16 datatype
-jax==0.4.13
-jaxlib==0.4.13
+ml-dtypes==0.2.0

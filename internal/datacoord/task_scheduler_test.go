@@ -37,19 +37,21 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var (
-	collID    = UniqueID(100)
-	partID    = UniqueID(200)
-	indexID   = UniqueID(300)
-	fieldID   = UniqueID(400)
-	indexName = "_default_idx"
-	segID     = UniqueID(500)
-	buildID   = UniqueID(600)
-	nodeID    = UniqueID(700)
+	collID         = UniqueID(100)
+	partID         = UniqueID(200)
+	indexID        = UniqueID(300)
+	fieldID        = UniqueID(400)
+	indexName      = "_default_idx"
+	segID          = UniqueID(500)
+	buildID        = UniqueID(600)
+	nodeID         = UniqueID(700)
+	partitionKeyID = UniqueID(800)
 )
 
 func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
@@ -905,14 +907,16 @@ func (s *taskSchedulerSuite) Test_scheduler() {
 	}, nil)
 
 	s.Run("test scheduler with indexBuilderV1", func() {
-		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
-		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		s.scheduler(handler)
 	})
 
 	s.Run("test scheduler with indexBuilderV2", func() {
 		paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 
 		s.scheduler(handler)
 	})
@@ -923,7 +927,6 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		ctx := context.Background()
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		in := mocks.NewMockIndexNodeClient(s.T())
 		workerManager := NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
@@ -954,9 +957,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		scheduler.scheduleDuration = s.duration
 		scheduler.Start()
 
-		// taskID 1 peek client success, update version success. AssignTask failed --> state: Failed --> save
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
+		// taskID 1 PreCheck failed --> state: Failed --> save
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(nil, false).Once()
 
@@ -1294,14 +1295,10 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		defer Params.CommonCfg.EnableStorageV2.SwapTempValue("False")
 		scheduler.Start()
 
-		// peek client success, update version success, get collection info failed --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// get collection info failed --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
-		// peek client success, update version success, partition key field is nil, get collection info failed  --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// partition key field is nil, get collection info failed  --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
 			Schema: &schemapb.CollectionSchema{
@@ -1312,9 +1309,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}, nil).Once()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
-		// peek client success, update version success, get collection info success, get dim failed --> init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		// get collection info success, get dim failed --> init
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
 			Schema: &schemapb.CollectionSchema{
@@ -1327,8 +1322,6 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 		// peek client success, update version success, get collection info success, get dim success, get storage uri failed --> init
 		s.NoError(err)
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*collectionInfo, error) {
 			return &collectionInfo{
 				ID: collID,
@@ -1420,4 +1413,447 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 func Test_taskSchedulerSuite(t *testing.T) {
 	suite.Run(t, new(taskSchedulerSuite))
+}
+
+func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+	in := mocks.NewMockIndexNodeClient(s.T())
+
+	workerManager := NewMockWorkerManager(s.T())
+	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
+
+	minNumberOfRowsToBuild := paramtable.Get().DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() + 1
+	fieldsSchema := []*schemapb.FieldSchema{
+		{
+			FieldID:  fieldID,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: "128",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.IndexHNSW,
+				},
+			},
+		},
+		{
+			FieldID:        partitionKeyID,
+			Name:           "scalar",
+			DataType:       schemapb.DataType_VarChar,
+			IsPartitionKey: true,
+		},
+	}
+	mt := meta{
+		catalog: catalog,
+		collections: map[int64]*collectionInfo{
+			collID: {
+				ID: collID,
+				Schema: &schemapb.CollectionSchema{
+					Fields: fieldsSchema,
+				},
+				CreatedAt: 0,
+			},
+		},
+
+		analyzeMeta: &analyzeMeta{
+			ctx:     context.Background(),
+			catalog: catalog,
+		},
+
+		indexMeta: &indexMeta{
+			catalog: catalog,
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						TenantID:     "",
+						CollectionID: collID,
+						FieldID:      fieldID,
+						IndexID:      indexID,
+						IndexName:    indexName,
+						IsDeleted:    false,
+						CreateTime:   1,
+						TypeParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.DimKey,
+								Value: "128",
+							},
+						},
+						IndexParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.MetricTypeKey,
+								Value: "L2",
+							},
+							{
+								Key:   common.IndexTypeKey,
+								Value: indexparamcheck.IndexHNSW,
+							},
+						},
+					},
+				},
+			},
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segID: {
+					indexID: {
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       minNumberOfRowsToBuild,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        0,
+						IndexVersion:  0,
+						IndexState:    commonpb.IndexState_Unissued,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    0,
+						IndexFileKeys: nil,
+						IndexSize:     0,
+					},
+				},
+			},
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+				buildID: {
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       minNumberOfRowsToBuild,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        0,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    0,
+					IndexFileKeys: nil,
+					IndexSize:     0,
+				},
+			},
+		},
+		segments: &SegmentsInfo{
+			segments: map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      minNumberOfRowsToBuild,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+			},
+		},
+	}
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("ut-index")
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:               "coll",
+			Fields:             fieldsSchema,
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
+	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+
+	waitTaskDoneFunc := func(sche *taskScheduler) {
+		for {
+			sche.RLock()
+			taskNum := len(sche.tasks)
+			sche.RUnlock()
+
+			if taskNum == 0 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+	}
+
+	resetMetaFunc := func() {
+		mt.indexMeta.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
+		mt.indexMeta.segmentIndexes[segID][indexID].IndexState = commonpb.IndexState_Unissued
+		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
+		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
+		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
+	}
+
+	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+			switch request.GetJobType() {
+			case indexpb.JobType_JobTypeIndexJob:
+				results := make([]*indexpb.IndexTaskInfo, 0)
+				for _, buildID := range request.GetTaskIDs() {
+					results = append(results, &indexpb.IndexTaskInfo{
+						BuildID:             buildID,
+						State:               commonpb.IndexState_Finished,
+						IndexFileKeys:       []string{"file1", "file2"},
+						SerializedSize:      1024,
+						FailReason:          "",
+						CurrentIndexVersion: 0,
+						IndexStoreVersion:   0,
+					})
+				}
+				return &indexpb.QueryJobsV2Response{
+					Status:    merr.Success(),
+					ClusterID: request.GetClusterID(),
+					Result: &indexpb.QueryJobsV2Response_IndexJobResults{
+						IndexJobResults: &indexpb.IndexJobResults{
+							Results: results,
+						},
+					},
+				}, nil
+			default:
+				return &indexpb.QueryJobsV2Response{
+					Status: merr.Status(errors.New("unknown job type")),
+				}, nil
+			}
+		})
+	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+	s.Run("success to get opt field on startup", func() {
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		s.Equal(1, len(scheduler.tasks))
+		s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID].GetState())
+
+		scheduler.Start()
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue valid", func() {
+		for _, dataType := range []schemapb.DataType{
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_VarChar,
+			schemapb.DataType_String,
+		} {
+			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+					return merr.Success(), nil
+				}).Once()
+			t := &indexBuildTask{
+				taskID: buildID,
+				nodeID: nodeID,
+				taskInfo: &indexpb.IndexTaskInfo{
+					BuildID:    buildID,
+					State:      commonpb.IndexState_Unissued,
+					FailReason: "",
+				},
+			}
+			scheduler.enqueue(t)
+			waitTaskDoneFunc(scheduler)
+			resetMetaFunc()
+		}
+	})
+
+	// should still be able to build vec index when opt field is not set
+	s.Run("enqueue returns empty optional field when cfg disable", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler.enqueue(t)
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR or Integer", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		for _, dataType := range []schemapb.DataType{
+			schemapb.DataType_Bool,
+			schemapb.DataType_Float,
+			schemapb.DataType_Double,
+			schemapb.DataType_Array,
+			schemapb.DataType_JSON,
+		} {
+			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+					return merr.Success(), nil
+				}).Once()
+			t := &indexBuildTask{
+				taskID: buildID,
+				nodeID: nodeID,
+				taskInfo: &indexpb.IndexTaskInfo{
+					BuildID:    buildID,
+					State:      commonpb.IndexState_Unissued,
+					FailReason: "",
+				},
+			}
+			scheduler.enqueue(t)
+			waitTaskDoneFunc(scheduler)
+			resetMetaFunc()
+		}
+	})
+
+	s.Run("enqueue returns empty optional field when no partition key", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler.enqueue(t)
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is false when schema is not set", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler.enqueue(t)
+		waitTaskDoneFunc(scheduler)
+		resetMetaFunc()
+	})
+	scheduler.Stop()
+
+	isoCollInfo := &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:               "coll",
+			Fields:             fieldsSchema,
+			EnableDynamicField: false,
+		},
+		Properties: map[string]string{
+			common.PartitionKeyIsolationKey: "false",
+		},
+	}
+	handler_isolation := NewNMockHandler(s.T())
+	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
+
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
+	scheduler_isolation.Start()
+
+	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is true when MV enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "true"
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, true)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+
+	s.Run("enqueue partitionKeyIsolation is invalid when MV is enabled", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "invalid"
+		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
+				return merr.Success(), nil
+			}).Once()
+		t := &indexBuildTask{
+			taskID: buildID,
+			nodeID: nodeID,
+			taskInfo: &indexpb.IndexTaskInfo{
+				BuildID:    buildID,
+				State:      commonpb.IndexState_Unissued,
+				FailReason: "",
+			},
+		}
+		scheduler_isolation.enqueue(t)
+		waitTaskDoneFunc(scheduler_isolation)
+		resetMetaFunc()
+	})
+	scheduler_isolation.Stop()
 }

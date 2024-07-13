@@ -195,13 +195,19 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	if err != nil {
 		return nil, err
 	}
+
 	totalRows := lo.SumBy(task.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {
 		return stat.GetTotalRows()
 	})
-	idBegin, idEnd, err := alloc.allocN(totalRows)
+
+	// Allocated IDs are used for rowID and the BEGINNING of the logID.
+	allocNum := totalRows + 1
+
+	idBegin, idEnd, err := alloc.allocN(allocNum)
 	if err != nil {
 		return nil, err
 	}
+
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
@@ -382,6 +388,9 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
+	if job == nil {
+		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
+	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
 		progress := getPendingProgress(jobID, imeta)
@@ -425,7 +434,7 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 		}
 		for _, fileStat := range task.GetFileStats() {
 			progresses = append(progresses, &internalpb.ImportTaskProgress{
-				FileName:     fileStat.GetImportFile().String(),
+				FileName:     fmt.Sprintf("%v", fileStat.GetImportFile().GetPaths()),
 				FileSize:     fileStat.GetFileSize(),
 				Reason:       task.GetReason(),
 				Progress:     progress,

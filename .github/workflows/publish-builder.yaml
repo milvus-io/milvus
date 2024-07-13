@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu20.04, amazonlinux2023, rockylinux8]
+        os: [ubuntu22.04, amazonlinux2023, rockylinux8]
     env:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
@@ -83,7 +83,7 @@ jobs:
           file: build/docker/builder/cpu/${{ matrix.os }}/Dockerfile
       - name: Bump Builder Version
         uses: ./.github/actions/bump-builder-version
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu22.04'
         with:
           tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
           type: cpu

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -216,20 +217,18 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	}
 
 	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
-		// when replica number or resource groups is not set, use database level config
+		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to get data base level load info", zap.Error(err))
-		}
+			log.Warn("failed to get pre-defined load info", zap.Error(err))
+		} else {
+			if req.GetReplicaNumber() <= 0 && replicas > 0 {
+				req.ReplicaNumber = int32(replicas)
+			}
 
-		if req.GetReplicaNumber() <= 0 {
-			log.Info("load collection use database level replica number", zap.Int64("databaseLevelReplicaNum", replicas))
-			req.ReplicaNumber = int32(replicas)
-		}
-
-		if len(req.GetResourceGroups()) == 0 {
-			log.Info("load collection use database level resource groups", zap.Strings("databaseLevelResourceGroups", rgs))
-			req.ResourceGroups = rgs
+			if len(req.GetResourceGroups()) == 0 && len(rgs) > 0 {
+				req.ResourceGroups = rgs
+			}
 		}
 	}
 
@@ -876,9 +875,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		return &milvuspb.GetReplicasResponse{
-			Replicas: make([]*milvuspb.ReplicaInfo, 0),
-		}, nil
+		return resp, nil
 	}
 
 	for _, replica := range replicas {
@@ -915,10 +912,14 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	errReasons, err := s.checkNodeHealth(ctx)
 	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errReasons}, nil
+		return componentutil.CheckHealthRespWithErrMsg(errReasons...), nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
+	if err := utils.CheckCollectionsQueryable(s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {

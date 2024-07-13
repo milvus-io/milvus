@@ -95,24 +95,27 @@ type Cache interface {
 	AllocID(ctx context.Context) (int64, error)
 }
 type collectionBasicInfo struct {
-	collID              typeutil.UniqueID
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
+	collID                typeutil.UniqueID
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type collectionInfo struct {
-	collID              typeutil.UniqueID
-	schema              *schemaInfo
-	partInfo            *partitionInfos
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
-	consistencyLevel    commonpb.ConsistencyLevel
+	collID                typeutil.UniqueID
+	schema                *schemaInfo
+	partInfo              *partitionInfos
+	createdTimestamp      uint64
+	createdUtcTimestamp   uint64
+	consistencyLevel      commonpb.ConsistencyLevel
+	partitionKeyIsolation bool
 }
 
 type databaseInfo struct {
 	dbID             typeutil.UniqueID
 	createdTimestamp uint64
+	properties       map[string]string
 }
 
 // schemaInfo is a helper function wraps *schemapb.CollectionSchema
@@ -184,10 +187,11 @@ type partitionInfo struct {
 func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 	// Do a deep copy for all fields.
 	basicInfo := &collectionBasicInfo{
-		collID:              info.collID,
-		createdTimestamp:    info.createdTimestamp,
-		createdUtcTimestamp: info.createdUtcTimestamp,
-		consistencyLevel:    info.consistencyLevel,
+		collID:                info.collID,
+		createdTimestamp:      info.createdTimestamp,
+		createdUtcTimestamp:   info.createdUtcTimestamp,
+		consistencyLevel:      info.consistencyLevel,
+		partitionKeyIsolation: info.partitionKeyIsolation,
 	}
 
 	return basicInfo
@@ -384,14 +388,20 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
+	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+
 	schemaInfo := newSchemaInfo(collection.Schema)
 	m.collInfo[database][collectionName] = &collectionInfo{
-		collID:              collection.CollectionID,
-		schema:              schemaInfo,
-		partInfo:            parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
-		createdTimestamp:    collection.CreatedTimestamp,
-		createdUtcTimestamp: collection.CreatedUtcTimestamp,
-		consistencyLevel:    collection.ConsistencyLevel,
+		collID:                collection.CollectionID,
+		schema:                schemaInfo,
+		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+		createdTimestamp:      collection.CreatedTimestamp,
+		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+		consistencyLevel:      collection.ConsistencyLevel,
+		partitionKeyIsolation: isolation,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
@@ -713,6 +723,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 		ConsistencyLevel:     coll.ConsistencyLevel,
 		DbName:               coll.GetDbName(),
+		Properties:           coll.Properties,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
@@ -794,7 +805,7 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
-			log.Info("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
+			log.Info("partition group not in partitionKey pattern", zap.String("partitionName", partitionName), zap.Error(err))
 			return result
 		}
 		partitionNames[index] = partitionName
@@ -1150,6 +1161,7 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		dbInfo := &databaseInfo{
 			dbID:             resp.GetDbID(),
 			createdTimestamp: resp.GetCreatedTimestamp(),
+			properties:       funcutil.KeyValuePair2Map(resp.GetProperties()),
 		}
 		m.dbInfo[database] = dbInfo
 		return dbInfo, nil

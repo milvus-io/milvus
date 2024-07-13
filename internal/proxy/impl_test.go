@@ -45,8 +45,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1379,7 +1379,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 
 		factory := dependency.NewMockFactory(t)
 		stream := msgstream.NewMockMsgStream(t)
-		mockMsgID := mqwrapper.NewMockMessageID(t)
+		mockMsgID := mqcommon.NewMockMessageID(t)
 
 		factory.EXPECT().NewMsgStream(mock.Anything).Return(stream, nil).Once()
 		mockMsgID.EXPECT().Serialize().Return([]byte("mock")).Once()
@@ -1475,10 +1475,10 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		msgStreamObj.EXPECT().AsProducer(mock.Anything).Return()
 		msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return()
 		msgStreamObj.EXPECT().Close().Return()
-		mockMsgID1 := mqwrapper.NewMockMessageID(t)
-		mockMsgID2 := mqwrapper.NewMockMessageID(t)
+		mockMsgID1 := mqcommon.NewMockMessageID(t)
+		mockMsgID2 := mqcommon.NewMockMessageID(t)
 		mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2"))
-		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
 			"unit_test_replicate_message": {mockMsgID1, mockMsgID2},
 		}, nil)
 
@@ -1566,7 +1566,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 		{
 			broadcastMock.Unset()
-			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqwrapper.MessageID{
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
 				"unit_test_replicate_message": {},
 			}, nil)
 			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)

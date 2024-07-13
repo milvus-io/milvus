@@ -65,9 +65,24 @@ class IndexFactory {
     CreateVectorIndex(const CreateIndexInfo& create_index_info,
                       const storage::FileManagerContext& file_manager_context);
 
+    // For base types like int, float, double, string, etc
     IndexBasePtr
     CreatePrimitiveScalarIndex(
         DataType data_type,
+        IndexType index_type,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    // For types like array, struct, union, etc
+    IndexBasePtr
+    CreateCompositeScalarIndex(
+        IndexType index_type,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    // For types like Json, XML, etc
+    IndexBasePtr
+    CreateComplexScalarIndex(
         IndexType index_type,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
@@ -85,7 +100,10 @@ class IndexFactory {
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,
                       const storage::FileManagerContext& file_manager_context,
-                      std::shared_ptr<milvus_storage::Space> space);
+                      std::shared_ptr<milvus_storage::Space> space) {
+        PanicInfo(ErrorCode::Unsupported,
+                  "CreateScalarIndexV2 not implemented");
+    }
 
     // IndexBasePtr
     // CreateIndex(DataType dtype, const IndexType& index_type);
@@ -94,28 +112,15 @@ class IndexFactory {
 
     template <typename T>
     ScalarIndexPtr<T>
-    CreateScalarIndex(const IndexType& index_type,
-                      const storage::FileManagerContext& file_manager =
-                          storage::FileManagerContext());
+    CreatePrimitiveScalarIndex(const IndexType& index_type,
+                               const storage::FileManagerContext& file_manager =
+                                   storage::FileManagerContext());
 
     template <typename T>
     ScalarIndexPtr<T>
-    CreateScalarIndex(const IndexType& index_type,
-                      const storage::FileManagerContext& file_manager,
-                      std::shared_ptr<milvus_storage::Space> space);
+    CreatePrimitiveScalarIndex(const IndexType& index_type,
+                               const storage::FileManagerContext& file_manager,
+                               std::shared_ptr<milvus_storage::Space> space);
 };
 
-// template <>
-// ScalarIndexPtr<std::string>
-// IndexFactory::CreateScalarIndex<std::string>(
-//     const IndexType& index_type,
-//     const storage::FileManagerContext& file_manager_context,
-//     DataType d_type);
-
-template <>
-ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex<std::string>(
-    const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space);
 }  // namespace milvus::index

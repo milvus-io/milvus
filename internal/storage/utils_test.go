@@ -434,6 +434,121 @@ func genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim int, withSparse 
 	return schema, pkFieldID, fieldIDs
 }
 
+func genAllFieldsSchemaNullable(fVecDim, bVecDim, f16VecDim, bf16VecDim int, withSparse bool) (schema *schemapb.CollectionSchema, pkFieldID UniqueID, fieldIDs []UniqueID) {
+	schema = &schemapb.CollectionSchema{
+		Name:        "all_fields_schema_nullable",
+		Description: "all_fields_schema_nullable",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Int8,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Int16,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Int32,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Int64,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Float,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_Double,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(fVecDim),
+					},
+				},
+			},
+			{
+				DataType: schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(bVecDim),
+					},
+				},
+			},
+			{
+				DataType: schemapb.DataType_Float16Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(f16VecDim),
+					},
+				},
+			},
+			{
+				DataType: schemapb.DataType_BFloat16Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(bf16VecDim),
+					},
+				},
+			},
+			{
+				DataType: schemapb.DataType_Array,
+				Nullable: true,
+			},
+			{
+				DataType: schemapb.DataType_JSON,
+				Nullable: true,
+			},
+		},
+	}
+	if withSparse {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			DataType: schemapb.DataType_SparseFloatVector,
+		})
+	}
+	fieldIDs = make([]UniqueID, 0)
+	for idx := range schema.Fields {
+		fID := int64(common.StartOfUserFieldID + idx)
+		schema.Fields[idx].FieldID = fID
+		if schema.Fields[idx].IsPrimaryKey {
+			pkFieldID = fID
+		}
+		fieldIDs = append(fieldIDs, fID)
+	}
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      common.RowIDField,
+		Name:         common.RowIDFieldName,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+	})
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      common.TimeStampField,
+		Name:         common.TimeStampFieldName,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+	})
+	return schema, pkFieldID, fieldIDs
+}
+
 func generateInt32ArrayList(numRows int) []*schemapb.ScalarField {
 	ret := make([]*schemapb.ScalarField, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -616,6 +731,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				},
 				FieldId: field.FieldID,
 			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
 				columns[idx] = append(columns[idx], d)
@@ -635,6 +753,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 					},
 				},
 				FieldId: field.FieldID,
+			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -656,6 +777,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				},
 				FieldId: field.FieldID,
 			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
 				columns[idx] = append(columns[idx], int16(d))
@@ -676,6 +800,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				},
 				FieldId: field.FieldID,
 			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
 				columns[idx] = append(columns[idx], d)
@@ -695,6 +822,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 					},
 				},
 				FieldId: field.FieldID,
+			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -717,6 +847,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				},
 				FieldId: field.FieldID,
 			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
 				columns[idx] = append(columns[idx], d)
@@ -736,6 +869,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 					},
 				},
 				FieldId: field.FieldID,
+			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -856,6 +992,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				},
 				FieldId: field.FieldID,
 			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
+			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
 				columns[idx] = append(columns[idx], d)
@@ -876,6 +1015,9 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 					},
 				},
 				FieldId: field.FieldID,
+			}
+			if field.GetNullable() {
+				f.ValidData = testutils.GenerateBoolArray(numRows)
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -1019,6 +1161,24 @@ func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 	}
 }
 
+func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
+	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 2, 2, 8, 2, 2
+	schema, _, fieldIDs := genAllFieldsSchemaNullable(fVecDim, bVecDim, f16VecDim, bf16VecDim, true)
+	msg, _, columns := genColumnBasedInsertMsg(schema, numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
+
+	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	for idx, fID := range fieldIDs {
+		column := columns[idx]
+		fData, ok := idata.Data[fID]
+		assert.True(t, ok)
+		assert.Equal(t, len(column), fData.RowNum())
+		for j := range column {
+			assert.Equal(t, fData.GetRow(j), column[j])
+		}
+	}
+}
+
 func TestColumnBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -1145,233 +1305,391 @@ func TestInsertMsgToInsertData2(t *testing.T) {
 }
 
 func TestMergeInsertData(t *testing.T) {
-	d1 := &InsertData{
-		Data: map[int64]FieldData{
-			common.RowIDField: &Int64FieldData{
-				Data: []int64{1},
-			},
-			common.TimeStampField: &Int64FieldData{
-				Data: []int64{1},
-			},
-			BoolField: &BoolFieldData{
-				Data: []bool{true},
-			},
-			Int8Field: &Int8FieldData{
-				Data: []int8{1},
-			},
-			Int16Field: &Int16FieldData{
-				Data: []int16{1},
-			},
-			Int32Field: &Int32FieldData{
-				Data: []int32{1},
-			},
-			Int64Field: &Int64FieldData{
-				Data: []int64{1},
-			},
-			FloatField: &FloatFieldData{
-				Data: []float32{0},
-			},
-			DoubleField: &DoubleFieldData{
-				Data: []float64{0},
-			},
-			StringField: &StringFieldData{
-				Data: []string{"1"},
-			},
-			BinaryVectorField: &BinaryVectorFieldData{
-				Data: []byte{0},
-				Dim:  8,
-			},
-			FloatVectorField: &FloatVectorFieldData{
-				Data: []float32{0},
-				Dim:  1,
-			},
-			Float16VectorField: &Float16VectorFieldData{
-				Data: []byte{0, 1},
-				Dim:  1,
-			},
-			BFloat16VectorField: &BFloat16VectorFieldData{
-				Data: []byte{0, 1},
-				Dim:  1,
-			},
-			SparseFloatVectorField: &SparseFloatVectorFieldData{
-				SparseFloatArray: schemapb.SparseFloatArray{
-					Dim: 600,
-					Contents: [][]byte{
-						typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-						typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+	t.Run("empty data in buffer", func(t *testing.T) {
+		d1 := &InsertData{
+			Data:  make(map[FieldID]FieldData),
+			Infos: []BlobInfo{},
+		}
+		d2 := &InsertData{
+			Data: map[int64]FieldData{
+				common.RowIDField: &Int64FieldData{
+					Data: []int64{2},
+				},
+				common.TimeStampField: &Int64FieldData{
+					Data: []int64{2},
+				},
+				BoolField: &BoolFieldData{
+					Data: []bool{false},
+				},
+				Int8Field: &Int8FieldData{
+					Data: []int8{2},
+				},
+				Int16Field: &Int16FieldData{
+					Data: []int16{2},
+				},
+				Int32Field: &Int32FieldData{
+					Data: []int32{2},
+				},
+				Int64Field: &Int64FieldData{
+					Data: []int64{2},
+				},
+				FloatField: &FloatFieldData{
+					Data: []float32{0},
+				},
+				DoubleField: &DoubleFieldData{
+					Data: []float64{0},
+				},
+				StringField: &StringFieldData{
+					Data: []string{"2"},
+				},
+				BinaryVectorField: &BinaryVectorFieldData{
+					Data: []byte{0},
+					Dim:  8,
+				},
+				FloatVectorField: &FloatVectorFieldData{
+					Data: []float32{0},
+					Dim:  1,
+				},
+				Float16VectorField: &Float16VectorFieldData{
+					Data: []byte{2, 3},
+					Dim:  1,
+				},
+				BFloat16VectorField: &BFloat16VectorFieldData{
+					Data: []byte{2, 3},
+					Dim:  1,
+				},
+				SparseFloatVectorField: &SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{
+						Dim: 600,
+						Contents: [][]byte{
+							typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+						},
 					},
 				},
-			},
-			ArrayField: &ArrayFieldData{
-				Data: []*schemapb.ScalarField{
-					{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: []int32{1, 2, 3},
+				ArrayField: &ArrayFieldData{
+					Data: []*schemapb.ScalarField{
+						{
+							Data: &schemapb.ScalarField_IntData{
+								IntData: &schemapb.IntArray{
+									Data: []int32{4, 5, 6},
+								},
 							},
 						},
 					},
 				},
-			},
-			JSONField: &JSONFieldData{
-				Data: [][]byte{[]byte(`{"key":"value"}`)},
-			},
-		},
-		Infos: nil,
-	}
-	d2 := &InsertData{
-		Data: map[int64]FieldData{
-			common.RowIDField: &Int64FieldData{
-				Data: []int64{2},
-			},
-			common.TimeStampField: &Int64FieldData{
-				Data: []int64{2},
-			},
-			BoolField: &BoolFieldData{
-				Data: []bool{false},
-			},
-			Int8Field: &Int8FieldData{
-				Data: []int8{2},
-			},
-			Int16Field: &Int16FieldData{
-				Data: []int16{2},
-			},
-			Int32Field: &Int32FieldData{
-				Data: []int32{2},
-			},
-			Int64Field: &Int64FieldData{
-				Data: []int64{2},
-			},
-			FloatField: &FloatFieldData{
-				Data: []float32{0},
-			},
-			DoubleField: &DoubleFieldData{
-				Data: []float64{0},
-			},
-			StringField: &StringFieldData{
-				Data: []string{"2"},
-			},
-			BinaryVectorField: &BinaryVectorFieldData{
-				Data: []byte{0},
-				Dim:  8,
-			},
-			FloatVectorField: &FloatVectorFieldData{
-				Data: []float32{0},
-				Dim:  1,
-			},
-			Float16VectorField: &Float16VectorFieldData{
-				Data: []byte{2, 3},
-				Dim:  1,
-			},
-			BFloat16VectorField: &BFloat16VectorFieldData{
-				Data: []byte{2, 3},
-				Dim:  1,
-			},
-			SparseFloatVectorField: &SparseFloatVectorFieldData{
-				SparseFloatArray: schemapb.SparseFloatArray{
-					Dim: 600,
-					Contents: [][]byte{
-						typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
-					},
+				JSONField: &JSONFieldData{
+					Data: [][]byte{[]byte(`{"hello":"world"}`)},
 				},
 			},
-			ArrayField: &ArrayFieldData{
-				Data: []*schemapb.ScalarField{
-					{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: []int32{4, 5, 6},
+			Infos: nil,
+		}
+
+		MergeInsertData(d1, d2)
+
+		f, ok := d1.Data[common.RowIDField]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{2}, f.(*Int64FieldData).Data)
+
+		f, ok = d1.Data[common.TimeStampField]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{2}, f.(*Int64FieldData).Data)
+
+		f, ok = d1.Data[BoolField]
+		assert.True(t, ok)
+		assert.Equal(t, []bool{false}, f.(*BoolFieldData).Data)
+
+		f, ok = d1.Data[Int8Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int8{2}, f.(*Int8FieldData).Data)
+
+		f, ok = d1.Data[Int16Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int16{2}, f.(*Int16FieldData).Data)
+
+		f, ok = d1.Data[Int32Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int32{2}, f.(*Int32FieldData).Data)
+
+		f, ok = d1.Data[Int64Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{2}, f.(*Int64FieldData).Data)
+
+		f, ok = d1.Data[FloatField]
+		assert.True(t, ok)
+		assert.Equal(t, []float32{0}, f.(*FloatFieldData).Data)
+
+		f, ok = d1.Data[DoubleField]
+		assert.True(t, ok)
+		assert.Equal(t, []float64{0}, f.(*DoubleFieldData).Data)
+
+		f, ok = d1.Data[StringField]
+		assert.True(t, ok)
+		assert.Equal(t, []string{"2"}, f.(*StringFieldData).Data)
+
+		f, ok = d1.Data[BinaryVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{0}, f.(*BinaryVectorFieldData).Data)
+
+		f, ok = d1.Data[FloatVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []float32{0}, f.(*FloatVectorFieldData).Data)
+
+		f, ok = d1.Data[Float16VectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{2, 3}, f.(*Float16VectorFieldData).Data)
+
+		f, ok = d1.Data[BFloat16VectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{2, 3}, f.(*BFloat16VectorFieldData).Data)
+
+		f, ok = d1.Data[SparseFloatVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, &SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 600,
+				Contents: [][]byte{
+					typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+				},
+			},
+		}, f.(*SparseFloatVectorFieldData))
+
+		f, ok = d1.Data[ArrayField]
+		assert.True(t, ok)
+		assert.Equal(t, []int32{4, 5, 6}, f.(*ArrayFieldData).Data[0].GetIntData().GetData())
+
+		f, ok = d1.Data[JSONField]
+		assert.True(t, ok)
+		assert.EqualValues(t, [][]byte{[]byte(`{"hello":"world"}`)}, f.(*JSONFieldData).Data)
+	})
+	t.Run("normal case", func(t *testing.T) {
+		d1 := &InsertData{
+			Data: map[int64]FieldData{
+				common.RowIDField: &Int64FieldData{
+					Data: []int64{1},
+				},
+				common.TimeStampField: &Int64FieldData{
+					Data: []int64{1},
+				},
+				BoolField: &BoolFieldData{
+					Data: []bool{true},
+				},
+				Int8Field: &Int8FieldData{
+					Data: []int8{1},
+				},
+				Int16Field: &Int16FieldData{
+					Data: []int16{1},
+				},
+				Int32Field: &Int32FieldData{
+					Data: []int32{1},
+				},
+				Int64Field: &Int64FieldData{
+					Data: []int64{1},
+				},
+				FloatField: &FloatFieldData{
+					Data: []float32{0},
+				},
+				DoubleField: &DoubleFieldData{
+					Data: []float64{0},
+				},
+				StringField: &StringFieldData{
+					Data: []string{"1"},
+				},
+				BinaryVectorField: &BinaryVectorFieldData{
+					Data: []byte{0},
+					Dim:  8,
+				},
+				FloatVectorField: &FloatVectorFieldData{
+					Data: []float32{0},
+					Dim:  1,
+				},
+				Float16VectorField: &Float16VectorFieldData{
+					Data: []byte{0, 1},
+					Dim:  1,
+				},
+				BFloat16VectorField: &BFloat16VectorFieldData{
+					Data: []byte{0, 1},
+					Dim:  1,
+				},
+				SparseFloatVectorField: &SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{
+						Dim: 600,
+						Contents: [][]byte{
+							typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+							typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+						},
+					},
+				},
+				ArrayField: &ArrayFieldData{
+					Data: []*schemapb.ScalarField{
+						{
+							Data: &schemapb.ScalarField_IntData{
+								IntData: &schemapb.IntArray{
+									Data: []int32{1, 2, 3},
+								},
 							},
 						},
 					},
 				},
+				JSONField: &JSONFieldData{
+					Data: [][]byte{[]byte(`{"key":"value"}`)},
+				},
 			},
-			JSONField: &JSONFieldData{
-				Data: [][]byte{[]byte(`{"hello":"world"}`)},
+			Infos: nil,
+		}
+		d2 := &InsertData{
+			Data: map[int64]FieldData{
+				common.RowIDField: &Int64FieldData{
+					Data: []int64{2},
+				},
+				common.TimeStampField: &Int64FieldData{
+					Data: []int64{2},
+				},
+				BoolField: &BoolFieldData{
+					Data: []bool{false},
+				},
+				Int8Field: &Int8FieldData{
+					Data: []int8{2},
+				},
+				Int16Field: &Int16FieldData{
+					Data: []int16{2},
+				},
+				Int32Field: &Int32FieldData{
+					Data: []int32{2},
+				},
+				Int64Field: &Int64FieldData{
+					Data: []int64{2},
+				},
+				FloatField: &FloatFieldData{
+					Data: []float32{0},
+				},
+				DoubleField: &DoubleFieldData{
+					Data: []float64{0},
+				},
+				StringField: &StringFieldData{
+					Data: []string{"2"},
+				},
+				BinaryVectorField: &BinaryVectorFieldData{
+					Data: []byte{0},
+					Dim:  8,
+				},
+				FloatVectorField: &FloatVectorFieldData{
+					Data: []float32{0},
+					Dim:  1,
+				},
+				Float16VectorField: &Float16VectorFieldData{
+					Data: []byte{2, 3},
+					Dim:  1,
+				},
+				BFloat16VectorField: &BFloat16VectorFieldData{
+					Data: []byte{2, 3},
+					Dim:  1,
+				},
+				SparseFloatVectorField: &SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{
+						Dim: 600,
+						Contents: [][]byte{
+							typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+						},
+					},
+				},
+				ArrayField: &ArrayFieldData{
+					Data: []*schemapb.ScalarField{
+						{
+							Data: &schemapb.ScalarField_IntData{
+								IntData: &schemapb.IntArray{
+									Data: []int32{4, 5, 6},
+								},
+							},
+						},
+					},
+				},
+				JSONField: &JSONFieldData{
+					Data: [][]byte{[]byte(`{"hello":"world"}`)},
+				},
 			},
-		},
-		Infos: nil,
-	}
+			Infos: nil,
+		}
 
-	MergeInsertData(d1, d2)
+		MergeInsertData(d1, d2)
 
-	f, ok := d1.Data[common.RowIDField]
-	assert.True(t, ok)
-	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
+		f, ok := d1.Data[common.RowIDField]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = d1.Data[common.TimeStampField]
-	assert.True(t, ok)
-	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
+		f, ok = d1.Data[common.TimeStampField]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = d1.Data[BoolField]
-	assert.True(t, ok)
-	assert.Equal(t, []bool{true, false}, f.(*BoolFieldData).Data)
+		f, ok = d1.Data[BoolField]
+		assert.True(t, ok)
+		assert.Equal(t, []bool{true, false}, f.(*BoolFieldData).Data)
 
-	f, ok = d1.Data[Int8Field]
-	assert.True(t, ok)
-	assert.Equal(t, []int8{1, 2}, f.(*Int8FieldData).Data)
+		f, ok = d1.Data[Int8Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int8{1, 2}, f.(*Int8FieldData).Data)
 
-	f, ok = d1.Data[Int16Field]
-	assert.True(t, ok)
-	assert.Equal(t, []int16{1, 2}, f.(*Int16FieldData).Data)
+		f, ok = d1.Data[Int16Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int16{1, 2}, f.(*Int16FieldData).Data)
 
-	f, ok = d1.Data[Int32Field]
-	assert.True(t, ok)
-	assert.Equal(t, []int32{1, 2}, f.(*Int32FieldData).Data)
+		f, ok = d1.Data[Int32Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int32{1, 2}, f.(*Int32FieldData).Data)
 
-	f, ok = d1.Data[Int64Field]
-	assert.True(t, ok)
-	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
+		f, ok = d1.Data[Int64Field]
+		assert.True(t, ok)
+		assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
-	f, ok = d1.Data[FloatField]
-	assert.True(t, ok)
-	assert.Equal(t, []float32{0, 0}, f.(*FloatFieldData).Data)
+		f, ok = d1.Data[FloatField]
+		assert.True(t, ok)
+		assert.Equal(t, []float32{0, 0}, f.(*FloatFieldData).Data)
 
-	f, ok = d1.Data[DoubleField]
-	assert.True(t, ok)
-	assert.Equal(t, []float64{0, 0}, f.(*DoubleFieldData).Data)
+		f, ok = d1.Data[DoubleField]
+		assert.True(t, ok)
+		assert.Equal(t, []float64{0, 0}, f.(*DoubleFieldData).Data)
 
-	f, ok = d1.Data[StringField]
-	assert.True(t, ok)
-	assert.Equal(t, []string{"1", "2"}, f.(*StringFieldData).Data)
+		f, ok = d1.Data[StringField]
+		assert.True(t, ok)
+		assert.Equal(t, []string{"1", "2"}, f.(*StringFieldData).Data)
 
-	f, ok = d1.Data[BinaryVectorField]
-	assert.True(t, ok)
-	assert.Equal(t, []byte{0, 0}, f.(*BinaryVectorFieldData).Data)
+		f, ok = d1.Data[BinaryVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{0, 0}, f.(*BinaryVectorFieldData).Data)
 
-	f, ok = d1.Data[FloatVectorField]
-	assert.True(t, ok)
-	assert.Equal(t, []float32{0, 0}, f.(*FloatVectorFieldData).Data)
+		f, ok = d1.Data[FloatVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []float32{0, 0}, f.(*FloatVectorFieldData).Data)
 
-	f, ok = d1.Data[Float16VectorField]
-	assert.True(t, ok)
-	assert.Equal(t, []byte{0, 1, 2, 3}, f.(*Float16VectorFieldData).Data)
+		f, ok = d1.Data[Float16VectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{0, 1, 2, 3}, f.(*Float16VectorFieldData).Data)
 
-	f, ok = d1.Data[BFloat16VectorField]
-	assert.True(t, ok)
-	assert.Equal(t, []byte{0, 1, 2, 3}, f.(*BFloat16VectorFieldData).Data)
+		f, ok = d1.Data[BFloat16VectorField]
+		assert.True(t, ok)
+		assert.Equal(t, []byte{0, 1, 2, 3}, f.(*BFloat16VectorFieldData).Data)
 
-	f, ok = d1.Data[SparseFloatVectorField]
-	assert.True(t, ok)
-	assert.Equal(t, &SparseFloatVectorFieldData{
-		SparseFloatArray: schemapb.SparseFloatArray{
-			Dim: 600,
-			Contents: [][]byte{
-				typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-				typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
-				typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+		f, ok = d1.Data[SparseFloatVectorField]
+		assert.True(t, ok)
+		assert.Equal(t, &SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 600,
+				Contents: [][]byte{
+					typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+					typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+				},
 			},
-		},
-	}, f.(*SparseFloatVectorFieldData))
+		}, f.(*SparseFloatVectorFieldData))
 
-	f, ok = d1.Data[ArrayField]
-	assert.True(t, ok)
-	assert.Equal(t, []int32{1, 2, 3}, f.(*ArrayFieldData).Data[0].GetIntData().GetData())
-	assert.Equal(t, []int32{4, 5, 6}, f.(*ArrayFieldData).Data[1].GetIntData().GetData())
+		f, ok = d1.Data[ArrayField]
+		assert.True(t, ok)
+		assert.Equal(t, []int32{1, 2, 3}, f.(*ArrayFieldData).Data[0].GetIntData().GetData())
+		assert.Equal(t, []int32{4, 5, 6}, f.(*ArrayFieldData).Data[1].GetIntData().GetData())
 
-	f, ok = d1.Data[JSONField]
-	assert.True(t, ok)
-	assert.EqualValues(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, f.(*JSONFieldData).Data)
+		f, ok = d1.Data[JSONField]
+		assert.True(t, ok)
+		assert.EqualValues(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, f.(*JSONFieldData).Data)
+	})
 }
 
 func TestMergeFloat16VectorField(t *testing.T) {
@@ -1549,94 +1867,6 @@ func Test_stringFieldDataToBytes(t *testing.T) {
 func binaryRead(endian binary.ByteOrder, bs []byte, receiver interface{}) error {
 	reader := bytes.NewReader(bs)
 	return binary.Read(reader, endian, receiver)
-}
-
-func TestFieldDataToBytes(t *testing.T) {
-	// TODO: test big endian.
-	endian := common.Endian
-
-	var bs []byte
-	var err error
-	var receiver interface{}
-
-	f1 := &BoolFieldData{Data: []bool{true, false}}
-	bs, err = FieldDataToBytes(endian, f1)
-	assert.NoError(t, err)
-	var barr schemapb.BoolArray
-	err = proto.Unmarshal(bs, &barr)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f1.Data, barr.Data)
-
-	f2 := &StringFieldData{Data: []string{"true", "false"}}
-	bs, err = FieldDataToBytes(endian, f2)
-	assert.NoError(t, err)
-	var sarr schemapb.StringArray
-	err = proto.Unmarshal(bs, &sarr)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f2.Data, sarr.Data)
-
-	f3 := &Int8FieldData{Data: []int8{0, 1}}
-	bs, err = FieldDataToBytes(endian, f3)
-	assert.NoError(t, err)
-	receiver = make([]int8, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f3.Data, receiver)
-
-	f4 := &Int16FieldData{Data: []int16{0, 1}}
-	bs, err = FieldDataToBytes(endian, f4)
-	assert.NoError(t, err)
-	receiver = make([]int16, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f4.Data, receiver)
-
-	f5 := &Int32FieldData{Data: []int32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f5)
-	assert.NoError(t, err)
-	receiver = make([]int32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f5.Data, receiver)
-
-	f6 := &Int64FieldData{Data: []int64{0, 1}}
-	bs, err = FieldDataToBytes(endian, f6)
-	assert.NoError(t, err)
-	receiver = make([]int64, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f6.Data, receiver)
-
-	// in fact, hard to compare float point value.
-
-	f7 := &FloatFieldData{Data: []float32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f7)
-	assert.NoError(t, err)
-	receiver = make([]float32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f7.Data, receiver)
-
-	f8 := &DoubleFieldData{Data: []float64{0, 1}}
-	bs, err = FieldDataToBytes(endian, f8)
-	assert.NoError(t, err)
-	receiver = make([]float64, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f8.Data, receiver)
-
-	f9 := &BinaryVectorFieldData{Data: []byte{0, 1, 0}}
-	bs, err = FieldDataToBytes(endian, f9)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f9.Data, bs)
-
-	f10 := &FloatVectorFieldData{Data: []float32{0, 1}}
-	bs, err = FieldDataToBytes(endian, f10)
-	assert.NoError(t, err)
-	receiver = make([]float32, 2)
-	err = binaryRead(endian, bs, receiver)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, f10.Data, receiver)
 }
 
 func TestJson(t *testing.T) {

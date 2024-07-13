@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -548,12 +549,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		if paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
-			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-				req.GetSegmentID(), req.GetChannel(), false)
-			if err != nil {
-				log.Warn("failed to trigger single compaction")
-			}
+		err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
+			req.GetSegmentID(), req.GetChannel(), false)
+		if err != nil {
+			log.Warn("failed to trigger single compaction")
 		}
 	}
 
@@ -1089,23 +1088,27 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+	if req.MajorCompaction {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+	} else {
+		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	planCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
-	if planCnt == 0 {
+	taskCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
+	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
 	} else {
 		resp.CompactionID = id
-		resp.CompactionPlanCount = int32(planCnt)
+		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
+	log.Info("success to trigger manual compaction", zap.Bool("isMajor", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1139,6 +1142,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	resp.FailedPlanNo = int64(info.failedCnt)
 	log.Info("success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
 		zap.Int("completed", info.completedCnt), zap.Int("failed", info.failedCnt), zap.Int("timeout", info.timeoutCnt))
+
 	return resp, nil
 }
 
@@ -1462,21 +1466,6 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	return nil
 }
 
-// getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.
-func getDiff(base, remove []int64) []int64 {
-	mb := make(map[int64]struct{}, len(remove))
-	for _, x := range remove {
-		mb[x] = struct{}{}
-	}
-	var diff []int64
-	for _, x := range base {
-		if _, found := mb[x]; !found {
-			diff = append(diff, x)
-		}
-	}
-	return diff
-}
-
 // MarkSegmentsDropped marks the given segments as `Dropped`.
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
 // Deprecated, do not use it
@@ -1536,10 +1525,18 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	err := s.sessionManager.CheckHealth(ctx)
 	if err != nil {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: []string{err.Error()}}, nil
+		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+	if err = CheckAllChannelsWatched(s.meta, s.channelManager); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	if err = CheckCheckPointsHealth(s.meta); err != nil {
+		return componentutil.CheckHealthRespWithErr(err), nil
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
@@ -1703,6 +1700,10 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		return resp, nil
 	}
 	job := s.importMeta.GetJob(jobID)
+	if job == nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		return resp, nil
+	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason

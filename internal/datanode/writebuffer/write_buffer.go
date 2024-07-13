@@ -55,7 +55,7 @@ type WriteBuffer interface {
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
 	// Close is the method to close and sink current buffer data.
-	Close(drop bool)
+	Close(ctx context.Context, drop bool)
 }
 
 type checkpointCandidate struct {
@@ -157,11 +157,13 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		serializer, err = syncmgr.NewStorageV2Serializer(
 			storageV2Cache,
+			option.idAllocator,
 			metacache,
 			option.metaWriter,
 		)
 	} else {
 		serializer, err = syncmgr.NewStorageSerializer(
+			option.idAllocator,
 			metacache,
 			option.metaWriter,
 		)
@@ -310,26 +312,14 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	return segmentsToSync
 }
 
-func (wb *writeBufferBase) cleanupCompactedSegments() {
-	segmentIDs := wb.metaCache.GetSegmentIDsBy(
-		metacache.WithSegmentState(commonpb.SegmentState_Dropped),
-		metacache.WithCompacted(),
-		metacache.WithNoSyncingTask())
-	// remove compacted only when there is no writebuffer
-	targetIDs := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
-		_, ok := wb.buffers[segmentID]
-		return !ok
-	})
-	if len(targetIDs) == 0 {
-		return
-	}
-	removed := wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(targetIDs...))
-	if len(removed) > 0 {
-		log.Info("remove compacted segments", zap.Int64s("removed", removed))
-	}
-}
-
 func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
+	for _, segmentID := range segmentIDs {
+		_, ok := wb.metaCache.GetSegmentByID(segmentID)
+		if !ok {
+			log.Warn("cannot find segment when sealSegments", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
+			return merr.WrapErrSegmentNotFound(segmentID)
+		}
+	}
 	// mark segment flushing if segment was growing
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
@@ -404,7 +394,7 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		return nil, nil, nil, nil
@@ -442,6 +432,32 @@ func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	}
 
 	return ok && ts > uint64(minTs)
+}
+
+func (id *inData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits []bool) []bool {
+	if len(pks) == 0 {
+		return nil
+	}
+
+	pkType := pks[0].Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.intPKTs[pks[i].GetValue().(int64)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	case schemapb.DataType_VarChar:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	}
+
+	return hits
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
@@ -535,6 +551,7 @@ func (wb *writeBufferBase) bufferInsert(inData *inData, startPos, endPos *msgpb.
 		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.SetStartPosRecorded(false))
+		log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.String("channel", wb.channelName))
 	}
 
 	segBuf := wb.getOrCreateBuffer(inData.segmentID)
@@ -578,10 +595,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	}
 
 	actions := []metacache.SegmentAction{}
-	if insert != nil {
-		batchSize = int64(insert.GetRowNum())
-		totalMemSize += float64(insert.GetMemorySize())
+
+	for _, chunk := range insert {
+		batchSize += int64(chunk.GetRowNum())
+		totalMemSize += float64(chunk.GetMemorySize())
 	}
+
 	if delta != nil {
 		totalMemSize += float64(delta.Size())
 	}
@@ -622,7 +641,7 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 	return uint(sizeLimit / int64(wb.estSizePerRecord))
 }
 
-func (wb *writeBufferBase) Close(drop bool) {
+func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	log := wb.logger
 	// sink all data and call Drop for meta writer
 	wb.mut.Lock()
@@ -633,7 +652,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 
 	var futures []*conc.Future[struct{}]
 	for id := range wb.buffers {
-		syncTask, err := wb.getSyncTask(context.Background(), id)
+		syncTask, err := wb.getSyncTask(ctx, id)
 		if err != nil {
 			// TODO
 			continue
@@ -645,7 +664,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 			t.WithDrop()
 		}
 
-		f := wb.syncMgr.SyncData(context.Background(), syncTask, func(err error) error {
+		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if err != nil {
 				return err
 			}
@@ -663,7 +682,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 		// TODO change to remove channel in the future
 		panic(err)
 	}
-	err = wb.metaWriter.DropChannel(wb.channelName)
+	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
 	if err != nil {
 		log.Error("failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future

@@ -38,7 +38,6 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -47,10 +46,9 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -58,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -103,7 +100,6 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 	quitCh           chan struct{}
 	stateCode        atomic.Value
-	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
 	tikvCli          *txnkv.Client
@@ -126,7 +122,7 @@ type Server struct {
 
 	compactionTrigger        trigger
 	compactionHandler        compactionPlanContext
-	compactionTriggerManager *CompactionTriggerManager
+	compactionTriggerManager TriggerManager
 
 	syncSegmentsScheduler *SyncSegmentsScheduler
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
@@ -166,17 +162,6 @@ type CollectionNameInfo struct {
 	DBName         string
 }
 
-// ServerHelper datacoord server injection helper
-type ServerHelper struct {
-	eventAfterHandleDataNodeTt func()
-}
-
-func defaultServerHelper() ServerHelper {
-	return ServerHelper{
-		eventAfterHandleDataNodeTt: func() {},
-	}
-}
-
 // Option utility function signature to set DataCoord server attributes
 type Option func(svr *Server)
 
@@ -184,13 +169,6 @@ type Option func(svr *Server)
 func WithRootCoordCreator(creator rootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
-	}
-}
-
-// WithServerHelper returns an `Option` setting ServerHelp with provided parameter
-func WithServerHelper(helper ServerHelper) Option {
-	return func(svr *Server) {
-		svr.helper = helper
 	}
 }
 
@@ -228,7 +206,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
-		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
 	}
@@ -276,13 +253,13 @@ func (s *Server) Register() error {
 			err := s.session.ProcessActiveStandBy(s.activateFunc)
 			if err != nil {
 				log.Error("failed to activate standby datacoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 
 			err = s.icSession.ForceActiveStandby(nil)
 			if err != nil {
 				log.Error("failed to force activate standby indexcoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()
@@ -375,11 +352,10 @@ func (s *Server) initDataCoord() error {
 	log.Info("init service discovery done")
 
 	s.initTaskScheduler(storageCli)
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.createCompactionHandler()
-		s.createCompactionTrigger()
-		log.Info("init compaction scheduler done")
-	}
+	log.Info("init task scheduler done")
+
+	s.initCompaction()
+	log.Info("init compaction done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -421,11 +397,6 @@ func (s *Server) Start() error {
 
 func (s *Server) startDataCoord() {
 	s.taskScheduler.Start()
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.compactionHandler.start()
-		s.compactionTrigger.start()
-		s.compactionTriggerManager.Start()
-	}
 	s.startServerLoop()
 
 	// http.Register(&http.Handler{
@@ -487,16 +458,9 @@ func (s *Server) initCluster() error {
 	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
 
 	var err error
-	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
-		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
-		if err != nil {
-			return err
-		}
-	} else {
-		s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker(), withBgChecker())
-		if err != nil {
-			return err
-		}
+	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+	if err != nil {
+		return err
 	}
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil
@@ -525,24 +489,6 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 
 func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNodeClient, error)) {
 	s.indexNodeCreator = f
-}
-
-func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
-}
-
-func (s *Server) stopCompactionHandler() {
-	s.compactionHandler.stop()
-	s.compactionTriggerManager.Close()
-}
-
-func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
-}
-
-func (s *Server) stopCompactionTrigger() {
-	s.compactionTrigger.stop()
 }
 
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
@@ -703,10 +649,42 @@ func (s *Server) initIndexNodeManager() {
 	}
 }
 
+func (s *Server) initCompaction() {
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+}
+
+func (s *Server) stopCompaction() {
+	if s.compactionTrigger != nil {
+		s.compactionTrigger.stop()
+	}
+	if s.compactionTriggerManager != nil {
+		s.compactionTriggerManager.Stop()
+	}
+
+	if s.compactionHandler != nil {
+		s.compactionHandler.stop()
+	}
+}
+
+func (s *Server) startCompaction() {
+	if s.compactionHandler != nil {
+		s.compactionHandler.start()
+	}
+
+	if s.compactionTrigger != nil {
+		s.compactionTrigger.start()
+	}
+
+	if s.compactionTriggerManager != nil {
+		s.compactionTriggerManager.Start()
+	}
+}
+
 func (s *Server) startServerLoop() {
-	if !Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-		s.serverLoopWg.Add(1)
-		s.startDataNodeTtLoop(s.serverLoopCtx)
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		s.startCompaction()
 	}
 
 	s.serverLoopWg.Add(2)
@@ -717,80 +695,6 @@ func (s *Server) startServerLoop() {
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 	s.syncSegmentsScheduler.Start()
-}
-
-// startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
-// tt msg stands for the currently consumed timestamp for each channel
-func (s *Server) startDataNodeTtLoop(ctx context.Context) {
-	ttMsgStream, err := s.factory.NewMsgStream(ctx)
-	if err != nil {
-		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
-		panic(err)
-	}
-
-	timeTickChannel := Params.CommonCfg.DataCoordTimeTick.GetValue()
-	if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
-		timeTickChannel = Params.CommonCfg.TimeTicker.GetValue()
-	}
-	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
-
-	ttMsgStream.AsConsumer(context.TODO(), []string{timeTickChannel}, subName, mqwrapper.SubscriptionPositionLatest)
-	log.Info("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", timeTickChannel),
-		zap.String("subscription", subName))
-
-	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
-}
-
-func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStream msgstream.MsgStream) {
-	var checker *timerecord.LongTermChecker
-	if enableTtChecker {
-		checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
-		checker.Start()
-		defer checker.Stop()
-	}
-
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	defer func() {
-		// https://github.com/milvus-io/milvus/issues/15659
-		// msgstream service closed before datacoord quits
-		defer func() {
-			if x := recover(); x != nil {
-				log.Error("Failed to close ttMessage", zap.Any("recovered", x))
-			}
-		}()
-		ttMsgStream.Close()
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("DataNode timetick loop shutdown")
-			return
-		case msgPack, ok := <-ttMsgStream.Chan():
-			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
-				log.Info("receive nil timetick msg and shutdown timetick channel")
-				return
-			}
-
-			for _, msg := range msgPack.Msgs {
-				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
-				if !ok {
-					log.Warn("receive unexpected msg type from tt channel")
-					continue
-				}
-				if enableTtChecker {
-					checker.Check()
-				}
-
-				if err := s.handleDataNodeTtMsg(ctx, &ttMsg.DataNodeTtMsg); err != nil {
-					log.Warn("failed to handle timetick message", zap.Error(err))
-					continue
-				}
-			}
-			s.helper.eventAfterHandleDataNodeTt()
-		}
-	}
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
@@ -1111,10 +1015,7 @@ func (s *Server) Stop() error {
 	s.importChecker.Close()
 	s.syncSegmentsScheduler.Stop()
 
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.stopCompactionTrigger()
-		s.stopCompactionHandler()
-	}
+	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
 	s.taskScheduler.Stop()

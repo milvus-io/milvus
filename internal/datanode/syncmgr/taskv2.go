@@ -65,22 +65,15 @@ func (t *SyncTaskV2) handleError(err error) {
 	}
 }
 
-func (t *SyncTaskV2) Run() error {
+func (t *SyncTaskV2) Run(ctx context.Context) error {
 	log := t.getLogger()
 	var err error
 
-	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
+	_, ok := t.metacache.GetSegmentByID(t.segmentID)
 	if !ok {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
 		return merr.WrapErrSegmentNotFound(t.segmentID)
-	}
-
-	if segment.CompactTo() > 0 {
-		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
-		// update sync task segment id
-		// it's ok to use compactTo segmentID here, since there shall be no insert for compacted segment
-		t.segmentID = segment.CompactTo()
 	}
 
 	if err = t.writeSpace(); err != nil {

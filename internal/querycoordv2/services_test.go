@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -49,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -165,6 +165,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
+	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.jobScheduler.Start()
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,
@@ -1211,7 +1213,9 @@ func (suite *ServiceSuite) TestLoadBalance() {
 			DstNodeIDs:       []int64{dstNode},
 			SealedSegmentIDs: segments,
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
 			suite.Len(actions, 2)
@@ -1256,7 +1260,9 @@ func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
 			SourceNodeIDs:    []int64{srcNode},
 			SealedSegmentIDs: segments,
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
 			suite.Len(actions, 2)
@@ -1337,7 +1343,9 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			SourceNodeIDs: []int64{srcNode},
 			DstNodeIDs:    []int64{dstNode},
 		}
-		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.ExpectedCalls = nil
+		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(t task.Task) {
 			actions := t.Actions()
 			suite.Len(actions, 2)

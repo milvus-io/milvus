@@ -32,6 +32,7 @@ using milvus::segcore::GeneratedData;
 using milvus::storage::ChunkManagerPtr;
 using milvus::storage::FieldDataMeta;
 using milvus::storage::InsertData;
+using milvus::storage::MmapConfig;
 using milvus::storage::StorageConfig;
 
 namespace {
@@ -43,6 +44,18 @@ get_default_local_storage_config() {
     storage_config.storage_type = "local";
     storage_config.root_path = TestRemotePath;
     return storage_config;
+}
+
+inline MmapConfig
+get_default_mmap_config() {
+    MmapConfig mmap_config = {
+        .cache_read_ahead_policy = "willneed",
+        .mmap_path = "/tmp/test_mmap_manager/",
+        .disk_limit =
+            uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
+        .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
+        .growing_enable_mmap = false};
+    return mmap_config;
 }
 
 inline LoadFieldDataInfo
@@ -104,7 +117,7 @@ PrepareInsertBinlog(int64_t collection_id,
 
 std::map<std::string, int64_t>
 PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
-             const std::vector<const uint8_t*>& buffers,
+             const std::vector<void*>& buffers,
              const std::vector<int64_t>& element_counts,
              const std::vector<std::string>& object_keys,
              FieldDataMeta& field_data_meta,
@@ -121,7 +134,7 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
         futures.push_back(
             pool.Submit(milvus::storage::EncodeAndUploadFieldSlice,
                         remote_chunk_manager,
-                        const_cast<uint8_t*>(buffers[i]),
+                        buffers[i],
                         element_counts[i],
                         field_data_meta,
                         field_meta,

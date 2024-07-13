@@ -108,6 +108,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.preCreatedTopic.timeticker", "timeticker")
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
+
+		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -416,6 +418,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
+
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -512,6 +516,8 @@ func TestComponentParam(t *testing.T) {
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+
+		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
@@ -521,6 +527,18 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("indexnode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+	})
+
+	t.Run("test streamingCoordConfig", func(t *testing.T) {
+		assert.Equal(t, 1*time.Minute, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Millisecond, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 2.0, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
+		params.Save(params.StreamingCoordCfg.AutoBalanceTriggerInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.Key, "3.5")
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 3.5, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {
@@ -537,6 +555,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
 		params.Save("common.useVectorAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
+		params.Save("common.enableVectorClusteringKey", "true")
+		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
 }
 

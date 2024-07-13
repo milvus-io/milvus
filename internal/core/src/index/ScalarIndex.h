@@ -28,6 +28,35 @@
 
 namespace milvus::index {
 
+enum class ScalarIndexType {
+    NONE = 0,
+    BITMAP,
+    STLSORT,
+    MARISA,
+    INVERTED,
+    HYBRID,
+};
+
+inline std::string
+ToString(ScalarIndexType type) {
+    switch (type) {
+        case ScalarIndexType::NONE:
+            return "NONE";
+        case ScalarIndexType::BITMAP:
+            return "BITMAP";
+        case ScalarIndexType::STLSORT:
+            return "STLSORT";
+        case ScalarIndexType::MARISA:
+            return "MARISA";
+        case ScalarIndexType::INVERTED:
+            return "INVERTED";
+        case ScalarIndexType::HYBRID:
+            return "HYBRID";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
@@ -44,11 +73,28 @@ class ScalarIndex : public IndexBase {
     };
 
  public:
+    virtual ScalarIndexType
+    GetIndexType() const = 0;
+
     virtual void
     Build(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
     In(size_t n, const T* values) = 0;
+
+    virtual const TargetBitmap
+    InApplyFilter(size_t n,
+                  const T* values,
+                  const std::function<bool(size_t /* offset */)>& filter) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyFilter is not implemented");
+    }
+
+    virtual void
+    InApplyCallback(size_t n,
+                    const T* values,
+                    const std::function<void(size_t /* offset */)>& callback) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
+    }
 
     virtual const TargetBitmap
     NotIn(size_t n, const T* values) = 0;

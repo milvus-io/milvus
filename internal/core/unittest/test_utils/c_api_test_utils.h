@@ -25,9 +25,10 @@
 #include "common/type_c.h"
 #include "pb/plan.pb.h"
 #include "segcore/Collection.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
+#include "futures/Future.h"
 #include "DataGen.h"
 #include "PbHelper.h"
 #include "c_api_test_utils.h"
@@ -85,14 +86,14 @@ generate_query_data(int nq) {
     return blob;
 }
 void
-CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
+CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
+                           int group_size = 1) {
     auto nq = ((SearchResult*)results[0])->total_nq_;
-
     std::unordered_set<PkType> pk_set;
-    std::unordered_set<GroupByValueType> group_by_val_set;
+    std::unordered_map<GroupByValueType, int> group_by_map;
     for (int qi = 0; qi < nq; qi++) {
         pk_set.clear();
-        group_by_val_set.clear();
+        group_by_map.clear();
         for (size_t i = 0; i < results.size(); i++) {
             auto search_result = (SearchResult*)results[i];
             ASSERT_EQ(nq, search_result->total_nq_);
@@ -107,8 +108,8 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
                     search_result->group_by_values_.value().size() > ki) {
                     auto group_by_val =
                         search_result->group_by_values_.value()[ki];
-                    ASSERT_TRUE(group_by_val_set.count(group_by_val) == 0);
-                    group_by_val_set.insert(group_by_val);
+                    group_by_map[group_by_val] += 1;
+                    ASSERT_TRUE(group_by_map[group_by_val] <= group_size);
                 }
             }
         }
@@ -147,8 +148,24 @@ CSearch(CSegmentInterface c_segment,
         CPlaceholderGroup c_placeholder_group,
         uint64_t timestamp,
         CSearchResult* result) {
-    return Search(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, result);
+    auto future =
+        AsyncSearch({}, c_segment, c_plan, c_placeholder_group, timestamp);
+    auto futurePtr = static_cast<milvus::futures::IFuture*>(
+        static_cast<void*>(static_cast<CFuture*>(future)));
+
+    std::mutex mu;
+    mu.lock();
+    futurePtr->registerReadyCallback(
+        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+        (CLockedGoMutex*)(&mu));
+    mu.lock();
+
+    auto [searchResult, status] = futurePtr->leakyGet();
+    if (status.error_code != 0) {
+        return status;
+    }
+    *result = static_cast<CSearchResult>(searchResult);
+    return status;
 }
 
 }  // namespace

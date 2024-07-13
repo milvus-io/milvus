@@ -33,6 +33,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -51,6 +52,7 @@ type StorageV2SerializerSuite struct {
 
 	schema         *schemapb.CollectionSchema
 	storageCache   *metacache.StorageV2Cache
+	mockAllocator  *allocator.MockAllocator
 	mockCache      *metacache.MockMetaCache
 	mockMetaWriter *MockMetaWriter
 
@@ -86,6 +88,7 @@ func (s *StorageV2SerializerSuite) SetupSuite() {
 		},
 	}
 
+	s.mockAllocator = allocator.NewMockAllocator(s.T())
 	s.mockCache = metacache.NewMockMetaCache(s.T())
 	s.mockMetaWriter = NewMockMetaWriter(s.T())
 }
@@ -98,7 +101,7 @@ func (s *StorageV2SerializerSuite) SetupTest() {
 	s.mockCache.EXPECT().Collection().Return(s.collectionID)
 	s.mockCache.EXPECT().Schema().Return(s.schema)
 
-	s.serializer, err = NewStorageV2Serializer(storageCache, s.mockCache, s.mockMetaWriter)
+	s.serializer, err = NewStorageV2Serializer(storageCache, s.mockAllocator, s.mockCache, s.mockMetaWriter)
 	s.Require().NoError(err)
 }
 
@@ -179,7 +182,7 @@ func (s *StorageV2SerializerSuite) getBfs() *metacache.BloomFilterSet {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}
@@ -221,7 +224,7 @@ func (s *StorageV2SerializerSuite) TestSerializeInsert() {
 	s.Run("empty_insert_data", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getEmptyInsertBuffer()).WithBatchSize(0)
+		pack.WithInsertData([]*storage.InsertData{s.getEmptyInsertBuffer()}).WithBatchSize(0)
 
 		_, err := s.serializer.EncodeBuffer(ctx, pack)
 		s.Error(err)
@@ -230,7 +233,7 @@ func (s *StorageV2SerializerSuite) TestSerializeInsert() {
 	s.Run("with_normal_data", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 
 		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
 
@@ -264,13 +267,12 @@ func (s *StorageV2SerializerSuite) TestSerializeInsert() {
 	s.Run("with_flush", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 		pack.WithFlush()
 
 		bfs := s.getBfs()
 		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 		metacache.UpdateNumOfRows(1000)(segInfo)
-		metacache.CompactTo(metacache.NullSegment)(segInfo)
 		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
 			action(segInfo)
 		}).Return().Once()
@@ -355,7 +357,7 @@ func (s *StorageV2SerializerSuite) TestBadSchema() {
 	mockCache := metacache.NewMockMetaCache(s.T())
 	mockCache.EXPECT().Collection().Return(s.collectionID).Once()
 	mockCache.EXPECT().Schema().Return(&schemapb.CollectionSchema{}).Once()
-	_, err := NewStorageV2Serializer(s.storageCache, mockCache, s.mockMetaWriter)
+	_, err := NewStorageV2Serializer(s.storageCache, s.mockAllocator, mockCache, s.mockMetaWriter)
 	s.Error(err)
 }
 

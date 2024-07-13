@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type DelegatorDataSuite struct {
@@ -74,6 +77,9 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitMmapManager(paramtable.Get())
 
 	s.collectionID = 1000
 	s.replicaID = 65535
@@ -260,6 +266,13 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
+			})
+			ms.EXPECT().BatchPkExist(mock.Anything).RunAndReturn(func(lc *storage.BatchLocationsCache) []bool {
+				hits := make([]bool, lc.Size())
+				for i, pk := range lc.PKs() {
+					hits[i] = pk.EQ(storage.NewInt64PrimaryKey(10))
+				}
+				return hits
 			})
 			return ms
 		})
@@ -1061,7 +1074,9 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	defer s.chunkManager.Remove(context.Background(), statsPath1)
 
 	// reload and check partition stats
-	s.delegator.maybeReloadPartitionStats(context.Background())
+	partVersions := make(map[int64]int64)
+	partVersions[partitionID1] = 1
+	s.delegator.loadPartitionStats(context.Background(), partVersions)
 	s.Equal(1, len(s.delegator.partitionStats))
 	s.NotNil(s.delegator.partitionStats[partitionID1])
 	p1Stats := s.delegator.partitionStats[partitionID1]
@@ -1144,8 +1159,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 
 	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
-	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
-	s.True(pks[1].EQ(allPartitionDeleteData.Pks[0]))
+	s.ElementsMatch(pks, []storage.PrimaryKey{partitionDeleteData.Pks[0], allPartitionDeleteData.Pks[0]})
 
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
 	bfs.UpdateBloomFilter(allPartitionDeleteData.Pks)

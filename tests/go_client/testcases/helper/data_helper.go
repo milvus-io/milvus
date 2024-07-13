@@ -5,36 +5,29 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
-	"go.uber.org/zap"
 )
 
 // insert params
 type InsertParams struct {
 	Schema        *entity.Schema
 	PartitionName string
-	Start         int
-	Nb            int
 	IsRows        bool
 }
 
 func NewInsertParams(schema *entity.Schema, nb int) *InsertParams {
 	return &InsertParams{
 		Schema: schema,
-		Nb:     nb,
 	}
 }
 
 func (opt *InsertParams) TWithPartitionName(partitionName string) *InsertParams {
 	opt.PartitionName = partitionName
-	return opt
-}
-
-func (opt *InsertParams) TWithStart(start int) *InsertParams {
-	opt.Start = start
 	return opt
 }
 
@@ -45,13 +38,19 @@ func (opt *InsertParams) TWithIsRows(isRows bool) *InsertParams {
 
 // GenColumnDataOption -- create column data --
 type GenDataOption struct {
+	nb           int
+	start        int
 	dim          int
 	maxLen       int
 	sparseMaxLen int
 	maxCapacity  int
-	start        int
-	fieldName    string
 	elementType  entity.FieldType
+	fieldName    string
+}
+
+func (opt *GenDataOption) TWithNb(nb int) *GenDataOption {
+	opt.nb = nb
+	return opt
 }
 
 func (opt *GenDataOption) TWithDim(dim int) *GenDataOption {
@@ -91,11 +90,12 @@ func (opt *GenDataOption) TWithElementType(eleType entity.FieldType) *GenDataOpt
 
 func TNewDataOption() *GenDataOption {
 	return &GenDataOption{
+		nb:           common.DefaultNb,
+		start:        0,
 		dim:          common.DefaultDim,
 		maxLen:       common.TestMaxLen,
 		sparseMaxLen: common.TestMaxLen,
 		maxCapacity:  common.TestCapacity,
-		start:        0,
 		elementType:  entity.FieldTypeNone,
 	}
 }
@@ -249,14 +249,14 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 	return jsonValues
 }
 
-// GenColumnData GenColumnDataOption
+// GenColumnData GenColumnDataOption except dynamic column
 func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
 	dim := option.dim
 	sparseMaxLen := option.sparseMaxLen
 	start := option.start
 	fieldName := option.fieldName
 	if option.fieldName == "" {
-		fieldName = GetFieldNameByFieldType(fieldType, option.elementType)
+		fieldName = GetFieldNameByFieldType(fieldType, TWithElementType(option.elementType))
 	}
 	switch fieldType {
 	case entity.FieldTypeInt64:
@@ -317,9 +317,11 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 
 	case entity.FieldTypeArray:
 		return GenArrayColumnData(nb, option.elementType, option)
+
 	case entity.FieldTypeJSON:
 		jsonValues := GenDefaultJSONData(nb, option)
 		return column.NewColumnJSONBytes(fieldName, jsonValues)
+
 	case entity.FieldTypeFloatVector:
 		vecFloatValues := make([][]float32, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -327,6 +329,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			vecFloatValues = append(vecFloatValues, vec)
 		}
 		return column.NewColumnFloatVector(fieldName, option.dim, vecFloatValues)
+
 	case entity.FieldTypeBinaryVector:
 		binaryVectors := make([][]byte, 0, nb)
 		for i := 0; i < nb; i++ {
@@ -341,6 +344,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			fp16Vectors = append(fp16Vectors, vec)
 		}
 		return column.NewColumnFloat16Vector(fieldName, dim, fp16Vectors)
+
 	case entity.FieldTypeBFloat16Vector:
 		bf16Vectors := make([][]byte, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -348,6 +352,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			bf16Vectors = append(bf16Vectors, vec)
 		}
 		return column.NewColumnBFloat16Vector(fieldName, dim, bf16Vectors)
+
 	case entity.FieldTypeSparseVector:
 		vectors := make([]entity.SparseEmbedding, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -355,13 +360,14 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			vectors = append(vectors, vec)
 		}
 		return column.NewColumnSparseVectors(fieldName, vectors)
+
 	default:
 		log.Fatal("GenColumnData failed", zap.Any("FieldType", fieldType))
 		return nil
 	}
 }
 
-func GenDynamicFieldData(start int, nb int) []column.Column {
+func GenDynamicColumnData(start int, nb int) []column.Column {
 	type ListStruct struct {
 		List []int64 `json:"list" milvus:"name:list"`
 	}
@@ -392,4 +398,45 @@ func GenDynamicFieldData(start int, nb int) []column.Column {
 		column.NewColumnJSONBytes(common.DefaultDynamicListField, listValues),
 	}
 	return data
+}
+
+func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *column.ColumnJSONBytes {
+	values := make([][]byte, 0, nb)
+	for i := 0; i < nb; i++ {
+		m := make(map[string]interface{})
+		for _, c := range columns {
+			// range guaranteed
+			m[c.Name()], _ = c.Get(i)
+		}
+		bs, err := json.Marshal(&m)
+		if err != nil {
+			log.Fatal("MergeColumnsToDynamic failed:", zap.Error(err))
+		}
+		values = append(values, bs)
+	}
+	jsonColumn := column.NewColumnJSONBytes(columnName, values).WithIsDynamic(true)
+
+	return jsonColumn
+}
+
+func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
+	if nil == schema || schema.CollectionName == "" {
+		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
+	}
+	fields := schema.Fields
+	columns := make([]column.Column, 0, len(fields)+1)
+	var dynamicColumns []column.Column
+	for _, field := range fields {
+		if field.DataType == entity.FieldTypeArray {
+			option.TWithElementType(field.ElementType)
+		}
+		if field.AutoID {
+			continue
+		}
+		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
+	}
+	if schema.EnableDynamicField {
+		dynamicColumns = GenDynamicColumnData(option.start, option.nb)
+	}
+	return columns, dynamicColumns
 }

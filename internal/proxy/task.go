@@ -248,19 +248,13 @@ func (t *createCollectionTask) validateClusteringKey() error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
+			if typeutil.IsVectorType(field.GetDataType()) &&
+				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
+				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName)
+			}
 			if idx != -1 {
 				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
 					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name))
-			}
-
-			if field.GetIsPrimaryKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be primary key field, field name = %s", field.Name))
-			}
-
-			if field.GetIsPartitionKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be partition key field, field name = %s", field.Name))
 			}
 			idx = i
 		}
@@ -334,6 +328,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate partition key mode
 	if err := t.validatePartitionKey(); err != nil {
+		return err
+	}
+
+	hasPartitionKey := hasParitionKeyModeField(t.schema)
+	if _, err := validatePartitionKeyIsolation(t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -628,6 +627,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			// nolint
 			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
+			t.result.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
 		}
 		return nil
 	}
@@ -846,6 +846,7 @@ type alterCollectionTask struct {
 	rootCoord  types.RootCoordClient
 	result     *commonpb.Status
 	queryCoord types.QueryCoordClient
+	dataCoord  types.DataCoordClient
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -905,6 +906,32 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
+	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
+	if err != nil {
+		return false, err
+	}
+
+	// partition key isolation is not set, skip
+	if !iso {
+		return false, nil
+	}
+
+	if !isPartitionKeyEnabled {
+		return false, merr.WrapErrCollectionIllegalSchema(colName,
+			"partition key isolation mode is enabled but no partition key field is set. Please set the partition key first")
+	}
+
+	if !paramtable.Get().CommonCfg.EnableMaterializedView.GetAsBool() {
+		return false, merr.WrapErrCollectionIllegalSchema(colName,
+			"partition key isolation mode is enabled but current Milvus does not support it. Please contact us")
+	}
+
+	log.Info("validated with partition key isolation", zap.String("collectionName", colName))
+
+	return true, nil
+}
+
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -922,6 +949,62 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 		if loaded {
 			return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+		}
+	}
+
+	isPartitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	// check if the new partition key isolation is valid to use
+	newIsoValue, err := validatePartitionKeyIsolation(t.CollectionName, isPartitionKeyMode, t.Properties...)
+	if err != nil {
+		return err
+	}
+	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, t.CollectionID)
+	if err != nil {
+		return err
+	}
+	oldIsoValue := collBasicInfo.partitionKeyIsolation
+
+	log.Info("alter collection pre check with partition key isolation",
+		zap.String("collectionName", t.CollectionName),
+		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
+		zap.Bool("newIsoValue", newIsoValue),
+		zap.Bool("oldIsoValue", oldIsoValue))
+
+	// if the isolation flag in properties is not set, meta cache will assign partitionKeyIsolation in collection info to false
+	//   - None|false -> false, skip
+	//   - None|false -> true, check if the collection has vector index
+	//   - true -> false, check if the collection has vector index
+	//   - false -> true, check if the collection has vector index
+	//   - true -> true, skip
+	if oldIsoValue != newIsoValue {
+		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return err
+		}
+
+		hasVecIndex := false
+		indexName := ""
+		indexResponse, err := t.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: t.CollectionID,
+			IndexName:    "",
+		})
+		if err != nil {
+			return merr.WrapErrServiceInternal("describe index failed", err.Error())
+		}
+		for _, index := range indexResponse.IndexInfos {
+			for _, field := range collSchema.Fields {
+				if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
+					hasVecIndex = true
+					indexName = field.GetName()
+				}
+			}
+		}
+		if hasVecIndex {
+			return merr.WrapErrIndexDuplicate(indexName,
+				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}
 
@@ -1446,7 +1529,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
 		if err != nil {
-			return err
+			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 		flushReq := &datapb.FlushRequest{
 			Base: commonpbutil.UpdateMsgBase(

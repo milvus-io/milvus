@@ -330,7 +330,7 @@ seconds, (0 ~ 65536)`,
 	p.FlushLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.FlushLimitEnabled.Init(base.mgr)
@@ -376,7 +376,7 @@ seconds, (0 ~ 65536)`,
 	p.MaxFlushRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.flushRate.collection.max",
 		Version:      "2.3.9",
-		DefaultValue: "-1",
+		DefaultValue: "0.1",
 		Formatter: func(v string) string {
 			if !p.FlushLimitEnabled.GetAsBool() {
 				return max
@@ -1584,15 +1584,10 @@ specific conditions, such as memory of nodes to water marker), ` + "true" + ` me
 		Version:      "2.2.0",
 		DefaultValue: defaultMaxTtDelay,
 		Formatter: func(v string) string {
-			if !p.TtProtectionEnabled.GetAsBool() {
-				return fmt.Sprintf("%d", math.MaxInt64)
+			if getAsFloat(v) < 0 {
+				return "0"
 			}
-			delay := getAsFloat(v)
-			// (0, 65536)
-			if delay <= 0 || delay >= 65536 {
-				return defaultMaxTtDelay
-			}
-			return fmt.Sprintf("%f", delay)
+			return v
 		},
 		Doc: `maxTimeTickDelay indicates the backpressure for DML Operations.
 DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,

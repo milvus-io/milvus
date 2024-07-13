@@ -32,6 +32,7 @@ type Column interface {
 	Name() string
 	Type() entity.FieldType
 	Len() int
+	Slice(int, int) Column
 	FieldData() *schemapb.FieldData
 	AppendValue(interface{}) error
 	Get(int) (interface{}, error)
@@ -304,11 +305,30 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		vector := make([][]byte, 0, end-begin) // shall not have remanunt
 		for i := begin; i < end; i++ {
-			v := make([]byte, dim)
+			v := make([]byte, dim*2)
 			copy(v, data[i*dim*2:(i+1)*dim*2])
 			vector = append(vector, v)
 		}
 		return NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector), nil
+	case schemapb.DataType_SparseFloatVector:
+		sparseVectors := fd.GetVectors().GetSparseFloatVector()
+		if sparseVectors == nil {
+			return nil, errFieldDataTypeNotMatch
+		}
+		data := sparseVectors.Contents
+		if end < 0 {
+			end = len(data)
+		}
+		data = data[begin:end]
+		vectors := make([]entity.SparseEmbedding, 0, len(data))
+		for _, bs := range data {
+			vector, err := entity.DeserializeSliceSparseEmbedding(bs)
+			if err != nil {
+				return nil, err
+			}
+			vectors = append(vectors, vector)
+		}
+		return NewColumnSparseVectors(fd.GetFieldName(), vectors), nil
 	default:
 		return nil, fmt.Errorf("unsupported data type %s", fd.GetType())
 	}

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <any>
 #include <string>
 #include <memory>
 #include <vector>
@@ -61,7 +62,7 @@ struct DescriptorEventData {
     DescriptorEventDataFixPart fix_part;
     int32_t extra_length;
     std::vector<uint8_t> extra_bytes;
-    std::unordered_map<std::string, std::string> extras;
+    std::unordered_map<std::string, std::any> extras;
     std::vector<uint8_t> post_header_lengths;
 
     DescriptorEventData() = default;
