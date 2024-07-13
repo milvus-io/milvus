@@ -295,12 +295,23 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 	defer suite.TearDownTest()
 	balancer := suite.balancer
 
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.DelegatorMemoryOverloadFactor.Key, "0.3")
+	suite.balancer.meta.PutCollection(&meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: 1,
+		},
+	}, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: 1,
+			PartitionID:  1,
+		},
+	})
 	distributions := map[int64][]*meta.Segment{
 		1: {
-			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20, CollectionID: 1}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 100, CollectionID: 1}, Node: 1},
 		},
 		2: {
-			{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 20, CollectionID: 1}, Node: 2},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 100, CollectionID: 1}, Node: 2},
 		},
 	}
 	for node, s := range distributions {
@@ -321,9 +332,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 
 	// mock 50 growing row count in node 1, which is delegator, expect all segment assign to node 2
 	leaderView := &meta.LeaderView{
-		ID:               1,
-		CollectionID:     1,
-		NumOfGrowingRows: 50,
+		ID:           1,
+		CollectionID: 1,
 	}
 	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
 	plans := balancer.AssignSegment(1, toAssign, lo.Keys(distributions), false)
