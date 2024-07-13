@@ -342,6 +342,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 			Configuations: nil,
 		}, nil
 	}
+	defer i.lifetime.Done()
 
 	configList := make([]*commonpb.KeyValuePair, 0)
 	for key, value := range Params.GetComponentConfigurations("indexnode", req.Pattern) {
