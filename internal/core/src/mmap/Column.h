@@ -477,14 +477,6 @@ class SparseFloatColumn : public ColumnBase {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
     }
 
-    // This is used to advice mmap prefetch, we don't currently support mmap for
-    // sparse float vector thus not implemented for now.
-    size_t
-    ByteSize() const override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "ByteSize not supported for sparse float column");
-    }
-
     size_t
     Capacity() const override {
         PanicInfo(ErrorCode::Unsupported,
