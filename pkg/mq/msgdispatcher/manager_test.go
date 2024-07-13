@@ -48,7 +48,7 @@ func TestManager(t *testing.T) {
 				offset++
 				vchannel := fmt.Sprintf("mock-pchannel-dml_0_vchannelv%d", offset)
 				t.Logf("add vchannel, %s", vchannel)
-				_, err := c.Add(context.Background(), vchannel, nil, common.SubscriptionPositionUnknown)
+				_, err := c.Add(context.Background(), vchannel, nil, mqwrapper.SubscriptionPositionUnknown)
 				assert.NoError(t, err)
 				assert.Equal(t, offset, c.Num())
 			}
