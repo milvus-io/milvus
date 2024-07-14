@@ -64,15 +64,15 @@ class ColumnBase {
     };
     // memory mode ctor
     ColumnBase(size_t reserve, const FieldMeta& field_meta)
-        : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
-                         ? 1
-                         : field_meta.get_sizeof()),
-          mapping_type_(MappingType::MAP_WITH_ANONYMOUS) {
-        SetPaddingSize(field_meta.get_data_type());
+        : mapping_type_(MappingType::MAP_WITH_ANONYMOUS) {
+        auto data_type = field_meta.get_data_type();
+        SetPaddingSize(data_type);
 
-        if (IsVariableDataType(field_meta.get_data_type())) {
+        if (IsVariableDataType(data_type)) {
             return;
         }
+
+        type_size_ = field_meta.get_sizeof();
 
         cap_size_ = type_size_ * reserve;
 
@@ -120,12 +120,13 @@ class ColumnBase {
     // mmap mode ctor
     // User must call Seal to build the view for variable length column.
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
-        : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
-                         ? 1
-                         : field_meta.get_sizeof()),
-          mapping_type_(MappingType::MAP_WITH_FILE),
-          num_rows_(size / type_size_) {
-        SetPaddingSize(field_meta.get_data_type());
+        : mapping_type_(MappingType::MAP_WITH_FILE) {
+        auto data_type = field_meta.get_data_type();
+        SetPaddingSize(data_type);
+        if (!IsVariableDataType(data_type)) {
+            type_size_ = field_meta.get_sizeof();
+            num_rows_ = size / type_size_;
+        }
 
         size_ = size;
         cap_size_ = size;
@@ -148,12 +149,7 @@ class ColumnBase {
                size_t size,
                int dim,
                const DataType& data_type)
-        : type_size_(IsSparseFloatVectorDataType(data_type)
-                         ? 1
-                         : GetDataTypeSize(data_type, dim)),
-          num_rows_(
-              IsSparseFloatVectorDataType(data_type) ? 1 : (size / type_size_)),
-          size_(size),
+        : size_(size),
           cap_size_(size),
           mapping_type_(MappingType::MAP_WITH_FILE) {
         SetPaddingSize(data_type);
@@ -161,6 +157,10 @@ class ColumnBase {
         // use exact same size of file, padding shall be written in file already
         // see also https://github.com/milvus-io/milvus/issues/34442
         size_t mapped_size = cap_size_;
+        if (!IsVariableDataType(data_type)) {
+            type_size_ = GetDataTypeSize(data_type, dim);
+            num_rows_ = size / type_size_;
+        }
         data_ = static_cast<char*>(mmap(
             nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
@@ -355,7 +355,7 @@ class ColumnBase {
     size_t cap_size_{0};
     size_t padding_{0};
     // type_size_ is not used for sparse float vector column.
-    const size_t type_size_{1};
+    size_t type_size_{1};
     size_t num_rows_{0};
 
     // length in bytes
