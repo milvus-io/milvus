@@ -1559,6 +1559,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1792,6 +1793,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GrowingRowCountWeight.Init(base.mgr)
+
+	p.DelegatorMemoryOverloadFactor = ParamItem{
+		Key:          "queryCoord.delegatorMemoryOverloadFactor",
+		Version:      "2.3.19",
+		DefaultValue: "0.3",
+		PanicIfEmpty: true,
+		Doc:          "the factor of delegator overloaded memory",
+		Export:       true,
+	}
+	p.DelegatorMemoryOverloadFactor.Init(base.mgr)
 
 	p.BalanceCostThreshold = ParamItem{
 		Key:          "queryCoord.balanceCostThreshold",
