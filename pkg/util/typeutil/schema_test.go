@@ -821,7 +821,7 @@ func TestAppendFieldData(t *testing.T) {
 	SparseFloatVector := &schemapb.SparseFloatArray{
 		Dim: 231,
 		Contents: [][]byte{
-			CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+			CreateSparseFloatRow([]uint32{}, []float32{}),
 			CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 		},
 	}
@@ -1397,7 +1397,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	SparseFloatVector := &schemapb.SparseFloatArray{
 		Dim: 231,
 		Contents: [][]byte{
-			CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+			CreateSparseFloatRow([]uint32{}, []float32{}),
 			CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 		},
 	}
@@ -1469,7 +1469,7 @@ func TestMergeFieldData(t *testing.T) {
 		// 3 rows for src
 		CreateSparseFloatRow([]uint32{600, 800, 2300}, []float32{2.1, 2.2, 2.3}),
 		CreateSparseFloatRow([]uint32{90, 141, 352}, []float32{1.1, 1.2, 1.3}),
-		CreateSparseFloatRow([]uint32{160, 280, 340}, []float32{2.1, 2.2, 2.3}),
+		CreateSparseFloatRow([]uint32{}, []float32{}),
 	}
 
 	t.Run("merge data", func(t *testing.T) {
@@ -2069,6 +2069,10 @@ func TestValidateSparseFloatRows(t *testing.T) {
 			CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{1.0, 2.0, 3.0}),
 			CreateSparseFloatRow([]uint32{2, 4, 6}, []float32{4.0, 5.0, 6.0}),
 			CreateSparseFloatRow([]uint32{0, 7, 8}, []float32{7.0, 8.0, 9.0}),
+			// we allow empty row(including indices with 0 value)
+			CreateSparseFloatRow([]uint32{}, []float32{}),
+			CreateSparseFloatRow([]uint32{24}, []float32{0}),
+			{},
 		}
 		err := ValidateSparseFloatRows(rows...)
 		assert.NoError(t, err)
@@ -2139,14 +2143,6 @@ func TestValidateSparseFloatRows(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("empty indices or values", func(t *testing.T) {
-		rows := [][]byte{
-			CreateSparseFloatRow([]uint32{}, []float32{}),
-		}
-		err := ValidateSparseFloatRows(rows...)
-		assert.Error(t, err)
-	})
-
 	t.Run("no rows", func(t *testing.T) {
 		err := ValidateSparseFloatRows()
 		assert.NoError(t, err)
@@ -2182,6 +2178,20 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{math.MaxInt32 + 1}, []float32{1.0}), res)
 	})
 
+	t.Run("valid row 5", func(t *testing.T) {
+		row := map[string]interface{}{"indices": []interface{}{}, "values": []interface{}{}}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid row 6", func(t *testing.T) {
+		row := map[string]interface{}{"indices": []interface{}{1}, "values": []interface{}{0}}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid row 1", func(t *testing.T) {
 		row := map[string]interface{}{"indices": []interface{}{1, 3, 5}, "values": []interface{}{1.0, 2.0}}
 		_, err := CreateSparseFloatRowFromMap(row)
@@ -2190,12 +2200,6 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 
 	t.Run("invalid row 2", func(t *testing.T) {
 		row := map[string]interface{}{"indices": []interface{}{1}, "values": []interface{}{1.0, 2.0}}
-		_, err := CreateSparseFloatRowFromMap(row)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid row 3", func(t *testing.T) {
-		row := map[string]interface{}{"indices": []interface{}{}, "values": []interface{}{}}
 		_, err := CreateSparseFloatRowFromMap(row)
 		assert.Error(t, err)
 	})
@@ -2250,6 +2254,20 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{2.0, 1.0, 3.0}), res)
 	})
 
+	t.Run("valid dict row 3", func(t *testing.T) {
+		row := map[string]interface{}{}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid dict row 4", func(t *testing.T) {
+		row := map[string]interface{}{"1": 0}
+		res, err := CreateSparseFloatRowFromMap(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid dict row 1", func(t *testing.T) {
 		row := map[string]interface{}{"a": 1.0, "3": 2.0, "5": 3.0}
 		_, err := CreateSparseFloatRowFromMap(row)
@@ -2276,12 +2294,6 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 
 	t.Run("invalid dict row 5", func(t *testing.T) {
 		row := map[string]interface{}{"1": -1.0, "3": 2.0, "5": 3.0}
-		_, err := CreateSparseFloatRowFromMap(row)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid dict row 6", func(t *testing.T) {
-		row := map[string]interface{}{}
 		_, err := CreateSparseFloatRowFromMap(row)
 		assert.Error(t, err)
 	})
@@ -2332,6 +2344,20 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 		res, err := CreateSparseFloatRowFromJSON(row)
 		assert.NoError(t, err)
 		assert.Equal(t, CreateSparseFloatRow([]uint32{math.MaxInt32 + 1}, []float32{1.0}), res)
+	})
+
+	t.Run("valid row 4", func(t *testing.T) {
+		row := []byte(`{"indices":[], "values":[]}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid row 5", func(t *testing.T) {
+		row := []byte(`{"indices":[1], "values":[0]}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
 	})
 
 	t.Run("invalid row 1", func(t *testing.T) {
@@ -2390,6 +2416,20 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 		assert.Equal(t, CreateSparseFloatRow([]uint32{1, 3, 5}, []float32{2.0, 1.0, 3.0}), res)
 	})
 
+	t.Run("valid dict row 3", func(t *testing.T) {
+		row := []byte(`{}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{}, []float32{}), res)
+	})
+
+	t.Run("valid dict row 4", func(t *testing.T) {
+		row := []byte(`{"1": 0}`)
+		res, err := CreateSparseFloatRowFromJSON(row)
+		assert.NoError(t, err)
+		assert.Equal(t, CreateSparseFloatRow([]uint32{1}, []float32{0}), res)
+	})
+
 	t.Run("invalid dict row 1", func(t *testing.T) {
 		row := []byte(`{"a": 1.0, "3": 2.0, "5": 3.0}`)
 		_, err := CreateSparseFloatRowFromJSON(row)
@@ -2427,7 +2467,7 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 	})
 
 	t.Run("invalid dict row 7", func(t *testing.T) {
-		row := []byte(`{}`)
+		row := []byte(``)
 		_, err := CreateSparseFloatRowFromJSON(row)
 		assert.Error(t, err)
 	})
