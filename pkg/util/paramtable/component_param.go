@@ -2844,6 +2844,7 @@ type dataCoordConfig struct {
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
+	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -3588,6 +3589,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.SegmentFlushInterval = ParamItem{
+		Key:          "dataCoord.segmentFlushInterval",
+		Version:      "2.4.6",
+		DefaultValue: "2",
+		Doc:          "the minimal interval duration(unit: Seconds) between flusing operation on same segment",
+		Export:       true,
+	}
+	p.SegmentFlushInterval.Init(base.mgr)
 
 	p.FilesPerPreImportTask = ParamItem{
 		Key:          "dataCoord.import.filesPerPreImportTask",
