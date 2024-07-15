@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"fmt"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -121,8 +122,10 @@ func (f segmentSealPolicyFunc) ShouldSeal(segment *SegmentInfo, ts Timestamp) (b
 // sealL1SegmentByCapacity get segmentSealPolicy with segment size factor policy
 func sealL1SegmentByCapacity(sizeFactor float64) segmentSealPolicyFunc {
 	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
-		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum()),
-			fmt.Sprintf("Row count capacity full, current rows: %d, max row: %d, seal factor: %f", segment.currRows, segment.GetMaxRowNum(), sizeFactor)
+		jitter := paramtable.Get().DataCoordCfg.SegmentSealProportionJitter.GetAsFloat()
+		ratio := (1 - jitter*rand.Float64())
+		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())*ratio,
+			fmt.Sprintf("Row count capacity full, current rows: %d, max row: %d, seal factor: %f, jitter ratio: %f", segment.currRows, segment.GetMaxRowNum(), sizeFactor, ratio)
 	}
 }
 
