@@ -1580,11 +1580,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
-			fmt.Println("wait for read lock")
 			sche.RLock()
-			fmt.Println("after read lock")
 			taskNum := len(sche.tasks)
-			fmt.Println("taskNum: ", taskNum)
 			sche.RUnlock()
 
 			if taskNum == 0 {
