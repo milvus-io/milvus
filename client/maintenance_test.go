@@ -162,6 +162,57 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 	})
 }
 
+func (s *MaintenanceSuite) TestReleaseCollection() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.mock.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rcr *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+			s.Equal(collectionName, rcr.GetCollectionName())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.ReleaseCollection(ctx, NewReleaseCollectionOption(collectionName))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.mock.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.ReleaseCollection(ctx, NewReleaseCollectionOption(collectionName))
+		s.Error(err)
+	})
+}
+
+func (s *MaintenanceSuite) TestReleasePartitions() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		s.mock.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rpr *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+			s.Equal(collectionName, rpr.GetCollectionName())
+			s.ElementsMatch([]string{partitionName}, rpr.GetPartitionNames())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.ReleasePartitions(ctx, NewReleasePartitionsOptions(collectionName, partitionName))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		s.mock.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.ReleasePartitions(ctx, NewReleasePartitionsOptions(collectionName, partitionName))
+		s.Error(err)
+	})
+}
+
 func (s *MaintenanceSuite) TestFlush() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
