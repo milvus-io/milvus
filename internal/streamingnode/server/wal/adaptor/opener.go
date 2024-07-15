@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
@@ -24,7 +23,7 @@ func adaptImplsToOpener(opener walimpls.OpenerImpls, builders []interceptors.Int
 	return &openerAdaptorImpl{
 		lifetime:            lifetime.NewLifetime(lifetime.Working),
 		opener:              opener,
-		idAllocator:         util.NewIDAllocator(),
+		idAllocator:         typeutil.NewIDAllocator(),
 		walInstances:        typeutil.NewConcurrentMap[int64, wal.WAL](),
 		interceptorBuilders: builders,
 	}
@@ -34,7 +33,7 @@ func adaptImplsToOpener(opener walimpls.OpenerImpls, builders []interceptors.Int
 type openerAdaptorImpl struct {
 	lifetime            lifetime.Lifetime[lifetime.State]
 	opener              walimpls.OpenerImpls
-	idAllocator         *util.IDAllocator
+	idAllocator         *typeutil.IDAllocator
 	walInstances        *typeutil.ConcurrentMap[int64, wal.WAL] // store all wal instances allocated by these allocator.
 	interceptorBuilders []interceptors.InterceptorBuilder
 }

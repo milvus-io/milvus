@@ -56,7 +56,9 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	consumeServer := &consumeGrpcServerHelper{
 		StreamingNodeHandlerService_ConsumeServer: streamServer,
 	}
-	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{}); err != nil {
+	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{
+		WalName: l.WALName(),
+	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
 			log.Warn("close scanner failed at create consume server", zap.Error(err))

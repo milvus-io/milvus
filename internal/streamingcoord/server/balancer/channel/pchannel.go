@@ -18,7 +18,7 @@ func newPChannelMeta(name string) *PChannelMeta {
 			},
 			Node:      nil,
 			State:     streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-			Histories: make([]*streamingpb.PChannelMetaHistory, 0),
+			Histories: make([]*streamingpb.PChannelAssignmentLog, 0),
 		},
 	}
 }
@@ -114,7 +114,7 @@ func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeI
 	}
 	if m.inner.State != streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED {
 		// if the channel is already initialized, add the history.
-		m.inner.Histories = append(m.inner.Histories, &streamingpb.PChannelMetaHistory{
+		m.inner.Histories = append(m.inner.Histories, &streamingpb.PChannelAssignmentLog{
 			Term: m.inner.Channel.Term,
 			Node: m.inner.Node,
 		})
@@ -130,7 +130,7 @@ func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeI
 // AssignToServerDone assigns the channel to the server done.
 func (m *mutablePChannel) AssignToServerDone() {
 	if m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING {
-		m.inner.Histories = make([]*streamingpb.PChannelMetaHistory, 0)
+		m.inner.Histories = make([]*streamingpb.PChannelAssignmentLog, 0)
 		m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
 	}
 }

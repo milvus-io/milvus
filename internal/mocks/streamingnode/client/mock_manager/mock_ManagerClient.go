@@ -7,8 +7,6 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
-
 	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
@@ -101,19 +99,19 @@ func (_c *MockManagerClient_Close_Call) RunAndReturn(run func()) *MockManagerCli
 }
 
 // CollectAllStatus provides a mock function with given fields: ctx
-func (_m *MockManagerClient) CollectAllStatus(ctx context.Context) (map[int64]types.StreamingNodeStatus, error) {
+func (_m *MockManagerClient) CollectAllStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
 	ret := _m.Called(ctx)
 
-	var r0 map[int64]types.StreamingNodeStatus
+	var r0 map[int64]*types.StreamingNodeStatus
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]types.StreamingNodeStatus, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeStatus, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64]types.StreamingNodeStatus); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeStatus); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]types.StreamingNodeStatus)
+			r0 = ret.Get(0).(map[int64]*types.StreamingNodeStatus)
 		}
 	}
 
@@ -144,12 +142,12 @@ func (_c *MockManagerClient_CollectAllStatus_Call) Run(run func(ctx context.Cont
 	return _c
 }
 
-func (_c *MockManagerClient_CollectAllStatus_Call) Return(_a0 map[int64]types.StreamingNodeStatus, _a1 error) *MockManagerClient_CollectAllStatus_Call {
+func (_c *MockManagerClient_CollectAllStatus_Call) Return(_a0 map[int64]*types.StreamingNodeStatus, _a1 error) *MockManagerClient_CollectAllStatus_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManagerClient_CollectAllStatus_Call) RunAndReturn(run func(context.Context) (map[int64]types.StreamingNodeStatus, error)) *MockManagerClient_CollectAllStatus_Call {
+func (_c *MockManagerClient_CollectAllStatus_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeStatus, error)) *MockManagerClient_CollectAllStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -198,19 +196,29 @@ func (_c *MockManagerClient_Remove_Call) RunAndReturn(run func(context.Context, 
 }
 
 // WatchNodeChanged provides a mock function with given fields: ctx
-func (_m *MockManagerClient) WatchNodeChanged(ctx context.Context) <-chan map[int64]*sessionutil.SessionRaw {
+func (_m *MockManagerClient) WatchNodeChanged(ctx context.Context) (<-chan struct{}, error) {
 	ret := _m.Called(ctx)
 
-	var r0 <-chan map[int64]*sessionutil.SessionRaw
-	if rf, ok := ret.Get(0).(func(context.Context) <-chan map[int64]*sessionutil.SessionRaw); ok {
+	var r0 <-chan struct{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (<-chan struct{}, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) <-chan struct{}); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(<-chan map[int64]*sessionutil.SessionRaw)
+			r0 = ret.Get(0).(<-chan struct{})
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockManagerClient_WatchNodeChanged_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchNodeChanged'
@@ -231,12 +239,12 @@ func (_c *MockManagerClient_WatchNodeChanged_Call) Run(run func(ctx context.Cont
 	return _c
 }
 
-func (_c *MockManagerClient_WatchNodeChanged_Call) Return(_a0 <-chan map[int64]*sessionutil.SessionRaw) *MockManagerClient_WatchNodeChanged_Call {
-	_c.Call.Return(_a0)
+func (_c *MockManagerClient_WatchNodeChanged_Call) Return(_a0 <-chan struct{}, _a1 error) *MockManagerClient_WatchNodeChanged_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManagerClient_WatchNodeChanged_Call) RunAndReturn(run func(context.Context) <-chan map[int64]*sessionutil.SessionRaw) *MockManagerClient_WatchNodeChanged_Call {
+func (_c *MockManagerClient_WatchNodeChanged_Call) RunAndReturn(run func(context.Context) (<-chan struct{}, error)) *MockManagerClient_WatchNodeChanged_Call {
 	_c.Call.Return(run)
 	return _c
 }

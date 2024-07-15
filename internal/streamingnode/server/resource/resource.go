@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"reflect"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
@@ -70,7 +72,14 @@ func (r *resourceImpl) RootCoordClient() types.RootCoordClient {
 
 // assertNotNil panics if the resource is nil.
 func assertNotNil(v interface{}) {
-	if v == nil {
+	iv := reflect.ValueOf(v)
+	if !iv.IsValid() {
 		panic("nil resource")
+	}
+	switch iv.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
+		if iv.IsNil() {
+			panic("nil resource")
+		}
 	}
 }

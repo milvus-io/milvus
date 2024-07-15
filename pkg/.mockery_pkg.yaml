@@ -23,3 +23,7 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/pkg/streaming/util/types:
+    interfaces:
+      AssignmentDiscoverWatcher:
+  
