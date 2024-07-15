@@ -30,29 +30,38 @@ func (t *mixCompactionTask) processPipelining() bool {
 	if t.NeedReAssignNodeID() {
 		return false
 	}
+
+	log := log.With(zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("nodeID", t.GetNodeID()))
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
-	// Segment not found
 	if err != nil {
-		err2 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-		return err2 == nil
+		log.Warn("mixCompactionTask failed to build compaction request", zap.Error(err))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+		if err != nil {
+			log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			return false
+		}
+		return t.processFailed()
 	}
-	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
+
+	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
-		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
+		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		return false
 	}
+
 	t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	return false
 }
 
 func (t *mixCompactionTask) processMetaSaved() bool {
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
-	if err == nil {
-		return t.processCompleted()
+	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+		log.Warn("mixCompactionTask failed to proccessMetaSaved", zap.Error(err))
+		return false
 	}
-	return false
+
+	return t.processCompleted()
 }
 
 func (t *mixCompactionTask) processExecuting() bool {
@@ -62,44 +71,48 @@ func (t *mixCompactionTask) processExecuting() bool {
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		}
+		log.Warn("mixCompactionTask failed to get compaction result", zap.Error(err))
 		return false
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err == nil {
-				return t.processTimeout()
+			if err != nil {
+				log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				return false
 			}
+			return t.processTimeout()
 		}
-		return false
 	case datapb.CompactionTaskState_completed:
 		t.result = result
 		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
 			log.Info("illegal compaction results")
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 			if err != nil {
+				log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
 				return false
 			}
 			return t.processFailed()
 		}
-		err2 := t.saveSegmentMeta()
-		if err2 != nil {
-			if errors.Is(err2, merr.ErrIllegalCompactionPlan) {
-				err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
-				if err3 != nil {
-					log.Warn("fail to updateAndSaveTaskMeta")
+		if err := t.saveSegmentMeta(); err != nil {
+			log.Warn("mixCompactionTask failed to save segment meta", zap.Error(err))
+			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
+				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+				if err != nil {
+					log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
 				}
 				return true
 			}
 			return false
 		}
 		segments := []UniqueID{t.newSegment.GetID()}
-		err3 := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
-		if err3 == nil {
-			return t.processMetaSaved()
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
+		if err != nil {
+			log.Warn("mixCompaction failed to setState meta saved", zap.Error(err))
+			return false
 		}
-		return false
+		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 		if err != nil {
