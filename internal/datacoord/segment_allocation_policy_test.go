@@ -172,10 +172,10 @@ func TestSealSegmentPolicy(t *testing.T) {
 			},
 		}
 
-		shouldSeal := p(segment, tsoutil.ComposeTS(nosealTs, 0))
+		shouldSeal, _ := p.ShouldSeal(segment, tsoutil.ComposeTS(nosealTs, 0))
 		assert.False(t, shouldSeal)
 
-		shouldSeal = p(segment, tsoutil.ComposeTS(sealTs, 0))
+		shouldSeal, _ = p.ShouldSeal(segment, tsoutil.ComposeTS(sealTs, 0))
 		assert.True(t, shouldSeal)
 	})
 }
@@ -186,9 +186,12 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	maxSizeOfSegment := 512.0
 	policy := sealL1SegmentByIdleTime(idleTimeTolerance, minSizeToSealIdleSegment, maxSizeOfSegment)
 	seg1 := &SegmentInfo{lastWrittenTime: time.Now().Add(idleTimeTolerance * 5)}
-	assert.False(t, policy(seg1, 100))
+	shouldSeal, _ := policy.ShouldSeal(seg1, 100)
+	assert.False(t, shouldSeal)
 	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
-	assert.False(t, policy(seg2, 100))
+	shouldSeal, _ = policy.ShouldSeal(seg2, 100)
+	assert.False(t, shouldSeal)
 	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
-	assert.True(t, policy(seg3, 100))
+	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
+	assert.True(t, shouldSeal)
 }

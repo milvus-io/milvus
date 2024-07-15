@@ -572,7 +572,7 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
 				Properties: []*commonpb.KeyValuePair{},
 			}, nil)
 		_, _, err := s.broker.GetCollectionLoadInfo(ctx, 1)
-		s.Error(err)
+		s.NoError(err)
 		s.resetMock()
 	})
 }

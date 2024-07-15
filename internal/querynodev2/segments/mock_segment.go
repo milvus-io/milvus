@@ -17,6 +17,8 @@ import (
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -51,30 +53,30 @@ func (_m *MockSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	return r0
 }
 
-// MockSegment_BatchTestLocationCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BatchPkExist'
-type MockSegment_BatchTestLocationCache_Call struct {
+// MockSegment_BatchPkExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BatchPkExist'
+type MockSegment_BatchPkExist_Call struct {
 	*mock.Call
 }
 
 // BatchPkExist is a helper method to define mock.On call
 //   - lc *storage.BatchLocationsCache
-func (_e *MockSegment_Expecter) BatchPkExist(lc interface{}) *MockSegment_BatchTestLocationCache_Call {
-	return &MockSegment_BatchTestLocationCache_Call{Call: _e.mock.On("BatchPkExist", lc)}
+func (_e *MockSegment_Expecter) BatchPkExist(lc interface{}) *MockSegment_BatchPkExist_Call {
+	return &MockSegment_BatchPkExist_Call{Call: _e.mock.On("BatchPkExist", lc)}
 }
 
-func (_c *MockSegment_BatchTestLocationCache_Call) Run(run func(lc *storage.BatchLocationsCache)) *MockSegment_BatchTestLocationCache_Call {
+func (_c *MockSegment_BatchPkExist_Call) Run(run func(lc *storage.BatchLocationsCache)) *MockSegment_BatchPkExist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*storage.BatchLocationsCache))
 	})
 	return _c
 }
 
-func (_c *MockSegment_BatchTestLocationCache_Call) Return(_a0 []bool) *MockSegment_BatchTestLocationCache_Call {
+func (_c *MockSegment_BatchPkExist_Call) Return(_a0 []bool) *MockSegment_BatchPkExist_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_BatchTestLocationCache_Call) RunAndReturn(run func(*storage.BatchLocationsCache) []bool) *MockSegment_BatchTestLocationCache_Call {
+func (_c *MockSegment_BatchPkExist_Call) RunAndReturn(run func(*storage.BatchLocationsCache) []bool) *MockSegment_BatchPkExist_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -708,6 +710,49 @@ func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDel
 }
 
 func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadDeltaData2 provides a mock function with given fields: ctx, schema
+func (_m *MockSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	ret := _m.Called(ctx, schema)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(ctx, schema)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_LoadDeltaData2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadDeltaData2'
+type MockSegment_LoadDeltaData2_Call struct {
+	*mock.Call
+}
+
+// LoadDeltaData2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - schema *schemapb.CollectionSchema
+func (_e *MockSegment_Expecter) LoadDeltaData2(ctx interface{}, schema interface{}) *MockSegment_LoadDeltaData2_Call {
+	return &MockSegment_LoadDeltaData2_Call{Call: _e.mock.On("LoadDeltaData2", ctx, schema)}
+}
+
+func (_c *MockSegment_LoadDeltaData2_Call) Run(run func(ctx context.Context, schema *schemapb.CollectionSchema)) *MockSegment_LoadDeltaData2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
+	})
+	return _c
+}
+
+func (_c *MockSegment_LoadDeltaData2_Call) Return(_a0 error) *MockSegment_LoadDeltaData2_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_LoadDeltaData2_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockSegment_LoadDeltaData2_Call {
 	_c.Call.Return(run)
 	return _c
 }

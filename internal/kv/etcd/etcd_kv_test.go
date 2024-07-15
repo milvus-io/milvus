@@ -957,7 +957,7 @@ func TestRetryInterval(t *testing.T) {
 	})
 	elapsed := time.Since(startTime)
 	// expected (defaultRetryCount - 1) intervals of defaultRetryInterval
-	expectedMin := defaultRetryInterval * time.Duration(defaultRetryCount-1)
+	expectedMin := defaultRetryInterval * (defaultRetryCount - 1)
 	expectedMax := expectedMin + (50 * time.Millisecond) // Allow 50ms margin for timing precision
 
 	if err == nil {

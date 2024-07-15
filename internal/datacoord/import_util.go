@@ -200,10 +200,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	var (
-		// Allocated IDs are used for rowID and the BEGINNING of the logID.
-		allocNum = totalRows + 1
-	)
+	// Allocated IDs are used for rowID and the BEGINNING of the logID.
+	allocNum := totalRows + 1
 
 	idBegin, idEnd, err := alloc.allocN(allocNum)
 	if err != nil {

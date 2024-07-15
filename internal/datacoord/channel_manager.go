@@ -71,6 +71,7 @@ type ChannelManagerImpl struct {
 
 	factory       ChannelPolicyFactory
 	balancePolicy BalanceChannelPolicy
+	assignPolicy  AssignPolicy
 
 	balanceCheckLoop ChannelBGChecker
 
@@ -93,7 +94,7 @@ func withCheckerV2() ChannelmanagerOpt {
 	return func(c *ChannelManagerImpl) { c.balanceCheckLoop = c.CheckLoop }
 }
 
-func NewChannelManagerV2(
+func NewChannelManager(
 	kv kv.TxnKV,
 	h Handler,
 	subCluster SubCluster, // sessionManager
@@ -117,6 +118,7 @@ func NewChannelManagerV2(
 	}
 
 	m.balancePolicy = m.factory.NewBalancePolicy()
+	m.assignPolicy = m.factory.NewAssignPolicy()
 	m.lastActiveTimestamp = time.Now()
 	return m, nil
 }
@@ -189,7 +191,7 @@ func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
 	log.Info("register node", zap.Int64("registered node", nodeID))
 
 	m.store.AddNode(nodeID)
-	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
+	updates := m.assignPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
 
 	if updates == nil {
 		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
@@ -242,7 +244,7 @@ func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
 
 	// channel already written into meta, try to assign it to the cluster
 	// not error is returned if failed, the assignment will retry later
-	updates = AvgAssignByCountPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
+	updates = m.assignPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
 	if updates == nil {
 		return nil
 	}
@@ -270,7 +272,7 @@ func (m *ChannelManagerImpl) DeleteNode(nodeID UniqueID) error {
 	}
 
 	updates := NewChannelOpSet(
-		NewDeleteOp(info.NodeID, lo.Values(info.Channels)...),
+		NewChannelOp(info.NodeID, Delete, lo.Values(info.Channels)...),
 		NewChannelOp(bufferID, Watch, lo.Values(info.Channels)...),
 	)
 	log.Info("deregister node", zap.Int64("nodeID", nodeID), zap.Array("updates", updates))
@@ -292,7 +294,7 @@ func (m *ChannelManagerImpl) reassign(original *NodeChannelInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), original, m.legacyNodes.Collect())
+	updates := m.assignPolicy(m.store.GetNodesChannels(), original, m.legacyNodes.Collect())
 	if updates != nil {
 		return m.execute(updates)
 	}

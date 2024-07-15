@@ -38,7 +38,7 @@ func TestWALLifetime(t *testing.T) {
 
 	// Test expired term remove.
 	err = wlt.Remove(context.Background(), 1)
-	assertErrorTermExpired(t, err)
+	assertErrorOperationIgnored(t, err)
 	assert.NotNil(t, wlt.GetWAL())
 	assert.Equal(t, channel, wlt.GetWAL().Channel().Name)
 	assert.Equal(t, int64(2), wlt.GetWAL().Channel().Term)
@@ -53,7 +53,7 @@ func TestWALLifetime(t *testing.T) {
 		Name: channel,
 		Term: 1,
 	})
-	assertErrorTermExpired(t, err)
+	assertErrorOperationIgnored(t, err)
 	assert.Nil(t, wlt.GetWAL())
 
 	// Test open after close.
@@ -92,7 +92,7 @@ func TestWALLifetime(t *testing.T) {
 		Name: channel,
 		Term: 11,
 	})
-	assertErrorTermExpired(t, err)
+	assertErrorOperationIgnored(t, err)
 
 	wlt.Open(context.Background(), types.PChannelInfo{
 		Name: channel,

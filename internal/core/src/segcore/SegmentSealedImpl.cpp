@@ -541,6 +541,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                        indices,
                        element_indices);
     }
+    WriteFieldPadding(file, data_type, total_written);
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};

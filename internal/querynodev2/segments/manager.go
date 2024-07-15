@@ -204,7 +204,7 @@ func NewManager() *Manager {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
 
-			err = manager.Loader.LoadLazySegment(ctx, segment.(*LocalSegment), info)
+			err = manager.Loader.LoadLazySegment(ctx, segment, info)
 			return nil, err
 		})
 		if err != nil {

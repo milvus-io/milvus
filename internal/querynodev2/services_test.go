@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"

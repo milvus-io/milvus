@@ -2459,7 +2459,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2490,20 +2490,6 @@ func TestOptions(t *testing.T) {
 	})
 }
 
-type mockPolicyFactory struct {
-	ChannelPolicyFactoryV1
-}
-
-// NewRegisterPolicy create a new register policy
-func (p *mockPolicyFactory) NewRegisterPolicy() RegisterPolicy {
-	return EmptyRegister
-}
-
-// NewDeregisterPolicy create a new dereigster policy
-func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
-	return EmptyDeregisterPolicy
-}
-
 func TestHandleSessionEvent(t *testing.T) {
 	kv := getWatchKV(t)
 	defer func() {
@@ -2514,7 +2500,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cancel()
 
 	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)
@@ -3172,8 +3158,8 @@ func Test_CheckHealth(t *testing.T) {
 	}
 
 	collections := map[UniqueID]*collectionInfo{
-		1: {
-			ID:            1,
+		449684528748778322: {
+			ID:            449684528748778322,
 			VChannelNames: []string{"ch1", "ch2"},
 		},
 		2: nil,
@@ -3222,7 +3208,7 @@ func Test_CheckHealth(t *testing.T) {
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
-					"ch1": {
+					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
 						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
@@ -3246,7 +3232,15 @@ func Test_CheckHealth(t *testing.T) {
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
-					"ch1": {
+					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
+						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						MsgID:     []byte{1, 2, 3, 4},
+					},
+					"invalid-vchannel-name": {
 						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 						MsgID:     []byte{1, 2, 3, 4},
 					},

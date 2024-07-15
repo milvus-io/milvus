@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -70,10 +71,10 @@ type compactionInfo struct {
 }
 
 type compactionPlanHandler struct {
-	mu         lock.RWMutex
+	queueGuard lock.RWMutex
 	queueTasks map[int64]CompactionTask // planID -> task
 
-	executingMu    lock.RWMutex
+	executingGuard lock.RWMutex
 	executingTasks map[int64]CompactionTask // planID -> task
 
 	meta             CompactionMeta
@@ -157,23 +158,21 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 
 func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64) int {
 	cnt := 0
-	c.mu.RLock()
+	c.queueGuard.RLock()
 	for _, t := range c.queueTasks {
 		if t.GetTriggerID() == triggerID {
 			cnt += 1
 		}
 		// if t.GetPlanID()
 	}
-	cnt += len(c.queueTasks)
-	c.mu.RUnlock()
-	c.executingMu.RLock()
+	c.queueGuard.RUnlock()
+	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		if t.GetTriggerID() == triggerID {
 			cnt += 1
 		}
 	}
-	cnt += len(c.queueTasks)
-	c.executingMu.RUnlock()
+	c.executingGuard.RUnlock()
 	return cnt
 }
 
@@ -195,12 +194,12 @@ func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm Chann
 }
 
 func (c *compactionPlanHandler) schedule() []CompactionTask {
-	c.mu.RLock()
+	c.queueGuard.RLock()
 	if len(c.queueTasks) == 0 {
-		c.mu.RUnlock()
+		c.queueGuard.RUnlock()
 		return nil
 	}
-	c.mu.RUnlock()
+	c.queueGuard.RUnlock()
 
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
@@ -208,7 +207,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 	mixLabelExcludes := typeutil.NewSet[string]()
 	clusterLabelExcludes := typeutil.NewSet[string]()
 
-	c.executingMu.RLock()
+	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		switch t.GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
@@ -221,11 +220,11 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			clusterLabelExcludes.Insert(t.GetLabel())
 		}
 	}
-	c.executingMu.RUnlock()
+	c.executingGuard.RUnlock()
 
 	var picked []CompactionTask
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.queueGuard.RLock()
+	defer c.queueGuard.RUnlock()
 	keys := lo.Keys(c.queueTasks)
 	sort.SliceStable(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
@@ -270,8 +269,8 @@ func (c *compactionPlanHandler) start() {
 }
 
 func (c *compactionPlanHandler) loadMeta() {
-	// todo: make it compatible to all types of compaction with persist meta
-	triggers := c.meta.(*meta).compactionTaskMeta.GetCompactionTasks()
+	// TODO: make it compatible to all types of compaction with persist meta
+	triggers := c.meta.GetCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			state := task.GetState()
@@ -280,14 +279,19 @@ func (c *compactionPlanHandler) loadMeta() {
 				state == datapb.CompactionTaskState_unknown {
 				log.Info("compactionPlanHandler loadMeta abandon compactionTask",
 					zap.Int64("planID", task.GetPlanID()),
-					zap.String("State", task.GetState().String()))
+					zap.String("type", task.GetType().String()),
+					zap.String("state", task.GetState().String()))
 				continue
 			} else {
+				// TODO: how to deal with the create failed tasks, leave it in meta forever?
 				t, err := c.createCompactTask(task)
 				if err != nil {
 					log.Warn("compactionPlanHandler loadMeta create compactionTask failed",
 						zap.Int64("planID", task.GetPlanID()),
-						zap.String("State", task.GetState().String()))
+						zap.String("type", task.GetType().String()),
+						zap.String("state", task.GetState().String()),
+						zap.Error(err),
+					)
 					continue
 				}
 				if t.NeedReAssignNodeID() {
@@ -296,6 +300,7 @@ func (c *compactionPlanHandler) loadMeta() {
 						zap.Int64("planID", t.GetPlanID()),
 						zap.Int64("triggerID", t.GetTriggerID()),
 						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.String("type", task.GetType().String()),
 						zap.String("state", t.GetState().String()))
 				} else {
 					c.restoreTask(t)
@@ -303,6 +308,7 @@ func (c *compactionPlanHandler) loadMeta() {
 						zap.Int64("planID", t.GetPlanID()),
 						zap.Int64("triggerID", t.GetTriggerID()),
 						zap.Int64("collectionID", t.GetCollectionID()),
+						zap.String("type", task.GetType().String()),
 						zap.String("state", t.GetState().String()))
 				}
 			}
@@ -313,17 +319,20 @@ func (c *compactionPlanHandler) loadMeta() {
 func (c *compactionPlanHandler) doSchedule() {
 	picked := c.schedule()
 	if len(picked) > 0 {
-		c.executingMu.Lock()
+		c.executingGuard.Lock()
 		for _, t := range picked {
 			c.executingTasks[t.GetPlanID()] = t
 		}
-		c.executingMu.Unlock()
+		c.executingGuard.Unlock()
 
-		c.mu.Lock()
+		c.queueGuard.Lock()
 		for _, t := range picked {
 			delete(c.queueTasks, t.GetPlanID())
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Inc()
 		}
-		c.mu.Unlock()
+		c.queueGuard.Unlock()
+
 	}
 }
 
@@ -396,7 +405,7 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(task)
 					if err != nil {
-						log.Warn("fail to drop task", zap.Int64("taskPlanID", task.PlanID), zap.Error(err))
+						log.Warn("fail to drop task", zap.Int64("planID", task.PlanID), zap.Error(err))
 					}
 				}
 			}
@@ -462,7 +471,7 @@ func (c *compactionPlanHandler) stop() {
 }
 
 func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
-	c.mu.Lock()
+	c.queueGuard.Lock()
 	for id, task := range c.queueTasks {
 		log.Info("Compaction handler removing tasks by channel",
 			zap.String("channel", channel), zap.Any("id", id), zap.Any("task_channel", task.GetChannel()))
@@ -474,13 +483,14 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 			)
 			delete(c.queueTasks, id)
 			c.taskNumber.Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetNodeID()), task.GetType().String(), metrics.Pending).Dec()
 		}
 	}
-	c.mu.Unlock()
-	c.executingMu.Lock()
+	c.queueGuard.Unlock()
+	c.executingGuard.Lock()
 	for id, task := range c.executingTasks {
 		log.Info("Compaction handler removing tasks by channel",
-			zap.String("channel", channel), zap.Any("id", id), zap.Any("task_channel", task.GetChannel()))
+			zap.String("channel", channel), zap.Int64("planID", id), zap.Any("task_channel", task.GetChannel()))
 		if task.GetChannel() == channel {
 			log.Info("Compaction handler removing tasks by channel",
 				zap.String("channel", channel),
@@ -489,46 +499,49 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 			)
 			delete(c.executingTasks, id)
 			c.taskNumber.Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetNodeID()), task.GetType().String(), metrics.Executing).Dec()
 		}
 	}
-	c.executingMu.Unlock()
+	c.executingGuard.Unlock()
 }
 
 func (c *compactionPlanHandler) submitTask(t CompactionTask) {
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
 	t.SetSpan(span)
-	c.mu.Lock()
+	c.queueGuard.Lock()
 	c.queueTasks[t.GetPlanID()] = t
-	c.mu.Unlock()
+	c.queueGuard.Unlock()
 	c.taskNumber.Add(1)
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Inc()
 }
 
 // restoreTask used to restore Task from etcd
 func (c *compactionPlanHandler) restoreTask(t CompactionTask) {
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetType()))
 	t.SetSpan(span)
-	c.executingMu.Lock()
+	c.executingGuard.Lock()
 	c.executingTasks[t.GetPlanID()] = t
-	c.executingMu.Unlock()
+	c.executingGuard.Unlock()
 	c.taskNumber.Add(1)
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
 }
 
 // getCompactionTask return compaction
 func (c *compactionPlanHandler) getCompactionTask(planID int64) CompactionTask {
-	c.mu.RLock()
+	c.queueGuard.RLock()
 	t, ok := c.queueTasks[planID]
 	if ok {
-		c.mu.RUnlock()
+		c.queueGuard.RUnlock()
 		return t
 	}
-	c.mu.RUnlock()
-	c.executingMu.RLock()
+	c.queueGuard.RUnlock()
+	c.executingGuard.RLock()
 	t, ok = c.executingTasks[planID]
 	if ok {
-		c.executingMu.RUnlock()
+		c.executingGuard.RUnlock()
 		return t
 	}
-	c.executingMu.RUnlock()
+	c.executingGuard.RUnlock()
 	return t
 }
 
@@ -609,6 +622,8 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 		} else {
 			log.Info("compactionHandler assignNodeID success",
 				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Any("nodeID", nodeID))
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Dec()
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Inc()
 		}
 	}
 }
@@ -618,34 +633,36 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	//  for DC might add new task while GetCompactionState.
 
 	var needAssignIDTasks []CompactionTask
-	c.executingMu.RLock()
+	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		if t.NeedReAssignNodeID() {
 			needAssignIDTasks = append(needAssignIDTasks, t)
 		}
 	}
-	c.executingMu.RUnlock()
+	c.executingGuard.RUnlock()
 	if len(needAssignIDTasks) > 0 {
 		c.assignNodeIDs(needAssignIDTasks)
 	}
 
 	var finishedTasks []CompactionTask
-	c.executingMu.RLock()
+	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		finished := t.Process()
 		if finished {
 			finishedTasks = append(finishedTasks, t)
 		}
 	}
-	c.executingMu.RUnlock()
+	c.executingGuard.RUnlock()
 
 	// delete all finished
-	c.executingMu.Lock()
+	c.executingGuard.Lock()
 	for _, t := range finishedTasks {
 		delete(c.executingTasks, t.GetPlanID())
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetNodeID()), t.GetType().String(), metrics.Done).Inc()
 	}
-	c.executingMu.Unlock()
-	c.taskNumber.Add(-int32(len(finishedTasks)))
+	c.executingGuard.Unlock()
+	c.taskNumber.Sub(int32(len(finishedTasks)))
 	return nil
 }
 
@@ -686,8 +703,8 @@ func (c *compactionPlanHandler) getTaskCount() int {
 }
 
 func (c *compactionPlanHandler) getTasksByState(state datapb.CompactionTaskState) []CompactionTask {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.queueGuard.RLock()
+	defer c.queueGuard.RUnlock()
 	tasks := make([]CompactionTask, 0, len(c.queueTasks))
 	for _, t := range c.queueTasks {
 		if t.GetState() == state {

@@ -3,6 +3,7 @@ package wal
 import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 type MessageFilter = func(message.ImmutableMessage) bool
@@ -17,6 +18,9 @@ type ReadOption struct {
 type Scanner interface {
 	// Chan returns the channel of message.
 	Chan() <-chan message.ImmutableMessage
+
+	// Channel returns the channel assignment info of the wal.
+	Channel() types.PChannelInfo
 
 	// Error returns the error of scanner failed.
 	// Will block until scanner is closed or Chan is dry out.
