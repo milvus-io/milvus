@@ -1635,22 +1635,3 @@ func GetCostValue(status *commonpb.Status) int {
 	}
 	return value
 }
-
-type isProxyRequestKeyType struct{}
-
-var ctxProxyRequestKey = isProxyRequestKeyType{}
-
-func SetRequestLabelForContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ctxProxyRequestKey, true)
-}
-
-func GetRequestLabelFromContext(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	v := ctx.Value(ctxProxyRequestKey)
-	if v == nil {
-		return false
-	}
-	return v.(bool)
-}
