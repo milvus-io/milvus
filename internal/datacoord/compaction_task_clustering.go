@@ -558,7 +558,7 @@ func (t *clusteringCompactionTask) GetLabel() string {
 }
 
 func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == 0
+	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
 }
 
 func (t *clusteringCompactionTask) CleanLogPath() {
