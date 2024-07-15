@@ -120,7 +120,7 @@ class HybridIndexTestV1 : public testing::Test {
         std::vector<std::string> index_files;
 
         Config config;
-        config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
+        config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "1000";
 
@@ -135,7 +135,7 @@ class HybridIndexTestV1 : public testing::Test {
         }
 
         index::CreateIndexInfo index_info{};
-        index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
+        index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = type_;
 
         config["index_files"] = index_files;

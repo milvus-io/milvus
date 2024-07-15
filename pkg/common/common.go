@@ -121,9 +121,9 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IsSparseKey               = "is_sparse"
 	AutoIndexName             = "AUTOINDEX"
+	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 )
 
 //  Collection properties key

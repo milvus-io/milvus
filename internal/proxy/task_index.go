@@ -149,8 +149,9 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 	if exist && specifyIndexType != "" {
-		_, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
-		if err != nil {
+		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
+		// not enable hybrid index for user, used in milvus internally
+		if err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
 			log.Ctx(cit.ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, specifyIndexType))
 			return merr.WrapErrParameterInvalid("valid index", fmt.Sprintf("invalid index type: %s", specifyIndexType))
 		}
@@ -158,17 +159,38 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool() || specifyIndexType == AutoIndexName || !exist {
-			if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
-			} else if typeutil.IsStringType(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
-			} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
-			} else {
-				return merr.WrapErrParameterInvalid("supported field",
-					fmt.Sprintf("create auto index on %s field is not supported", cit.fieldSchema.DataType.String()))
+		autoIndexEnable := Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
+
+		if autoIndexEnable || !exist || specifyIndexType == AutoIndexName {
+			getPrimitiveIndexType := func(dataType schemapb.DataType) string {
+				if typeutil.IsBoolType(dataType) {
+					return Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
+				} else if typeutil.IsIntegerType(dataType) {
+					return Params.AutoIndexConfig.ScalarIntIndexType.GetValue()
+				} else if typeutil.IsFloatingType(dataType) {
+					return Params.AutoIndexConfig.ScalarFloatIndexType.GetValue()
+				} else {
+					return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
+				}
 			}
+
+			indexType, err := func() (string, error) {
+				dataType := cit.fieldSchema.DataType
+				if typeutil.IsPrimitiveType(dataType) {
+					return getPrimitiveIndexType(dataType), nil
+				} else if typeutil.IsArrayType(dataType) {
+					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
+				} else {
+					return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
+				}
+			}()
+
+			if err != nil {
+				return merr.WrapErrParameterInvalid("supported field", err.Error())
+			}
+
+			indexParamsMap[common.IndexTypeKey] = indexType
+
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
@@ -368,7 +390,7 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
 
-	if indexType == indexparamcheck.IndexBitmap {
+	if indexType == indexparamcheck.IndexHybrid {
 		_, exist := indexParams[common.BitmapCardinalityLimitKey]
 		if !exist {
 			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()

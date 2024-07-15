@@ -42,6 +42,7 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
             return TantivyDataType::F64;
         }
 
+        case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
             return TantivyDataType::Keyword;
         }
@@ -152,7 +153,7 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
     AssertInfo(insert_files.has_value(), "insert_files were empty");
     auto field_datas =
         mem_file_manager_->CacheRawDataToMemory(insert_files.value());
-    build_index(field_datas);
+    BuildWithFieldData(field_datas);
 }
 
 template <typename T>
@@ -173,7 +174,7 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
-    build_index(field_datas);
+    BuildWithFieldData(field_datas);
 }
 
 template <typename T>
@@ -185,7 +186,17 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
-    disk_file_manager_->CacheIndexToDisk(index_files.value());
+    auto files_value = index_files.value();
+    // need erase the index type file that has been readed
+    auto index_type_file =
+        disk_file_manager_->GetRemoteIndexPrefix() + std::string("/index_type");
+    files_value.erase(std::remove_if(files_value.begin(),
+                                     files_value.end(),
+                                     [&](const std::string& file) {
+                                         return file == index_type_file;
+                                     }),
+                      files_value.end());
+    disk_file_manager_->CacheIndexToDisk(files_value);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 
@@ -398,7 +409,7 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
 
 template <typename T>
 void
-InvertedIndexTantivy<T>::build_index(
+InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     switch (schema_.data_type()) {
         case proto::schema::DataType::Bool:
@@ -454,8 +465,9 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            assert(array_column[i].get_element_type() ==
-                   static_cast<DataType>(schema_.element_type()));
+            Assert(IsStringDataType(array_column[i].get_element_type()));
+            Assert(IsStringDataType(
+                static_cast<DataType>(schema_.element_type())));
             std::vector<std::string> output;
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
