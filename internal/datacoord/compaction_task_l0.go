@@ -382,22 +382,17 @@ func (t *l0CompactionTask) SaveTaskMeta() error {
 
 func (t *l0CompactionTask) saveSegmentMeta() error {
 	result := t.result
-	plan := t.GetPlan()
 	var operators []UpdateOperator
 	for _, seg := range result.GetSegments() {
 		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
 	}
 
-	levelZeroSegments := lo.Filter(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return b.GetLevel() == datapb.SegmentLevel_L0
-	})
-
-	for _, seg := range levelZeroSegments {
-		operators = append(operators, UpdateStatusOperator(seg.GetSegmentID(), commonpb.SegmentState_Dropped), UpdateCompactedOperator(seg.GetSegmentID()))
+	for _, segID := range t.InputSegments {
+		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
-		zap.Int64("planID", plan.GetPlanID()),
+		zap.Int64("planID", t.GetPlanID()),
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)
