@@ -429,6 +429,9 @@ dataCoord:
     maxSize: 1024 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.12
+    # segment seal proportion jitter ratio, default value 0.1(10%), 
+    # if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
+    sealProportionJitter: 0.1 #
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
