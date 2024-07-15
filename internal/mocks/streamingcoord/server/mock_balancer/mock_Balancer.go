@@ -141,8 +141,8 @@ func (_c *MockBalancer_Trigger_Call) RunAndReturn(run func(context.Context) erro
 	return _c
 }
 
-// WatchBalanceResult provides a mock function with given fields: ctx, cb
-func (_m *MockBalancer) WatchBalanceResult(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+// WatchChannelAssignments provides a mock function with given fields: ctx, cb
+func (_m *MockBalancer) WatchChannelAssignments(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
 	ret := _m.Called(ctx, cb)
 
 	var r0 error
@@ -155,31 +155,31 @@ func (_m *MockBalancer) WatchBalanceResult(ctx context.Context, cb func(typeutil
 	return r0
 }
 
-// MockBalancer_WatchBalanceResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchBalanceResult'
-type MockBalancer_WatchBalanceResult_Call struct {
+// MockBalancer_WatchChannelAssignments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchChannelAssignments'
+type MockBalancer_WatchChannelAssignments_Call struct {
 	*mock.Call
 }
 
-// WatchBalanceResult is a helper method to define mock.On call
+// WatchChannelAssignments is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cb func(typeutil.VersionInt64Pair , []types.PChannelInfoAssigned) error
-func (_e *MockBalancer_Expecter) WatchBalanceResult(ctx interface{}, cb interface{}) *MockBalancer_WatchBalanceResult_Call {
-	return &MockBalancer_WatchBalanceResult_Call{Call: _e.mock.On("WatchBalanceResult", ctx, cb)}
+func (_e *MockBalancer_Expecter) WatchChannelAssignments(ctx interface{}, cb interface{}) *MockBalancer_WatchChannelAssignments_Call {
+	return &MockBalancer_WatchChannelAssignments_Call{Call: _e.mock.On("WatchChannelAssignments", ctx, cb)}
 }
 
-func (_c *MockBalancer_WatchBalanceResult_Call) Run(run func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error)) *MockBalancer_WatchBalanceResult_Call {
+func (_c *MockBalancer_WatchChannelAssignments_Call) Run(run func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error)) *MockBalancer_WatchChannelAssignments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error))
 	})
 	return _c
 }
 
-func (_c *MockBalancer_WatchBalanceResult_Call) Return(_a0 error) *MockBalancer_WatchBalanceResult_Call {
+func (_c *MockBalancer_WatchChannelAssignments_Call) Return(_a0 error) *MockBalancer_WatchChannelAssignments_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockBalancer_WatchBalanceResult_Call) RunAndReturn(run func(context.Context, func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error) *MockBalancer_WatchBalanceResult_Call {
+func (_c *MockBalancer_WatchChannelAssignments_Call) RunAndReturn(run func(context.Context, func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error) *MockBalancer_WatchChannelAssignments_Call {
 	_c.Call.Return(run)
 	return _c
 }

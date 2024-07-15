@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type scannerRegistry struct {
 	channel     types.PChannelInfo
-	idAllocator *util.IDAllocator
+	idAllocator *typeutil.IDAllocator
 }
 
 // AllocateScannerName a scanner name for a scanner.

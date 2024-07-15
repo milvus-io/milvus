@@ -17,7 +17,7 @@ func TestInit(t *testing.T) {
 		Init(OptETCD(&clientv3.Client{}))
 	})
 	assert.Panics(t, func() {
-		Init(OptETCD(&clientv3.Client{}))
+		Init(OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
 	})
 	Init(OptETCD(&clientv3.Client{}), OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
 

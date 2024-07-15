@@ -108,6 +108,7 @@ go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/importutilv2/..." -f
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/initcore/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/cgo/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()
@@ -163,6 +164,13 @@ function test_cmd()
 go test -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
+function test_streaming()
+{
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+}
+
 function test_all()
 {
 test_proxy
@@ -181,6 +189,7 @@ test_util
 test_pkg
 test_metastore
 test_cmd
+test_streaming
 }
 
 
@@ -236,6 +245,9 @@ case "${TEST_TAG}" in
         ;;
     cmd)
 	test_cmd
+        ;;
+    streaming)
+	test_streaming
         ;;
     *)   echo "Test All";
 	test_all

@@ -14,8 +14,8 @@ var _ Balancer = (*balancerImpl)(nil)
 // Balancer is a local component, it should promise all channel can be assigned, and reach the final consistency.
 // Balancer should be thread safe.
 type Balancer interface {
-	// WatchBalanceResult watches the balance result.
-	WatchBalanceResult(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error
+	// WatchChannelAssignments watches the balance result.
+	WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error
 
 	// MarkAsAvailable marks the pchannels as available, and trigger a rebalance.
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
