@@ -443,6 +443,9 @@ dataCoord:
     # The max number of binlog file for one segment, the segment will be sealed if
     # the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
+    # The size threshold in MB, if the total size of growing segments
+    # exceeds this threshold, the largest growing segment will be sealed.
+    totalGrowingSizeThresholdInMB: 4096
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     # A compaction will happen on small segments if the segment after compaction will have
