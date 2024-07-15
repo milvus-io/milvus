@@ -275,7 +275,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	for _, segInfo := range sealedSegments {
 		// TODO should allow parallel executing of l0 compaction
 		if segInfo.isCompacting {
-			log.Info("l0 compaction candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
+			log.Warn("l0CompactionTask candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
 			return nil, merr.WrapErrCompactionPlanConflict(fmt.Sprintf("segment %d is compacting", segInfo.GetID()))
 		}
 	}
@@ -292,7 +292,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	})
 
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-	log.Info("Compaction handler refreshed level zero compaction plan",
+	log.Info("l0CompactionTask refreshed level zero compaction plan",
 		zap.Any("target position", t.GetPos()),
 		zap.Any("target segments count", len(sealedSegBinlogs)))
 	return plan, nil

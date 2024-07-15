@@ -549,12 +549,20 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {
+		// Conflict is normal
+		if errors.Is(err, merr.ErrCompactionPlanConflict) {
+			log.RatedInfo(60, "Failed to create compaction task, compaction plan conflict", zap.Error(err))
+		} else {
+			log.Warn("Failed to create compaction task, unable to create compaction task", zap.Error(err))
+		}
 		return err
 	}
+
 	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
+		log.Warn("Failed to enqueue compaction task, unable to save task meta", zap.Error(err))
 		return err
 	}
 	c.submitTask(t)
@@ -608,7 +616,7 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 	for _, t := range tasks {
 		nodeID := c.pickAnyNode(slots)
 		if nodeID == NullNodeID {
-			log.Info("cannot find datanode for compaction task",
+			log.Info("compactionHandler cannot find datanode for compaction task",
 				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()))
 			continue
 		}
