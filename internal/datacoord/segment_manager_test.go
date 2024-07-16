@@ -75,7 +75,7 @@ func TestManagerOptions(t *testing.T) {
 		opt := withSegmentSealPolices(defaultSegmentSealPolicy()...)
 		assert.NotNil(t, opt)
 		// manual set nil
-		segmentManager.segmentSealPolicies = []segmentSealPolicy{}
+		segmentManager.segmentSealPolicies = []SegmentSealPolicy{}
 		opt.apply(segmentManager)
 		assert.True(t, len(segmentManager.segmentSealPolicies) > 0)
 	})
@@ -654,7 +654,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		// Not trigger seal
 		{
-			segmentManager.segmentSealPolicies = []segmentSealPolicy{sealL1SegmentByLifetime(2)}
+			segmentManager.segmentSealPolicies = []SegmentSealPolicy{sealL1SegmentByLifetime(2)}
 			segments := segmentManager.meta.segments.segments
 			assert.Equal(t, 1, len(segments))
 			for _, seg := range segments {
@@ -678,7 +678,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		// Trigger seal
 		{
-			segmentManager.segmentSealPolicies = []segmentSealPolicy{sealL1SegmentByBinlogFileNumber(2)}
+			segmentManager.segmentSealPolicies = []SegmentSealPolicy{sealL1SegmentByBinlogFileNumber(2)}
 			segments := segmentManager.meta.segments.segments
 			assert.Equal(t, 1, len(segments))
 			for _, seg := range segments {

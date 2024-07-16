@@ -179,10 +179,10 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	// check primaryFieldData whether autoID is true or not
-	// only allow support autoID == false
+	// use the passed pk as new pk when autoID == false
+	// automatic generate pk as new pk wehen autoID == true
 	var err error
-	it.result.IDs, err = checkPrimaryFieldData(it.schema.CollectionSchema, it.result, it.upsertMsg.InsertMsg, false)
+	it.result.IDs, err = checkPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg, false)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
