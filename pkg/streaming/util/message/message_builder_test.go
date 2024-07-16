@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
@@ -25,13 +24,13 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 21, mutableMessage.EstimateSize())
+	assert.Equal(t, 24, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
-	tt, n := proto.DecodeVarint([]byte(v))
+	tt, err := message.DecodeUint64(v)
 	assert.Equal(t, uint64(123), tt)
-	assert.Equal(t, len([]byte(v)), n)
+	assert.NoError(t, err)
 
 	lcMsgID := mock_message.NewMockMessageID(t)
 	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
@@ -54,7 +53,7 @@ func TestMessage(t *testing.T) {
 		[]byte("payload"),
 		map[string]string{
 			"key": "value",
-			"_t":  "1",
+			"_t":  "1200",
 			"_tt": message.EncodeUint64(456),
 			"_v":  "1",
 			"_lc": "lcMsgID",
@@ -67,7 +66,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 36, immutableMessage.EstimateSize())
+	assert.Equal(t, 39, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(1), immutableMessage.Version())
 	assert.Equal(t, uint64(456), immutableMessage.TimeTick())
 	assert.NotNil(t, immutableMessage.LastConfirmedMessageID())
@@ -77,7 +76,7 @@ func TestMessage(t *testing.T) {
 		[]byte("payload"),
 		map[string]string{
 			"key": "value",
-			"_t":  "1",
+			"_t":  "1200",
 		})
 
 	assert.True(t, immutableMessage.MessageID().EQ(msgID))
@@ -87,7 +86,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 18, immutableMessage.EstimateSize())
+	assert.Equal(t, 21, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(0), immutableMessage.Version())
 	assert.Panics(t, func() {
 		immutableMessage.TimeTick()

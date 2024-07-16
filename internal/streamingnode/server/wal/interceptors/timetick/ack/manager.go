@@ -31,7 +31,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 	defer ta.mu.Unlock()
 
 	// allocate one from underlying allocator first.
-	ts, err := resource.Resource().TimestampAllocator().Allocate(ctx)
+	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 // Concurrent safe to call with Allocate.
 func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail, error) {
 	// local timestamp may out of date, sync the underlying allocator before get last all acknowledged.
-	resource.Resource().TimestampAllocator().Sync()
+	resource.Resource().TSOAllocator().Sync()
 
 	// Allocate may be uncalled in long term, and the recorder may be out of date.
 	// Do a Allocate and Ack, can sync up the recorder with internal timetick.TimestampAllocator latest time.

@@ -3,7 +3,7 @@
 
 package resource
 
-import "github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
+import "github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 
 // InitForTest initializes the singleton of resources for test.
 func InitForTest(opts ...optResourceInit) {
@@ -12,6 +12,6 @@ func InitForTest(opts ...optResourceInit) {
 		opt(r)
 	}
 	if r.rootCoordClient != nil {
-		r.timestampAllocator = timestamp.NewAllocator(r.rootCoordClient)
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
 	}
 }
