@@ -69,7 +69,7 @@ func (s *CompactionTaskSuite) TestClusteringCompactionSegmentMetaChange() {
 	}
 
 	task := &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:             1,
 			TriggerID:          19530,
 			CollectionID:       1,
@@ -96,7 +96,7 @@ func (s *CompactionTaskSuite) TestClusteringCompactionSegmentMetaChange() {
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
-	task.ResultSegments = []int64{103, 104}
+	task.pb.ResultSegments = []int64{103, 104}
 	// fake some compaction result segment
 	meta.AddSegment(context.TODO(), &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{

@@ -63,12 +63,12 @@ func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) error {
 	t := &mixCompactionTask{
-		CompactionTask: task,
-		meta:           h.meta,
+		pb:   task,
+		meta: h.meta,
 	}
 	alloc := &MockAllocator0{}
 	t.allocator = alloc
-	t.ResultSegments = []int64{100}
+	t.pb.ResultSegments = []int64{100}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err

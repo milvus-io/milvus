@@ -186,7 +186,6 @@ func (cit *createIndexTask) parseIndexParams() error {
 					return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 				}
 			}()
-
 			if err != nil {
 				return merr.WrapErrParameterInvalid("supported field", err.Error())
 			}

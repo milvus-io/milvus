@@ -62,7 +62,7 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		}}
 	}).Times(2)
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:        1,
 			TriggerID:     19530,
 			CollectionID:  1,
@@ -94,7 +94,7 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		return nil
 	}).Once()
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			InputSegments: []int64{102},
 			PlanID:        1,
 			TriggerID:     19530,
@@ -131,7 +131,7 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(nil).Once()
 
 	task := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:        1,
 			TriggerID:     19530,
 			CollectionID:  1,
@@ -180,7 +180,7 @@ func (s *CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 
 func generateTestL0Task(state datapb.CompactionTaskState) *l0CompactionTask {
 	return &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:        1,
 			TriggerID:     19530,
 			CollectionID:  1,
@@ -203,17 +203,17 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 
 	s.Run("test pipelining needReassignNodeID", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.NodeID = NullNodeID
+		t.pb.NodeID = NullNodeID
 		t.allocator = alloc
 		got := t.Process()
 		s.False(got)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.State)
-		s.EqualValues(NullNodeID, t.NodeID)
+		s.Equal(datapb.CompactionTaskState_pipelining, t.pb.GetState())
+		s.EqualValues(NullNodeID, t.pb.GetNodeID())
 	})
 
 	s.Run("test pipelining BuildCompactionRequest failed", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.NodeID = 100
+		t.pb.NodeID = 100
 		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
@@ -246,12 +246,12 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_failed, t.State)
+		s.Equal(datapb.CompactionTaskState_failed, t.pb.GetState())
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.NodeID = 100
+		t.pb.NodeID = 100
 		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
@@ -280,19 +280,19 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 
 		t.sessions = s.mockSessMgr
 		s.mockSessMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
-			s.Require().EqualValues(t.NodeID, nodeID)
+			s.Require().EqualValues(t.pb.GetNodeID(), nodeID)
 			return errors.New("mock error")
 		})
 
 		got := t.Process()
 		s.False(got)
-		s.Equal(datapb.CompactionTaskState_pipelining, t.State)
-		s.EqualValues(NullNodeID, t.NodeID)
+		s.Equal(datapb.CompactionTaskState_pipelining, t.pb.GetState())
+		s.EqualValues(NullNodeID, t.pb.GetNodeID())
 	})
 
 	s.Run("test pipelining success", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		t.NodeID = 100
+		t.pb.NodeID = 100
 		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
@@ -321,12 +321,12 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 
 		t.sessions = s.mockSessMgr
 		s.mockSessMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
-			s.Require().EqualValues(t.NodeID, nodeID)
+			s.Require().EqualValues(t.pb.GetNodeID(), nodeID)
 			return nil
 		})
 
 		got := t.Process()
 		s.False(got)
-		s.Equal(datapb.CompactionTaskState_executing, t.State)
+		s.Equal(datapb.CompactionTaskState_executing, t.pb.GetState())
 	})
 }
