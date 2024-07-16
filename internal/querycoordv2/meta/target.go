@@ -128,6 +128,27 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 	}
 }
 
+// this impl won't compare channel's cp
+func (p *CollectionTarget) Equal(other *CollectionTarget) bool {
+	if len(p.dmChannels) != len(other.dmChannels) || len(p.segments) != len(other.segments) {
+		return false
+	}
+
+	for chName := range other.dmChannels {
+		if _, ok := p.dmChannels[chName]; !ok {
+			return false
+		}
+	}
+
+	for sid := range other.segments {
+		if _, ok := p.segments[sid]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
 	return p.segments
 }

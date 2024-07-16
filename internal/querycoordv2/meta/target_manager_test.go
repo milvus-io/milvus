@@ -178,6 +178,11 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget() {
 	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]),
 		suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+
+	// try to update current target with same segments and channels
+	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
+	suite.ErrorIs(err, merr.ErrCollectionTargetNotChanged)
+	suite.Nil(suite.mgr.next.getCollectionTarget(collectionID))
 }
 
 func (suite *TargetManagerSuite) TestUpdateNextTarget() {

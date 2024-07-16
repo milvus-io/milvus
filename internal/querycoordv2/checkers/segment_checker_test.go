@@ -266,11 +266,13 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
+		Version:  common.Version,
 	}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   2,
 		Address:  "localhost",
 		Hostname: "localhost",
+		Version:  common.Version,
 	}))
 	checker.meta.ResourceManager.HandleNodeUp(1)
 	checker.meta.ResourceManager.HandleNodeUp(2)
@@ -299,7 +301,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
+	view.Version = checker.targetMgr.GetCollectionTargetVersion(int64(1), meta.CurrentTargetFirst)
+	checker.dist.LeaderViewManager.Update(2, view)
 
 	// seg l0 segment exist on a non delegator node
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
