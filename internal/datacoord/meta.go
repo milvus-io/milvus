@@ -447,55 +447,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	return info
 }
 
-// GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-// func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
-// 	m.RLock()
-// 	defer m.RUnlock()
-// 	collectionBinlogSize := make(map[UniqueID]int64)
-// 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
-// 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
-// 	segments := m.segments.GetSegments()
-// 	var total int64
-// 	for _, segment := range segments {
-// 		segmentSize := segment.getSegmentSize()
-// 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
-// 			total += segmentSize
-// 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
-
-// 			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
-// 			if !ok {
-// 				partBinlogSize = make(map[int64]int64)
-// 				partitionBinlogSize[segment.GetCollectionID()] = partBinlogSize
-// 			}
-// 			partBinlogSize[segment.GetPartitionID()] += segmentSize
-
-// 			coll, ok := m.collections[segment.GetCollectionID()]
-// 			if ok {
-// 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-// 					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
-// 			} else {
-// 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
-// 			}
-
-// 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
-// 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
-// 			}
-// 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
-// 		}
-// 	}
-
-// 	metrics.DataCoordNumStoredRows.Reset()
-// 	for collectionID, statesRows := range collectionRowsNum {
-// 		for state, rows := range statesRows {
-// 			coll, ok := m.collections[collectionID]
-// 			if ok {
-// 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
-// 			}
-// 		}
-// 	}
-// 	return total, collectionBinlogSize, partitionBinlogSize
-// }
-
 // GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
 func (m *meta) GetCollectionIndexFilesSize() uint64 {
 	m.RLock()

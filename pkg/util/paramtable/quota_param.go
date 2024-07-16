@@ -1866,7 +1866,7 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 		Doc:          "switch to enable l0 segment row count quota",
 		Export:       true,
 	}
-	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
+	p.L0SegmentRowCountProtectionEnabled.Init(base.mgr)
 
 	p.L0SegmentRowCountLowWaterLevel = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.lowWaterLevel",
@@ -1875,9 +1875,9 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 		Doc:          "l0 segment row count quota, low water level",
 		Export:       true,
 	}
-	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
+	p.L0SegmentRowCountLowWaterLevel.Init(base.mgr)
 
-	p.L0SegmentRowCountLowWaterLevel = ParamItem{
+	p.L0SegmentRowCountHighWaterLevel = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.highWaterLevel",
 		Version:      "2.4.7",
 		DefaultValue: "65536",
