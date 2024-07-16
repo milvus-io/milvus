@@ -538,8 +538,8 @@ func (deser *DeserializeReader[T]) Next() error {
 		deser.pos = 0
 		deser.rec = deser.rr.Record()
 
-		// allocate new slice preventing overwrite previous batch
 		deser.values = make([]T, deser.rec.Len())
+
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return err
 		}

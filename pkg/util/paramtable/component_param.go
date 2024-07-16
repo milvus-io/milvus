@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package paramtable
 
@@ -64,16 +69,18 @@ type ComponentParam struct {
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
-	RootCoordCfg  rootCoordConfig
-	ProxyCfg      proxyConfig
-	QueryCoordCfg queryCoordConfig
-	QueryNodeCfg  queryNodeConfig
-	DataCoordCfg  dataCoordConfig
-	DataNodeCfg   dataNodeConfig
-	IndexNodeCfg  indexNodeConfig
-	HTTPCfg       httpConfig
-	LogCfg        logConfig
-	RoleCfg       roleConfig
+	RootCoordCfg      rootCoordConfig
+	ProxyCfg          proxyConfig
+	QueryCoordCfg     queryCoordConfig
+	QueryNodeCfg      queryNodeConfig
+	DataCoordCfg      dataCoordConfig
+	DataNodeCfg       dataNodeConfig
+	IndexNodeCfg      indexNodeConfig
+	HTTPCfg           httpConfig
+	LogCfg            logConfig
+	RoleCfg           roleConfig
+	StreamingCoordCfg streamingCoordConfig
+	StreamingNodeCfg  streamingNodeConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -125,6 +132,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
 	p.GpuConfig.init(bt)
+	p.StreamingCoordCfg.init(bt)
+	p.StreamingNodeCfg.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -1325,17 +1334,17 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.CacheSize = ParamItem{
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
-		DefaultValue: "10240",
-		Doc:          "Size of log of memory cache, in B. (Close write cache if szie was 0",
+		DefaultValue: "0",
+		Doc:          "Size of log of write cache, in B. (Close write cache if size was 0",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
 
 	p.AccessLog.CacheFlushInterval = ParamItem{
-		Key:          "proxy.accessLog.cacheSize",
+		Key:          "proxy.accessLog.cacheFlushInterval",
 		Version:      "2.4.0",
 		DefaultValue: "3",
-		Doc:          "time interval of auto flush memory cache, in Seconds. (Close auto flush if interval was 0)",
+		Doc:          "time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)",
 	}
 	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
@@ -1550,6 +1559,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1783,6 +1793,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GrowingRowCountWeight.Init(base.mgr)
+
+	p.DelegatorMemoryOverloadFactor = ParamItem{
+		Key:          "queryCoord.delegatorMemoryOverloadFactor",
+		Version:      "2.3.19",
+		DefaultValue: "0.3",
+		PanicIfEmpty: true,
+		Doc:          "the factor of delegator overloaded memory",
+		Export:       true,
+	}
+	p.DelegatorMemoryOverloadFactor.Init(base.mgr)
 
 	p.BalanceCostThreshold = ParamItem{
 		Key:          "queryCoord.balanceCostThreshold",
@@ -2844,6 +2864,7 @@ type dataCoordConfig struct {
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
+	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
 	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
@@ -2851,6 +2872,7 @@ type dataCoordConfig struct {
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
+	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -3018,6 +3040,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
+
+	p.SegmentSealProportionJitter = ParamItem{
+		Key:          "dataCoord.segment.sealProportionJitter",
+		Version:      "2.4.6",
+		DefaultValue: "0.1",
+		Doc:          "segment seal proportion jitter ratio, default value 0.1(10%), if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%",
+		Export:       true,
+	}
+	p.SegmentSealProportionJitter.Init(base.mgr)
 
 	p.SegAssignmentExpiration = ParamItem{
 		Key:          "dataCoord.segment.assignmentExpiration",
@@ -3586,6 +3617,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.SegmentFlushInterval = ParamItem{
+		Key:          "dataCoord.segmentFlushInterval",
+		Version:      "2.4.6",
+		DefaultValue: "2",
+		Doc:          "the minimal interval duration(unit: Seconds) between flusing operation on same segment",
+		Export:       true,
+	}
+	p.SegmentFlushInterval.Init(base.mgr)
 
 	p.FilesPerPreImportTask = ParamItem{
 		Key:          "dataCoord.import.filesPerPreImportTask",
@@ -4166,6 +4206,46 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Doc:          "seconds. force stop node without graceful stop",
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+}
+
+type streamingCoordConfig struct {
+	AutoBalanceTriggerInterval        ParamItem `refreshable:"true"`
+	AutoBalanceBackoffInitialInterval ParamItem `refreshable:"true"`
+	AutoBalanceBackoffMultiplier      ParamItem `refreshable:"true"`
+}
+
+func (p *streamingCoordConfig) init(base *BaseTable) {
+	p.AutoBalanceTriggerInterval = ParamItem{
+		Key:     "streamingCoord.autoBalanceTriggerInterval",
+		Version: "2.5.0",
+		Doc: `The interval of balance task trigger at background, 1 min by default. 
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		DefaultValue: "1m",
+		Export:       true,
+	}
+	p.AutoBalanceTriggerInterval.Init(base.mgr)
+	p.AutoBalanceBackoffInitialInterval = ParamItem{
+		Key:     "streamingCoord.autoBalanceBackoffInitialInterval",
+		Version: "2.5.0",
+		Doc: `The initial interval of balance task trigger backoff, 50 ms by default. 
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		DefaultValue: "50ms",
+		Export:       true,
+	}
+	p.AutoBalanceBackoffInitialInterval.Init(base.mgr)
+	p.AutoBalanceBackoffMultiplier = ParamItem{
+		Key:          "streamingCoord.autoBalanceBackoffMultiplier",
+		Version:      "2.5.0",
+		Doc:          "The multiplier of balance task trigger backoff, 2 by default",
+		DefaultValue: "2",
+		Export:       true,
+	}
+	p.AutoBalanceBackoffMultiplier.Init(base.mgr)
+}
+
+type streamingNodeConfig struct{}
+
+func (p *streamingNodeConfig) init(base *BaseTable) {
 }
 
 type runtimeConfig struct {

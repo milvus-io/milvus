@@ -80,21 +80,21 @@ func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (e
 
 // GetAvailableWAL returns a available wal instance for the channel.
 // Return nil if the wal instance is not found.
-func (m *managerImpl) GetAvailableWAL(channelName string, term int64) (wal.WAL, error) {
+func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
 	// reject operation if manager is closing.
 	if m.lifetime.Add(lifetime.IsWorking) != nil {
 		return nil, status.NewOnShutdownError("wal manager is closed")
 	}
 	defer m.lifetime.Done()
 
-	l := m.getWALLifetime(channelName).GetWAL()
+	l := m.getWALLifetime(channel.Name).GetWAL()
 	if l == nil {
-		return nil, status.NewChannelNotExist(channelName)
+		return nil, status.NewChannelNotExist(channel.Name)
 	}
 
-	channelTerm := l.Channel().Term
-	if channelTerm != term {
-		return nil, status.NewUnmatchedChannelTerm(channelName, term, channelTerm)
+	currentTerm := l.Channel().Term
+	if currentTerm != channel.Term {
+		return nil, status.NewUnmatchedChannelTerm(channel.Name, channel.Term, currentTerm)
 	}
 	return l, nil
 }

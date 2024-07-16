@@ -90,6 +90,12 @@ CreateSearchPlanByExpr(const Schema& schema,
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
+std::unique_ptr<Plan>
+CreateSearchPlanFromPlanNode(const Schema& schema,
+                             const proto::plan::PlanNode& plan_node) {
+    return ProtoParser(schema).CreatePlan(plan_node);
+}
+
 std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,

@@ -226,7 +226,8 @@ proxy:
     localPath: /tmp/milvus_access
     filename:  # Log filename, leave empty to use stdout.
     maxSize: 64 # Max size for a single file, in MB.
-    cacheSize: 10240 # Size of log of memory cache, in B
+    cacheSize: 0 # Size of log write cache, in B
+    cacheFlushInterval: 3 # time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)
     rotatedTime: 0 # Max time for single access log file in seconds
     remotePath: access_log/ # File path in minIO
     remoteMaxTime: 0 # Max time for log file in minIO, in hours
@@ -428,6 +429,9 @@ dataCoord:
     maxSize: 1024 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.12
+    # segment seal proportion jitter ratio, default value 0.1(10%), 
+    # if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
+    sealProportionJitter: 0.1 #
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
@@ -447,6 +451,7 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
+    segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:

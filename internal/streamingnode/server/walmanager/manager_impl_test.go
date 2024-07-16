@@ -34,7 +34,7 @@ func TestManager(t *testing.T) {
 	m := newManager(opener)
 	channelName := "ch1"
 
-	l, err := m.GetAvailableWAL(channelName, 1)
+	l, err := m.GetAvailableWAL(types.PChannelInfo{Name: channelName, Term: 1})
 	assertErrorChannelNotExist(t, err)
 	assert.Nil(t, l)
 
@@ -45,7 +45,7 @@ func TestManager(t *testing.T) {
 	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 1})
 	assert.NoError(t, err)
 
-	l, err = m.GetAvailableWAL(channelName, 1)
+	l, err = m.GetAvailableWAL(types.PChannelInfo{Name: channelName, Term: 1})
 	assertErrorChannelNotExist(t, err)
 	assert.Nil(t, l)
 
@@ -53,7 +53,7 @@ func TestManager(t *testing.T) {
 		Name: channelName,
 		Term: 1,
 	})
-	assertErrorTermExpired(t, err)
+	assertErrorOperationIgnored(t, err)
 
 	err = m.Open(context.Background(), types.PChannelInfo{
 		Name: channelName,
@@ -62,13 +62,13 @@ func TestManager(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 1})
-	assertErrorTermExpired(t, err)
+	assertErrorOperationIgnored(t, err)
 
-	l, err = m.GetAvailableWAL(channelName, 1)
+	l, err = m.GetAvailableWAL(types.PChannelInfo{Name: channelName, Term: 1})
 	assertErrorTermExpired(t, err)
 	assert.Nil(t, l)
 
-	l, err = m.GetAvailableWAL(channelName, 2)
+	l, err = m.GetAvailableWAL(types.PChannelInfo{Name: channelName, Term: 2})
 	assert.NoError(t, err)
 	assert.NotNil(t, l)
 
@@ -101,7 +101,7 @@ func TestManager(t *testing.T) {
 	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 2})
 	assertShutdownError(t, err)
 
-	l, err = m.GetAvailableWAL(channelName, 2)
+	l, err = m.GetAvailableWAL(types.PChannelInfo{Name: channelName, Term: 2})
 	assertShutdownError(t, err)
 	assert.Nil(t, l)
 }

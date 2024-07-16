@@ -322,6 +322,10 @@ test-metastore:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t metastore)
 
+test-streaming:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t streaming)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -517,10 +521,10 @@ generate-mockery-chunk-manager: getdeps
 generate-mockery-pkg:
 	$(MAKE) -C pkg generate-mockery
 
-generate-mockery-streaming:
-	$(INSTALL_PATH)/mockery --config $(PWD)/internal/streamingservice/.mockery.yaml
+generate-mockery-internal:
+	$(INSTALL_PATH)/mockery --config $(PWD)/internal/.mockery.yaml
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-log
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"

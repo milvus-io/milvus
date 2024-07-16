@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -121,6 +123,7 @@ const (
 
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IsSparseKey               = "is_sparse"
+	AutoIndexName             = "AUTOINDEX"
 )
 
 //  Collection properties key
@@ -152,12 +155,17 @@ const (
 	DatabaseDiskQuotaKey        = "database.diskQuota.mb"
 	DatabaseMaxCollectionsKey   = "database.max.collections"
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
+
+	// collection level load properties
+	CollectionReplicaNumber  = "collection.replica.number"
+	CollectionResourceGroups = "collection.resource_groups"
 )
 
 // common properties
 const (
-	MmapEnabledKey    = "mmap.enabled"
-	LazyLoadEnableKey = "lazyload.enabled"
+	MmapEnabledKey           = "mmap.enabled"
+	LazyLoadEnableKey        = "lazyload.enabled"
+	PartitionKeyIsolationKey = "partitionkey.isolation"
 )
 
 const (
@@ -219,6 +227,31 @@ func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == PartitionKeyIsolationKey {
+			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse partition key isolation")
+			}
+			return val, nil
+		}
+	}
+	return false, nil
+}
+
+func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
+	val, ok := props[PartitionKeyIsolationKey]
+	if !ok {
+		return false, nil
+	}
+	iso, parseErr := strconv.ParseBool(val)
+	if parseErr != nil {
+		return false, errors.Wrap(parseErr, "failed to parse partition key isolation property")
+	}
+	return iso, nil
+}
+
 const (
 	// LatestVerision is the magic number for watch latest revision
 	LatestRevision = int64(-1)
@@ -257,4 +290,39 @@ func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error)
 	}
 
 	return nil, fmt.Errorf("database property not found: %s", DatabaseResourceGroups)
+}
+
+func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
+	for _, kv := range kvs {
+		if kv.Key == CollectionReplicaNumber {
+			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			}
+
+			return replicaNum, nil
+		}
+	}
+
+	return 0, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+}
+
+func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
+	for _, kv := range kvs {
+		if kv.Key == CollectionResourceGroups {
+			invalidPropValue := fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			if len(kv.Value) == 0 {
+				return nil, invalidPropValue
+			}
+
+			rgs := strings.Split(kv.Value, ",")
+			if len(rgs) == 0 {
+				return nil, invalidPropValue
+			}
+
+			return rgs, nil
+		}
+	}
+
+	return nil, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
 }

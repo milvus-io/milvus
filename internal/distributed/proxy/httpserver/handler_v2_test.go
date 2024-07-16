@@ -954,6 +954,7 @@ func TestMethodGet(t *testing.T) {
 
 var commonSuccessStatus = &commonpb.Status{
 	ErrorCode: commonpb.ErrorCode_Success,
+	Code:      merr.Code(nil),
 	Reason:    "",
 }
 

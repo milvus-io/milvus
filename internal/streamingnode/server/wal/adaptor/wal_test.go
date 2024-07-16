@@ -86,9 +86,8 @@ func (f *testOneWALFramework) Run() {
 	ctx := context.Background()
 	for ; f.term <= 3; f.term++ {
 		pChannel := types.PChannelInfo{
-			Name:     f.pchannel,
-			Term:     int64(f.term),
-			ServerID: 1,
+			Name: f.pchannel,
+			Term: int64(f.term),
 		}
 		w, err := f.opener.Open(ctx, &wal.OpenOption{
 			Channel: pChannel,
@@ -96,7 +95,6 @@ func (f *testOneWALFramework) Run() {
 		assert.NoError(f.t, err)
 		assert.NotNil(f.t, w)
 		assert.Equal(f.t, pChannel.Name, w.Channel().Name)
-		assert.Equal(f.t, pChannel.ServerID, w.Channel().ServerID)
 
 		f.testReadAndWrite(ctx, w)
 		// close the wal

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -63,6 +64,7 @@ func PruneSegments(ctx context.Context,
 	}
 
 	filteredSegments := make(map[UniqueID]struct{}, 0)
+	pruneType := "scalar"
 	// currently we only prune based on one column
 	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
@@ -84,6 +86,7 @@ func PruneSegments(ctx context.Context,
 		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
+		pruneType = "vector"
 	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
@@ -104,13 +107,23 @@ func PruneSegments(ctx context.Context,
 		// 2. prune segments by scalar field
 		targetSegmentStats := make([]storage.SegmentStats, 0, 32)
 		targetSegmentIDs := make([]int64, 0, 32)
-		for _, partID := range partitionIDs {
-			partStats := partitionStats[partID]
-			for segID, segStat := range partStats.SegmentStats {
-				targetSegmentIDs = append(targetSegmentIDs, segID)
-				targetSegmentStats = append(targetSegmentStats, segStat)
+		if len(partitionIDs) > 0 {
+			for _, partID := range partitionIDs {
+				partStats := partitionStats[partID]
+				for segID, segStat := range partStats.SegmentStats {
+					targetSegmentIDs = append(targetSegmentIDs, segID)
+					targetSegmentStats = append(targetSegmentStats, segStat)
+				}
+			}
+		} else {
+			for _, partStats := range partitionStats {
+				for segID, segStat := range partStats.SegmentStats {
+					targetSegmentIDs = append(targetSegmentIDs, segID)
+					targetSegmentStats = append(targetSegmentStats, segStat)
+				}
 			}
 		}
+
 		PruneByScalarField(expr, targetSegmentStats, targetSegmentIDs, filteredSegments)
 	}
 
@@ -118,6 +131,8 @@ func PruneSegments(ctx context.Context,
 	if len(filteredSegments) > 0 {
 		realFilteredSegments := 0
 		totalSegNum := 0
+		minSegmentCount := math.MaxInt
+		maxSegmentCount := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
 			totalSegNum += len(item.Segments)
@@ -131,11 +146,30 @@ func PruneSegments(ctx context.Context,
 			}
 			item.Segments = newSegments
 			sealedSegments[idx] = item
+			segmentCount := len(item.Segments)
+			if segmentCount > maxSegmentCount {
+				maxSegmentCount = segmentCount
+			}
+			if segmentCount < minSegmentCount {
+				minSegmentCount = segmentCount
+			}
 		}
+		bias := 1.0
+		if maxSegmentCount != 0 && minSegmentCount != math.MaxInt {
+			bias = float64(maxSegmentCount) / float64(minSegmentCount)
+		}
+		metrics.QueryNodeSegmentPruneBias.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(bias)
+
 		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
-			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
-			Observe(float64(filterRatio))
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				pruneType,
+			).Set(float64(filterRatio))
 		log.Ctx(ctx).Debug("Pruned segment for search/query",
 			zap.Int("filtered_segment_num[stats]", len(filteredSegments)),
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
@@ -144,8 +178,10 @@ func PruneSegments(ctx context.Context,
 		)
 	}
 
-	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(fmt.Sprint(collectionID),
-		fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
+	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(collectionID),
+		pruneType).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Ctx(ctx).Debug("Pruned segment for search/query",
 		zap.Duration("duration", tr.ElapseSpan()))

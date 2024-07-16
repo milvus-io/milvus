@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package paramtable
 
@@ -319,6 +324,8 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.checkExecutedFlagInterval", "200")
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
+
+		assert.Equal(t, 0.3, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -527,6 +534,18 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("indexnode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+	})
+
+	t.Run("test streamingCoordConfig", func(t *testing.T) {
+		assert.Equal(t, 1*time.Minute, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Millisecond, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 2.0, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
+		params.Save(params.StreamingCoordCfg.AutoBalanceTriggerInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.Key, "50s")
+		params.Save(params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.Key, "3.5")
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse())
+		assert.Equal(t, 50*time.Second, params.StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 3.5, params.StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {

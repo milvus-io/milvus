@@ -27,20 +27,14 @@ func TestStreamingError(t *testing.T) {
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_REQUEST_SEQ, pbErr.Code)
 
-	streamingErr = NewChannelExist("test")
-	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_CHANNEL_EXIST, cause: test")
-	assert.False(t, streamingErr.IsWrongStreamingNode())
-	pbErr = streamingErr.AsPBError()
-	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_EXIST, pbErr.Code)
-
 	streamingErr = NewChannelNotExist("test")
 	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_CHANNEL_NOT_EXIST, cause: test")
 	assert.True(t, streamingErr.IsWrongStreamingNode())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST, pbErr.Code)
 
-	streamingErr = NewUnmatchedChannelTerm("test")
-	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_UNMATCHED_CHANNEL_TERM, cause: test")
+	streamingErr = NewUnmatchedChannelTerm("test", 1, 2)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_UNMATCHED_CHANNEL_TERM, cause: channel test")
 	assert.True(t, streamingErr.IsWrongStreamingNode())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM, pbErr.Code)

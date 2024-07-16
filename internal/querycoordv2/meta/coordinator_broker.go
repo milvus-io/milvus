@@ -107,23 +107,48 @@ func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName st
 
 // try to get database level replica_num and resource groups, return (resource_groups, replica_num, error)
 func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error) {
-	// to do by weiliu1031: querycoord should cache mappings: collectionID->dbName
 	collectionInfo, err := broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
+	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
 	if err != nil {
-		return nil, 0, err
+		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+	} else if replicaNum > 0 {
+		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
 	}
-	replicaNum, err := common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
+
+	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.GetProperties())
 	if err != nil {
-		return nil, 0, err
+		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+	} else if len(rgs) > 0 {
+		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
 	}
-	rgs, err := common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
-	if err != nil {
-		return nil, 0, err
+
+	if replicaNum <= 0 || len(rgs) == 0 {
+		dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if replicaNum <= 0 {
+			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
+			if err != nil {
+				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+			} else if replicaNum > 0 {
+				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
+			}
+		}
+
+		if len(rgs) == 0 {
+			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
+			if err != nil {
+				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+			} else if len(rgs) > 0 {
+				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
+			}
+		}
 	}
 
 	return rgs, replicaNum, nil
