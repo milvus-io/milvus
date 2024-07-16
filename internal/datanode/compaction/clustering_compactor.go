@@ -831,6 +831,8 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 		zap.Int64("segID", seg.GetSegmentID()),
 		zap.Int64("row num", seg.GetNumOfRows()))
 
+	// reset
+	buffer.flushedRowNum.Store(0)
 	// set old writer nil
 	writer = nil
 	return nil
