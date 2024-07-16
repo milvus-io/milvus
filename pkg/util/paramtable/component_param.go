@@ -2409,8 +2409,12 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.mmap.fixedFileSizeForMmapAlloc",
 		Version:      "2.4.6",
 		DefaultValue: "64",
-		Doc:          "tmp file size for mmap chunk manager",
+		Doc:          "MB, tmp file size for mmap chunk manager",
 		Export:       true,
+		Formatter: func(v string) string {
+			fixedFileSizeForMmapManager := p.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
+			return strconv.FormatFloat(fixedFileSizeForMmapManager, 'f', 2, 64)
+		},
 	}
 	p.FixedFileSizeForMmapManager.Init(base.mgr)
 

@@ -22,7 +22,8 @@
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
-                 const MmapChunkDescriptorPtr& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const bool mem_not_need) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -55,6 +56,21 @@ ChunkCache::Read(const std::string& filepath,
     // other thread request same path shall get the future.
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
     auto column = Mmap(field_data->GetFieldData(), descriptor);
+    if (mem_not_need) {
+        auto ok = madvise(
+            reinterpret_cast<void*>(const_cast<char*>(column->MmappedData())),
+            column->ByteSize(),
+            ReadAheadPolicy_Map["dontneed"]);
+        if (ok != 0) {
+            LOG_WARN(
+                "failed to madvise to the data file {}, addr {}, size {}, err: "
+                "{}",
+                filepath,
+                column->MmappedData(),
+                column->ByteSize(),
+                strerror(errno));
+        }
+    }
 
     // set promise value to notify the future
     lck.lock();
