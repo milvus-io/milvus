@@ -22,10 +22,10 @@ func RegisterMessageIDUnmsarshaler(name string, unmarshaler MessageIDUnmarshaler
 }
 
 // MessageIDUnmarshaler is the unmarshaler for message id.
-type MessageIDUnmarshaler = func(b []byte) (MessageID, error)
+type MessageIDUnmarshaler = func(b string) (MessageID, error)
 
 // UnmsarshalMessageID unmarshal the message id.
-func UnmarshalMessageID(name string, b []byte) (MessageID, error) {
+func UnmarshalMessageID(name string, b string) (MessageID, error) {
 	unmarshaler, ok := messageIDUnmarshaler.Get(name)
 	if !ok {
 		panic("MessageID Unmarshaler not registered: " + name)
@@ -48,5 +48,5 @@ type MessageID interface {
 	EQ(MessageID) bool
 
 	// Marshal marshal the message id.
-	Marshal() []byte
+	Marshal() string
 }

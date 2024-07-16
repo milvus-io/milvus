@@ -52,8 +52,8 @@ func TestDeliverPolicy(t *testing.T) {
 	assert.Equal(t, policy.Policy(), policy2.Policy())
 
 	msgID := mock_message.NewMockMessageID(t)
-	msgID.EXPECT().Marshal().Return([]byte("mock"))
-	message.RegisterMessageIDUnmsarshaler("mock", func(b []byte) (message.MessageID, error) {
+	msgID.EXPECT().Marshal().Return("mock")
+	message.RegisterMessageIDUnmsarshaler("mock", func(b string) (message.MessageID, error) {
 		return msgID, nil
 	})
 

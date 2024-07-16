@@ -43,6 +43,8 @@ func (r *watchBasedGRPCResolver) Close() {
 	r.lifetime.Close()
 }
 
+// Update updates the state of the resolver.
+// Return error if the resolver is closed.
 func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 	if r.lifetime.Add(lifetime.IsWorking) != nil {
 		return errors.New("resolver is closed")
@@ -50,8 +52,9 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 	defer r.lifetime.Done()
 
 	if err := r.cc.UpdateState(state.State); err != nil {
-		// watch based resolver could ignore the error.
+		// watch based resolver could ignore the error, just log and return nil
 		r.logger.Warn("fail to update resolver state", zap.Error(err))
+		return nil
 	}
 	r.logger.Info("update resolver state success", zap.Any("state", state.State))
 	return nil

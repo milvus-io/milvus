@@ -21,7 +21,7 @@ func TestInit(t *testing.T) {
 	})
 	Init(OptETCD(&clientv3.Client{}), OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
 
-	assert.NotNil(t, Resource().TimestampAllocator())
+	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())
 	assert.NotNil(t, Resource().RootCoordClient())
 }

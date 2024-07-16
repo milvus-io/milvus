@@ -26,4 +26,6 @@ packages:
   github.com/milvus-io/milvus/pkg/streaming/util/types:
     interfaces:
       AssignmentDiscoverWatcher:
+      AssignmentRebalanceTrigger:
+
   

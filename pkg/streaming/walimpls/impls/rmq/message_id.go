@@ -1,11 +1,7 @@
 package rmq
 
 import (
-	"encoding/base64"
-
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
-	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
@@ -13,7 +9,7 @@ import (
 var _ message.MessageID = rmqID(0)
 
 // UnmarshalMessageID unmarshal the message id.
-func UnmarshalMessageID(data []byte) (message.MessageID, error) {
+func UnmarshalMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalMessageID(data)
 	if err != nil {
 		return nil, err
@@ -22,12 +18,12 @@ func UnmarshalMessageID(data []byte) (message.MessageID, error) {
 }
 
 // unmashalMessageID unmarshal the message id.
-func unmarshalMessageID(data []byte) (rmqID, error) {
-	v, n := proto.DecodeVarint(data)
-	if n <= 0 || n != len(data) {
-		return 0, errors.Wrapf(message.ErrInvalidMessageID, "rmqID: %s", base64.RawStdEncoding.EncodeToString(data))
+func unmarshalMessageID(data string) (rmqID, error) {
+	v, err := message.DecodeUint64(data)
+	if err != nil {
+		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode rmqID fail with err: %s, id: %s", err.Error(), data)
 	}
-	return rmqID(protowire.DecodeZigZag(v)), nil
+	return rmqID(v), nil
 }
 
 // rmqID is the message id for rmq.
@@ -54,6 +50,6 @@ func (id rmqID) EQ(other message.MessageID) bool {
 }
 
 // Marshal marshal the message id.
-func (id rmqID) Marshal() []byte {
-	return proto.EncodeVarint(protowire.EncodeZigZag(int64(id)))
+func (id rmqID) Marshal() string {
+	return message.EncodeInt64(int64(id))
 }

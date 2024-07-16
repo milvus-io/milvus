@@ -190,15 +190,15 @@ func (_c *MockMutableMessage_Payload_Call) RunAndReturn(run func() []byte) *Mock
 }
 
 // Properties provides a mock function with given fields:
-func (_m *MockMutableMessage) Properties() message.Properties {
+func (_m *MockMutableMessage) Properties() message.RProperties {
 	ret := _m.Called()
 
-	var r0 message.Properties
-	if rf, ok := ret.Get(0).(func() message.Properties); ok {
+	var r0 message.RProperties
+	if rf, ok := ret.Get(0).(func() message.RProperties); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(message.Properties)
+			r0 = ret.Get(0).(message.RProperties)
 		}
 	}
 
@@ -222,12 +222,12 @@ func (_c *MockMutableMessage_Properties_Call) Run(run func()) *MockMutableMessag
 	return _c
 }
 
-func (_c *MockMutableMessage_Properties_Call) Return(_a0 message.Properties) *MockMutableMessage_Properties_Call {
+func (_c *MockMutableMessage_Properties_Call) Return(_a0 message.RProperties) *MockMutableMessage_Properties_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockMutableMessage_Properties_Call) RunAndReturn(run func() message.Properties) *MockMutableMessage_Properties_Call {
+func (_c *MockMutableMessage_Properties_Call) RunAndReturn(run func() message.RProperties) *MockMutableMessage_Properties_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -357,6 +357,50 @@ func (_c *MockMutableMessage_WithTimeTick_Call) Return(_a0 message.MutableMessag
 }
 
 func (_c *MockMutableMessage_WithTimeTick_Call) RunAndReturn(run func(uint64) message.MutableMessage) *MockMutableMessage_WithTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithVChannel provides a mock function with given fields: vChannel
+func (_m *MockMutableMessage) WithVChannel(vChannel string) message.MutableMessage {
+	ret := _m.Called(vChannel)
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func(string) message.MutableMessage); ok {
+		r0 = rf(vChannel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithVChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithVChannel'
+type MockMutableMessage_WithVChannel_Call struct {
+	*mock.Call
+}
+
+// WithVChannel is a helper method to define mock.On call
+//   - vChannel string
+func (_e *MockMutableMessage_Expecter) WithVChannel(vChannel interface{}) *MockMutableMessage_WithVChannel_Call {
+	return &MockMutableMessage_WithVChannel_Call{Call: _e.mock.On("WithVChannel", vChannel)}
+}
+
+func (_c *MockMutableMessage_WithVChannel_Call) Run(run func(vChannel string)) *MockMutableMessage_WithVChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithVChannel_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithVChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithVChannel_Call) RunAndReturn(run func(string) message.MutableMessage) *MockMutableMessage_WithVChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

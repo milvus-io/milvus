@@ -4,8 +4,6 @@
 package walimplstest
 
 import (
-	"strconv"
-
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
@@ -17,7 +15,7 @@ func NewTestMessageID(id int64) message.MessageID {
 }
 
 // UnmarshalTestMessageID unmarshal the message id.
-func UnmarshalTestMessageID(data []byte) (message.MessageID, error) {
+func UnmarshalTestMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalTestMessageID(data)
 	if err != nil {
 		return nil, err
@@ -26,8 +24,8 @@ func UnmarshalTestMessageID(data []byte) (message.MessageID, error) {
 }
 
 // unmashalTestMessageID unmarshal the message id.
-func unmarshalTestMessageID(data []byte) (testMessageID, error) {
-	id, err := strconv.ParseInt(string(data), 10, 64)
+func unmarshalTestMessageID(data string) (testMessageID, error) {
+	id, err := message.DecodeInt64(data)
 	if err != nil {
 		return 0, err
 	}
@@ -58,6 +56,6 @@ func (id testMessageID) EQ(other message.MessageID) bool {
 }
 
 // Marshal marshal the message id.
-func (id testMessageID) Marshal() []byte {
-	return []byte(strconv.FormatInt(int64(id), 10))
+func (id testMessageID) Marshal() string {
+	return message.EncodeInt64(int64(id))
 }
