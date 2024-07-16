@@ -115,7 +115,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	}
 
 	task := &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:             1,
 			TriggerID:          19530,
 			CollectionID:       1,
@@ -141,7 +141,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
-	task.ResultSegments = []int64{103, 104}
+	task.pb.ResultSegments = []int64{103, 104}
 	// fake some compaction result segment
 	s.meta.AddSegment(context.TODO(), &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -190,7 +190,7 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask() *clusteringCompactio
 	}
 
 	task := &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:             1,
 			TriggerID:          19530,
 			CollectionID:       1,
@@ -215,14 +215,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessRetryLogic() {
 	task.maxRetryTimes = 3
 	// process pipelining fail
 	s.Equal(false, task.Process())
-	s.Equal(int32(1), task.RetryTimes)
+	s.Equal(int32(1), task.pb.RetryTimes)
 	s.Equal(false, task.Process())
-	s.Equal(int32(2), task.RetryTimes)
+	s.Equal(int32(2), task.pb.RetryTimes)
 	s.Equal(false, task.Process())
-	s.Equal(int32(3), task.RetryTimes)
+	s.Equal(int32(3), task.pb.RetryTimes)
 	s.Equal(datapb.CompactionTaskState_pipelining, task.GetState())
 	s.Equal(false, task.Process())
-	s.Equal(int32(0), task.RetryTimes)
+	s.Equal(int32(0), task.pb.RetryTimes)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 }
 
@@ -251,7 +251,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStateChange() {
 	})
 
 	s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	task.State = datapb.CompactionTaskState_pipelining
+	task.pb.State = datapb.CompactionTaskState_pipelining
 	s.Equal(false, task.Process())
 	s.Equal(datapb.CompactionTaskState_executing, task.GetState())
 
@@ -263,7 +263,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStateChange() {
 	// repipelining
 	s.Equal(false, task.Process())
 	s.Equal(datapb.CompactionTaskState_pipelining, task.GetState())
-	task.NodeID = 1
+	task.pb.NodeID = 1
 	s.Equal(false, task.Process())
 	s.Equal(datapb.CompactionTaskState_executing, task.GetState())
 
@@ -309,7 +309,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 	})
 	task := s.generateBasicTask()
 	s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrDataNodeSlotExhausted())
-	task.State = datapb.CompactionTaskState_pipelining
+	task.pb.State = datapb.CompactionTaskState_pipelining
 	s.NoError(task.doCompact())
 	s.Equal(int64(NullNodeID), task.GetNodeID())
 }

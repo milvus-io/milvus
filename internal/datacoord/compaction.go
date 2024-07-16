@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -407,9 +408,9 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(task)
-					log.Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
+					log.Info("drop compaction task meta", zap.Int64("planID", task.GetPlanID()))
 					if err != nil {
-						log.Warn("fail to drop task", zap.Int64("planID", task.PlanID), zap.Error(err))
+						log.Warn("fail to drop task", zap.Int64("planID", task.GetPlanID()), zap.Error(err))
 					}
 				}
 			}
@@ -561,8 +562,6 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 		}
 		return err
 	}
-
-	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
@@ -575,27 +574,29 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 }
 
 // set segments compacting, one segment can only participate one compactionTask
-func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
+func (c *compactionPlanHandler) createCompactTask(pb *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
-	switch t.GetType() {
+	pbCloned := proto.Clone(pb).(*datapb.CompactionTask)
+	pbCloned.StartTime = time.Now().Unix()
+	switch pb.GetType() {
 	case datapb.CompactionType_MixCompaction:
 		task = &mixCompactionTask{
-			CompactionTask: t,
-			meta:           c.meta,
-			sessions:       c.sessions,
+			pb:       pbCloned,
+			meta:     c.meta,
+			sessions: c.sessions,
 		}
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = &l0CompactionTask{
-			CompactionTask: t,
-			meta:           c.meta,
-			sessions:       c.sessions,
+			pb:       pbCloned,
+			meta:     c.meta,
+			sessions: c.sessions,
 		}
 	case datapb.CompactionType_ClusteringCompaction:
-		task = newClusteringCompactionTask(t, c.meta, c.sessions, c.handler, c.analyzeScheduler)
+		task = newClusteringCompactionTask(pbCloned, c.meta, c.sessions, c.handler, c.analyzeScheduler)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
-	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(t.GetInputSegments())
+	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(pbCloned.GetInputSegments())
 	if !exist {
 		return nil, merr.WrapErrIllegalCompactionPlan("segment not exist")
 	}

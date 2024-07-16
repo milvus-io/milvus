@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestCompactionPlanHandlerSuite(t *testing.T) {
@@ -66,7 +64,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
 func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	ret := []CompactionTask{
 		&mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  1,
 				Type:    datapb.CompactionType_MixCompaction,
 				State:   datapb.CompactionTaskState_pipelining,
@@ -78,7 +76,7 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 			meta:     s.mockMeta,
 		},
 		&mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  2,
 				Type:    datapb.CompactionType_MixCompaction,
 				State:   datapb.CompactionTaskState_pipelining,
@@ -90,7 +88,7 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 			meta:     s.mockMeta,
 		},
 		&mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  3,
 				Type:    datapb.CompactionType_MixCompaction,
 				State:   datapb.CompactionTaskState_pipelining,
@@ -102,7 +100,7 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 			meta:     s.mockMeta,
 		},
 		&mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  4,
 				Type:    datapb.CompactionType_Level0DeleteCompaction,
 				State:   datapb.CompactionTaskState_pipelining,
@@ -128,7 +126,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 	}{
 		{"with L0 tasks diff channel", []CompactionTask{
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  10,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -140,7 +138,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -154,7 +152,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []CompactionTask{
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -166,7 +164,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 				meta:     s.mockMeta,
 			},
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  10,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -180,7 +178,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 		}, []UniqueID{10}},
 		{"without L0 tasks", []CompactionTask{
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  14,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -192,7 +190,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -238,7 +236,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 	}{
 		{"with L0 tasks diff channel", []CompactionTask{
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  10,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -250,7 +248,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -264,7 +262,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []CompactionTask{
 			&l0CompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  10,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -276,7 +274,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -288,7 +286,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
@@ -302,7 +300,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 		}, []UniqueID{10, 13}},
 		{"without L0 tasks", []CompactionTask{
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  14,
 					Type:    datapb.CompactionType_MixCompaction,
 					Channel: "ch-3",
@@ -313,7 +311,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 				meta:     s.mockMeta,
 			},
 			&mixCompactionTask{
-				CompactionTask: &datapb.CompactionTask{
+				pb: &datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					Channel: "ch-11",
@@ -352,7 +350,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 		101: 23,
 	}
 	node, useSlot := s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
 	})
@@ -360,7 +358,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
 	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
 	})
@@ -368,7 +366,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
 	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_MixCompaction,
 		},
 	})
@@ -388,18 +386,18 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 	}
 	executingTasks := make(map[int64]CompactionTask, 0)
 	executingTasks[1] = &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
 	}
 	executingTasks[2] = &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
 	}
 	s.handler.executingTasks = executingTasks
 	node, useSlot := s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
 	})
@@ -407,7 +405,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 	nodeSlots[node] = nodeSlots[node] - useSlot
 
 	node, useSlot = s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			Type: datapb.CompactionType_ClusteringCompaction,
 		},
 	})
@@ -422,7 +420,7 @@ func (s *CompactionPlanHandlerSuite) TestPickShardNode() {
 	}
 
 	t1 := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:  19530,
 			Type:    datapb.CompactionType_MixCompaction,
 			Channel: "ch-01",
@@ -437,7 +435,7 @@ func (s *CompactionPlanHandlerSuite) TestPickShardNode() {
 		meta:     s.mockMeta,
 	}
 	t2 := &l0CompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:  19531,
 			Type:    datapb.CompactionType_MixCompaction,
 			Channel: "ch-02",
@@ -473,7 +471,7 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
 	ch := "ch1"
 	t1 := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:  19530,
 			Type:    datapb.CompactionType_MixCompaction,
 			Channel: ch,
@@ -488,7 +486,7 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		meta:     s.mockMeta,
 	}
 	t2 := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:  19531,
 			Type:    datapb.CompactionType_MixCompaction,
 			Channel: ch,
@@ -512,7 +510,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 	s.SetupTest()
 	inTasks := map[int64]CompactionTask{
 		1: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				TriggerID: 1,
 				PlanID:    1,
 				Type:      datapb.CompactionType_MixCompaction,
@@ -528,7 +526,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 			meta:     s.mockMeta,
 		},
 		2: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				TriggerID: 1,
 				PlanID:    2,
 				Type:      datapb.CompactionType_MixCompaction,
@@ -544,7 +542,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 			meta:     s.mockMeta,
 		},
 		3: &l0CompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				TriggerID: 1,
 				PlanID:    3,
 				Type:      datapb.CompactionType_Level0DeleteCompaction,
@@ -566,7 +564,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 			if t.GetTriggerID() != i {
 				continue
 			}
-			ret = append(ret, t.ShadowClone())
+			ret = append(ret, t.GetTaskPB())
 		}
 		return ret
 	})
@@ -633,7 +631,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	inTasks := map[int64]CompactionTask{
 		1: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:           1,
 				Type:             datapb.CompactionType_MixCompaction,
 				TimeoutInSeconds: 1,
@@ -650,7 +648,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 			meta:     s.mockMeta,
 		},
 		2: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  2,
 				Type:    datapb.CompactionType_MixCompaction,
 				Channel: "ch-1",
@@ -666,7 +664,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 			meta:     s.mockMeta,
 		},
 		3: &l0CompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  3,
 				Type:    datapb.CompactionType_MixCompaction,
 				Channel: "ch-1",
@@ -682,7 +680,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 			meta:     s.mockMeta,
 		},
 		4: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  4,
 				Type:    datapb.CompactionType_MixCompaction,
 				Channel: "ch-1",
@@ -698,7 +696,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 			meta:     s.mockMeta,
 		},
 		6: &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:  6,
 				Type:    datapb.CompactionType_MixCompaction,
 				Channel: "ch-2",
@@ -846,7 +844,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	}
 
 	task := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:        plan.GetPlanID(),
 			TriggerID:     1,
 			Type:          plan.GetType(),
@@ -928,16 +926,4 @@ func getFieldBinlogIDsWithEntry(fieldID int64, entry int64, logIDs ...int64) *da
 		panic(err)
 	}
 	return l
-}
-
-func getInsertLogPath(rootPath string, segmentID typeutil.UniqueID) string {
-	return metautil.BuildInsertLogPath(rootPath, 10, 100, segmentID, 1000, 10000)
-}
-
-func getStatsLogPath(rootPath string, segmentID typeutil.UniqueID) string {
-	return metautil.BuildStatsLogPath(rootPath, 10, 100, segmentID, 1000, 10000)
-}
-
-func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
-	return metautil.BuildDeltaLogPath(rootPath, 10, 100, segmentID, 10000)
 }

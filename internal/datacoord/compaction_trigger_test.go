@@ -63,8 +63,8 @@ func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) error {
 	t := &mixCompactionTask{
-		CompactionTask: task,
-		meta:           h.meta,
+		pb:   task,
+		meta: h.meta,
 	}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
