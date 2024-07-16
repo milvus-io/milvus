@@ -36,7 +36,7 @@ func TestMessageID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, msgID.EQ(pulsarID{newMessageIDOfPulsar(1, 2, 3)}))
 
-	_, err = UnmarshalMessageID([]byte{0x01, 0x02, 0x03, 0x04})
+	_, err = UnmarshalMessageID(string([]byte{0x01, 0x02, 0x03, 0x04}))
 	assert.Error(t, err)
 }
 

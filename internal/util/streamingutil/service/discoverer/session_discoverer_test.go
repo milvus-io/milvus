@@ -12,6 +12,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -96,8 +97,8 @@ func TestSessionDiscoverer(t *testing.T) {
 	// Do a init discover here.
 	d = NewSessionDiscoverer(etcdClient, "session/", targetVersion)
 	err = d.Discover(ctx, func(state VersionedState) error {
+		// balance attributes
 		sessions := state.Sessions()
-
 		expectedSessions := make(map[int64]*sessionutil.SessionRaw, len(expected[idx]))
 		for k, v := range expected[idx] {
 			if semver.MustParse(v.Version).GT(semver.MustParse(targetVersion)) {
@@ -105,6 +106,12 @@ func TestSessionDiscoverer(t *testing.T) {
 			}
 		}
 		assert.Equal(t, expectedSessions, sessions)
+
+		// resolver attributes
+		for _, addr := range state.State.Addresses {
+			serverID := attributes.GetServerID(addr.Attributes)
+			assert.NotNil(t, serverID)
+		}
 		return io.EOF
 	})
 	assert.ErrorIs(t, err, io.EOF)

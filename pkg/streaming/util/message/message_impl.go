@@ -2,8 +2,6 @@ package message
 
 import (
 	"fmt"
-
-	"github.com/golang/protobuf/proto"
 )
 
 type messageImpl struct {
@@ -35,7 +33,7 @@ func (m *messageImpl) Payload() []byte {
 }
 
 // Properties returns the message properties.
-func (m *messageImpl) Properties() Properties {
+func (m *messageImpl) Properties() RProperties {
 	return m.properties
 }
 
@@ -45,10 +43,15 @@ func (m *messageImpl) EstimateSize() int {
 	return len(m.payload) + m.properties.EstimateSize()
 }
 
+// WithVChannel sets the virtual channel of current message.
+func (m *messageImpl) WithVChannel(vChannel string) MutableMessage {
+	m.properties.Set(messageVChannel, vChannel)
+	return m
+}
+
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
-	t := proto.EncodeVarint(tt)
-	m.properties.Set(messageTimeTick, string(t))
+	m.properties.Set(messageTimeTick, EncodeUint64(tt))
 	return m
 }
 
@@ -82,10 +85,9 @@ func (m *immutableMessageImpl) TimeTick() uint64 {
 	if !ok {
 		panic(fmt.Sprintf("there's a bug in the message codes, timetick lost in properties of message, id: %+v", m.id))
 	}
-	v := []byte(value)
-	tt, n := proto.DecodeVarint(v)
-	if n != len(v) {
-		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick in properties of message, id: %+v", m.id))
+	tt, err := DecodeUint64(value)
+	if err != nil {
+		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick %s in properties of message, id: %+v", value, m.id))
 	}
 	return tt
 }
@@ -95,7 +97,7 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 	if !ok {
 		panic(fmt.Sprintf("there's a bug in the message codes, last confirmed message lost in properties of message, id: %+v", m.id))
 	}
-	id, err := UnmarshalMessageID(m.id.WALName(), []byte(value))
+	id, err := UnmarshalMessageID(m.id.WALName(), value)
 	if err != nil {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty last confirmed message in properties of message, id: %+v", m.id))
 	}
@@ -113,9 +115,4 @@ func (m *immutableMessageImpl) VChannel() string {
 		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message, id: %+v", m.id))
 	}
 	return value
-}
-
-// Properties returns the message read only properties.
-func (m *immutableMessageImpl) Properties() RProperties {
-	return m.properties
 }

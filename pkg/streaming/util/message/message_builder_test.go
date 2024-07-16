@@ -34,7 +34,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, len([]byte(v)), n)
 
 	lcMsgID := mock_message.NewMockMessageID(t)
-	lcMsgID.EXPECT().Marshal().Return([]byte("lcMsgID"))
+	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
 	mutableMessage.WithLastConfirmed(lcMsgID)
 	v, ok = mutableMessage.Properties().Get("_lc")
 	assert.True(t, ok)
@@ -43,8 +43,8 @@ func TestMessage(t *testing.T) {
 	msgID := mock_message.NewMockMessageID(t)
 	msgID.EXPECT().EQ(msgID).Return(true)
 	msgID.EXPECT().WALName().Return("testMsgID")
-	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data []byte) (message.MessageID, error) {
-		if string(data) == "lcMsgID" {
+	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data string) (message.MessageID, error) {
+		if data == "lcMsgID" {
 			return msgID, nil
 		}
 		panic(fmt.Sprintf("unexpected data: %s", data))
@@ -55,7 +55,7 @@ func TestMessage(t *testing.T) {
 		map[string]string{
 			"key": "value",
 			"_t":  "1",
-			"_tt": string(proto.EncodeVarint(456)),
+			"_tt": message.EncodeUint64(456),
 			"_v":  "1",
 			"_lc": "lcMsgID",
 		})
