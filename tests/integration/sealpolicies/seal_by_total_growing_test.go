@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -53,9 +52,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 		dbName = ""
 		rowNum = 100000
 
-		indexType  = integration.IndexFaissIvfFlat
-		metricType = metric.L2
-		vecType    = schemapb.DataType_FloatVector
+		vecType = schemapb.DataType_FloatVector
 	)
 
 	collectionName := "TestSealByGrowingSegmentsSize_" + funcutil.GenRandomStr()
@@ -125,17 +122,17 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 		}
 	}
 
-	//// release collection
-	//status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
-	//	CollectionName: collectionName,
-	//})
-	//err = merr.CheckRPCCall(status, err)
-	//s.NoError(err)
-	//
-	//// drop collection
-	//status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-	//	CollectionName: collectionName,
-	//})
-	//err = merr.CheckRPCCall(status, err)
-	//s.NoError(err)
+	// release collection
+	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
+
+	// drop collection
+	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
 }
