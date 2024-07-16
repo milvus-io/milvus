@@ -12,7 +12,7 @@
 
 ## Milvus 是什么
 
-Milvus 是一款全球领先的开源向量数据库，赋能 AI 应用和向量相似度搜索，加速非结构化数据检索。用户在任何部署环境中均可获得始终如一的用户体验。
+Milvus 是一款全球领先的开源向量数据库，以其高性能高扩展性和成熟的产品功能，赋能 AI 应用和向量相似度搜索，加速非结构化数据检索。用户在任何部署环境中均可获得始终如一的用户体验。
 
 Milvus 2.0 是一款云原生向量数据库，采用存储与计算分离的架构设计。该重构版本的所有组件均为无状态组件，极大地增强了系统弹性和灵活性。更多系统架构细节，参考 [Milvus 系统架构](https://milvus.io/cn/docs/architecture_overview.md)。
 
@@ -41,10 +41,15 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
   </details>
 
 <details>
-  <summary><b>混合查询</b></summary>
-  除了向量以外，Milvus还支持布尔值、整型、浮点等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤。
+  <summary><b>标量过滤搜索</b></summary>
+  除了向量以外，Milvus还支持布尔值、整型、浮点、Varchar 和 JSON 等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤。
   </details>
 
+<details>
+  <summary><b>混合搜索</b></summary>
+  自 Milvus 2.4 起，Milvus 的 collection 中可以包含多个向量列字段来代表数据多维度特征，与此相对应的是采用 hybrid_search 接口，通过多路召回加重排序的方式对多向量列进行混合搜索。
+  </details>
+  
 <details>
   <summary><b>基于 Lambda 架构的流批一体式数据存储</b></summary>
   Milvus 在存储数据时支持流处理和批处理两种方式，兼顾了流处理的时效性和批处理的效率。统一的对外接口使得向量相似度查询更为便捷。
@@ -52,49 +57,28 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 <details>
   <summary><b>广受社区支持和业界认可</b></summary>
-  Milvus 项目在 GitHub 上获星超 8000，拥有逾 1000 家企业用户，还有活跃的开源社区。Milvus 由 <a href="https://lfaidata.foundation/">LF AI & Data 基金会</a> 背书，是该基金会的毕业项目。
+  Milvus 项目在 GitHub 上获星超 28000，拥有逾 1000 家企业用户，还有活跃的开源社区。Milvus 由 <a href="https://lfaidata.foundation/">LF AI & Data 基金会</a> 背书，是该基金会的毕业项目。
   </details>
+
+  更多高级功能请访问我们的[roadmap](https://milvus.io/docs/roadmap.md)
 
 ## 快速开始
 
 ### 启动 Milvus
 
-- [安装 Milvus 单机版](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
+- [安装 Milvus Lite](https://milvus.io/docs/quickstart.md)
+  
+- [安装 Milvus 单机版](https://milvus.io/docs/install_standalone-docker.md)
 
-- [安装 Milvus 分布式版本](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
+- [安装 Milvus 分布式版本](https://milvus.io/docs/install_cluster-milvusoperator.md)
 
-### 源码编译 Milvus
+## Milvus 2.4：GPU 加速、多向量列支持和混合检索、Group search、like 模式匹配增强等诸多新功能
 
-请先安装相关依赖。
+更多内容详见 
+- [Release Notes](https://milvus.io/docs/release_notes.md)
+- [What’s New in Milvus 2.4.0?](https://zilliz.com/blog/what-is-new-in-milvus-2-4-0) 
+- [Hybrid Search 功能详解](https://zilliz.com/blog/a-review-of-hybrid-search-in-milvus#How-We-Designed-Hybrid-Search-in-Milvus)
 
-```
-go: 1.21
-cmake: >=3.18
-gcc: 7.5
-protobuf: >=3.7
-```
-
-克隆 Milvus 项目并编译。
-
-```bash
-# 克隆项目
-$ git clone https://github.com/milvus-io/milvus.git
-
-# 安装第三方依赖
-$ cd milvus/
-$ ./scripts/install_deps.sh
-
-# 编译 Milvus 单机版
-$ make milvus
-```
-
-获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)。
-
-> **注意** 主分支用于 Milvus v2.0 代码开发。Milvus v1.0 于 2021 年 3 月 9 日发布，是 Milvus 的首个长期支持（LTS）版本。如需使用 Milvus 1.0，请切换至 [1.0 分支](https://github.com/milvus-io/milvus/tree/1.0)。
-
-## Milvus 2.0：功能增加、性能升级
-
-详见 [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus20vs1x.md) 。
 
 ## 入门指南
 
@@ -143,6 +127,8 @@ $ make milvus
 
 迅速检索相似化学分子式。
 
+更多内容详见 [官方文档 Tutorials](https://milvus.io/docs/build-rag-with-milvus.md) 
+
 ## 训练营
 
 Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解向量数据库的操作及各种应用场景。通过 Milvus 训练营探索如何进行 Milvus 性能测评，搭建智能问答机器人、推荐系统、以图搜图系统、分子式检索系统等。
@@ -150,6 +136,34 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ## 贡献代码
 
 欢迎向 Milvus 社区贡献你的代码。代码贡献流程或提交补丁等相关信息详见 [代码贡献准则](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。参考 [社区仓库](https://github.com/milvus-io/community) 了解社区管理准则并获取更多社区资源。
+
+### 源码编译 Milvus
+
+请先安装相关依赖。
+
+```
+go: 1.21
+cmake: >=3.18
+gcc: 7.5
+protobuf: >=3.7
+```
+
+克隆 Milvus 项目并编译。
+
+```bash
+# 克隆项目
+$ git clone https://github.com/milvus-io/milvus.git
+
+# 安装第三方依赖
+$ cd milvus/
+$ ./scripts/install_deps.sh
+
+# 编译 Milvus 单机版
+$ make milvus
+```
+
+获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)。
+
 
 ### All contributors
 
