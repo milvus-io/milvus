@@ -250,8 +250,8 @@ func validateStringIndexType(indexType string) bool {
 }
 
 func validateArithmeticIndexType(indexType string) bool {
-	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
+	// compatible with the index type Ascending of attu versions prior to 2.3.0
+	return indexType == DefaultArithmeticIndexType || indexType == "Ascending"
 }
 
 func validateFieldName(fieldName string) error {

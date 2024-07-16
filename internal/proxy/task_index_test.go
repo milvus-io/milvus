@@ -566,13 +566,13 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	// Compatible with the old version <= 2.3.0
-	t.Run("create Asceneding index on Arithmetic field", func(t *testing.T) {
+	t.Run("create Ascending index on Arithmetic field", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: "Asceneding",
+						Value: "Ascending",
 					},
 				},
 				IndexName: "",
