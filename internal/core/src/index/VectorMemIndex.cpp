@@ -600,6 +600,10 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                                       search_conf[RANGE_FILTER],
                                       GetMetricType());
             }
+            // `range_search_k` is only used as one of the conditions for iterator early termination.
+            // not gurantee to return exactly `range_search_k` results, which may be more or less.
+            // set it to -1 will return all results in the range.
+            search_conf[knowhere::meta::RANGE_SEARCH_K] = topk;
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res = index_.RangeSearch(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
