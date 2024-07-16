@@ -28,6 +28,7 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
@@ -51,6 +52,9 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
     LoadFieldDataV2(const LoadFieldDataInfo& info) override;
+    // erase duplicate records when sealed segment loaded done
+    void
+    RemoveDuplicatePkRecords() override;
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
@@ -109,6 +113,11 @@ class SegmentSealedImpl : public SegmentSealed {
 
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
+
+    std::vector<SegOffset>
+    SearchPk(const PkType& pk, Timestamp ts) const {
+        return insert_record_.search_pk(pk, ts);
+    }
 
  public:
     int64_t
@@ -182,6 +191,11 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     check_search(const query::Plan* plan) const override;
+
+    void
+    check_retrieve(const query::RetrievePlan* plan) const override {
+        Assert(plan);
+    }
 
     int64_t
     get_active_count(Timestamp ts) const override;
@@ -267,7 +281,7 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 2;
     }
 
-    const DeletedRecord&
+    const DeletedRecord<true>&
     get_deleted_record() const {
         return deleted_record_;
     }
@@ -312,7 +326,7 @@ class SegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 
@@ -332,6 +346,9 @@ class SegmentSealedImpl : public SegmentSealed {
     // for sparse vector unit test only! Once a type of sparse index that
     // doesn't has raw data is added, this should be removed.
     bool TEST_skip_index_for_retrieve_ = false;
+
+    // for pk index, when loaded done, need to compact to erase duplicate records
+    bool is_pk_index_valid_ = false;
 };
 
 inline SegmentSealedUPtr

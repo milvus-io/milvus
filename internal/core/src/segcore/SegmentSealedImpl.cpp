@@ -333,6 +333,23 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
                  field_id.get());
     }
 }
+
+void
+SegmentSealedImpl::RemoveDuplicatePkRecords() {
+    std::unique_lock lck(mutex_);
+    if (!is_pk_index_valid_) {
+        // Assert(!insert_record_.timestamps_.empty());
+        // firstly find that need removed records and mark them as deleted
+        auto removed_pks = insert_record_.get_need_removed_pks();
+        deleted_record_.Push(removed_pks.first, removed_pks.second.data());
+
+        // then remove duplicated pks in pk index
+        insert_record_.remove_duplicate_pks();
+        insert_record_.seal_pks();
+        is_pk_index_valid_ = true;
+    }
+}
+
 void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
@@ -626,7 +643,7 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    deleted_record_.Push(pks, timestamps);
 }
 
 void
@@ -745,24 +762,7 @@ void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
-    if (del_barrier == 0) {
-        return;
-    }
-
-    auto bitmap_holder = get_deleted_bitmap(
-        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
-    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
-        return;
-    }
-    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(
-        delete_bitset.size() == bitset.size(),
-        fmt::format(
-            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
-            delete_bitset.size(),
-            bitset.size()));
-    bitset |= delete_bitset;
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -1060,6 +1060,7 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       binlog_index_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
+      deleted_record_(&insert_record_),
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
@@ -1556,7 +1557,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
         sort_pks[i] = pk;
     }
 
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.Push(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
