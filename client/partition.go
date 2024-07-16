@@ -19,9 +19,10 @@ package client
 import (
 	"context"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"google.golang.org/grpc"
 )
 
 // CreatePartition is the API for creating a partition for a collection.
