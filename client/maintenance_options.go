@@ -92,6 +92,53 @@ func NewLoadPartitionsOption(collectionName string, partitionsNames []string) *l
 	}
 }
 
+type ReleaseCollectionOption interface {
+	Request() *milvuspb.ReleaseCollectionRequest
+}
+
+var _ ReleaseCollectionOption = (*releaseCollectionOption)(nil)
+
+type releaseCollectionOption struct {
+	collectionName string
+}
+
+func (opt *releaseCollectionOption) Request() *milvuspb.ReleaseCollectionRequest {
+	return &milvuspb.ReleaseCollectionRequest{
+		CollectionName: opt.collectionName,
+	}
+}
+
+func NewReleaseCollectionOption(collectionName string) *releaseCollectionOption {
+	return &releaseCollectionOption{
+		collectionName: collectionName,
+	}
+}
+
+type ReleasePartitionsOption interface {
+	Request() *milvuspb.ReleasePartitionsRequest
+}
+
+var _ ReleasePartitionsOption = (*releasePartitionsOption)(nil)
+
+type releasePartitionsOption struct {
+	collectionName string
+	partitionNames []string
+}
+
+func (opt *releasePartitionsOption) Request() *milvuspb.ReleasePartitionsRequest {
+	return &milvuspb.ReleasePartitionsRequest{
+		CollectionName: opt.collectionName,
+		PartitionNames: opt.partitionNames,
+	}
+}
+
+func NewReleasePartitionsOptions(collectionName string, partitionNames ...string) *releasePartitionsOption {
+	return &releasePartitionsOption{
+		collectionName: collectionName,
+		partitionNames: partitionNames,
+	}
+}
+
 type FlushOption interface {
 	Request() *milvuspb.FlushRequest
 	CollectionName() string
