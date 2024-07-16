@@ -44,6 +44,8 @@ type l0CompactionTask struct {
 	meta     CompactionMeta
 }
 
+// Note: return True means exit this state machine.
+// ONLY return True for processCompleted or processFailed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
