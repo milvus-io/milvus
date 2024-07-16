@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -383,17 +384,21 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
-// GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
+func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
+	// collection id => l0 delta entry count
+	collectionL0RowCounts := make(map[UniqueID]int64)
+
 	segments := m.segments.GetSegments()
 	var total int64
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
+		log.Warn("CQX", zap.Int64("size", segmentSize))
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
@@ -417,6 +422,10 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
+
+			if segment.GetLevel() == datapb.SegmentLevel_L0 {
+				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
+			}
 		}
 	}
 
@@ -429,8 +438,63 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			}
 		}
 	}
-	return total, collectionBinlogSize, partitionBinlogSize
+
+	info.TotalBinlogSize = total
+	info.CollectionBinlogSize = collectionBinlogSize
+	info.PartitionsBinlogSize = partitionBinlogSize
+	info.CollectionL0RowCount = collectionL0RowCounts
+
+	return info
 }
+
+// GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
+// func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
+// 	m.RLock()
+// 	defer m.RUnlock()
+// 	collectionBinlogSize := make(map[UniqueID]int64)
+// 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
+// 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
+// 	segments := m.segments.GetSegments()
+// 	var total int64
+// 	for _, segment := range segments {
+// 		segmentSize := segment.getSegmentSize()
+// 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
+// 			total += segmentSize
+// 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
+
+// 			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
+// 			if !ok {
+// 				partBinlogSize = make(map[int64]int64)
+// 				partitionBinlogSize[segment.GetCollectionID()] = partBinlogSize
+// 			}
+// 			partBinlogSize[segment.GetPartitionID()] += segmentSize
+
+// 			coll, ok := m.collections[segment.GetCollectionID()]
+// 			if ok {
+// 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
+// 					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+// 			} else {
+// 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
+// 			}
+
+// 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
+// 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
+// 			}
+// 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
+// 		}
+// 	}
+
+// 	metrics.DataCoordNumStoredRows.Reset()
+// 	for collectionID, statesRows := range collectionRowsNum {
+// 		for state, rows := range statesRows {
+// 			coll, ok := m.collections[collectionID]
+// 			if ok {
+// 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
+// 			}
+// 		}
+// 	}
+// 	return total, collectionBinlogSize, partitionBinlogSize
+// }
 
 // GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
 func (m *meta) GetCollectionIndexFilesSize() uint64 {

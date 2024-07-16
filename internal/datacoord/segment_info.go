@@ -53,6 +53,7 @@ type SegmentInfo struct {
 	isCompacting  bool
 	// a cache to avoid calculate twice
 	size            atomic.Int64
+	deltaRowcount   atomic.Int64
 	lastWrittenTime time.Time
 }
 
@@ -61,14 +62,20 @@ type SegmentInfo struct {
 // Note that the allocation information is not preserved,
 // the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
-	return &SegmentInfo{
-		SegmentInfo:   info,
-		currRows:      info.GetNumOfRows(),
-		allocations:   make([]*Allocation, 0, 16),
-		lastFlushTime: time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second)),
-		// A growing segment from recovery can be also considered idle.
-		lastWrittenTime: getZeroTime(),
+	s := &SegmentInfo{
+		SegmentInfo: info,
+		currRows:    info.GetNumOfRows(),
 	}
+	// setup growing fields
+	if s.GetState() == commonpb.SegmentState_Growing {
+		s.allocations = make([]*Allocation, 0, 16)
+		s.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
+		// A growing segment from recovery can be also considered idle.
+		s.lastWrittenTime = getZeroTime()
+	}
+	// mark as uninitialized
+	s.deltaRowcount.Store(-1)
+	return s
 }
 
 // NewSegmentsInfo creates a `SegmentsInfo` instance, which makes sure internal map is initialized
@@ -193,6 +200,7 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 		s.removeSecondaryIndex(segment)
 	}
 	s.segments[segmentID] = segment
+	log.Info("CQX set segment", zap.Any("segment", segment))
 	s.addSecondaryIndex(segment)
 	s.addCompactTo(segment)
 }
@@ -330,6 +338,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	cloned.size.Store(s.size.Load())
+	cloned.deltaRowcount.Store(s.deltaRowcount.Load())
 
 	for _, opt := range opts {
 		opt(cloned)
@@ -490,6 +499,20 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 		}
 	}
 	return s.size.Load()
+}
+
+func (s *SegmentInfo) getDeltaCount() int64 {
+	if s.deltaRowcount.Load() < 0 {
+		var rc int64
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				rc += l.GetEntriesNum()
+			}
+		}
+		s.deltaRowcount.Store(rc)
+	}
+	r := s.deltaRowcount.Load()
+	return r
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta
