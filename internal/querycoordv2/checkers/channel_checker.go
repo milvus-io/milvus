@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -40,6 +41,7 @@ type ChannelChecker struct {
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
 	balancer  balance.Balance
+	nodeMgr   *session.NodeManager
 }
 
 func NewChannelChecker(
@@ -47,6 +49,7 @@ func NewChannelChecker(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
 ) *ChannelChecker {
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
@@ -54,6 +57,7 @@ func NewChannelChecker(
 		dist:              dist,
 		targetMgr:         targetMgr,
 		balancer:          balancer,
+		nodeMgr:           nodeMgr,
 	}
 }
 
@@ -173,6 +177,16 @@ func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel
 		return ret
 	}
 	dist := c.getChannelDist(replica)
+
+	// filter delegator which isn't ready yet
+	dist = lo.Filter(dist, func(ch *meta.DmChannel, _ int) bool {
+		segmentsInTarget := c.targetMgr.GetSealedSegmentsByChannel(ch.CollectionID, ch.ChannelName, meta.CurrentTarget)
+		leader := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.ChannelName)
+		if leader == nil {
+			return false
+		}
+		return utils.CheckLeaderAvailable(c.nodeMgr, leader, segmentsInTarget) == nil
+	})
 
 	versionsMap := make(map[string]*meta.DmChannel)
 	for _, ch := range dist {

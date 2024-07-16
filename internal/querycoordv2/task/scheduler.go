@@ -709,23 +709,6 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 		return false
 	}
 
-	// check if new delegator is ready to release old delegator
-	checkLeaderView := func(collectionID int64, channel string, node int64) bool {
-		segmentsInTarget := scheduler.targetMgr.GetSealedSegmentsByChannel(collectionID, channel, meta.CurrentTarget)
-		leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(node, channel)
-		if leader == nil {
-			return false
-		}
-
-		for segmentID := range segmentsInTarget {
-			if _, exist := leader.Segments[segmentID]; !exist {
-				return false
-			}
-		}
-
-		return true
-	}
-
 	actions, step := task.Actions(), task.Step()
 	for step < len(actions) && actions[step].IsFinished(scheduler.distMgr) {
 		if GetTaskType(task) == TaskTypeMove && actions[step].Type() == ActionTypeGrow {
@@ -737,7 +720,12 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 				// causes a few time to load delta log, if reduce the old delegator in advance,
 				// new delegator can't service search and query, will got no available channel error
 				channelAction := actions[step].(*ChannelAction)
-				ready = checkLeaderView(task.CollectionID(), channelAction.Shard(), channelAction.Node())
+				segmentsInTarget := scheduler.targetMgr.GetSealedSegmentsByChannel(task.CollectionID(), channelAction.Shard(), meta.CurrentTarget)
+				leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(channelAction.Node(), channelAction.Shard())
+				if leader == nil {
+					return false
+				}
+				ready = utils.CheckLeaderAvailable(scheduler.nodeMgr, leader, segmentsInTarget) == nil
 			default:
 				ready = true
 			}
