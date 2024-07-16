@@ -560,6 +560,7 @@ message CompactionPlan {
   string analyze_result_path = 14;
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
+  int64 slot_usage = 17;
 }
 
 message CompactionSegment {
