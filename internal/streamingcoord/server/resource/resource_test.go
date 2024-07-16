@@ -17,7 +17,9 @@ func TestInit(t *testing.T) {
 		Init(OptETCD(&clientv3.Client{}))
 	})
 	assert.Panics(t, func() {
-		Init(OptETCD(&clientv3.Client{}))
+		Init(OptStreamingCatalog(
+			mock_metastore.NewMockStreamingCoordCataLog(t),
+		))
 	})
 	Init(OptETCD(&clientv3.Client{}), OptStreamingCatalog(
 		mock_metastore.NewMockStreamingCoordCataLog(t),

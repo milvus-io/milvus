@@ -19,10 +19,12 @@ func (p *produceGrpcServerHelper) SendProduceMessage(resp *streamingpb.ProduceMe
 }
 
 // SendCreated sends the create response to client.
-func (p *produceGrpcServerHelper) SendCreated() error {
+func (p *produceGrpcServerHelper) SendCreated(walName string) error {
 	return p.Send(&streamingpb.ProduceResponse{
 		Response: &streamingpb.ProduceResponse_Create{
-			Create: &streamingpb.CreateProducerResponse{},
+			Create: &streamingpb.CreateProducerResponse{
+				WalName: walName,
+			},
 		},
 	})
 }

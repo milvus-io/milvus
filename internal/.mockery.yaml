@@ -36,3 +36,16 @@ packages:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
       StreamingCoordCataLog:
+  github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer:
+    interfaces:
+      Discoverer:
+      AssignmentDiscoverWatcher:
+  github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver:
+    interfaces:
+      Resolver:
+  google.golang.org/grpc/resolver:
+    interfaces:
+      ClientConn:
+  google.golang.org/grpc/balancer:
+    interfaces:
+      SubConn:

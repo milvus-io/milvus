@@ -305,10 +305,10 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 
 	distributions := map[int64][]*meta.Segment{
 		1: {
-			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20, CollectionID: 1}, Node: 1},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 100, CollectionID: 1}, Node: 1},
 		},
 		2: {
-			{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 20, CollectionID: 1}, Node: 2},
+			{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 100, CollectionID: 1}, Node: 2},
 		},
 	}
 	for node, s := range distributions {
@@ -333,9 +333,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 
 	// mock 50 growing row count in node 1, which is delegator, expect all segment assign to node 2
 	leaderView := &meta.LeaderView{
-		ID:               1,
-		CollectionID:     1,
-		NumOfGrowingRows: 50,
+		ID:           1,
+		CollectionID: 1,
 	}
 	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
 	plans := balancer.AssignSegment(1, toAssign, lo.Keys(distributions), false)

@@ -3421,7 +3421,6 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryResults, error) {
 	request := qt.request
 	method := "Query"
-	isProxyRequest := GetRequestLabelFromContext(ctx)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3470,7 +3469,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 			zap.Error(err),
 		)
 
-		if isProxyRequest {
+		if !qt.reQuery {
 			metrics.ProxyFunctionCall.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				method,
@@ -3493,7 +3492,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err))
 
-		if isProxyRequest {
+		if !qt.reQuery {
 			metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 				metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 		}
@@ -3503,7 +3502,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		}, nil
 	}
 
-	if isProxyRequest {
+	if !qt.reQuery {
 		span := tr.CtxRecord(ctx, "wait query result")
 		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3578,7 +3577,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		request.GetCollectionName(),
 	).Inc()
 
-	ctx = SetRequestLabelForContext(ctx)
 	res, err := node.query(ctx, qt)
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err

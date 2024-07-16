@@ -16,7 +16,7 @@ import (
 
 func TestAssignmentDiscover(t *testing.T) {
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WatchBalanceResult(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
 		versions := []typeutil.VersionInt64Pair{
 			{Global: 1, Local: 2},
 			{Global: 1, Local: 3},
@@ -59,7 +59,7 @@ func TestAssignmentDiscover(t *testing.T) {
 						Term: 1,
 					},
 					Err: &streamingpb.StreamingError{
-						Code: streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_EXIST,
+						Code: streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST,
 					},
 				},
 			},
