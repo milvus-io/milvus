@@ -116,7 +116,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	s.Equal(datapb.SegmentLevel_L2, seg21.Level)
 	s.Equal(int64(10000), seg21.PartitionStatsVersion)
 
-	task.ResultSegments = []int64{103, 104}
+	task.pb.ResultSegments = []int64{103, 104}
 	// fake some compaction result segment
 	s.meta.AddSegment(context.TODO(), &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -197,23 +197,35 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 func (s *ClusteringCompactionTaskSuite) TestProcessRetryLogic() {
 	task := s.generateBasicTask(false)
 	task.maxRetryTimes = 3
+
+	getRetryTime := func() int32 {
+		task.pbGuard.RLock()
+		defer task.pbGuard.RUnlock()
+		return task.pb.GetRetryTimes()
+	}
 	// process pipelining fail
 	s.Equal(false, task.Process())
-	s.Equal(int32(1), task.RetryTimes)
+	s.Equal(int32(1), getRetryTime())
 	s.Equal(false, task.Process())
-	s.Equal(int32(2), task.RetryTimes)
+	s.Equal(int32(2), getRetryTime())
 	s.Equal(false, task.Process())
-	s.Equal(int32(3), task.RetryTimes)
+	s.Equal(int32(3), getRetryTime())
 	s.Equal(datapb.CompactionTaskState_pipelining, task.GetState())
 	s.Equal(false, task.Process())
-	s.Equal(int32(0), task.RetryTimes)
+	s.Equal(int32(0), getRetryTime())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
+}
+
+func (s *ClusteringCompactionTaskSuite) setTaskState(task *clusteringCompactionTask, state datapb.CompactionTaskState) {
+	task.pbGuard.Lock()
+	defer task.pbGuard.Unlock()
+	task.pb.State = state
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 	s.Run("process pipelining fail, segment not found", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
@@ -236,14 +248,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 			},
 		})
 		s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrDataNodeSlotExhausted())
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.False(task.Process())
 		s.Equal(int64(NullNodeID), task.GetNodeID())
 	})
 
 	s.Run("process succeed, scalar clustering key", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -260,14 +272,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 			},
 		})
 		s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetState())
 	})
 
 	s.Run("process succeed, vector clustering key", func() {
 		task := s.generateBasicTask(true)
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -283,7 +295,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		task.State = datapb.CompactionTaskState_pipelining
+		s.setTaskState(task, datapb.CompactionTaskState_pipelining)
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_analyzing, task.GetState())
 	})
@@ -292,7 +304,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 	s.Run("process executing, get compaction result fail", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_executing
+		s.setTaskState(task, datapb.CompactionTaskState_executing)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -315,7 +327,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 
 	s.Run("process executing, compaction result not ready", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_executing
+		s.setTaskState(task, datapb.CompactionTaskState_executing)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -343,7 +355,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 
 	s.Run("process executing, scalar clustering key, compaction result ready", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_executing
+		s.setTaskState(task, datapb.CompactionTaskState_executing)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -376,7 +388,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 
 	s.Run("process executing, compaction result ready", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_executing
+		s.setTaskState(task, datapb.CompactionTaskState_executing)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -409,9 +421,11 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 
 	s.Run("process executing, compaction result timeout", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_executing
-		task.StartTime = time.Now().Unix()
-		task.TimeoutInSeconds = 1
+		s.setTaskState(task, datapb.CompactionTaskState_executing)
+		task.pbGuard.Lock()
+		task.pb.StartTime = time.Now().Unix()
+		task.pb.TimeoutInSeconds = 1
+		task.pbGuard.Unlock()
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -488,14 +502,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {
 func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 	s.Run("collection has no index", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_indexing
+		s.setTaskState(task, datapb.CompactionTaskState_indexing)
 		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_completed, task.GetState())
 	})
 
 	s.Run("collection has index, segment is not indexed", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_indexing
+		s.setTaskState(task, datapb.CompactionTaskState_indexing)
 		index := &model.Index{
 			CollectionID: 1,
 			IndexID:      3,
@@ -509,7 +523,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 
 	s.Run("collection has index, segment indexed", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_indexing
+		s.setTaskState(task, datapb.CompactionTaskState_indexing)
 		index := &model.Index{
 			CollectionID: 1,
 			IndexID:      3,
@@ -538,23 +552,25 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 	s.Run("analyze task not found", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_analyzing
+		s.setTaskState(task, datapb.CompactionTaskState_analyzing)
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 	})
 
 	s.Run("analyze task failed", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_analyzing
-		task.AnalyzeTaskID = 7
+		s.setTaskState(task, datapb.CompactionTaskState_analyzing)
+		task.pbGuard.Lock()
+		task.pb.AnalyzeTaskID = 7
 		t := &indexpb.AnalyzeTask{
-			CollectionID: task.CollectionID,
-			PartitionID:  task.PartitionID,
-			FieldID:      task.ClusteringKeyField.FieldID,
-			SegmentIDs:   task.InputSegments,
+			CollectionID: task.pb.CollectionID,
+			PartitionID:  task.pb.PartitionID,
+			FieldID:      task.pb.ClusteringKeyField.FieldID,
+			SegmentIDs:   task.pb.InputSegments,
 			TaskID:       7,
 			State:        indexpb.JobState_JobStateFailed,
 		}
+		task.pbGuard.Unlock()
 		s.meta.analyzeMeta.AddAnalyzeTask(t)
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
@@ -562,17 +578,19 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 
 	s.Run("analyze task fake finish, vector not support", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_analyzing
-		task.AnalyzeTaskID = 7
+		s.setTaskState(task, datapb.CompactionTaskState_analyzing)
+		task.pbGuard.Lock()
+		task.pb.AnalyzeTaskID = 7
 		t := &indexpb.AnalyzeTask{
-			CollectionID:  task.CollectionID,
-			PartitionID:   task.PartitionID,
-			FieldID:       task.ClusteringKeyField.FieldID,
-			SegmentIDs:    task.InputSegments,
+			CollectionID:  task.pb.CollectionID,
+			PartitionID:   task.pb.PartitionID,
+			FieldID:       task.pb.ClusteringKeyField.FieldID,
+			SegmentIDs:    task.pb.InputSegments,
 			TaskID:        7,
 			State:         indexpb.JobState_JobStateFinished,
 			CentroidsFile: "",
 		}
+		task.pbGuard.Unlock()
 		s.meta.analyzeMeta.AddAnalyzeTask(t)
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetState())
@@ -580,17 +598,19 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 
 	s.Run("analyze task finished", func() {
 		task := s.generateBasicTask(false)
-		task.State = datapb.CompactionTaskState_analyzing
-		task.AnalyzeTaskID = 7
+		s.setTaskState(task, datapb.CompactionTaskState_analyzing)
+		task.pbGuard.Lock()
+		task.pb.AnalyzeTaskID = 7
 		t := &indexpb.AnalyzeTask{
-			CollectionID:  task.CollectionID,
-			PartitionID:   task.PartitionID,
-			FieldID:       task.ClusteringKeyField.FieldID,
-			SegmentIDs:    task.InputSegments,
+			CollectionID:  task.pb.CollectionID,
+			PartitionID:   task.pb.PartitionID,
+			FieldID:       task.pb.ClusteringKeyField.FieldID,
+			SegmentIDs:    task.pb.InputSegments,
 			TaskID:        7,
 			State:         indexpb.JobState_JobStateFinished,
 			CentroidsFile: "somewhere",
 		}
+		task.pbGuard.Unlock()
 		s.meta.analyzeMeta.AddAnalyzeTask(t)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{

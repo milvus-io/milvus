@@ -22,7 +22,7 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		}}
 	}).Times(2)
 	task := &mixCompactionTask{
-		CompactionTask: &datapb.CompactionTask{
+		pb: &datapb.CompactionTask{
 			PlanID:         1,
 			TriggerID:      19530,
 			CollectionID:   1,
@@ -56,7 +56,7 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			return nil
 		}).Once()
 		task := &mixCompactionTask{
-			CompactionTask: &datapb.CompactionTask{
+			pb: &datapb.CompactionTask{
 				PlanID:         1,
 				TriggerID:      19530,
 				CollectionID:   1,

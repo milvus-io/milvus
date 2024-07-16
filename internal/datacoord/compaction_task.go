@@ -25,7 +25,6 @@ import (
 
 type CompactionTask interface {
 	Process() bool
-	BuildCompactionRequest() (*datapb.CompactionPlan, error)
 
 	GetTriggerID() UniqueID
 	GetPlanID() UniqueID
@@ -46,13 +45,11 @@ type CompactionTask interface {
 
 	GetNodeID() UniqueID
 	GetSpan() trace.Span
-	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
+	CloneTaskPB(opts ...compactionTaskOpt) *datapb.CompactionTask
 	SetNodeID(UniqueID) error
-	SetTask(*datapb.CompactionTask)
 	SetSpan(trace.Span)
 	SetResult(*datapb.CompactionPlanResult)
 	EndSpan()
-	CleanLogPath()
 	NeedReAssignNodeID() bool
 	SaveTaskMeta() error
 }
@@ -86,6 +83,12 @@ func setTimeoutInSeconds(dur int32) compactionTaskOpt {
 func setResultSegments(segments []int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.ResultSegments = segments
+	}
+}
+
+func setAnalyzeVersion(version int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.AnalyzeVersion = version
 	}
 }
 
