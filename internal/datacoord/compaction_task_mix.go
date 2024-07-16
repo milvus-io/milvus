@@ -101,8 +101,9 @@ func (t *mixCompactionTask) processExecuting() bool {
 				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 				if err != nil {
 					log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
+					return false
 				}
-				return true
+				return t.processFailed()
 			}
 			return false
 		}
@@ -145,6 +146,8 @@ func (t *mixCompactionTask) saveSegmentMeta() error {
 	return nil
 }
 
+// Note: return True means exit this state machine.
+// ONLY return True for processCompleted or processFailed
 func (t *mixCompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
