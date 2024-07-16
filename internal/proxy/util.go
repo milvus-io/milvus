@@ -1122,6 +1122,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	}
 	return false, nil
 }
+
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
