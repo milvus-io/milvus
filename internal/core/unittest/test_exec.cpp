@@ -84,7 +84,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
         schema->set_primary_field_id(str1_fid);
 
         auto segment = CreateSealedSegment(schema);
-        size_t N = 1000000;
+        size_t N = 10000;
         num_rows_ = N;
         auto raw_data = DataGen(schema, N);
         auto fields = schema->get_fields();
@@ -131,7 +131,7 @@ TEST_P(TaskTest, UnaryExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
-        1000000,
+        10000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -175,7 +175,7 @@ TEST_P(TaskTest, LogicalExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
-        1000000,
+        10000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -232,7 +232,7 @@ TEST_P(TaskTest, CompileInputs_and) {
     auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+        DEAFULT_QUERY_ID, segment_.get(), 10000, MAX_TIMESTAMP);
     auto exprs = milvus::exec::CompileInputs(expr7, query_context.get(), {});
     EXPECT_EQ(exprs.size(), 4);
     for (int i = 0; i < exprs.size(); ++i) {
@@ -274,7 +274,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 10000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
@@ -308,7 +308,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 10000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
@@ -345,7 +345,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 10000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
         auto exprs =

@@ -33,7 +33,7 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create producer request is required")
 	}
-	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.Pchannel))
+	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,9 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	produceServer := &produceGrpcServerHelper{
 		StreamingNodeHandlerService_ProduceServer: streamServer,
 	}
-	if err := produceServer.SendCreated(l.WALName()); err != nil {
+	if err := produceServer.SendCreated(&streamingpb.CreateProducerResponse{
+		WalName: l.WALName(),
+	}); err != nil {
 		return nil, errors.Wrap(err, "at send created")
 	}
 	return &ProduceServer{
@@ -170,13 +172,13 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
 	if !msg.Version().GT(message.VersionOld) {
-		return status.NewInner("unsupported message version")
+		return status.NewInvaildArgument("unsupported message version")
 	}
 	if !msg.MessageType().Valid() {
-		return status.NewInner("unsupported message type")
+		return status.NewInvaildArgument("unsupported message type")
 	}
 	if msg.Payload() == nil {
-		return status.NewInner("empty payload for message")
+		return status.NewInvaildArgument("empty payload for message")
 	}
 	return nil
 }

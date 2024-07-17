@@ -1,14 +1,17 @@
 package pulsar
 
 import (
+	"encoding/hex"
+
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 var _ message.MessageID = pulsarID{}
 
-func UnmarshalMessageID(data []byte) (message.MessageID, error) {
+func UnmarshalMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalMessageID(data)
 	if err != nil {
 		return nil, err
@@ -16,10 +19,14 @@ func UnmarshalMessageID(data []byte) (message.MessageID, error) {
 	return id, nil
 }
 
-func unmarshalMessageID(data []byte) (pulsarID, error) {
-	msgID, err := pulsar.DeserializeMessageID(data)
+func unmarshalMessageID(data string) (pulsarID, error) {
+	val, err := hex.DecodeString(data)
 	if err != nil {
-		return pulsarID{nil}, err
+		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when decode hex with err: %s, id: %s", err.Error(), data)
+	}
+	msgID, err := pulsar.DeserializeMessageID(val)
+	if err != nil {
+		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when deserialize with err: %s, id: %s", err.Error(), data)
 	}
 	return pulsarID{msgID}, nil
 }
@@ -61,6 +68,6 @@ func (id pulsarID) EQ(other message.MessageID) bool {
 		id.BatchIdx() == id2.BatchIdx()
 }
 
-func (id pulsarID) Marshal() []byte {
-	return id.Serialize()
+func (id pulsarID) Marshal() string {
+	return hex.EncodeToString(id.Serialize())
 }

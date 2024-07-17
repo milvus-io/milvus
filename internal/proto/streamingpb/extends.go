@@ -1,5 +1,5 @@
 package streamingpb
 
 const (
-	ServiceMethodPrefix = "/milvus.proto.log"
+	ServiceMethodPrefix = "/milvus.proto.streaming"
 )
