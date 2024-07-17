@@ -198,6 +198,12 @@ func defaultSegmentSealPolicy() []SegmentSealPolicy {
 	}
 }
 
+func defaultChannelSealPolicy() []channelSealPolicy {
+	return []channelSealPolicy{
+		sealByTotalGrowingSegmentsSize(),
+	}
+}
+
 func defaultFlushPolicy() flushPolicy {
 	return flushPolicyL1
 }
@@ -211,8 +217,8 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) (*S
 		segments:            make([]UniqueID, 0),
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAllocatePolicy(),
-		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
-		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
+		segmentSealPolicies: defaultSegmentSealPolicy(),
+		channelSealPolicies: defaultChannelSealPolicy(),
 		flushPolicy:         defaultFlushPolicy(),
 	}
 	for _, opt := range opts {
@@ -644,6 +650,7 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 // tryToSealSegment applies segment & channel seal policies
 func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
+	sealedSegments := make(map[int64]struct{})
 	for _, id := range s.segments {
 		info := s.meta.GetHealthySegment(id)
 		if info == nil || info.InsertChannel != channel {
@@ -660,20 +667,27 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
+				sealedSegments[id] = struct{}{}
 				break
 			}
 		}
 	}
 	for channel, segmentInfos := range channelInfo {
 		for _, policy := range s.channelSealPolicies {
-			vs := policy(channel, segmentInfos, ts)
+			vs, reason := policy(channel, segmentInfos, ts)
 			for _, info := range vs {
+				if _, ok := sealedSegments[info.GetID()]; ok {
+					continue
+				}
 				if info.State != commonpb.SegmentState_Growing {
 					continue
 				}
 				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
+				log.Info("seal segment for channel seal policy matched",
+					zap.Int64("segmentID", info.GetID()), zap.String("channel", channel), zap.String("reason", reason))
+				sealedSegments[info.GetID()] = struct{}{}
 			}
 		}
 	}

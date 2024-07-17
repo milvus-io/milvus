@@ -466,7 +466,7 @@ func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
 }
 
 func (s *SegmentInfo) getSegmentSize() int64 {
-	if s.size.Load() <= 0 {
+	if s.size.Load() <= 0 || s.GetState() == commonpb.SegmentState_Growing {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
