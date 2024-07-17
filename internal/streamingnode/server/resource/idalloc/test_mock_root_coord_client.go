@@ -1,7 +1,7 @@
 //go:build test
 // +build test
 
-package timestamp
+package idalloc
 
 import (
 	"context"
@@ -34,6 +34,21 @@ func NewMockRootCoordClient(t *testing.T) *mocks.MockRootCoordClient {
 				Count:     atr.Count,
 			}, nil
 		},
-	)
+	).Maybe()
+	client.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+			if atr.Count > 1000 {
+				panic(fmt.Sprintf("count %d is too large", atr.Count))
+			}
+			c := counter.Add(uint64(atr.Count))
+			return &rootcoordpb.AllocIDResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				ID:    int64(c - uint64(atr.Count)),
+				Count: atr.Count,
+			}, nil
+		},
+	).Maybe()
 	return client
 }

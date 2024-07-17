@@ -1,4 +1,4 @@
-package timestamp
+package idalloc
 
 import (
 	"context"
@@ -58,14 +58,14 @@ func TestLocalAllocator(t *testing.T) {
 	assert.Zero(t, ts)
 }
 
-func TestRemoteAllocator(t *testing.T) {
+func TestRemoteTSOAllocator(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
 
-	allocator := newRemoteAllocator(client)
-	ts, count, err := allocator.allocate(context.Background(), 100)
+	allocator := newTSOAllocator(client)
+	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
 	assert.Equal(t, count, 100)
@@ -77,8 +77,8 @@ func TestRemoteAllocator(t *testing.T) {
 			return nil, errors.New("test")
 		},
 	)
-	allocator = newRemoteAllocator(client)
-	_, _, err = allocator.allocate(context.Background(), 100)
+	allocator = newTSOAllocator(client)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
 	client.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Unset()
@@ -91,7 +91,45 @@ func TestRemoteAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	allocator = newRemoteAllocator(client)
-	_, _, err = allocator.allocate(context.Background(), 100)
+	allocator = newTSOAllocator(client)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
+	assert.Error(t, err)
+}
+
+func TestRemoteIDAllocator(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+
+	client := NewMockRootCoordClient(t)
+
+	allocator := newIDAllocator(client)
+	ts, count, err := allocator.batchAllocate(context.Background(), 100)
+	assert.NoError(t, err)
+	assert.NotZero(t, ts)
+	assert.Equal(t, count, 100)
+
+	// Test error.
+	client = mocks.NewMockRootCoordClient(t)
+	client.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+			return nil, errors.New("test")
+		},
+	)
+	allocator = newIDAllocator(client)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
+	assert.Error(t, err)
+
+	client.EXPECT().AllocID(mock.Anything, mock.Anything).Unset()
+	client.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+			return &rootcoordpb.AllocIDResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_ForceDeny,
+				},
+			}, nil
+		},
+	)
+	allocator = newIDAllocator(client)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }

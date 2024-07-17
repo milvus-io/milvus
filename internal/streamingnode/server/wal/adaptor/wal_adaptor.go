@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -35,14 +34,14 @@ func adaptImplsToWAL(
 
 	wal := &walAdaptorImpl{
 		lifetime:    lifetime.NewLifetime(lifetime.Working),
-		idAllocator: util.NewIDAllocator(),
+		idAllocator: typeutil.NewIDAllocator(),
 		inner:       basicWAL,
 		// TODO: make the pool size configurable.
 		appendExecutionPool: conc.NewPool[struct{}](10),
 		interceptor:         interceptor,
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
-			idAllocator: util.NewIDAllocator(),
+			idAllocator: typeutil.NewIDAllocator(),
 		},
 		scanners: typeutil.NewConcurrentMap[int64, wal.Scanner](),
 		cleanup:  cleanup,
@@ -54,7 +53,7 @@ func adaptImplsToWAL(
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
 	lifetime            lifetime.Lifetime[lifetime.State]
-	idAllocator         *util.IDAllocator
+	idAllocator         *typeutil.IDAllocator
 	inner               walimpls.WALImpls
 	appendExecutionPool *conc.Pool[struct{}]
 	interceptor         interceptors.InterceptorWithReady
@@ -101,7 +100,7 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 	_ = w.appendExecutionPool.Submit(func() (struct{}, error) {
 		defer w.lifetime.Done()
 
-		msgID, err := w.inner.Append(ctx, msg)
+		msgID, err := w.Append(ctx, msg)
 		cb(msgID, err)
 		return struct{}{}, nil
 	})

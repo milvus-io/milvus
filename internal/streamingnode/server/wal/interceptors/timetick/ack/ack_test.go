@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -18,7 +18,7 @@ func TestAck(t *testing.T) {
 
 	ctx := context.Background()
 
-	rc := timestamp.NewMockRootCoordClient(t)
+	rc := idalloc.NewMockRootCoordClient(t)
 	resource.InitForTest(resource.OptRootCoordClient(rc))
 
 	ackManager := NewAckManager()

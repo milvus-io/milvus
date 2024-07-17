@@ -31,9 +31,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create consumer request is required")
 	}
-
-	pchanelInfo := typeconverter.NewPChannelInfoFromProto(createReq.Pchannel)
-	l, err := walManager.GetAvailableWAL(pchanelInfo)
+	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +54,9 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	consumeServer := &consumeGrpcServerHelper{
 		StreamingNodeHandlerService_ConsumeServer: streamServer,
 	}
-	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{}); err != nil {
+	if err := consumeServer.SendCreated(&streamingpb.CreateConsumerResponse{
+		WalName: l.WALName(),
+	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
 			log.Warn("close scanner failed at create consume server", zap.Error(err))

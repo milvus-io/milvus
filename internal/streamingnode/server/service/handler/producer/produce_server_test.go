@@ -3,6 +3,7 @@ package producer
 import (
 	"context"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -54,7 +55,9 @@ func TestCreateProduceServer(t *testing.T) {
 
 	// Return error if create scanner failed.
 	l := mock_wal.NewMockWAL(t)
+	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
+	l.EXPECT().WALName().Return("test")
 	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1}).Return(l, nil)
 	grpcProduceServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
 	assertCreateProduceServerFail(t, manager, grpcProduceServer)
@@ -213,7 +216,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 					Payload: []byte("test"),
 					Properties: map[string]string{
 						"_v": "1",
-						"_t": "1",
+						"_t": strconv.FormatInt(int64(message.MessageTypeTimeTick), 10),
 					},
 				},
 			},

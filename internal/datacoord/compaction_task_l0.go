@@ -44,6 +44,8 @@ type l0CompactionTask struct {
 	meta     CompactionMeta
 }
 
+// Note: return True means exit this state machine.
+// ONLY return True for processCompleted or processFailed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
@@ -200,7 +202,7 @@ func (t *l0CompactionTask) SetStartTime(startTime int64) {
 }
 
 func (t *l0CompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && t.GetNodeID() == NullNodeID
+	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
 }
 
 func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
@@ -275,7 +277,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	for _, segInfo := range sealedSegments {
 		// TODO should allow parallel executing of l0 compaction
 		if segInfo.isCompacting {
-			log.Info("l0 compaction candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
+			log.Warn("l0CompactionTask candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
 			return nil, merr.WrapErrCompactionPlanConflict(fmt.Sprintf("segment %d is compacting", segInfo.GetID()))
 		}
 	}
@@ -292,7 +294,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	})
 
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-	log.Info("Compaction handler refreshed level zero compaction plan",
+	log.Info("l0CompactionTask refreshed level zero compaction plan",
 		zap.Any("target position", t.GetPos()),
 		zap.Any("target segments count", len(sealedSegBinlogs)))
 	return plan, nil

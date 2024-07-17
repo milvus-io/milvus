@@ -1,4 +1,4 @@
-package timestamp
+package idalloc
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func TestTimestampAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	allocator := NewAllocator(client)
+	allocator := NewTSOAllocator(client)
 
 	for i := 0; i < 5000; i++ {
 		ts, err := allocator.Allocate(context.Background())
@@ -46,7 +46,7 @@ func TestTimestampAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	allocator = NewAllocator(client)
+	allocator = NewTSOAllocator(client)
 	_, err := allocator.Allocate(context.Background())
 	assert.Error(t, err)
 }

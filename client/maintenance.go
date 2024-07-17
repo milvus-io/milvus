@@ -106,6 +106,25 @@ func (c *Client) LoadPartitions(ctx context.Context, option LoadPartitionsOption
 	return task, err
 }
 
+func (c *Client) ReleaseCollection(ctx context.Context, option ReleaseCollectionOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.ReleaseCollection(ctx, req, callOptions...)
+
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) ReleasePartitions(ctx context.Context, option ReleasePartitionsOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.ReleasePartitions(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
 type FlushTask struct {
 	client         *Client
 	collectionName string

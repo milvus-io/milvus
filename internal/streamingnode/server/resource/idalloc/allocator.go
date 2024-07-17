@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package timestamp
+package idalloc
 
 import (
 	"context"
@@ -28,13 +28,26 @@ const batchAllocateSize = 1000
 
 var _ Allocator = (*allocatorImpl)(nil)
 
-// NewAllocator creates a new allocator.
-func NewAllocator(rc types.RootCoordClient) Allocator {
+// NewTSOAllocator creates a new allocator.
+func NewTSOAllocator(rc types.RootCoordClient) Allocator {
 	return &allocatorImpl{
 		mu:              sync.Mutex{},
-		remoteAllocator: newRemoteAllocator(rc),
+		remoteAllocator: newTSOAllocator(rc),
 		localAllocator:  newLocalAllocator(),
 	}
+}
+
+// NewIDAllocator creates a new allocator.
+func NewIDAllocator(rc types.RootCoordClient) Allocator {
+	return &allocatorImpl{
+		mu:              sync.Mutex{},
+		remoteAllocator: newIDAllocator(rc),
+		localAllocator:  newLocalAllocator(),
+	}
+}
+
+type remoteBatchAllocator interface {
+	batchAllocate(ctx context.Context, count uint32) (uint64, int, error)
 }
 
 type Allocator interface {
@@ -48,7 +61,7 @@ type Allocator interface {
 
 type allocatorImpl struct {
 	mu              sync.Mutex
-	remoteAllocator *remoteAllocator
+	remoteAllocator remoteBatchAllocator
 	localAllocator  *localAllocator
 }
 
@@ -77,7 +90,7 @@ func (ta *allocatorImpl) Sync() {
 // allocateRemote allocates timestamp from remote root coordinator.
 func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
 	// Update local allocator from remote.
-	start, count, err := ta.remoteAllocator.allocate(ctx, batchAllocateSize)
+	start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
 	if err != nil {
 		return 0, err
 	}

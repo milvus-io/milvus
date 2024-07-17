@@ -1,17 +1,35 @@
 package message
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+)
 
 type MessageType int32
 
 const (
-	MessageTypeUnknown  MessageType = 0
-	MessageTypeTimeTick MessageType = 1
+	MessageTypeUnknown          MessageType = MessageType(commonpb.MsgType_Undefined)
+	MessageTypeTimeTick         MessageType = MessageType(commonpb.MsgType_TimeTick)
+	MessageTypeInsert           MessageType = MessageType(commonpb.MsgType_Insert)
+	MessageTypeDelete           MessageType = MessageType(commonpb.MsgType_Delete)
+	MessageTypeFlush            MessageType = MessageType(commonpb.MsgType_Flush)
+	MessageTypeCreateCollection MessageType = MessageType(commonpb.MsgType_CreateCollection)
+	MessageTypeDropCollection   MessageType = MessageType(commonpb.MsgType_DropCollection)
+	MessageTypeCreatePartition  MessageType = MessageType(commonpb.MsgType_CreatePartition)
+	MessageTypeDropPartition    MessageType = MessageType(commonpb.MsgType_DropPartition)
 )
 
 var messageTypeName = map[MessageType]string{
-	MessageTypeUnknown:  "MESSAGE_TYPE_UNKNOWN",
-	MessageTypeTimeTick: "MESSAGE_TYPE_TIME_TICK",
+	MessageTypeUnknown:          "UNKNOWN",
+	MessageTypeTimeTick:         "TIME_TICK",
+	MessageTypeInsert:           "INSERT",
+	MessageTypeDelete:           "DELETE",
+	MessageTypeFlush:            "FLUSH",
+	MessageTypeCreateCollection: "CREATE_COLLECTION",
+	MessageTypeDropCollection:   "DROP_COLLECTION",
+	MessageTypeCreatePartition:  "CREATE_PARTITION",
+	MessageTypeDropPartition:    "DROP_PARTITION",
 }
 
 // String implements fmt.Stringer interface.
@@ -26,8 +44,8 @@ func (t MessageType) marshal() string {
 
 // Valid checks if the MessageType is valid.
 func (t MessageType) Valid() bool {
-	return t == MessageTypeTimeTick
-	// TODO: fill more.
+	_, ok := messageTypeName[t]
+	return t != MessageTypeUnknown && ok
 }
 
 // unmarshalMessageType unmarshal MessageType from string.

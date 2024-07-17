@@ -23,9 +23,10 @@ func TestBalancer(t *testing.T) {
 	paramtable.Init()
 
 	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]types.StreamingNodeStatus{
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
 		1: {
 			StreamingNodeInfo: types.StreamingNodeInfo{
 				ServerID: 1,
@@ -54,7 +55,7 @@ func TestBalancer(t *testing.T) {
 	}, nil)
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
 	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
 		return []*streamingpb.PChannelMeta{
@@ -87,7 +88,7 @@ func TestBalancer(t *testing.T) {
 	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair", streamingNodeManager)
+	b, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair")
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 	defer b.Close()
@@ -99,7 +100,7 @@ func TestBalancer(t *testing.T) {
 	b.Trigger(ctx)
 
 	doneErr := errors.New("done")
-	err = b.WatchBalanceResult(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+	err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
 		// should one pchannel be assigned to per nodes
 		nodeIDs := typeutil.NewSet[int64]()
 		if len(relations) == 3 {

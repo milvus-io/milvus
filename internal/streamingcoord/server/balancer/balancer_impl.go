@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -21,7 +21,6 @@ import (
 func RecoverBalancer(
 	ctx context.Context,
 	policy string,
-	streamingNodeManager manager.ManagerClient,
 	incomingNewChannel ...string, // Concurrent incoming new channel directly from the configuration.
 	// we should add a rpc interface for creating new incoming new channel.
 ) (Balancer, error) {
@@ -33,7 +32,6 @@ func RecoverBalancer(
 	b := &balancerImpl{
 		lifetime:               lifetime.NewLifetime(lifetime.Working),
 		logger:                 log.With(zap.String("policy", policy)),
-		streamingNodeManager:   streamingNodeManager, // TODO: fill it up.
 		channelMetaManager:     manager,
 		policy:                 mustGetPolicy(policy),
 		reqCh:                  make(chan *request, 5),
@@ -47,15 +45,14 @@ func RecoverBalancer(
 type balancerImpl struct {
 	lifetime               lifetime.Lifetime[lifetime.State]
 	logger                 *log.MLogger
-	streamingNodeManager   manager.ManagerClient
 	channelMetaManager     *channel.ChannelManager
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
 }
 
-// WatchBalanceResult watches the balance result.
-func (b *balancerImpl) WatchBalanceResult(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error {
+// WatchChannelAssignments watches the balance result.
+func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error {
 	if b.lifetime.Add(lifetime.IsWorking) != nil {
 		return status.NewOnShutdownError("balancer is closing")
 	}
@@ -110,6 +107,11 @@ func (b *balancerImpl) execute() {
 	}()
 
 	balanceTimer := newBalanceTimer()
+	nodeChanged, err := resource.Resource().StreamingNodeManagerClient().WatchNodeChanged(b.backgroundTaskNotifier.Context())
+	if err != nil {
+		b.logger.Error("fail to watch node changed", zap.Error(err))
+		return
+	}
 	for {
 		// Wait for next balance trigger.
 		// Maybe trigger by timer or by request.
@@ -122,6 +124,13 @@ func (b *balancerImpl) execute() {
 			newReq.apply(b)
 			b.applyAllRequest()
 		case <-nextTimer:
+			// balance triggered by timer.
+		case _, ok := <-nodeChanged:
+			if !ok {
+				return // nodeChanged is only closed if context cancel.
+				// in other word, balancer is closed.
+			}
+			// balance triggered by new streaming node changed.
 		}
 
 		if err := b.balance(b.backgroundTaskNotifier.Context()); err != nil {
@@ -159,7 +168,7 @@ func (b *balancerImpl) balance(ctx context.Context) error {
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
 	b.logger.Info("collect all status...")
-	nodeStatus, err := b.streamingNodeManager.CollectAllStatus(ctx)
+	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx)
 	if err != nil {
 		return errors.Wrap(err, "fail to collect all status")
 	}
@@ -197,15 +206,15 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 		g.Go(func() error {
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
-				if err := b.streamingNodeManager.Remove(ctx, assignment); err != nil {
-					b.logger.Warn("fail to remove channel", zap.Any("assignment", assignment))
+				if err := resource.Resource().StreamingNodeManagerClient().Remove(ctx, assignment); err != nil {
+					b.logger.Warn("fail to remove channel", zap.Any("assignment", assignment), zap.Error(err))
 					return err
 				}
 				b.logger.Info("remove channel success", zap.Any("assignment", assignment))
 			}
 
 			// assign the channel to the target node.
-			if err := b.streamingNodeManager.Assign(ctx, channel.CurrentAssignment()); err != nil {
+			if err := resource.Resource().StreamingNodeManagerClient().Assign(ctx, channel.CurrentAssignment()); err != nil {
 				b.logger.Warn("fail to assign channel", zap.Any("assignment", channel.CurrentAssignment()))
 				return err
 			}
@@ -223,7 +232,7 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.
-func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allNodesStatus map[int64]types.StreamingNodeStatus) (layout CurrentLayout) {
+func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allNodesStatus map[int64]*types.StreamingNodeStatus) (layout CurrentLayout) {
 	activeRelations := make(map[int64][]types.PChannelInfo, len(allNodesStatus))
 	incomingChannels := make([]string, 0)
 	channelsToNodes := make(map[string]int64, len(channelsInMeta))
@@ -255,7 +264,7 @@ func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allN
 				zap.String("channel", meta.Name()),
 				zap.Int64("term", meta.CurrentTerm()),
 				zap.Int64("serverID", meta.CurrentServerID()),
-				zap.Error(nodeStatus.Err),
+				zap.Error(nodeStatus.ErrorOfNode()),
 			)
 		}
 	}

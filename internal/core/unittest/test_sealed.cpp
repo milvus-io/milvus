@@ -1064,6 +1064,7 @@ TEST(Sealed, OverlapDelete) {
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
+    auto deleted_record1 = pks.size();
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << pks.size() << std::endl;
@@ -1079,10 +1080,10 @@ TEST(Sealed, OverlapDelete) {
     segment->LoadDeletedRecord(overlap_info);
 
     BitsetType bitset(N, false);
-    // NOTE: need to change delete timestamp, so not to hit the cache
-    ASSERT_EQ(segment->get_deleted_count(), pks.size())
+    auto deleted_record2 = pks.size();
+    ASSERT_EQ(segment->get_deleted_count(), deleted_record1 + deleted_record2)
         << "deleted_count=" << segment->get_deleted_count()
-        << " pks_count=" << pks.size() << std::endl;
+        << " pks_count=" << deleted_record1 + deleted_record2 << std::endl;
     segment->mask_with_delete(bitset, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
@@ -1231,6 +1232,63 @@ TEST(Sealed, BF_Overflow) {
     }
 }
 
+TEST(Sealed, DeleteDuplicatedRecords) {
+    {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateSealedSegment(schema);
+
+        auto offset = segment->get_deleted_count();
+        ASSERT_EQ(offset, 0);
+
+        int64_t c = 1000;
+        // generate random pk that may have dupicated records
+        auto dataset = DataGen(schema, c, 42, 0, 1, 10, true);
+        auto pks = dataset.get_col<int64_t>(pk);
+        // current insert record: { pk: random(0 - 999) timestamp: (0 - 999) }
+        SealedLoadFieldData(dataset, *segment);
+
+        segment->RemoveDuplicatePkRecords();
+
+        BitsetType bits(c);
+        std::map<int64_t, std::vector<int64_t>> different_pks;
+        for (int i = 0; i < pks.size(); i++) {
+            if (different_pks.find(pks[i]) != different_pks.end()) {
+                different_pks[pks[i]].push_back(i);
+            } else {
+                different_pks[pks[i]] = {i};
+            }
+        }
+
+        for (auto& [k, v] : different_pks) {
+            if (v.size() > 1) {
+                for (int i = 0; i < v.size() - 1; i++) {
+                    bits.set(v[i]);
+                }
+            }
+        }
+
+        ASSERT_EQ(segment->get_deleted_count(), c - different_pks.size())
+            << "deleted_count=" << segment->get_deleted_count()
+            << "duplicate_pks " << c - different_pks.size() << std::endl;
+
+        BitsetType bitset(c);
+        std::cout << "start to search delete" << std::endl;
+        segment->mask_with_delete(bitset, c, 1003);
+
+        for (int i = 0; i < bitset.size(); i++) {
+            ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;
+        }
+
+        for (auto& [k, v] : different_pks) {
+            //std::cout << "k:" << k << "v:" << join(v, ",") << std::endl;
+            auto res = segment->SearchPk(k, Timestamp(1003));
+            ASSERT_EQ(res.size(), 1);
+        }
+    }
+}
+
 TEST(Sealed, DeleteCount) {
     {
         auto schema = std::make_shared<Schema>();
@@ -1238,14 +1296,17 @@ TEST(Sealed, DeleteCount) {
         schema->set_primary_field_id(pk);
         auto segment = CreateSealedSegment(schema);
 
-        int64_t c = 10;
         auto offset = segment->get_deleted_count();
         ASSERT_EQ(offset, 0);
+        int64_t c = 10;
+        auto dataset = DataGen(schema, c);
+        auto pks = dataset.get_col<int64_t>(pk);
+        SealedLoadFieldData(dataset, *segment);
 
         Timestamp begin_ts = 100;
         auto tss = GenTss(c, begin_ts);
-        auto pks = GenPKs(c, 0);
-        auto status = segment->Delete(offset, c, pks.get(), tss.data());
+        auto delete_pks = GenPKs(c, 0);
+        auto status = segment->Delete(offset, c, delete_pks.get(), tss.data());
         ASSERT_TRUE(status.ok());
 
         // shouldn't be filtered for empty segment.

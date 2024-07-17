@@ -141,6 +141,23 @@ func TestAllocSegment(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, segmentManager)
 	})
+
+	t.Run("alloc clear unhealthy segment", func(t *testing.T) {
+		allocations1, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 1, len(allocations1))
+		assert.EqualValues(t, 1, len(segmentManager.segments))
+
+		err = meta.SetState(allocations1[0].SegmentID, commonpb.SegmentState_Dropped)
+		assert.NoError(t, err)
+
+		allocations2, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 1, len(allocations2))
+		// clear old healthy and alloc new
+		assert.EqualValues(t, 1, len(segmentManager.segments))
+		assert.NotEqual(t, allocations1[0].SegmentID, allocations2[0].SegmentID)
+	})
 }
 
 func TestLastExpireReset(t *testing.T) {
@@ -514,7 +531,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, ids)
 
-		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now().Local().Add(-flushInterval))
+		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now().Local().Add(-1*paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second)))
 		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))

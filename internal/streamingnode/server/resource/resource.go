@@ -1,9 +1,11 @@
 package resource
 
 import (
+	"reflect"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -33,9 +35,10 @@ func Init(opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
-	r.timestampAllocator = timestamp.NewAllocator(r.rootCoordClient)
+	r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 
-	assertNotNil(r.TimestampAllocator())
+	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.ETCD())
 	assertNotNil(r.RootCoordClient())
 }
@@ -48,14 +51,20 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	timestampAllocator timestamp.Allocator
+	timestampAllocator idalloc.Allocator
+	idAllocator        idalloc.Allocator
 	etcdClient         *clientv3.Client
 	rootCoordClient    types.RootCoordClient
 }
 
-// TimestampAllocator returns the timestamp allocator to allocate timestamp.
-func (r *resourceImpl) TimestampAllocator() timestamp.Allocator {
+// TSOAllocator returns the timestamp allocator to allocate timestamp.
+func (r *resourceImpl) TSOAllocator() idalloc.Allocator {
 	return r.timestampAllocator
+}
+
+// IDAllocator returns the id allocator to allocate id.
+func (r *resourceImpl) IDAllocator() idalloc.Allocator {
+	return r.idAllocator
 }
 
 // ETCD returns the etcd client.
@@ -70,7 +79,14 @@ func (r *resourceImpl) RootCoordClient() types.RootCoordClient {
 
 // assertNotNil panics if the resource is nil.
 func assertNotNil(v interface{}) {
-	if v == nil {
+	iv := reflect.ValueOf(v)
+	if !iv.IsValid() {
 		panic("nil resource")
+	}
+	switch iv.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
+		if iv.IsNil() {
+			panic("nil resource")
+		}
 	}
 }

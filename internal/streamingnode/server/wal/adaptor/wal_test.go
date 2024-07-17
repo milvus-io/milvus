@@ -16,7 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -32,7 +32,7 @@ type walTestFramework struct {
 }
 
 func TestWAL(t *testing.T) {
-	rc := timestamp.NewMockRootCoordClient(t)
+	rc := idalloc.NewMockRootCoordClient(t)
 	resource.InitForTest(resource.OptRootCoordClient(rc))
 
 	b := registry.MustGetBuilder(walimplstest.WALName)
