@@ -256,8 +256,12 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	node.compactionExecutor.Execute(task)
-	return merr.Success(), nil
+	succeed, err := node.compactionExecutor.Execute(task)
+	if succeed {
+		return merr.Success(), nil
+	} else {
+		return merr.Status(err), nil
+	}
 }
 
 // GetCompactionState called by DataCoord

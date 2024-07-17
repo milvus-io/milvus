@@ -519,6 +519,10 @@ dataCoord:
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
   syncSegmentsInterval: 300
+  slot:  
+    clusteringCompactionUsage: 16
+    mixCompactionUsage: 8
+    l0DeleteCompactionUsage: 8
 
 dataNode:
   dataSync:
@@ -567,10 +571,11 @@ dataNode:
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
   slot:
-    slotCap: 2 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
+    slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
 
   clusteringCompaction:
     memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.
+    workPoolSize: 8
 
 # Configures the system log output.
 log:
