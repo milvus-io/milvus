@@ -19,6 +19,7 @@ package proxy
 import (
 	"container/list"
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -190,6 +192,7 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	t.SetTs(ts)
 	t.SetID(id)
 
+	t.SetOnEnqueueTime()
 	return queue.addUnissuedTask(t)
 }
 
@@ -453,6 +456,11 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 		q.PopActiveTask(t.ID())
 	}()
 	span.AddEvent("scheduler process PreExecute")
+
+	waitDuration := t.GetDurationInQueue()
+	metrics.ProxyReqInQueueLatency.
+		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.Type().String()).
+		Observe(float64(waitDuration.Milliseconds()))
 
 	err := t.PreExecute(ctx)
 

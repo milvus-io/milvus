@@ -98,6 +98,11 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *deleteTask) OnEnqueue() error {
+	if dt.req.Base == nil {
+		dt.req.Base = commonpbutil.NewMsgBase()
+	}
+	dt.req.Base.MsgType = commonpb.MsgType_Delete
+	dt.req.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
