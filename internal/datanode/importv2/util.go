@@ -152,7 +152,7 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 }
 
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
-	idRange := task.req.GetAutoIDRange()
+	idRange := task.req.GetIDRange()
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err

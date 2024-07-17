@@ -560,7 +560,9 @@ message CompactionPlan {
   string analyze_result_path = 14;
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
-  int64 slot_usage = 17;
+  int64 begin_logID = 17;
+  IDRange pre_allocated_segments = 18; // only for clustering compaction
+  int64 slot_usage = 19;
 }
 
 message CompactionSegment {
@@ -724,7 +726,7 @@ message PreImportRequest {
   repeated common.KeyValuePair options = 9;
 }
 
-message autoIDRange {
+message IDRange {
   int64 begin = 1;
   int64 end = 2;
 }
@@ -746,7 +748,7 @@ message ImportRequest {
   repeated internal.ImportFile files = 8;
   repeated common.KeyValuePair options = 9;
   uint64 ts = 10;
-  autoIDRange autoID_range = 11;
+  IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
 }
 

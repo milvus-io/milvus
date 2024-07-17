@@ -58,7 +58,7 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	task := &ImportTask{
 		req: &datapb.ImportRequest{
 			Ts: 1000,
-			AutoIDRange: &datapb.AutoIDRange{
+			IDRange: &datapb.IDRange{
 				Begin: 0,
 				End:   count,
 			},
