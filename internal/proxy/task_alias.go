@@ -81,13 +81,13 @@ func (t *CreateAliasTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_CreateAlias
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 // PreExecute defines the tion before task execution
 func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_CreateAlias
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	collAlias := t.Alias
 	// collection alias uses the same format as collection name
@@ -164,12 +164,12 @@ func (t *DropAliasTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DropAlias
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *DropAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DropAlias
-	t.Base.SourceID = paramtable.GetNodeID()
 	collAlias := t.Alias
 	if err := ValidateCollectionAlias(collAlias); err != nil {
 		return err
@@ -233,12 +233,12 @@ func (t *AlterAliasTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_AlterAlias
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterAlias
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	collAlias := t.Alias
 	// collection alias uses the same format as collection name
@@ -309,12 +309,12 @@ func (a *DescribeAliasTask) SetTs(ts Timestamp) {
 
 func (a *DescribeAliasTask) OnEnqueue() error {
 	a.Base = commonpbutil.NewMsgBase()
+	a.Base.MsgType = commonpb.MsgType_DescribeAlias
+	a.Base.SourceID = a.nodeID
 	return nil
 }
 
 func (a *DescribeAliasTask) PreExecute(ctx context.Context) error {
-	a.Base.MsgType = commonpb.MsgType_DescribeAlias
-	a.Base.SourceID = a.nodeID
 	// collection alias uses the same format as collection name
 	if err := ValidateCollectionAlias(a.GetAlias()); err != nil {
 		return err
@@ -377,12 +377,12 @@ func (a *ListAliasesTask) SetTs(ts Timestamp) {
 
 func (a *ListAliasesTask) OnEnqueue() error {
 	a.Base = commonpbutil.NewMsgBase()
+	a.Base.MsgType = commonpb.MsgType_ListAliases
+	a.Base.SourceID = a.nodeID
 	return nil
 }
 
 func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
-	a.Base.MsgType = commonpb.MsgType_ListAliases
-	a.Base.SourceID = a.nodeID
 
 	if len(a.GetCollectionName()) > 0 {
 		if err := validateCollectionName(a.GetCollectionName()); err != nil {

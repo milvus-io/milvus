@@ -2693,6 +2693,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 		ctx:                        ctx,
 		queryCoord:                 qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_CreateResourceGroup, task.Type())
@@ -2732,6 +2733,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 		ctx:                      ctx,
 		queryCoord:               qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DropResourceGroup, task.Type())
@@ -2773,6 +2775,7 @@ func TestTransferNodeTask(t *testing.T) {
 		ctx:                 ctx,
 		queryCoord:          qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_TransferNode, task.Type())
@@ -2815,6 +2818,7 @@ func TestTransferReplicaTask(t *testing.T) {
 		ctx:                    ctx,
 		queryCoord:             qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_TransferReplica, task.Type())
@@ -2854,6 +2858,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 		ctx:                       ctx,
 		queryCoord:                qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_ListResourceGroups, task.Type())
@@ -2906,6 +2911,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 		ctx:                          ctx,
 		queryCoord:                   qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
@@ -2952,6 +2958,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 		ctx:                          ctx,
 		queryCoord:                   qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
