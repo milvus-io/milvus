@@ -1576,7 +1576,12 @@ func (c *Core) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsReq
 		}, nil
 	}
 
-	c.meta.GetCollectionVirtualChannels()
+	resp := &rootcoordpb.GetVChannelsResponse{
+		Status: merr.Success(),
+	}
+	vchannels := c.meta.GetVChannelsByPchannel(in.GetPchannel())
+	resp.Vchannels = vchannels
+	return resp, nil
 }
 
 // AllocTimestamp alloc timestamp
