@@ -1,29 +1,34 @@
 #!/bin/bash
 
-#Download milvus source code
-git clone https://github.com/milvus-io/milvus.git
-cd milvus
-# $1 is the branch name or commit number
-git checkout $1
-make
-cd ..
+#Change config
+rm -rf milvus
+cp -r /milvus .
+sed -i 's#embed: false#embed: true#' milvus/configs/milvus.yaml
+sed -i 's#dir: default.etcd#data.dir: /var/lib/milvus/etcd#' milvus/configs/milvus.yaml
+sed -i '/data.dir: \/var\/lib\/milvus\/etcd/a \  config:\n    path: /etc/milvus/configs/embedEtcd.yaml' milvus/configs/milvus.yaml
+sed -i 's#storageType: remote#storageType: local#' milvus/configs/milvus.yaml
+cat << EOF > milvus/configs/embedEtcd.yaml
+listen-client-urls: http://0.0.0.0:2379
+advertise-client-urls: http://0.0.0.0:2379
+quota-backend-bytes: 4294967296
+auto-compaction-mode: revision
+auto-compaction-retention: '1000'
+EOF
+
 
 #Prepare for milvus-deb
+rm -rf milvus-deb
 mkdir -p milvus-deb/milvus
 mkdir milvus-deb/milvus/milvus-bin
 mkdir milvus-deb/milvus/milvus-lib
 ## binary
 cp milvus/bin/milvus milvus-deb/milvus/milvus-bin/
-wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz && tar -xf etcd-v3.5.0-linux-amd64.tar.gz
-cp etcd-v3.5.0-linux-amd64/etcd milvus-deb/milvus/milvus-bin/milvus-etcd
-wget https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2021-02-14T04-01-33Z -O milvus-deb/milvus/milvus-bin/milvus-minio
 ## lib
-cp -d milvus/internal/core/output/lib/* milvus-deb/milvus/milvus-lib/
-cp /usr/lib/x86_64-linux-gnu/libgfortran.so.4.0.0 milvus-deb/milvus/milvus-lib/libgfortran.so.4
+cp -d milvus/lib/* milvus-deb/milvus/milvus-lib/
+cp /usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0 milvus-deb/milvus/milvus-lib/libgfortran.so.4
 cp /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0 milvus-deb/milvus/milvus-lib/libgomp.so.1
 cp /usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0 milvus-deb/milvus/milvus-lib/libquadmath.so.0
-cp /usr/lib/x86_64-linux-gnu/libtbb.so.2 milvus-deb/milvus/milvus-lib/libtbb.so.2
-cp /usr/lib/libopenblas-r0.3.9.so milvus-deb/milvus/milvus-lib/libopenblas.so.0
+cp /usr/lib/x86_64-linux-gnu/libopenblas.so.0  milvus-deb/milvus/milvus-lib/libopenblas.so.0
 ## script
 cp -r scripts milvus-deb/milvus/
 ## config
@@ -31,7 +36,7 @@ cp -r milvus/configs milvus-deb/milvus/
 
 # set env
 apt update
-apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential -y
+apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential libopenblas-dev brz-debian -y
 ## $3 is name, $4 is email
 bzr whoami "$3 $4"
 export DEBFULLNAME="$3"
@@ -58,8 +63,4 @@ rm -rf milvus/debian/*.ex milvus/debian/*.EX
 cd milvus
 bzr add debian/source/format
 bzr commit -m "Initial commit of Debian packaging."
-bzr builddeb -- -us -uc
-
-#sign package and  upload to launcgpad
-#bzr builddeb -S
-#dput ppa:milvusdb/milvus milvus_$2-1_source.changes
+dpkg-buildpackage -us -uc -ui

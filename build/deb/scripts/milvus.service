@@ -2,9 +2,7 @@
 
 [Unit]
 Description=Milvus Standalone Server
-Wants=milvus-etcd.service milvus-minio.service
-Requires=milvus-etcd.service milvus-minio.service
-After=network.target syslog.target milvus-etcd.service milvus-minio.service
+After=network.target syslog.target
 
 [Install]
 WantedBy=multi-user.target
