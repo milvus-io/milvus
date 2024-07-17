@@ -149,7 +149,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	l, err := w.opener.Open(expectedState.Context(), &wal.OpenOption{
 		Channel: expectedState.GetPChannelInfo(),
 	})
-	// TODO: flusher.open
+	// TODO: flusher.Open()
 	if err != nil {
 		logger.Warn("open new wal fail", zap.Error(err))
 		// Open new wal at expected term failed, push expected term to current state unavailable.
