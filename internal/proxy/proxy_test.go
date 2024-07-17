@@ -4433,8 +4433,7 @@ func Test_GetCompactionState(t *testing.T) {
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
-		assert.EqualValues(t, &milvuspb.GetCompactionStateResponse{}, resp)
-		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("get compaction state with unhealthy proxy", func(t *testing.T) {
