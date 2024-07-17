@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
@@ -249,6 +250,18 @@ func (mr *MilvusRoles) setupLogger() {
 	}
 
 	logutil.SetupLogger(&logConfig)
+	params.Watch(params.LogCfg.Level.Key, config.NewHandler("log.level", func(event *config.Event) {
+		if !event.HasUpdated || event.EventType == config.DeleteType {
+			return
+		}
+		logLevel, err := zapcore.ParseLevel(event.Value)
+		if err != nil {
+			log.Warn("failed to parse log level", zap.Error(err))
+			return
+		}
+		log.SetLevel(logLevel)
+		log.Info("log level changed", zap.String("level", event.Value))
+	}))
 }
 
 // Register serves prometheus http service
@@ -352,6 +365,7 @@ func (mr *MilvusRoles) Run() {
 
 	expr.Init()
 	expr.Register("param", paramtable.Get())
+	mr.setupLogger()
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
 
@@ -423,7 +437,6 @@ func (mr *MilvusRoles) Run() {
 		return nil
 	})
 
-	mr.setupLogger()
 	tracer.Init()
 	paramtable.Get().WatchKeyPrefix("trace", config.NewHandler("tracing handler", func(e *config.Event) {
 		params := paramtable.Get()
