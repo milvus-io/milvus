@@ -43,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//go:generate mockery --name=IMetaTable --structname=IMetaTable --output=./mocks/  --filename=meta_table.go --with-expecter
+//go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
 type IMetaTable interface {
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
