@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -44,7 +44,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	}
 	defer hc.lifetime.Done()
 
-	p, err := hc.createHandlerUntilStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Wait for handler service is ready.
 		handlerService, err := hc.service.GetService(ctx)
 		if err != nil {
@@ -65,7 +65,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	}
 	defer hc.lifetime.Done()
 
-	c, err := hc.createHandlerUntilStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Wait for handler service is ready.
 		handlerService, err := hc.service.GetService(ctx)
 		if err != nil {
@@ -84,9 +84,9 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	return c.(Consumer), nil
 }
 
-// createHandlerUntilStreamingNodeReady creates a handler until streaming node ready.
+// createHandlerAfterStreamingNodeReady creates a handler until streaming node ready.
 // If streaming node is not ready, it will block until new assignment term is coming or context timeout.
-func (hc *handlerClientImpl) createHandlerUntilStreamingNodeReady(ctx context.Context, pchannel string, create func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error)) (any, error) {
+func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, pchannel string, create func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error)) (any, error) {
 	logger := log.With(zap.String("pchannel", pchannel))
 	// TODO: backoff should be configurable.
 	backoff := backoff.NewExponentialBackOff()
@@ -109,14 +109,16 @@ func (hc *handlerClientImpl) createHandlerUntilStreamingNodeReady(ctx context.Co
 			log.Warn("assignment not found")
 		}
 
+		start := time.Now()
 		nextBackoff := backoff.NextBackOff()
 		logger.Info("wait for next backoff", zap.Duration("nextBackoff", nextBackoff))
 		isAssignemtChange, err := hc.waitForNextBackoff(ctx, pchannel, assign, nextBackoff)
+		cost := time.Since(start)
 		if err != nil {
-			logger.Warn("wait for next backoff failed", zap.Error(err))
+			logger.Warn("wait for next backoff failed", zap.Error(err), zap.Duration("cost", cost))
 			return nil, err
 		}
-		logger.Info("wait for next backoff done", zap.Bool("isAssignmentChange", isAssignemtChange))
+		logger.Info("wait for next backoff done", zap.Bool("isAssignmentChange", isAssignemtChange), zap.Duration("cost", cost))
 	}
 }
 

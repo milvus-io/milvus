@@ -246,7 +246,6 @@ func (p *producerImpl) sendLoop() (err error) {
 			})
 			return err
 		}
-		p.logger.Debug("send produce message to server", zap.Int64("requestID", requestID))
 	}
 	// all message has been sent, sent close response.
 	return p.grpcStreamClient.SendClose()
