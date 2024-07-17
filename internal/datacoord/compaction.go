@@ -577,18 +577,21 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	case datapb.CompactionType_MixCompaction:
 		task = &mixCompactionTask{
 			CompactionTask: t,
+			allocator:      c.allocator,
 			meta:           c.meta,
 			sessions:       c.sessions,
 		}
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = &l0CompactionTask{
 			CompactionTask: t,
+			allocator:      c.allocator,
 			meta:           c.meta,
 			sessions:       c.sessions,
 		}
 	case datapb.CompactionType_ClusteringCompaction:
 		task = &clusteringCompactionTask{
 			CompactionTask:   t,
+			allocator:        c.allocator,
 			meta:             c.meta,
 			sessions:         c.sessions,
 			handler:          c.handler,

@@ -37,11 +37,13 @@ var _ CompactionTask = (*l0CompactionTask)(nil)
 
 type l0CompactionTask struct {
 	*datapb.CompactionTask
-	plan     *datapb.CompactionPlan
-	result   *datapb.CompactionPlanResult
-	span     trace.Span
-	sessions SessionManager
-	meta     CompactionMeta
+	plan   *datapb.CompactionPlan
+	result *datapb.CompactionPlanResult
+
+	span      trace.Span
+	allocator allocator
+	sessions  SessionManager
+	meta      CompactionMeta
 }
 
 // Note: return True means exit this state machine.
@@ -230,6 +232,10 @@ func (t *l0CompactionTask) CleanLogPath() {
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	beginLogID, _, err := t.allocator.allocN(1)
+	if err != nil {
+		return nil, err
+	}
 	plan := &datapb.CompactionPlan{
 		PlanID:           t.GetPlanID(),
 		StartTime:        t.GetStartTime(),
@@ -239,6 +245,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl:    t.GetCollectionTtl(),
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
+		BeginLogID:       beginLogID,
 	}
 
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
@@ -384,22 +391,17 @@ func (t *l0CompactionTask) SaveTaskMeta() error {
 
 func (t *l0CompactionTask) saveSegmentMeta() error {
 	result := t.result
-	plan := t.GetPlan()
 	var operators []UpdateOperator
 	for _, seg := range result.GetSegments() {
 		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
 	}
 
-	levelZeroSegments := lo.Filter(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return b.GetLevel() == datapb.SegmentLevel_L0
-	})
-
-	for _, seg := range levelZeroSegments {
-		operators = append(operators, UpdateStatusOperator(seg.GetSegmentID(), commonpb.SegmentState_Dropped), UpdateCompactedOperator(seg.GetSegmentID()))
+	for _, segID := range t.InputSegments {
+		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
-		zap.Int64("planID", plan.GetPlanID()),
+		zap.Int64("planID", t.GetPlanID()),
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)

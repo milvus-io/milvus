@@ -27,7 +27,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -45,7 +45,7 @@ import (
 
 type LevelZeroCompactionTask struct {
 	io.BinlogIO
-	allocator allocator.Allocator
+	allocator allocator.Interface
 	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
@@ -63,11 +63,11 @@ var _ Compactor = (*LevelZeroCompactionTask)(nil)
 func NewLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	alloc allocator.Allocator,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	return &LevelZeroCompactionTask{
 		ctx:    ctx,
 		cancel: cancel,
