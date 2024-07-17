@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
@@ -42,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//go:generate mockery --name=IMetaTable --outpkg=mockrootcoord --filename=meta_table.go --with-expecter
+//go:generate mockery --structname=IMetaTable --name=IMetaTable --outpkg=mocks --filename=meta_table.go --with-expecter
 type IMetaTable interface {
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
@@ -61,6 +62,7 @@ type IMetaTable interface {
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
 	GetCollectionVirtualChannels(colID int64) []string
+	GetVChannelsByPchannel(pchannel string) []string
 	AddPartition(ctx context.Context, partition *model.Partition) error
 	ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
 	RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
@@ -831,6 +833,19 @@ func (mt *MetaTable) GetCollectionVirtualChannels(colID int64) []string {
 		}
 	}
 	return nil
+}
+
+// GetVChannelsByPchannel returns vchannels by the given pchannel.
+func (mt *MetaTable) GetVChannelsByPchannel(pchannel string) []string {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	res := make([]string, 0)
+	for _, collInfo := range mt.collID2Meta {
+		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx > 0 {
+			res = append(res, collInfo.VirtualChannelNames[idx])
+		}
+	}
+	return res
 }
 
 func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {

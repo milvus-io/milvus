@@ -56,6 +56,7 @@ const (
 	TestRootCoordID = 200
 )
 
+// TODO: remove mockMetaTable, use mockery instead
 type mockMetaTable struct {
 	IMetaTable
 	ListDatabasesFunc                func(ctx context.Context, ts Timestamp) ([]*model.Database, error)
@@ -188,6 +189,10 @@ func (m mockMetaTable) GetPartitionByName(collID UniqueID, partitionName string,
 
 func (m mockMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	return m.GetCollectionVirtualChannelsFunc(colID)
+}
+
+func (m mockMetaTable) GetVChannelsByPchannel(pchannel string) []string {
+	panic("unimplemented")
 }
 
 func (m mockMetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {

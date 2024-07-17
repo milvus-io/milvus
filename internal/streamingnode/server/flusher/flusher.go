@@ -40,11 +40,9 @@ type flusher struct {
 }
 
 func (f *flusher) Open() {
-	// TODO: query vchannels
-	//var vchannels []string
-	//for _, vchannel := range vchannels {
-	//	ds, err := pipeline.NewDataSyncService()
-	//}
+	// TODO: 1. query vchannels; 2. for each vchannel:
+	// 2.1 get recovery info
+	// 2.2 create pipeline
 }
 
 func (f *flusher) Start() {
