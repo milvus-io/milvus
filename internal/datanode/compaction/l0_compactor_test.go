@@ -48,7 +48,6 @@ type LevelZeroCompactionTaskSuite struct {
 	suite.Suite
 
 	mockBinlogIO *io.MockBinlogIO
-	mockAlloc    *allocator.MockAllocator
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
@@ -57,10 +56,9 @@ type LevelZeroCompactionTaskSuite struct {
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	paramtable.Init()
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	// plan of the task is unset
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil, nil)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -272,6 +270,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.task.plan = plan
@@ -289,7 +288,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
 	s.Require().Equal(plan.GetChannel(), s.task.GetChannelName())
@@ -381,6 +379,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.task.plan = plan
@@ -396,7 +395,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -443,6 +441,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 				SegmentID: 100,
 			},
 		},
+		BeginLogID: 11111,
 	}
 
 	s.Run("serializeUpload allocator Alloc failed", func() {
@@ -468,7 +467,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
-		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
 		results, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
@@ -480,7 +478,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 
-		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}

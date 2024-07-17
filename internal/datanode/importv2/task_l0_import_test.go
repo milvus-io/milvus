@@ -165,7 +165,7 @@ func (s *L0ImportSuite) TestL0Import() {
 				Vchannel:    s.channel,
 			},
 		},
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.delCnt),
 		},

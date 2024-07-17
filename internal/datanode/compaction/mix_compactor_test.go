@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"math"
 	"testing"
 	"time"
@@ -29,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -51,7 +51,6 @@ type MixCompactionTaskSuite struct {
 	suite.Suite
 
 	mockBinlogIO *io.MockBinlogIO
-	mockAlloc    *allocator.MockAllocator
 
 	meta      *etcdpb.CollectionMeta
 	segWriter *SegmentWriter
@@ -66,9 +65,6 @@ func (s *MixCompactionTaskSuite) SetupSuite() {
 
 func (s *MixCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
-	s.mockAlloc = allocator.NewMockAllocator(s.T())
-
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil)
 
 	s.meta = genTestCollectionMeta()
 
@@ -82,10 +78,14 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds: 10,
-		Type:             datapb.CompactionType_MixCompaction,
-		Schema:           s.meta.GetSchema(),
+		TimeoutInSeconds:     10,
+		Type:                 datapb.CompactionType_MixCompaction,
+		Schema:               s.meta.GetSchema(),
+		BeginLogID:           19530,
+		PreAllocatedSegments: &datapb.IDRange{Begin: 19530},
 	}
+
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, s.plan)
 	s.task.plan = s.plan
 }
 
@@ -104,7 +104,6 @@ func getMilvusBirthday() time.Time {
 func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 	// Test merge compactions, two segments with the same pk, one deletion pk=1
 	// The merged segment 19530 should remain 3 pk without pk=100
-	s.mockAlloc.EXPECT().AllocOne().Return(int64(19530), nil).Twice()
 	segments := []int64{7, 8, 9}
 	dblobs, err := getInt64DeltaBlobs(
 		1,
@@ -115,8 +114,8 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
 		Return([][]byte{dblobs.GetValue()}, nil).Times(3)
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(7777777, 8888888, nil)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
 
 	// clear origial segments
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
@@ -139,7 +138,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 		//}
 		//bfs := metacache.NewBloomFilterSet(statistic)
 
-		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
@@ -177,10 +176,8 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 }
 
 func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
-	s.mockAlloc.EXPECT().AllocOne().Return(int64(19530), nil).Twice()
-
 	segments := []int64{5, 6, 7}
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(7777777, 8888888, nil)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segID := range segments {
@@ -191,7 +188,7 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 		//	MaxPK:    s.segWriter.pkstats.MaxPk,
 		//}
 		//bfs := metacache.NewBloomFilterSet(statistic)
-		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
@@ -251,11 +248,10 @@ func (s *MixCompactionTaskSuite) TestMergeBufferFull() {
 	err := s.segWriter.Write(&v)
 	s.Require().NoError(err)
 
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil).Times(2)
-	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 
-	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, paths []string) ([][]byte, error) {
 			s.Require().Equal(len(paths), len(kvs))
@@ -279,11 +275,10 @@ func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
 	currTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second*(time.Duration(collTTL)+1)), 0)
 	s.task.currentTs = currTs
 	s.task.plan.CollectionTtl = int64(collTTL)
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 
-	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
+	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
-	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, paths []string) ([][]byte, error) {
 			s.Require().Equal(len(paths), len(kvs))
@@ -313,15 +308,11 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 		{"deleted pk=4", map[interface{}]uint64{int64(4): deleteTs}, 0},
 	}
 
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil)
-	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			if test.expectedRowCount > 0 {
-				s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(77777, 99999, nil).Once()
-			}
-			s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
 					s.Require().Equal(len(paths), len(kvs))
@@ -486,12 +477,6 @@ func (s *MixCompactionTaskSuite) TestCompactFail() {
 	s.Run("Test compact invalid empty segment binlogs", func() {
 		s.plan.SegmentBinlogs = nil
 
-		_, err := s.task.Compact()
-		s.Error(err)
-	})
-
-	s.Run("Test compact AllocOnce failed", func() {
-		s.mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc one error")).Once()
 		_, err := s.task.Compact()
 		s.Error(err)
 	})

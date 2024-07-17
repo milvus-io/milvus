@@ -18,9 +18,11 @@ var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
 	*datapb.CompactionTask
-	plan       *datapb.CompactionPlan
-	result     *datapb.CompactionPlanResult
+	plan   *datapb.CompactionPlan
+	result *datapb.CompactionPlanResult
+
 	span       trace.Span
+	allocator  allocator
 	sessions   SessionManager
 	meta       CompactionMeta
 	newSegment *SegmentInfo
@@ -328,6 +330,10 @@ func (t *mixCompactionTask) CleanLogPath() {
 }
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	beginLogID, _, err := t.allocator.allocN(1)
+	if err != nil {
+		return nil, err
+	}
 	plan := &datapb.CompactionPlan{
 		PlanID:           t.GetPlanID(),
 		StartTime:        t.GetStartTime(),
@@ -337,6 +343,10 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CollectionTtl:    t.GetCollectionTtl(),
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
+		BeginLogID:       beginLogID,
+		PreAllocatedSegments: &datapb.IDRange{
+			Begin: t.GetResultSegments()[0],
+		},
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

@@ -265,7 +265,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -326,7 +326,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
@@ -417,7 +417,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 		Ts: 1000,
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.numRows),
 		},

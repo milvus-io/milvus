@@ -36,7 +36,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -59,8 +59,9 @@ import (
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	binlogIO  io.BinlogIO
-	allocator allocator.Allocator
+	binlogIO   io.BinlogIO
+	logIDAlloc allocator.Interface
+	segIDAlloc allocator.Interface
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -127,15 +128,17 @@ type FlushSignal struct {
 func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
 	return &clusteringCompactionTask{
 		ctx:                ctx,
 		cancel:             cancel,
 		binlogIO:           binlogIO,
-		allocator:          alloc,
+		logIDAlloc:         logIDAlloc,
+		segIDAlloc:         segIDAlloc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
@@ -295,7 +298,9 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(buffer)
+		if _, err = t.refreshBufferWriter(buffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
 			scalarToClusterBufferMap[key] = buffer
@@ -346,7 +351,9 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		t.refreshBufferWriter(clusterBuffer)
+		if _, err = t.refreshBufferWriter(clusterBuffer); err != nil {
+			return err
+		}
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
@@ -805,7 +812,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	for _, fieldBinlog := range buffer.flushedBinlogs {
 		insertLogs = append(insertLogs, fieldBinlog)
 	}
-	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, writer, buffer.flushedRowNum.Load())
+	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.logIDAlloc, writer, buffer.flushedRowNum.Load())
 	if err != nil {
 		return err
 	}
@@ -870,7 +877,7 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 	}
 
 	start := time.Now()
-	kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, writer)
+	kvs, partialBinlogs, err := serializeWrite(ctx, t.logIDAlloc, writer)
 	if err != nil {
 		log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
 		return err
@@ -1136,7 +1143,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 	}
 	if buffer.writer == nil || buffer.currentSegmentRowNum.Load()+buffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() {
 		pack = true
-		segmentID, err = t.allocator.AllocOne()
+		segmentID, err = t.segIDAlloc.AllocOne()
 		if err != nil {
 			return pack, err
 		}

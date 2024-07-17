@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -50,6 +52,8 @@ func (s *CompactionTaskSuite) TestClusteringCompactionSegmentMetaChange() {
 		},
 	})
 	session := NewSessionManagerImpl()
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 
 	schema := ConstructScalarClusteringSchema("TestClusteringCompactionTask", 32, true)
 	pk := &schemapb.FieldSchema{
@@ -77,9 +81,11 @@ func (s *CompactionTaskSuite) TestClusteringCompactionSegmentMetaChange() {
 			Schema:             schema,
 			ClusteringKeyField: pk,
 			InputSegments:      []int64{101, 102},
+			ResultSegments:     []int64{1000, 1100},
 		},
-		meta:     meta,
-		sessions: session,
+		meta:      meta,
+		sessions:  session,
+		allocator: alloc,
 	}
 
 	task.processPipelining()

@@ -66,6 +66,9 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 		CompactionTask: task,
 		meta:           h.meta,
 	}
+	alloc := &MockAllocator0{}
+	t.allocator = alloc
+	t.ResultSegments = []int64{100}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
@@ -474,11 +477,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 						},
 					},
 					// StartTime:        0,
-					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-					Type:             datapb.CompactionType_MixCompaction,
-					Channel:          "ch1",
-					TotalRows:        200,
-					Schema:           schema,
+					TimeoutInSeconds:     Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+					Type:                 datapb.CompactionType_MixCompaction,
+					Channel:              "ch1",
+					TotalRows:            200,
+					Schema:               schema,
+					PreAllocatedSegments: &datapb.IDRange{Begin: 100},
 				},
 			},
 		},

@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -58,6 +74,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
 
@@ -88,6 +107,9 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
@@ -121,7 +143,38 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		},
 		meta: s.mockMeta,
 	}
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
 	_, err := task.BuildCompactionRequest()
+	s.Error(err)
+}
+
+func (s *CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
+	var task CompactionTask
+
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
+
+	task = &l0CompactionTask{
+		allocator: alloc,
+	}
+	_, err := task.BuildCompactionRequest()
+	s.T().Logf("err=%v", err)
+	s.Error(err)
+
+	task = &mixCompactionTask{
+		allocator: alloc,
+	}
+	_, err = task.BuildCompactionRequest()
+	s.T().Logf("err=%v", err)
+	s.Error(err)
+
+	task = &clusteringCompactionTask{
+		allocator: alloc,
+	}
+	_, err = task.BuildCompactionRequest()
+	s.T().Logf("err=%v", err)
 	s.Error(err)
 }
 
@@ -145,9 +198,13 @@ func (s *CompactionTaskSuite) SetupSubTest() {
 }
 
 func (s *CompactionTaskSuite) TestProcessStateTrans() {
+	alloc := NewNMockAllocator(s.T())
+	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+
 	s.Run("test pipelining needReassignNodeID", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = NullNodeID
+		t.allocator = alloc
 		got := t.Process()
 		s.False(got)
 		s.Equal(datapb.CompactionTaskState_pipelining, t.State)
@@ -157,6 +214,7 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 	s.Run("test pipelining BuildCompactionRequest failed", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
+		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
@@ -194,6 +252,7 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 	s.Run("test pipelining Compaction failed", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
+		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
@@ -234,6 +293,7 @@ func (s *CompactionTaskSuite) TestProcessStateTrans() {
 	s.Run("test pipelining success", func() {
 		t := generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
+		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
