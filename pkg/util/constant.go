@@ -48,7 +48,6 @@ const (
 	MemberCredID        = "@@milvus-member@@"
 	CredentialSeperator = ":"
 	UserRoot            = "root"
-	DefaultRootPassword = "Milvus"
 	PasswordHolder      = "___"
 	DefaultTenant       = ""
 	RoleAdmin           = "admin"
