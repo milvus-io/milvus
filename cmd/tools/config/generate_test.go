@@ -42,9 +42,10 @@ func TestYamlFile(t *testing.T) {
 	defer f.Close()
 	fileScanner := bufio.NewScanner(f)
 	codeScanner := bufio.NewScanner(&w)
+
 	for fileScanner.Scan() && codeScanner.Scan() {
-		if strings.Contains(codeScanner.Text(), ":2379") {
-			// Skip check of etcd endpoints
+		if strings.Contains(codeScanner.Text(), "etcd:") || strings.Contains(fileScanner.Text(), "minio:") || strings.Contains(codeScanner.Text(), "pulsar:") {
+			// Skip check of endpoints given by .env
 			continue
 		}
 		if fileScanner.Text() != codeScanner.Text() {
