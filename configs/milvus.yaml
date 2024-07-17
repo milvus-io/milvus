@@ -458,18 +458,17 @@ dataCoord:
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
+    gcInterval: 1800 # The time interval in seconds for compaction gc
+    dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     clustering:
       enable: true
       autoEnable: false
       triggerInterval: 600
-      stateCheckInterval: 10
-      gcInterval: 600
       minInterval: 3600
       maxInterval: 259200
       newDataRatioThreshold: 0.2
       newDataSizeThreshold: 512m
       timeout: 7200
-      dropTolerance: 86400
       # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
       # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
       # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
