@@ -398,7 +398,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	var total int64
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
-		log.Warn("CQX", zap.Int64("size", segmentSize))
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize

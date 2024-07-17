@@ -200,7 +200,6 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 		s.removeSecondaryIndex(segment)
 	}
 	s.segments[segmentID] = segment
-	log.Info("CQX set segment", zap.Any("segment", segment))
 	s.addSecondaryIndex(segment)
 	s.addCompactTo(segment)
 }
