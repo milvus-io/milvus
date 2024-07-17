@@ -117,6 +117,12 @@ func (dsService *dataSyncService) close() {
 			log.Info("dataSyncService flowgraph closed")
 		}
 
+		if dsService.compactor != nil {
+			log.Info("dataSyncService discarding compaction plans")
+			dsService.compactor.discardPlan(dsService.vchannelName)
+			log.Info("dataSyncService compaction plans discarded")
+		}
+
 		dsService.clearGlobalFlushingCache()
 		close(dsService.flushCh)
 
