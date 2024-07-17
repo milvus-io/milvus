@@ -977,7 +977,7 @@ func TestDeleteData(t *testing.T) {
 
 func TestAddFieldDataToPayload(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
-	e, _ := w.NextInsertEventWriter(false)
+	e, _ := w.NextInsertEventWriter()
 	var err error
 	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}, nil})
 	assert.Error(t, err)

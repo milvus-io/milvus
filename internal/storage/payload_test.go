@@ -32,7 +32,7 @@ import (
 
 func TestPayload_ReaderAndWriter(t *testing.T) {
 	t.Run("TestBool", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -69,7 +69,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt8", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -109,7 +109,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt16", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -147,7 +147,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -186,7 +186,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt64", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -225,7 +225,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloat32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Float)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -264,7 +264,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestDouble", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Double)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -303,7 +303,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddString", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -351,7 +351,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddArray", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Array, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Array)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -423,7 +423,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddJSON", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_JSON, false)
+		w, err := NewPayloadWriter(schemapb.DataType_JSON)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -471,7 +471,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestBinaryVector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -520,7 +520,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloatVector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, false, 1)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithDim(1))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -562,7 +562,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloat16Vector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float16Vector, false, 1)
+		w, err := NewPayloadWriter(schemapb.DataType_Float16Vector, WithDim(1))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -604,7 +604,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestBFloat16Vector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BFloat16Vector, false, 1)
+		w, err := NewPayloadWriter(schemapb.DataType_BFloat16Vector, WithDim(1))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -646,7 +646,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestSparseFloatVector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, false)
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -715,7 +715,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	testSparseOneBatch := func(t *testing.T, rows [][]byte, actualDim int) {
-		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, false)
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -811,31 +811,8 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		}, int(int32Max))
 	})
 
-	// t.Run("TestAddDataToPayload", func(t *testing.T) {
-	// 	w, err := NewPayloadWriter(schemapb.DataType_Bool)
-	// 	w.colType = 999
-	// 	require.Nil(t, err)
-	// 	require.NotNil(t, w)
-
-	// 	err = w.AddDataToPayload([]bool{false, false, false, false})
-	// 	assert.NotNil(t, err)
-
-	// 	err = w.AddDataToPayload([]bool{false, false, false, false}, 0)
-	// 	assert.NotNil(t, err)
-
-	// 	err = w.AddDataToPayload([]bool{false, false, false, false}, 0, 0)
-	// 	assert.NotNil(t, err)
-
-	// 	err = w.AddBoolToPayload([]bool{})
-	// 	assert.NotNil(t, err)
-	// 	err = w.FinishPayloadWriter()
-	// 	assert.Nil(t, err)
-	// 	err = w.AddBoolToPayload([]bool{false})
-	// 	assert.NotNil(t, err)
-	// })
-
 	t.Run("TestAddBoolAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -851,7 +828,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt8AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -867,7 +844,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddInt16AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -883,7 +860,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddInt32AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -899,7 +876,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddInt64AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -915,7 +892,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddFloatAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Float)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -931,7 +908,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddDoubleAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Double)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -947,7 +924,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddOneStringAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -963,7 +940,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddBinVectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -987,7 +964,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddFloatVectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -1008,7 +985,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddFloat16VectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float16Vector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_Float16Vector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -1032,7 +1009,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddBFloat16VectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BFloat16Vector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_BFloat16Vector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -1056,7 +1033,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestAddSparseFloatVectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, false)
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -1100,7 +1077,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetBoolError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1124,7 +1101,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetBoolError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1145,7 +1122,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt8Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1169,7 +1146,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt8Error2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1190,7 +1167,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt16Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1214,7 +1191,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt16Error2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1235,7 +1212,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt32Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1259,7 +1236,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt32Error2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1280,7 +1257,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt64Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1304,7 +1281,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetInt64Error2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1325,7 +1302,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1349,7 +1326,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Float)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1370,7 +1347,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetDoubleError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1394,7 +1371,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetDoubleError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Double)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1415,7 +1392,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetStringError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1439,7 +1416,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetStringError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1464,7 +1441,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetArrayError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1488,7 +1465,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetBinaryVectorError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1512,7 +1489,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetBinaryVectorError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1533,7 +1510,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatVectorError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1557,7 +1534,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatVectorError2", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, false, 8)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithDim(8))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1579,7 +1556,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestByteArrayDatasetError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1619,7 +1596,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			vec = append(vec, 1)
 		}
 
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, false)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
 
 		err = w.AddFloatVectorToPayload(vec, 128)
@@ -1635,7 +1612,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddBool with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1644,7 +1621,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt8 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1653,7 +1630,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt16 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1662,7 +1639,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt32 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1671,7 +1648,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt64 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1680,7 +1657,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddFloat32 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Float)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1689,7 +1666,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddDouble with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Double)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1698,7 +1675,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddAddString with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1707,7 +1684,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddArray with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Array, false)
+		w, err := NewPayloadWriter(schemapb.DataType_Array)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1722,7 +1699,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddJSON with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_JSON, false)
+		w, err := NewPayloadWriter(schemapb.DataType_JSON)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1733,7 +1710,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 
 func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	t.Run("TestBool", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1770,7 +1747,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt8", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1810,7 +1787,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt16", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1848,7 +1825,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1887,7 +1864,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt64", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1926,7 +1903,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloat32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Float, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -1965,7 +1942,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestDouble", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Double, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2004,7 +1981,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddString", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, true)
+		w, err := NewPayloadWriter(schemapb.DataType_String, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2052,7 +2029,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddArray", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Array, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Array, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2124,7 +2101,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddJSON", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_JSON, true)
+		w, err := NewPayloadWriter(schemapb.DataType_JSON, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2172,22 +2149,22 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestBinaryVector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_BinaryVector, true, 8)
+		_, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithNullable(true), WithDim(8))
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("TestFloatVector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_FloatVector, true, 1)
+		_, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithNullable(true), WithDim(1))
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("TestFloat16Vector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_Float16Vector, true, 1)
+		_, err := NewPayloadWriter(schemapb.DataType_Float16Vector, WithNullable(true), WithDim(1))
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("TestAddBool with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2196,7 +2173,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt8 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2205,7 +2182,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt16 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2214,7 +2191,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt32 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2223,7 +2200,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt64 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2232,7 +2209,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddFloat32 with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Float, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2241,7 +2218,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddDouble with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Double, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2250,25 +2227,25 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddAddString with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, true)
+		w, err := NewPayloadWriter(schemapb.DataType_String, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload("hello0", nil)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_String, true)
+		w, err = NewPayloadWriter(schemapb.DataType_String, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload("hello0", []bool{false, false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_String, false)
+		w, err = NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload("hello0", []bool{false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_String, false)
+		w, err = NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload("hello0", []bool{true})
@@ -2276,7 +2253,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddArray with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Array, true)
+		w, err := NewPayloadWriter(schemapb.DataType_Array, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload(&schemapb.ScalarField{
@@ -2288,7 +2265,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		}, nil)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_Array, true)
+		w, err = NewPayloadWriter(schemapb.DataType_Array, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -2301,7 +2278,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		}, []bool{false, false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_Array, false)
+		w, err = NewPayloadWriter(schemapb.DataType_Array)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload(&schemapb.ScalarField{
@@ -2313,7 +2290,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		}, []bool{false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_Array, false)
+		w, err = NewPayloadWriter(schemapb.DataType_Array)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload(&schemapb.ScalarField{
@@ -2327,25 +2304,25 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddJSON with wrong valids", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_JSON, true)
+		w, err := NewPayloadWriter(schemapb.DataType_JSON, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload([]byte(`{"1":"1"}`), nil)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_JSON, true)
+		w, err = NewPayloadWriter(schemapb.DataType_JSON, WithNullable(true))
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload([]byte(`{"1":"1"}`), []bool{false, false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_JSON, false)
+		w, err = NewPayloadWriter(schemapb.DataType_JSON)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload([]byte(`{"1":"1"}`), []bool{false})
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		w, err = NewPayloadWriter(schemapb.DataType_JSON, false)
+		w, err = NewPayloadWriter(schemapb.DataType_JSON)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		err = w.AddDataToPayload([]byte(`{"1":"1"}`), []bool{true})
@@ -2355,7 +2332,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 
 func TestArrowRecordReader(t *testing.T) {
 	t.Run("TestArrowRecordReader", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String, false)
+		w, err := NewPayloadWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		defer w.Close()
 
@@ -2395,7 +2372,7 @@ func TestArrowRecordReader(t *testing.T) {
 }
 
 func dataGen(size int) ([]byte, error) {
-	w, err := NewPayloadWriter(schemapb.DataType_String, false)
+	w, err := NewPayloadWriter(schemapb.DataType_String)
 	if err != nil {
 		return nil, err
 	}
@@ -2422,7 +2399,7 @@ func dataGen(size int) ([]byte, error) {
 }
 
 func BenchmarkDefaultReader(b *testing.B) {
-	size := 1000000
+	size := 10
 	buffer, err := dataGen(size)
 	assert.NoError(b, err)
 
@@ -2446,7 +2423,7 @@ func BenchmarkDefaultReader(b *testing.B) {
 }
 
 func BenchmarkDataSetReader(b *testing.B) {
-	size := 1000000
+	size := 10
 	buffer, err := dataGen(size)
 	assert.NoError(b, err)
 
@@ -2474,7 +2451,7 @@ func BenchmarkDataSetReader(b *testing.B) {
 }
 
 func BenchmarkArrowRecordReader(b *testing.B) {
-	size := 1000000
+	size := 10
 	buffer, err := dataGen(size)
 	assert.NoError(b, err)
 
