@@ -2872,6 +2872,7 @@ type dataCoordConfig struct {
 	SegmentExpansionRate              ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
 	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds     ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -2885,12 +2886,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionEnable               ParamItem `refreshable:"true"`
 	ClusteringCompactionAutoEnable           ParamItem `refreshable:"true"`
 	ClusteringCompactionTriggerInterval      ParamItem `refreshable:"true"`
-	ClusteringCompactionStateCheckInterval   ParamItem `refreshable:"true"`
-	ClusteringCompactionGCInterval           ParamItem `refreshable:"true"`
 	ClusteringCompactionMinInterval          ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxInterval          ParamItem `refreshable:"true"`
 	ClusteringCompactionNewDataSizeThreshold ParamItem `refreshable:"true"`
-	ClusteringCompactionDropTolerance        ParamItem `refreshable:"true"`
 	ClusteringCompactionPreferSegmentSize    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxSegmentSize       ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxTrainSizeRatio    ParamItem `refreshable:"true"`
@@ -3193,10 +3191,18 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionDropToleranceInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.dropTolerance",
 		Version:      "2.4.2",
-		Doc:          "If compaction job is finished for a long time, gc it",
+		Doc:          "Compaction task will be cleaned after finish longer than this time(in seconds)",
 		DefaultValue: "86400",
 	}
 	p.CompactionDropToleranceInSeconds.Init(base.mgr)
+
+	p.CompactionGCIntervalInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.gcInterval",
+		Version:      "2.4.7",
+		Doc:          "The time interval in seconds for compaction gc",
+		DefaultValue: "1800",
+	}
+	p.CompactionGCIntervalInSeconds.Init(base.mgr)
 
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",
@@ -3326,20 +3332,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
-	p.ClusteringCompactionStateCheckInterval = ParamItem{
-		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
-		Version:      "2.4.6",
-		DefaultValue: "10",
-	}
-	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
-
-	p.ClusteringCompactionGCInterval = ParamItem{
-		Key:          "dataCoord.compaction.clustering.gcInterval",
-		Version:      "2.4.6",
-		DefaultValue: "600",
-	}
-	p.ClusteringCompactionGCInterval.Init(base.mgr)
-
 	p.ClusteringCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minInterval",
 		Version:      "2.4.6",
@@ -3370,14 +3362,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3600",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
-
-	p.ClusteringCompactionDropTolerance = ParamItem{
-		Key:          "dataCoord.compaction.clustering.dropTolerance",
-		Version:      "2.4.6",
-		Doc:          "If clustering compaction job is finished for a long time, gc it",
-		DefaultValue: "259200",
-	}
-	p.ClusteringCompactionDropTolerance.Init(base.mgr)
 
 	p.ClusteringCompactionPreferSegmentSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.preferSegmentSize",
