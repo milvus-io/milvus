@@ -589,16 +589,16 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check TotalBinlogSize
-		total, collectionBinlogSize, _ := meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo := meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
 		meta.collections[collID] = collInfo
-		total, collectionBinlogSize, _ = meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo = meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
