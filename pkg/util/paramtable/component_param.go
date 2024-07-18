@@ -2824,7 +2824,7 @@ user-task-polling:
 		Key:          "queryNode.enableSegmentPrune",
 		Version:      "2.3.4",
 		DefaultValue: "false",
-		Doc:          "use partition prune function on shard delegator",
+		Doc:          "use partition stats to prune data in search/query on shard delegator",
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
@@ -3369,6 +3369,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
 		Version:      "2.4.6",
 		DefaultValue: "600",
+		Doc:          "clustering compaction trigger interval in seconds",
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
@@ -3414,6 +3415,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.timeout",
 		Version:      "2.4.6",
 		DefaultValue: "3600",
+		Doc:          "timeout in seconds for clustering compaction, the task will stop if timeout",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
 
@@ -4163,7 +4165,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
-		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
+		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
 		Export:       true,
