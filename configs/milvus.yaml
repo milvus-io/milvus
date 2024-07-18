@@ -441,9 +441,6 @@ dataCoord:
     # The max number of binlog file for one segment, the segment will be sealed if
     # the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
-    # The size threshold in MB, if the total size of growing segments
-    # exceeds this threshold, the largest growing segment will be sealed.
-    totalGrowingSizeThresholdInMB: 4096
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     # A compaction will happen on small segments if the segment after compaction will have
@@ -453,6 +450,11 @@ dataCoord:
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
     segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  sealPolicy:
+    channel:
+      # The size threshold in MB, if the total size of growing segments of each shard
+      # exceeds this threshold, the largest growing segment will be sealed.
+      growingSegmentsMemSize: 4099
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:

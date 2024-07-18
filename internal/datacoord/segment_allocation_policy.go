@@ -202,7 +202,7 @@ func sealByTotalGrowingSegmentsSize() channelSealPolicy {
 			return segment.GetID(), size
 		})
 
-		threshold := paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.GetAsInt64() * 1024 * 1024
+		threshold := paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.GetAsInt64() * 1024 * 1024
 		if totalSize >= threshold {
 			target := lo.MaxBy(growingSegments, func(s1, s2 *SegmentInfo) bool {
 				return sizeMap[s1.GetID()] > sizeMap[s2.GetID()]
