@@ -152,6 +152,9 @@ type quotaConfig struct {
 	DiskQuotaPerDB                       ParamItem `refreshable:"true"`
 	DiskQuotaPerCollection               ParamItem `refreshable:"true"`
 	DiskQuotaPerPartition                ParamItem `refreshable:"true"`
+	L0SegmentRowCountProtectionEnabled   ParamItem `refreshable:"true"`
+	L0SegmentRowCountLowWaterLevel       ParamItem `refreshable:"true"`
+	L0SegmentRowCountHighWaterLevel      ParamItem `refreshable:"true"`
 
 	// limit reading
 	ForceDenyReading               ParamItem `refreshable:"true"`
@@ -1855,6 +1858,33 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 		Export: true,
 	}
 	p.DiskQuotaPerPartition.Init(base.mgr)
+
+	p.L0SegmentRowCountProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.enabled",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Doc:          "switch to enable l0 segment row count quota",
+		Export:       true,
+	}
+	p.L0SegmentRowCountProtectionEnabled.Init(base.mgr)
+
+	p.L0SegmentRowCountLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.lowWaterLevel",
+		Version:      "2.4.7",
+		DefaultValue: "32768",
+		Doc:          "l0 segment row count quota, low water level",
+		Export:       true,
+	}
+	p.L0SegmentRowCountLowWaterLevel.Init(base.mgr)
+
+	p.L0SegmentRowCountHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.l0SegmentsRowCountProtection.highWaterLevel",
+		Version:      "2.4.7",
+		DefaultValue: "65536",
+		Doc:          "l0 segment row count quota, low water level",
+		Export:       true,
+	}
+	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
 
 	// limit reading
 	p.ForceDenyReading = ParamItem{

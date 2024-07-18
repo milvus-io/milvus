@@ -39,7 +39,7 @@ func generateTestSchema() *schemapb.CollectionSchema {
 		{FieldID: 13, Name: "int64", DataType: schemapb.DataType_Int64},
 		{FieldID: 14, Name: "float", DataType: schemapb.DataType_Float},
 		{FieldID: 15, Name: "double", DataType: schemapb.DataType_Double},
-		{FieldID: 16, Name: "varchar", DataType: schemapb.DataType_VarChar},
+		{FieldID: 16, Name: "varchar", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
 		{FieldID: 17, Name: "string", DataType: schemapb.DataType_String},
 		{FieldID: 18, Name: "array", DataType: schemapb.DataType_Array},
 		{FieldID: 19, Name: "string", DataType: schemapb.DataType_JSON},

@@ -345,13 +345,69 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	s.SetupTest()
 	nodeSlots := map[int64]int64{
-		100: 2,
-		101: 3,
+		100: 16,
+		101: 24,
 	}
-	node := s.handler.pickAnyNode(nodeSlots)
+	node, useSlot := s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
 	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node = s.handler.pickAnyNode(map[int64]int64{})
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
+	s.Equal(int64(100), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
+	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
+	s.Equal(int64(NullNodeID), node)
+}
+
+func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
+	s.SetupTest()
+	nodeSlots := map[int64]int64{
+		100: 2,
+		101: 16,
+		102: 10,
+	}
+	executingTasks := make(map[int64]CompactionTask, 0)
+	executingTasks[1] = &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	}
+	executingTasks[2] = &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	}
+	s.handler.executingTasks = executingTasks
+	node, useSlot := s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	})
+	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	})
 	s.Equal(int64(NullNodeID), node)
 }
 

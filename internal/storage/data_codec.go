@@ -243,31 +243,18 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
-		var eventWriter *insertEventWriter
-		var err error
-		var dim int64
-		if typeutil.IsVectorType(field.DataType) {
-			if field.GetNullable() {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vectorType not support null, fieldName: %s", field.GetName()))
+
+		// get payload writing configs, including nullable and fallback encoding method
+		opts := []PayloadWriterOptions{WithNullable(field.GetNullable()), WithWriterProps(getFieldWriterProps(field))}
+
+		if typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+			dim, err := typeutil.GetDim(field)
+			if err != nil {
+				return nil, err
 			}
-			switch field.DataType {
-			case schemapb.DataType_FloatVector,
-				schemapb.DataType_BinaryVector,
-				schemapb.DataType_Float16Vector,
-				schemapb.DataType_BFloat16Vector:
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return nil, err
-				}
-				eventWriter, err = writer.NextInsertEventWriter(field.GetNullable(), int(dim))
-			case schemapb.DataType_SparseFloatVector:
-				eventWriter, err = writer.NextInsertEventWriter(field.GetNullable())
-			default:
-				return nil, fmt.Errorf("undefined data type %d", field.DataType)
-			}
-		} else {
-			eventWriter, err = writer.NextInsertEventWriter(field.GetNullable())
+			opts = append(opts, WithDim(int(dim)))
 		}
+		eventWriter, err := writer.NextInsertEventWriter(opts...)
 		if err != nil {
 			writer.Close()
 			return nil, err
@@ -711,7 +698,9 @@ func NewDeleteCodec() *DeleteCodec {
 // For each delete message, it will save "pk,ts" string to binlog.
 func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
 	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
-	eventWriter, err := binlogWriter.NextDeleteEventWriter()
+	field := &schemapb.FieldSchema{IsPrimaryKey: true, DataType: schemapb.DataType_String}
+	opts := []PayloadWriterOptions{WithWriterProps(getFieldWriterProps(field))}
+	eventWriter, err := binlogWriter.NextDeleteEventWriter(opts...)
 	if err != nil {
 		binlogWriter.Close()
 		return nil, err

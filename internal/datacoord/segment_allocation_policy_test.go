@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -132,7 +133,7 @@ func TestGetChannelOpenSegCapacityPolicy(t *testing.T) {
 		},
 	}
 	for _, c := range testCases {
-		result := p(c.channel, c.segments, c.ts)
+		result, _ := p(c.channel, c.segments, c.ts)
 		if c.validator != nil {
 			assert.True(t, c.validator(result))
 		}
@@ -194,4 +195,38 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
 	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
 	assert.True(t, shouldSeal)
+}
+
+func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key)
+
+	seg0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      0,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 30 * MB}}}},
+	}}
+	seg1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      1,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 40 * MB}}}},
+	}}
+	seg2 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      2,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 50 * MB}}}},
+	}}
+	seg3 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:    3,
+		State: commonpb.SegmentState_Sealed,
+	}}
+
+	fn := sealByTotalGrowingSegmentsSize()
+	// size not reach threshold
+	res, _ := fn("ch-0", []*SegmentInfo{seg0}, 0)
+	assert.Equal(t, 0, len(res))
+	// size reached the threshold
+	res, _ = fn("ch-0", []*SegmentInfo{seg0, seg1, seg2, seg3}, 0)
+	assert.Equal(t, 1, len(res))
+	assert.Equal(t, seg2.GetID(), res[0].GetID())
 }

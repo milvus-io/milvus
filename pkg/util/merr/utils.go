@@ -1183,3 +1183,19 @@ func WrapErrCompactionResult(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrDataNodeSlotExhausted(msg ...string) error {
+	err := error(ErrDataNodeSlotExhausted)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrDuplicatedCompactionTask(msg ...string) error {
+	err := error(ErrDuplicatedCompactionTask)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}

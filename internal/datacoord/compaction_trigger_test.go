@@ -483,6 +483,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					TotalRows:            200,
 					Schema:               schema,
 					PreAllocatedSegments: &datapb.IDRange{Begin: 100},
+					SlotUsage:            8,
 				},
 			},
 		},

@@ -40,7 +40,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 
 	curTS := time.Now().UnixNano() / int64(time.Millisecond)
 
-	e1, err := w.NextInsertEventWriter(false)
+	e1, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
@@ -50,7 +50,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0), tsoutil.ComposeTS(curTS+20*60*1000, 0))
 
-	e2, err := w.NextInsertEventWriter(false)
+	e2, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)

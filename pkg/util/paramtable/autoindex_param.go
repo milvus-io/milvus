@@ -46,8 +46,10 @@ type autoIndexConfig struct {
 	ScalarAutoIndexEnable  ParamItem `refreshable:"true"`
 	ScalarAutoIndexParams  ParamItem `refreshable:"true"`
 	ScalarNumericIndexType ParamItem `refreshable:"true"`
+	ScalarIntIndexType     ParamItem `refreshable:"true"`
 	ScalarVarcharIndexType ParamItem `refreshable:"true"`
 	ScalarBoolIndexType    ParamItem `refreshable:"true"`
+	ScalarFloatIndexType   ParamItem `refreshable:"true"`
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
@@ -152,10 +154,11 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"numeric": "INVERTED","varchar": "INVERTED","bool": "INVERTED"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
+	// Deprecated param
 	p.ScalarNumericIndexType = ParamItem{
 		Version: "2.4.0",
 		Formatter: func(v string) string {
@@ -167,6 +170,30 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarNumericIndexType.Init(base.mgr)
+
+	p.ScalarIntIndexType = ParamItem{
+		Version: "2.5.0",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["int"]
+		},
+	}
+	p.ScalarIntIndexType.Init(base.mgr)
+
+	p.ScalarFloatIndexType = ParamItem{
+		Version: "2.5.0",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["float"]
+		},
+	}
+	p.ScalarFloatIndexType.Init(base.mgr)
 
 	p.ScalarVarcharIndexType = ParamItem{
 		Version: "2.4.0",

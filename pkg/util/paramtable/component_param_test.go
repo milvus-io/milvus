@@ -103,6 +103,10 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.superUsers", "super1,super2,super3")
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())
 
+		assert.Equal(t, "Milvus", Params.DefaultRootPassword.GetValue())
+		params.Save("common.security.defaultRootPassword", "defaultMilvus")
+		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
+
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
 
@@ -435,6 +439,7 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
+		assert.Equal(t, int64(4096), Params.TotalGrowingSizeThresholdInMB.GetAsInt64())
 
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
@@ -467,6 +472,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
 		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
+		params.Save("dataCoord.slot.clusteringCompactionUsage", "10")
+		assert.Equal(t, 10, Params.ClusteringCompactionSlotUsage.GetAsInt())
+		params.Save("dataCoord.slot.mixCompactionUsage", "5")
+		assert.Equal(t, 5, Params.MixCompactionSlotUsage.GetAsInt())
+		params.Save("dataCoord.slot.l0DeleteCompactionUsage", "4")
+		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -519,10 +530,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
-		assert.Equal(t, 2, Params.SlotCap.GetAsInt())
+		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
+
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
+		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
+		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})

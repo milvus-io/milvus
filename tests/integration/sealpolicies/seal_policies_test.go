@@ -14,21 +14,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package sealpolicies
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
-//go:generate mockery --name=Compactor --structname=MockCompactor --output=./  --filename=mock_compactor.go --with-expecter --inpackage
-type Compactor interface {
-	Complete()
-	Compact() (*datapb.CompactionPlanResult, error)
-	Stop()
-	GetPlanID() typeutil.UniqueID
-	GetCollection() typeutil.UniqueID
-	GetChannelName() string
-	GetCompactionType() datapb.CompactionType
-	GetSlotUsage() int64
+type SealSuite struct {
+	integration.MiniClusterSuite
+}
+
+func (s *SealSuite) SetupSuite() {
+	s.MiniClusterSuite.SetupSuite()
+
+	paramtable.Init()
+}
+
+func (s *SealSuite) TearDownSuite() {
+	s.MiniClusterSuite.TearDownSuite()
+}
+
+func TestSealPolicies(t *testing.T) {
+	suite.Run(t, new(SealSuite))
 }
