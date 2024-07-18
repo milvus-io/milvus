@@ -459,11 +459,8 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		UserAutoindexMetricTypeSpecified: cit.userAutoIndexMetricTypeSpecified,
 	}
 	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
-	if err != nil {
+	if err = merr.CheckRPCCall(cit.result, err); err != nil {
 		return err
-	}
-	if cit.result.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(cit.result.Reason)
 	}
 	SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
 	return nil
@@ -579,11 +576,8 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 		Params:       t.req.GetExtraParams(),
 	}
 	t.result, err = t.datacoord.AlterIndex(ctx, req)
-	if err != nil {
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
-	}
-	if t.result.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(t.result.Reason)
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.req)
 	return nil
@@ -797,14 +791,11 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
 		CollectionID: dit.collectionID, IndexName: dit.IndexName,
 	})
-	if err != nil || resp == nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
 	dit.result = &milvuspb.GetIndexStatisticsResponse{}
 	dit.result.Status = resp.GetStatus()
-	if dit.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(dit.result.GetStatus())
-	}
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
@@ -936,15 +927,9 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		IndexName:    dit.IndexName,
 		DropAll:      false,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(dit.result, err); err != nil {
 		ctxLog.Warn("drop index failed", zap.Error(err))
 		return err
-	}
-	if dit.result == nil {
-		return errors.New("drop index resp is nil")
-	}
-	if dit.result.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(dit.result.Reason)
 	}
 	SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
 	return nil
@@ -1027,7 +1012,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		CollectionID: collectionID,
 		IndexName:    gibpt.IndexName,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
 
@@ -1115,7 +1100,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		CollectionID: collectionID,
 		IndexName:    gist.IndexName,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(state, err); err != nil {
 		return err
 	}
 

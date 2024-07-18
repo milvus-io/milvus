@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -106,7 +107,7 @@ func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
 func (t *CreateAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.CreateAlias(ctx, t.CreateAliasRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 // PostExecute defines the post execution, do nothing for create alias
@@ -180,7 +181,7 @@ func (t *DropAliasTask) PreExecute(ctx context.Context) error {
 func (t *DropAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.DropAlias(ctx, t.DropAliasRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *DropAliasTask) PostExecute(ctx context.Context) error {
@@ -257,7 +258,7 @@ func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
 func (t *AlterAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.AlterAlias(ctx, t.AlterAliasRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *AlterAliasTask) PostExecute(ctx context.Context) error {
@@ -325,7 +326,7 @@ func (a *DescribeAliasTask) PreExecute(ctx context.Context) error {
 func (a *DescribeAliasTask) Execute(ctx context.Context) error {
 	var err error
 	a.result, err = a.rootCoord.DescribeAlias(ctx, a.DescribeAliasRequest)
-	return err
+	return merr.CheckRPCCall(a.result, err)
 }
 
 func (a *DescribeAliasTask) PostExecute(ctx context.Context) error {
@@ -395,7 +396,7 @@ func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
 func (a *ListAliasesTask) Execute(ctx context.Context) error {
 	var err error
 	a.result, err = a.rootCoord.ListAliases(ctx, a.ListAliasesRequest)
-	return err
+	return merr.CheckRPCCall(a.result, err)
 }
 
 func (a *ListAliasesTask) PostExecute(ctx context.Context) error {

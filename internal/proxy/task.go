@@ -399,7 +399,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 func (t *createCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.CreateCollection(ctx, t.CreateCollectionRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *createCollectionTask) PostExecute(ctx context.Context) error {
@@ -469,7 +469,7 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.DropCollection(ctx, t.DropCollectionRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
@@ -537,16 +537,7 @@ func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
 func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.HasCollection(ctx, t.HasCollectionRequest)
-	if err != nil {
-		return err
-	}
-	if t.result == nil {
-		return errors.New("has collection resp is nil")
-	}
-	if t.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(t.result.GetStatus())
-	}
-	return nil
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
@@ -757,16 +748,8 @@ func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
 func (t *showCollectionsTask) Execute(ctx context.Context) error {
 	ctx = AppendUserInfoForRPC(ctx)
 	respFromRootCoord, err := t.rootCoord.ShowCollections(ctx, t.ShowCollectionsRequest)
-	if err != nil {
+	if err = merr.CheckRPCCall(respFromRootCoord, err); err != nil {
 		return err
-	}
-
-	if respFromRootCoord == nil {
-		return errors.New("failed to show collections")
-	}
-
-	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(respFromRootCoord.GetStatus())
 	}
 
 	if t.GetType() == milvuspb.ShowType_InMemory {
@@ -1030,7 +1013,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 func (t *alterCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.AlterCollection(ctx, t.AlterCollectionRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
@@ -1112,13 +1095,7 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.rootCoord.CreatePartition(ctx, t.CreatePartitionRequest)
-	if err != nil {
-		return err
-	}
-	if t.result.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(t.result.Reason)
-	}
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *createPartitionTask) PostExecute(ctx context.Context) error {
@@ -1227,13 +1204,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 func (t *dropPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.rootCoord.DropPartition(ctx, t.DropPartitionRequest)
-	if err != nil {
-		return err
-	}
-	if t.result.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(t.result.Reason)
-	}
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *dropPartitionTask) PostExecute(ctx context.Context) error {
@@ -1306,13 +1277,7 @@ func (t *hasPartitionTask) PreExecute(ctx context.Context) error {
 
 func (t *hasPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.rootCoord.HasPartition(ctx, t.HasPartitionRequest)
-	if err != nil {
-		return err
-	}
-	if t.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(t.result.GetStatus())
-	}
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *hasPartitionTask) PostExecute(ctx context.Context) error {
@@ -1389,16 +1354,8 @@ func (t *showPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (t *showPartitionsTask) Execute(ctx context.Context) error {
 	respFromRootCoord, err := t.rootCoord.ShowPartitions(ctx, t.ShowPartitionsRequest)
-	if err != nil {
+	if err = merr.CheckRPCCall(respFromRootCoord, err); err != nil {
 		return err
-	}
-
-	if respFromRootCoord == nil {
-		return errors.New("failed to show partitions")
-	}
-
-	if respFromRootCoord.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(respFromRootCoord.GetStatus())
 	}
 
 	if t.GetType() == milvuspb.ShowType_InMemory {
@@ -1433,16 +1390,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionIDs: partitionIDs,
 		})
-		if err != nil {
+		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
-		}
-
-		if resp == nil {
-			return errors.New("failed to show partitions")
-		}
-
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return merr.Error(resp.GetStatus())
 		}
 
 		t.result = &milvuspb.ShowPartitionsResponse{
@@ -1559,11 +1508,8 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			CollectionID: collID,
 		}
 		resp, err := t.dataCoord.Flush(ctx, flushReq)
-		if err != nil {
+		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
-		}
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return merr.Error(resp.GetStatus())
 		}
 		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
@@ -1723,7 +1669,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	log.Debug("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema))
 	t.result, err = t.queryCoord.LoadCollection(ctx, request)
-	if err != nil {
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadCollectionRequest)
@@ -1821,7 +1767,7 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 
 	t.result, err = t.queryCoord.ReleaseCollection(ctx, request)
-	if err != nil {
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
 
@@ -1973,7 +1919,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		ResourceGroups: t.ResourceGroups,
 	}
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
-	if err != nil {
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadPartitionsRequest)
@@ -2081,7 +2027,7 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 		PartitionIDs: partitionIDs,
 	}
 	t.result, err = t.queryCoord.ReleasePartitions(ctx, request)
-	if err != nil {
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleasePartitionsRequest)
@@ -2151,7 +2097,7 @@ func (t *CreateResourceGroupTask) PreExecute(ctx context.Context) error {
 func (t *CreateResourceGroupTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.queryCoord.CreateResourceGroup(ctx, t.CreateResourceGroupRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *CreateResourceGroupTask) PostExecute(ctx context.Context) error {
@@ -2219,7 +2165,7 @@ func (t *UpdateResourceGroupsTask) Execute(ctx context.Context) error {
 		Base:           t.UpdateResourceGroupsRequest.GetBase(),
 		ResourceGroups: t.UpdateResourceGroupsRequest.GetResourceGroups(),
 	})
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *UpdateResourceGroupsTask) PostExecute(ctx context.Context) error {
@@ -2284,7 +2230,7 @@ func (t *DropResourceGroupTask) PreExecute(ctx context.Context) error {
 func (t *DropResourceGroupTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.queryCoord.DropResourceGroup(ctx, t.DropResourceGroupRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *DropResourceGroupTask) PostExecute(ctx context.Context) error {
@@ -2475,7 +2421,7 @@ func (t *TransferNodeTask) PreExecute(ctx context.Context) error {
 func (t *TransferNodeTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.queryCoord.TransferNode(ctx, t.TransferNodeRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *TransferNodeTask) PostExecute(ctx context.Context) error {
@@ -2549,7 +2495,7 @@ func (t *TransferReplicaTask) Execute(ctx context.Context) error {
 		CollectionID:        collID,
 		NumReplica:          t.NumReplica,
 	})
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *TransferReplicaTask) PostExecute(ctx context.Context) error {
@@ -2614,7 +2560,7 @@ func (t *ListResourceGroupsTask) PreExecute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.queryCoord.ListResourceGroups(ctx, t.ListResourceGroupsRequest)
-	return err
+	return merr.CheckRPCCall(t.result, err)
 }
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
