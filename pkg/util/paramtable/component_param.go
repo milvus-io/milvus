@@ -2939,6 +2939,10 @@ type dataCoordConfig struct {
 	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
+	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
+	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3683,6 +3687,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.ClusteringCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.clusteringCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of clustering compaction job.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionSlotUsage.Init(base.mgr)
+
+	p.MixCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.mixCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of mix compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MixCompactionSlotUsage.Init(base.mgr)
+
+	p.L0DeleteCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of l0 compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4081,7 +4115,7 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap = ParamItem{
 		Key:          "dataNode.slot.slotCap",
 		Version:      "2.4.2",
-		DefaultValue: "2",
+		DefaultValue: "16",
 		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
 		Export:       true,
 	}
@@ -4101,7 +4135,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.workPoolSize",
 		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
-		DefaultValue: "1",
+		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

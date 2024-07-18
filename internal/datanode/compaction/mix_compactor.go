@@ -94,6 +94,10 @@ func (t *mixCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *mixCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 // return num rows of all segment compaction from
 func (t *mixCompactionTask) getNumRows() int64 {
 	numRows := int64(0)
@@ -391,4 +395,8 @@ func (t *mixCompactionTask) isExpiredEntity(ts typeutil.Timestamp) bool {
 	nowT, _ := tsoutil.ParseTS(now)
 
 	return entityT.Add(time.Duration(t.plan.GetCollectionTtl())).Before(nowT)
+}
+
+func (t *mixCompactionTask) GetSlotUsage() int64 {
+	return t.plan.GetSlotUsage()
 }

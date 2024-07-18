@@ -479,6 +479,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Channel:          "ch1",
 					TotalRows:        200,
 					Schema:           schema,
+					SlotUsage:        8,
 				},
 			},
 		},

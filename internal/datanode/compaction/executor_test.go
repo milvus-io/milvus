@@ -25,17 +25,82 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test execute", func(t *testing.T) {
+		paramtable.Get().Init(paramtable.NewBaseTable())
 		planID := int64(1)
 		mockC := NewMockCompactor(t)
 		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetChannelName().Return("ch1")
+		mockC.EXPECT().GetSlotUsage().Return(8)
 		executor := NewExecutor()
-		executor.Execute(mockC)
-		executor.Execute(mockC)
+		succeed, err := executor.Execute(mockC)
+		assert.Equal(t, true, succeed)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 1, len(executor.taskCh))
+		assert.EqualValues(t, 1, executor.executing.Len())
+
+		mockC.EXPECT().Stop().Return().Once()
+		executor.stopTask(planID)
+	})
+
+	t.Run("Test deplicate execute", func(t *testing.T) {
+		paramtable.Get().Init(paramtable.NewBaseTable())
+		planID := int64(1)
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(planID)
+		mockC.EXPECT().GetChannelName().Return("ch1")
+		mockC.EXPECT().GetSlotUsage().Return(8)
+		executor := NewExecutor()
+		succeed, err := executor.Execute(mockC)
+		assert.Equal(t, true, succeed)
+		assert.NoError(t, err)
+
+		succeed2, err2 := executor.Execute(mockC)
+		assert.Equal(t, false, succeed2)
+		assert.Error(t, err2)
+		assert.True(t, errors.Is(err2, merr.ErrDuplicatedCompactionTask))
+
+		assert.EqualValues(t, 1, len(executor.taskCh))
+		assert.EqualValues(t, 1, executor.executing.Len())
+
+		mockC.EXPECT().Stop().Return().Once()
+		executor.stopTask(planID)
+	})
+
+	t.Run("Test execute task slot usage larger than free slop", func(t *testing.T) {
+		paramtable.Get().Init(paramtable.NewBaseTable())
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetSlotUsage().Return(100)
+		executor := NewExecutor()
+
+		succeed, err := executor.Execute(mockC)
+		assert.Equal(t, false, succeed)
+		assert.True(t, errors.Is(err, merr.ErrDataNodeSlotExhausted))
+
+		assert.EqualValues(t, 0, len(executor.taskCh))
+		assert.EqualValues(t, 0, executor.executing.Len())
+	})
+
+	t.Run("Test execute task with slot=0", func(t *testing.T) {
+		paramtable.Get().Init(paramtable.NewBaseTable())
+		planID := int64(1)
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(planID)
+		mockC.EXPECT().GetChannelName().Return("ch1")
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
+		mockC.EXPECT().GetSlotUsage().Return(0)
+		executor := NewExecutor()
+
+		succeed, err := executor.Execute(mockC)
+		assert.Equal(t, true, succeed)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(8), executor.Slots())
+		assert.Equal(t, int64(8), executor.usingSlots)
 
 		assert.EqualValues(t, 1, len(executor.taskCh))
 		assert.EqualValues(t, 1, executor.executing.Len())
@@ -115,6 +180,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mc.EXPECT().GetPlanID().Return(int64(1))
 		mc.EXPECT().GetChannelName().Return("mock")
 		mc.EXPECT().Compact().Return(&datapb.CompactionPlanResult{PlanID: 1}, nil).Maybe()
+		mc.EXPECT().GetSlotUsage().Return(8)
 		mc.EXPECT().Stop().Return().Once()
 
 		ex.Execute(mc)

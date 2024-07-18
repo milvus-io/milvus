@@ -337,6 +337,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CollectionTtl:    t.GetCollectionTtl(),
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
+		SlotUsage:        Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

@@ -167,6 +167,10 @@ func (t *clusteringCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
+func (t *clusteringCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
 func (t *clusteringCompactionTask) GetCollection() int64 {
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
@@ -207,7 +211,6 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		log.Warn("compact wrong, illegal compaction type")
 		return nil, merr.WrapErrIllegalCompactionPlan()
 	}
-	log.Info("Clustering compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
@@ -1162,4 +1165,8 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 
 	buffer.writer = writer
 	return pack, nil
+}
+
+func (t *clusteringCompactionTask) GetSlotUsage() int64 {
+	return t.plan.GetSlotUsage()
 }
