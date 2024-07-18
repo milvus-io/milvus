@@ -53,6 +53,7 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 }
 
 func (policy *clusteringCompactionPolicy) Trigger() (map[CompactionTriggerType][]CompactionView, error) {
+	log.Info("start trigger clusteringCompactionPolicy...")
 	ctx := context.Background()
 	collections := policy.meta.GetCollections()
 	ts, err := policy.allocator.allocTimestamp(ctx)
@@ -97,7 +98,8 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 }
 
 func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, ts Timestamp, manual bool) ([]CompactionView, int64, error) {
-	log.Info("trigger collection clustering compaction", zap.Int64("collectionID", collectionID))
+	log := log.With(zap.Int64("collectionID", collectionID))
+	log.Info("trigger collection clustering compaction")
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		log.Warn("fail to get collection")
@@ -105,6 +107,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	}
 	clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
 	if clusteringKeyField == nil {
+		log.Info("the collection has no clustering key, skip tigger clustering compaction")
 		return nil, 0, nil
 	}
 
@@ -120,7 +123,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 
 	compacting, triggerID := policy.collectionIsClusteringCompacting(collection.ID)
 	if compacting {
-		log.Info("collection is clustering compacting", zap.Int64("collectionID", collection.ID), zap.Int64("triggerID", triggerID))
+		log.Info("collection is clustering compacting", zap.Int64("triggerID", triggerID))
 		return nil, triggerID, nil
 	}
 
@@ -142,10 +145,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	views := make([]CompactionView, 0)
 	// partSegments is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range partSegments {
-		log := log.Ctx(ctx).With(zap.Int64("collectionID", group.collectionID),
-			zap.Int64("partitionID", group.partitionID),
-			zap.String("channel", group.channelName))
-
+		log := log.With(zap.Int64("partitionID", group.partitionID), zap.String("channel", group.channelName))
 		if !policy.checkAllL2SegmentsContains(ctx, group.collectionID, group.partitionID, group.channelName) {
 			log.Warn("clustering compaction cannot be done, otherwise the performance will fall back")
 			continue
@@ -184,7 +184,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		views = append(views, view)
 	}
 
-	log.Info("trigger collection clustering compaction", zap.Int64("collectionID", collectionID), zap.Int("viewNum", len(views)))
+	log.Info("finish trigger collection clustering compaction", zap.Int("viewNum", len(views)))
 	return views, newTriggerID, nil
 }
 
