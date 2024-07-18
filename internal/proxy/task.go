@@ -518,7 +518,9 @@ func (t *hasCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *hasCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_HasCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
@@ -584,7 +586,9 @@ func (t *describeCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *describeCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_DescribeCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
@@ -1250,7 +1254,9 @@ func (t *hasPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (t *hasPartitionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_HasPartition
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
@@ -1322,7 +1328,9 @@ func (t *showPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (t *showPartitionsTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_ShowPartitions
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
