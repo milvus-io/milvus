@@ -658,11 +658,8 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	}
 
 	result, err := g.dataCoord.GetCollectionStatistics(ctx, req)
-	if err != nil {
+	if err = merr.CheckRPCCall(result, err); err != nil {
 		return err
-	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(result.GetStatus())
 	}
 	g.result = &milvuspb.GetCollectionStatisticsResponse{
 		Status: merr.Success(),
