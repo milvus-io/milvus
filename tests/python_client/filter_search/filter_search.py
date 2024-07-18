@@ -12,6 +12,8 @@ def convert_numbers_to_quoted_strings(text):
 
 @events.init_command_line_parser.add_listener
 def _(parser):
+    parser.add_argument("--user", type=str, env_var="USER", default="root", help="filter field")
+    parser.add_argument("--pwd", type=str, env_var="PWD", default="", help="filter field")
     parser.add_argument("--filter_field", type=str, env_var="LOCUST_FILTER", default="", help="filter field")
     parser.add_argument("--filter_op", type=str, env_var="LOCUST_FILTER", default="==", help="filter op")
     parser.add_argument("--filter_value", type=str, env_var="LOCUST_FILTER", default="0", help="filter value")
@@ -57,6 +59,10 @@ class MilvusUser(HttpUser):
 
     def on_start(self):
         # print("X. Here's where you would put things you want to run the first time a User is started")
+        self.client.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.environment.parsed_options.user}:{self.environment.parsed_options.pwd}"
+        }
         filter_field = self.environment.parsed_options.filter_field
         expr = f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} {self.environment.parsed_options.filter_value}"
         ascii_codes = [str(ord(char)) for char in expr]
