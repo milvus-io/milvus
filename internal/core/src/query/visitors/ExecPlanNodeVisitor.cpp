@@ -164,6 +164,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         return;
     }
 
+    std::chrono::high_resolution_clock::time_point scalar_start =
+        std::chrono::high_resolution_clock::now();
     std::unique_ptr<BitsetType> bitset_holder;
     if (node.filter_plannode_.has_value()) {
         BitsetType expr_res;
@@ -177,6 +179,12 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     segment->mask_with_timestamps(*bitset_holder, timestamp_);
 
     segment->mask_with_delete(*bitset_holder, active_count, timestamp_);
+    std::chrono::high_resolution_clock::time_point scalar_end =
+        std::chrono::high_resolution_clock::now();
+    double scalar_cost =
+        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+            .count();
+    monitor::internal_core_search_latency_scalar.Observe(scalar_cost);
 
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder->all()) {
@@ -184,6 +192,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
             empty_search_result(num_queries, node.search_info_);
         return;
     }
+
+    std::chrono::high_resolution_clock::time_point vector_start =
+        std::chrono::high_resolution_clock::now();
     BitsetView final_view = *bitset_holder;
     segment->vector_search(node.search_info_,
                            src_data,
@@ -209,6 +220,20 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                    search_result.seg_offsets_.size());
     }
     search_result_opt_ = std::move(search_result);
+    std::chrono::high_resolution_clock::time_point vector_end =
+        std::chrono::high_resolution_clock::now();
+    double vector_cost =
+        std::chrono::duration<double, std::micro>(vector_end - vector_start)
+            .count();
+    monitor::internal_core_search_latency_vector.Observe(vector_cost);
+
+    double total_cost =
+        std::chrono::duration<double, std::micro>(vector_end - scalar_start)
+            .count();
+    double scalar_ratio =
+        total_cost > 0.0 ? scalar_cost / total_cost : 0.0;
+    monitor::internal_core_search_latency_scalar_proportion.Observe(
+        scalar_ratio);
 }
 
 std::unique_ptr<RetrieveResult>
