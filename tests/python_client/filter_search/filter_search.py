@@ -89,7 +89,7 @@ class MilvusUser(HttpUser):
                                     "outputFields": ["id"],
                                     "filter": filter,
                                     "limit": 1000
-                                    }
+                    }
         with self.client.post("/v2/vectordb/entities/search",
                               json=payload,
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
@@ -97,7 +97,7 @@ class MilvusUser(HttpUser):
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 0:
                 resp.failure(f"search failed with error {resp.text}")
-                print(f"search with payload {payload} failed with error {resp.text}")
+                print(f"search with payload failed with error {resp.text}")
             else:
                 # compute recall
                 result_ids = [item["id"] for item in resp.json()["data"]]
