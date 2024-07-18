@@ -1022,6 +1022,7 @@ func TestHasCollectionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_HasCollection, task.Type())
@@ -1084,6 +1085,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeCollection, task.Type())
@@ -1332,6 +1334,7 @@ func TestCreatePartitionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_CreatePartition, task.Type())
@@ -1407,6 +1410,7 @@ func TestDropPartitionTask(t *testing.T) {
 		queryCoord: qc,
 		result:     nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DropPartition, task.Type())
@@ -1524,6 +1528,7 @@ func TestHasPartitionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_HasPartition, task.Type())
@@ -1571,6 +1576,7 @@ func TestShowPartitionsTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_ShowPartitions, task.Type())
