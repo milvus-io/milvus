@@ -89,6 +89,7 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
+        self.requires("grpc/1.50.1", override=True)
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
