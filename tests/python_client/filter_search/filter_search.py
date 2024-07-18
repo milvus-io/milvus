@@ -83,20 +83,21 @@ class MilvusUser(HttpUser):
         random_id = random.randint(0, len(self.vectors_to_search) - 1)
         # print([self.vectors_to_search[random_id].tolist()])
         data = [self.vectors_to_search[random_id].tolist()]
-        with self.client.post("/v2/vectordb/entities/search",
-                              json={"collectionName": "test_restful_perf",
+        payload = {"collectionName": "test_restful_perf",
                                     "annsField": "emb",
                                     "data": data,
                                     "outputFields": ["id"],
                                     "filter": filter,
                                     "limit": 1000
-                                    },
+                                    }
+        with self.client.post("/v2/vectordb/entities/search",
+                              json=payload,
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 0:
                 resp.failure(f"search failed with error {resp.text}")
-                print(f"search failed with error {resp.text}")
+                print(f"search with payload {payload} failed with error {resp.text}")
             else:
                 # compute recall
                 result_ids = [item["id"] for item in resp.json()["data"]]
