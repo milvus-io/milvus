@@ -320,10 +320,13 @@ func (t *l0CompactionTask) processMetaSaved() bool {
 }
 
 func (t *l0CompactionTask) processCompleted() bool {
-	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-		PlanID: t.GetPlanID(),
-	}); err != nil {
-		log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+	if t.GetNodeID() != 0 && t.GetNodeID() != NullNodeID {
+		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+			PlanID: t.GetPlanID(),
+		})
+		if err != nil {
+			log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		}
 	}
 
 	t.resetSegmentCompacting()

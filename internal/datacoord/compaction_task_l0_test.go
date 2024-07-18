@@ -440,13 +440,14 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil)
 
-		t.StartTime = time.Now().Add(-time.Hour).Unix()
-		t.TimeoutInSeconds = 10
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Times(2)
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return().Once()
 
 		got := t.Process()
-		s.False(got)
-		s.Equal(datapb.CompactionTaskState_executing, t.GetState())
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_completed, t.GetState())
 	})
 }
