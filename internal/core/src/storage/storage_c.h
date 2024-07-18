@@ -36,9 +36,6 @@ InitMmapManager(CMmapConfig c_mmap_config);
 void
 CleanRemoteChunkManagerSingleton();
 
-char*
-GetStorageMetrics();
-
 #ifdef __cplusplus
 };
 #endif
