@@ -106,10 +106,11 @@ func (t *l0CompactionTask) processExecuting() bool {
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_executing:
+		// will L0Compaction be timeouted?
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err != nil {
-				log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				log.Warn("l0CompactionTask failed to set task timeout state", zap.Error(err))
 				return false
 			}
 			return t.processTimeout()
@@ -122,12 +123,13 @@ func (t *l0CompactionTask) processExecuting() bool {
 		}
 
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn("l0CompactionTask failed to save task meta_saved state", zap.Error(err))
 			return false
 		}
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
-			log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("l0CompactionTask failed to set task failed state", zap.Error(err))
 			return false
 		}
 		return t.processFailed()
@@ -349,11 +351,15 @@ func (t *l0CompactionTask) processFailed() bool {
 
 func (t *l0CompactionTask) checkTimeout() bool {
 	if t.GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()
+		start := time.Unix(t.GetStartTime(), 0)
+		diff := time.Since(start).Seconds()
 		if diff > float64(t.GetTimeoutInSeconds()) {
 			log.Warn("compaction timeout",
+				zap.Int64("taskID", t.GetTriggerID()),
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int64("nodeID", t.GetNodeID()),
 				zap.Int32("timeout in seconds", t.GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetStartTime()),
+				zap.Time("startTime", start),
 			)
 			return true
 		}
