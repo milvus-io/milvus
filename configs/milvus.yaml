@@ -456,7 +456,7 @@ dataCoord:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
       # exceeds this threshold, the largest growing segment will be sealed.
-      growingSegmentsMemSize: 4099
+      growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:
