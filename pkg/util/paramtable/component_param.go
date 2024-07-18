@@ -1613,8 +1613,9 @@ type queryCoordConfig struct {
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval  ParamItem `refreshable:"false"`
+	CollectionObserverInterval        ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval         ParamItem `refreshable:"false"`
+	CollectionBalanceSegmentBatchSize ParamItem `refreshable true`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1867,7 +1868,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.BalanceCheckInterval = ParamItem{
 		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
-		DefaultValue: "10000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -2128,6 +2129,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.CheckExecutedFlagInterval.Init(base.mgr)
+
+	p.CollectionBalanceSegmentBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
+		Version:      "2.4.7",
+		DefaultValue: "5",
+		Doc:          "the max balance task number for collection at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
