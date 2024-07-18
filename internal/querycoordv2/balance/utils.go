@@ -75,13 +75,6 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			zap.String("level", p.Segment.GetLevel().String()),
 			zap.Int64("from", p.From),
 			zap.Int64("to", p.To))
-		if task.GetTaskType(t) == task.TaskTypeMove {
-			// from balance checker
-			t.SetPriority(task.TaskPriorityLow)
-		} else {
-			// from segment checker
-			t.SetPriority(task.TaskPriorityNormal)
-		}
 		ret = append(ret, t)
 	}
 	return ret
@@ -118,7 +111,6 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			zap.String("channel", p.Channel.GetChannelName()),
 			zap.Int64("from", p.From),
 			zap.Int64("to", p.To))
-		t.SetPriority(task.TaskPriorityHigh)
 		ret = append(ret, t)
 	}
 	return ret

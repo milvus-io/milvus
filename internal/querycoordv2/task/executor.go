@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // segmentsVersion is used for the flushed segments should not be included in the watch dm channel request
@@ -61,7 +60,6 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks   *typeutil.ConcurrentSet[string] // task index
 	executingTaskNum atomic.Int32
 	executedFlag     chan struct{}
 }
@@ -82,8 +80,7 @@ func NewExecutor(meta *meta.Meta,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		executingTasks: typeutil.NewConcurrentSet[string](),
-		executedFlag:   make(chan struct{}, 1),
+		executedFlag: make(chan struct{}, 1),
 	}
 }
 
@@ -98,12 +95,7 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	exist := !ex.executingTasks.Insert(task.Index())
-	if exist {
-		return false
-	}
 	if ex.executingTaskNum.Inc() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
-		ex.executingTasks.Remove(task.Index())
 		ex.executingTaskNum.Dec()
 		return false
 	}
@@ -150,7 +142,6 @@ func (ex *Executor) removeTask(task Task, step int) {
 		}
 	}
 
-	ex.executingTasks.Remove(task.Index())
 	ex.executingTaskNum.Dec()
 }
 

@@ -1192,65 +1192,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	suite.broker.ExpectedCalls = bakExpectations
 }
 
-func (suite *TaskSuite) TestChannelTaskReplace() {
-	ctx := context.Background()
-	timeout := 10 * time.Second
-	targetNode := int64(3)
-
-	for _, channel := range suite.subChannels {
-		task, err := NewChannelTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewChannelAction(targetNode, ActionTypeGrow, channel),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityNormal)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
-	}
-
-	// Task with the same replica and segment,
-	// but without higher priority can't be added
-	for _, channel := range suite.subChannels {
-		task, err := NewChannelTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewChannelAction(targetNode, ActionTypeGrow, channel),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityNormal)
-		err = suite.scheduler.Add(task)
-		suite.Error(err)
-		task.SetPriority(TaskPriorityLow)
-		err = suite.scheduler.Add(task)
-		suite.Error(err)
-	}
-
-	// Replace the task with one with higher priority
-	for _, channel := range suite.subChannels {
-		task, err := NewChannelTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewChannelAction(targetNode, ActionTypeGrow, channel),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityHigh)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
-	}
-	channelNum := len(suite.subChannels)
-	suite.AssertTaskNum(0, channelNum, channelNum, 0)
-}
-
 func (suite *TaskSuite) TestLeaderTaskSet() {
 	ctx := context.Background()
 	targetNode := int64(3)
@@ -1395,65 +1336,6 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.NotNil(leaderTask)
 }
 
-func (suite *TaskSuite) TestSegmentTaskReplace() {
-	ctx := context.Background()
-	timeout := 10 * time.Second
-	targetNode := int64(3)
-
-	for _, segment := range suite.loadSegments {
-		task, err := NewSegmentTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityNormal)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
-	}
-
-	// Task with the same replica and segment,
-	// but without higher priority can't be added
-	for _, segment := range suite.loadSegments {
-		task, err := NewSegmentTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityNormal)
-		err = suite.scheduler.Add(task)
-		suite.Error(err)
-		task.SetPriority(TaskPriorityLow)
-		err = suite.scheduler.Add(task)
-		suite.Error(err)
-	}
-
-	// Replace the task with one with higher priority
-	for _, segment := range suite.loadSegments {
-		task, err := NewSegmentTask(
-			ctx,
-			timeout,
-			WrapIDSource(0),
-			suite.collection,
-			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
-		)
-		suite.NoError(err)
-		task.SetPriority(TaskPriorityHigh)
-		err = suite.scheduler.Add(task)
-		suite.NoError(err)
-	}
-	segmentNum := len(suite.loadSegments)
-	suite.AssertTaskNum(0, segmentNum, 0, segmentNum)
-}
-
 func (suite *TaskSuite) TestNoExecutor() {
 	ctx := context.Background()
 	timeout := 10 * time.Second
@@ -1513,18 +1395,12 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 func (suite *TaskSuite) dispatchAndWait(node int64) {
 	timeout := 10 * time.Second
 	suite.scheduler.Dispatch(node)
-	var keys []any
 	count := 0
 	for start := time.Now(); time.Since(start) < timeout; {
 		count = 0
-		keys = make([]any, 0)
 
 		for _, executor := range suite.scheduler.executors {
-			executor.executingTasks.Range(func(taskIndex string) bool {
-				keys = append(keys, taskIndex)
-				count++
-				return true
-			})
+			count += int(executor.executingTaskNum.Load())
 		}
 
 		if count == 0 {
@@ -1532,7 +1408,7 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	suite.FailNow("executor hangs in executing tasks", "count=%d keys=%+v", count, keys)
+	suite.FailNow("executor hangs in executing tasks", "count=%d keys=%+v", count)
 }
 
 func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {

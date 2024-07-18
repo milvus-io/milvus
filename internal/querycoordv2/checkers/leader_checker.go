@@ -135,8 +135,6 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 			action,
 		)
 
-		// leader task shouldn't replace executing segment task
-		t.SetPriority(task.TaskPriorityLow)
 		t.SetReason("sync partition stats versions")
 		ret = append(ret, t)
 	}
@@ -180,8 +178,6 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 				action,
 			)
 
-			// leader task shouldn't replace executing segment task
-			t.SetPriority(task.TaskPriorityLow)
 			t.SetReason("add segment to leader view")
 			ret = append(ret, t)
 		}
@@ -226,8 +222,6 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 			action,
 		)
 
-		// leader task shouldn't replace executing segment task
-		t.SetPriority(task.TaskPriorityLow)
 		t.SetReason("remove segment from leader view")
 		ret = append(ret, t)
 	}

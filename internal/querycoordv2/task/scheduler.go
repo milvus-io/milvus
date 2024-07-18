@@ -89,46 +89,53 @@ type replicaChannelIndex struct {
 }
 
 type taskQueue struct {
-	// TaskPriority -> TaskID -> Task
-	buckets []map[int64]Task
+	// taskID -> Task
+	// separate channel task and segment task, in order to execute channel task in high priority
+	channelBuckets map[int64]Task
+	segmentBuckets map[int64]Task
 }
 
 func newTaskQueue() *taskQueue {
-	buckets := make([]map[int64]Task, len(TaskPriorities))
-	for i := range buckets {
-		buckets[i] = make(map[int64]Task)
-	}
 	return &taskQueue{
-		buckets: buckets,
+		channelBuckets: make(map[int64]Task),
+		segmentBuckets: make(map[int64]Task),
 	}
 }
 
 func (queue *taskQueue) Len() int {
-	taskNum := 0
-	for _, tasks := range queue.buckets {
-		taskNum += len(tasks)
-	}
-
-	return taskNum
+	return len(queue.channelBuckets) + len(queue.segmentBuckets)
 }
 
 func (queue *taskQueue) Add(task Task) {
-	bucket := queue.buckets[task.Priority()]
-	bucket[task.ID()] = task
+	switch task.(type) {
+	case *ChannelTask:
+		queue.channelBuckets[task.ID()] = task
+	default:
+		queue.segmentBuckets[task.ID()] = task
+	}
 }
 
 func (queue *taskQueue) Remove(task Task) {
-	bucket := queue.buckets[task.Priority()]
-	delete(bucket, task.ID())
+	if queue.segmentBuckets[task.ID()] != nil {
+		delete(queue.segmentBuckets, task.ID())
+	}
+
+	if queue.channelBuckets[task.ID()] != nil {
+		delete(queue.channelBuckets, task.ID())
+	}
 }
 
 // Range iterates all tasks in the queue ordered by priority from high to low
 func (queue *taskQueue) Range(fn func(task Task) bool) {
-	for priority := len(queue.buckets) - 1; priority >= 0; priority-- {
-		for _, task := range queue.buckets[priority] {
-			if !fn(task) {
-				return
-			}
+	for _, task := range queue.channelBuckets {
+		if !fn(task) {
+			return
+		}
+	}
+
+	for _, task := range queue.segmentBuckets {
+		if !fn(task) {
+			return
 		}
 	}
 }
@@ -168,6 +175,9 @@ type taskScheduler struct {
 	processQueue *taskQueue
 	waitQueue    *taskQueue
 
+	// from taskID -> executing action step
+	executingStep map[int64]int
+
 	// executing task delta changes on node: nodeID -> collectionID -> delta changes
 	// delta changes measure by segment row count and channel num
 	segmentExecutingTaskDelta map[int64]map[int64]int
@@ -205,6 +215,7 @@ func NewScheduler(ctx context.Context,
 		waitQueue:                 newTaskQueue(),
 		segmentExecutingTaskDelta: make(map[int64]map[int64]int),
 		channelExecutingTaskDelta: make(map[int64]map[int64]int),
+		executingStep:             make(map[int64]int),
 	}
 }
 
@@ -380,24 +391,11 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		if old, ok := scheduler.segmentTasks[index]; ok {
-			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
+		if _, ok := scheduler.segmentTasks[index]; ok {
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 
 		taskType := GetTaskType(task)
-
 		if taskType == TaskTypeMove {
 			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(task.SegmentID(), false))
 			if len(views) == 0 {
@@ -411,19 +409,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		if old, ok := scheduler.channelTasks[index]; ok {
-			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
+		if _, ok := scheduler.channelTasks[index]; ok {
 			return merr.WrapErrServiceInternal("task with the same channel exists")
 		}
 
@@ -444,19 +430,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		if old, ok := scheduler.segmentTasks[index]; ok {
-			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
+		if _, ok := scheduler.segmentTasks[index]; ok {
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 	default:
@@ -617,10 +591,17 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	toRemove := make([]Task, 0)
 	scheduler.processQueue.Range(func(task Task) bool {
 		if scheduler.preProcess(task) && scheduler.isRelated(task, node) {
-			toProcess = append(toProcess, task)
+			executingStep, ok := scheduler.executingStep[task.ID()]
+			// if current action is executing, skip to process it again
+			if !ok || executingStep != task.Step() {
+				toProcess = append(toProcess, task)
+				scheduler.executingStep[task.ID()] = task.Step()
+			}
 		}
+
 		if task.Status() != TaskStatusStarted {
 			toRemove = append(toRemove, task)
+			delete(scheduler.executingStep, task.ID())
 		}
 
 		return true

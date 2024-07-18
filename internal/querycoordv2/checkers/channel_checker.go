@@ -116,8 +116,6 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetReason("redundancies of channel", tasks...)
 	ret = append(ret, tasks...)
 
-	// All channel related tasks should be with high priority
-	task.SetPriority(task.TaskPriorityHigh, tasks...)
 	return ret
 }
 

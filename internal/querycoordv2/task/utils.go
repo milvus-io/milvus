@@ -65,12 +65,6 @@ func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
 	return err
 }
 
-func SetPriority(priority Priority, tasks ...Task) {
-	for i := range tasks {
-		tasks[i].SetPriority(priority)
-	}
-}
-
 func SetReason(reason string, tasks ...Task) {
 	for i := range tasks {
 		tasks[i].SetReason(reason)

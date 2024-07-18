@@ -33,8 +33,7 @@ import (
 )
 
 type (
-	Status   = string
-	Priority int32
+	Status = string
 )
 
 const (
@@ -43,26 +42,8 @@ const (
 	TaskStatusSucceeded = "succeeded"
 	TaskStatusCanceled  = "canceled"
 	TaskStatusFailed    = "failed"
+	TaskStatusExecuting = "executing"
 )
-
-const (
-	TaskPriorityLow    Priority = iota // for balance checker
-	TaskPriorityNormal                 // for segment checker
-	TaskPriorityHigh                   // for channel checker
-)
-
-var TaskPriorityName = map[Priority]string{
-	TaskPriorityLow:    "Low",
-	TaskPriorityNormal: "Normal",
-	TaskPriorityHigh:   "High",
-}
-
-func (p Priority) String() string {
-	return TaskPriorityName[p]
-}
-
-// All task priorities from low to high
-var TaskPriorities = []Priority{TaskPriorityLow, TaskPriorityNormal, TaskPriorityHigh}
 
 type Source fmt.Stringer
 
@@ -80,8 +61,6 @@ type Task interface {
 	Status() Status
 	SetStatus(status Status)
 	Err() error
-	Priority() Priority
-	SetPriority(priority Priority)
 	Index() string // dedup indexing string
 
 	// cancel the task as we don't need to continue it
@@ -113,13 +92,12 @@ type baseTask struct {
 	shard        string
 	loadType     querypb.LoadType
 
-	source   Source
-	status   *atomic.String
-	priority Priority
-	err      error
-	actions  []Action
-	step     int
-	reason   string
+	source  Source
+	status  *atomic.String
+	err     error
+	actions []Action
+	step    int
+	reason  string
 
 	// span for tracing
 	span trace.Span
@@ -139,7 +117,6 @@ func newBaseTask(ctx context.Context, source Source, collectionID typeutil.Uniqu
 		shard:        shard,
 
 		status:   atomic.NewString(TaskStatusStarted),
-		priority: TaskPriorityNormal,
 		ctx:      ctx,
 		cancel:   cancel,
 		doneCh:   make(chan struct{}),
@@ -193,14 +170,6 @@ func (task *baseTask) Status() Status {
 
 func (task *baseTask) SetStatus(status Status) {
 	task.status.Store(status)
-}
-
-func (task *baseTask) Priority() Priority {
-	return task.priority
-}
-
-func (task *baseTask) SetPriority(priority Priority) {
-	task.priority = priority
 }
 
 func (task *baseTask) Index() string {
@@ -284,7 +253,7 @@ func (task *baseTask) String() string {
 		actionsStr += action.String() + ","
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [resourceGroup=%s] [priority=%s] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [resourceGroup=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
 		GetTaskType(task).String(),
 		task.source.String(),
@@ -292,7 +261,6 @@ func (task *baseTask) String() string {
 		task.collectionID,
 		task.ReplicaID(),
 		task.ResourceGroup(),
-		task.priority.String(),
 		len(task.actions),
 		actionsStr,
 	)

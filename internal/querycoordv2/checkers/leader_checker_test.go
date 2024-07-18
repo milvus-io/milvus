@@ -135,7 +135,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test segment's version in leader view doesn't match segment's version in dist
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
@@ -154,7 +153,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test skip sync l0 segment
 	segments = []*datapb.SegmentInfo{
@@ -230,7 +228,6 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 }
 
 func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
@@ -318,7 +315,6 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 }
 
 func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
@@ -375,7 +371,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 }
 
 func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
@@ -410,7 +405,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).Version(), int64(0))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// skip sync l0 segments
 	segments := []*datapb.SegmentInfo{
@@ -471,7 +465,6 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 }
 
 func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {

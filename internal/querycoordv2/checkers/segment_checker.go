@@ -102,7 +102,6 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)
 	task.SetReason("collection released", reduceTasks...)
 	results = append(results, reduceTasks...)
-	task.SetPriority(task.TaskPriorityNormal, results...)
 	return results
 }
 

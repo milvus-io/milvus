@@ -190,8 +190,6 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		)
 		return nil, false
 	}
-	// index task shall have lower or equal priority than balance task
-	t.SetPriority(task.TaskPriorityLow)
 	t.SetReason("missing index")
 	return t, true
 }
