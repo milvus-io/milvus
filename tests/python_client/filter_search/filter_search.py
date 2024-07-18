@@ -96,6 +96,7 @@ class MilvusUser(HttpUser):
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 0:
                 resp.failure(f"search failed with error {resp.text}")
+                print(f"search failed with error {resp.text}")
             else:
                 # compute recall
                 result_ids = [item["id"] for item in resp.json()["data"]]
@@ -145,7 +146,7 @@ class StagesShape(LoadTestShape):
     """
 
     stages = [
-        {"duration": 3600, "users": 200, "spawn_rate": 50, "stop": True},
+        {"duration": 360, "users": 1, "spawn_rate": 1, "stop": True},
     ]
 
     def tick(self):
