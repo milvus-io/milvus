@@ -208,9 +208,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         std::vector<std::string> index_files;
 
         Config config;
-        config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
+        config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
-        config["bitmap_cardinality_limit"] = "1000";
+        config["bitmap_cardinality_limit"] = "100";
 
         auto build_index =
             indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -223,7 +223,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         }
 
         index::CreateIndexInfo index_info{};
-        index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
+        index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
 
         config["index_files"] = index_files;
@@ -233,11 +233,15 @@ class ArrayBitmapIndexTest : public testing::Test {
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
-    void
-    SetUp() override {
+    virtual void
+    SetParam() {
         nb_ = 10000;
         cardinality_ = 30;
+    }
 
+    void
+    SetUp() override {
+        SetParam();
         // if constexpr (std::is_same_v<T, int8_t>) {
         //     type_ = DataType::INT8;
         // } else if constexpr (std::is_same_v<T, int16_t>) {
@@ -338,3 +342,31 @@ REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTest,
 INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheck,
                                ArrayBitmapIndexTest,
                                BitmapType);
+
+template <typename T>
+class ArrayBitmapIndexTestV1 : public ArrayBitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 200;
+    }
+
+    virtual ~ArrayBitmapIndexTestV1() {
+    }
+};
+
+TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1);
+
+TYPED_TEST_P(ArrayBitmapIndexTestV1, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+using BitmapTypeV1 = testing::Types<int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1, CountFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
+                               ArrayBitmapIndexTestV1,
+                               BitmapTypeV1);

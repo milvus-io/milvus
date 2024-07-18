@@ -117,6 +117,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
                       const std::vector<std::string>& remote_files,
                       const std::vector<int64_t>& remote_file_sizes);
 
+    std::string
+    GetRemoteIndexPrefix() const {
+        return space_ != nullptr ? GetRemoteIndexObjectPrefixV2()
+                                 : GetRemoteIndexObjectPrefix();
+    }
+
  private:
     int64_t
     GetIndexBuildId() {
