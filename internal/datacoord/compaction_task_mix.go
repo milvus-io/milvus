@@ -347,6 +347,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		PreAllocatedSegments: &datapb.IDRange{
 			Begin: t.GetResultSegments()[0],
 		},
+		SlotUsage: Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
