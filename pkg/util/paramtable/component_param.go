@@ -218,6 +218,7 @@ type commonConfig struct {
 
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
+	DefaultRootPassword  ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -595,6 +596,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.SuperUsers.Init(base.mgr)
+
+	p.DefaultRootPassword = ParamItem{
+		Key:          "common.security.defaultRootPassword",
+		Version:      "2.4.7",
+		Doc:          "default password for root user",
+		DefaultValue: "Milvus",
+		Export:       true,
+	}
+	p.DefaultRootPassword.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",

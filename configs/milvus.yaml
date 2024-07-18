@@ -644,6 +644,7 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     tlsMode: 0
+    defaultRootPassword: Milvus
   session:
     ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests

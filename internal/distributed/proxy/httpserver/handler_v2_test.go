@@ -274,7 +274,7 @@ func TestGrpcWrapper(t *testing.T) {
 	for _, testcase := range getTestCasesNeedAuth {
 		t.Run("get"+testcase.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, testcase.path, nil)
-			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 			w := httptest.NewRecorder()
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -311,7 +311,7 @@ func TestGrpcWrapper(t *testing.T) {
 
 		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		req = httptest.NewRequest(http.MethodGet, needAuthPrefix+path, nil)
-		req.SetBasicAuth("test", util.DefaultRootPassword)
+		req.SetBasicAuth("test", getDefaultRootPassword())
 		w = httptest.NewRecorder()
 		ginHandler.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code)
