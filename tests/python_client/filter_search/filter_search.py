@@ -92,7 +92,7 @@ class MilvusUser(HttpUser):
                     }
         with self.client.post("/v2/vectordb/entities/search",
                               json=payload,
-                              headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
+                              headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.environment.parsed_options.user}:{self.environment.parsed_options.pwd}"},
                               catch_response=True
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 0:
