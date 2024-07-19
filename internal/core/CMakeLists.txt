@@ -305,6 +305,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install monitor
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/monitor/
+        DESTINATION include/monitor
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/futures/
         DESTINATION include/futures
         FILES_MATCHING PATTERN "*.h"

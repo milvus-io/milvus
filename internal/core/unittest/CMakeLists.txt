@@ -70,6 +70,7 @@ set(MILVUS_TEST_FILES
         test_chunk_vector.cpp
         test_mmap_chunk_manager.cpp
         test_futures.cpp
+        test_monitor.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -127,6 +128,7 @@ if (LINUX)
     target_link_libraries(index_builder_test
             gtest
             gtest_main
+            milvus_monitor
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
