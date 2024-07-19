@@ -24,7 +24,7 @@ def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="
             port=port,
             user=user,
             password=pwd
-        ) 
+        )
     else:
         connections.connect(
             host=host,
@@ -45,6 +45,7 @@ def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="
     ]
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True, num_partitions=1)
     collection = Collection(name=collection_name, schema=schema, num_partitions=1)
+    collection.set_properties({"partitionkey.isolation": "true"})
     logger.info(f"collection {collection_name} created: {collection.describe()}")
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
