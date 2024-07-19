@@ -349,7 +349,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	s.SetupTest()
 	nodeSlots := map[int64]int64{
 		100: 16,
-		101: 24,
+		101: 23,
 	}
 	node, useSlot := s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
 		CompactionTask: &datapb.CompactionTask{
