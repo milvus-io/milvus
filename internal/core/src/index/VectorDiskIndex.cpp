@@ -371,6 +371,10 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             GetValueFromConfig<float>(search_info.search_params_, RADIUS);
         if (radius.has_value()) {
             search_config[RADIUS] = radius.value();
+            // `range_search_k` is only used as one of the conditions for iterator early termination.
+            // not gurantee to return exactly `range_search_k` results, which may be more or less.
+            // set it to -1 will return all results in the range.
+            search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
             auto range_filter = GetValueFromConfig<float>(
                 search_info.search_params_, RANGE_FILTER);
             if (range_filter.has_value()) {
