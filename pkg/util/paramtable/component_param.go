@@ -3906,7 +3906,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Version:      "2.3.4",
 		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
-		Export:       true,
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				log.Warn("positive parallel task number, reset to default 256", zap.String("value", v))
+				return "256" // MaxParallelSyncMgrTasks must >= 1
+			}
+			return strconv.FormatInt(int64(concurrency), 10)
+		},
+		Export: true,
 	}
 	p.MaxParallelSyncMgrTasks.Init(base.mgr)
 

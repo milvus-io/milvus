@@ -263,12 +263,7 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(node.chunkManager)
-		if err != nil {
-			initError = err
-			log.Error("failed to create sync manager", zap.Error(err))
-			return
-		}
+		syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 		node.syncMgr = syncMgr
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)

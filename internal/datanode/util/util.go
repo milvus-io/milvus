@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -61,7 +61,7 @@ type PipelineParams struct {
 	Session            *sessionutil.Session
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
-	Allocator          allocator.Allocator
+	Allocator          allocator.Interface
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

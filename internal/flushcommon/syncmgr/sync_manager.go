@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -55,12 +54,9 @@ type syncManager struct {
 	tasks *typeutil.ConcurrentMap[string, Task]
 }
 
-func NewSyncManager(chunkManager storage.ChunkManager) (SyncManager, error) {
+func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	params := paramtable.Get()
 	initPoolSize := params.DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt()
-	if initPoolSize < 1 {
-		return nil, merr.WrapErrParameterInvalid("positive parallel task number", strconv.FormatInt(int64(initPoolSize), 10))
-	}
 	dispatcher := newKeyLockDispatcher[int64](initPoolSize)
 	log.Info("sync manager initialized", zap.Int("initPoolSize", initPoolSize))
 
@@ -71,8 +67,7 @@ func NewSyncManager(chunkManager storage.ChunkManager) (SyncManager, error) {
 	}
 	// setup config update watcher
 	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler))
-
-	return syncMgr, nil
+	return syncMgr
 }
 
 func (mgr *syncManager) resizeHandler(evt *config.Event) {

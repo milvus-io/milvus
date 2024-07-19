@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"reflect"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -14,10 +16,24 @@ var r *resourceImpl // singleton resource instance
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
 
+// OptFlusher provides the flusher to the resource.
+func OptFlusher(flusher flusher.Flusher) optResourceInit {
+	return func(r *resourceImpl) {
+		r.flusher = flusher
+	}
+}
+
 // OptETCD provides the etcd client to the resource.
 func OptETCD(etcd *clientv3.Client) optResourceInit {
 	return func(r *resourceImpl) {
 		r.etcdClient = etcd
+	}
+}
+
+// OptChunkManager provides the chunk manager to the resource.
+func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
+	return func(r *resourceImpl) {
+		r.chunkManager = chunkManager
 	}
 }
 
@@ -58,11 +74,18 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
+	flusher            flusher.Flusher
 	timestampAllocator idalloc.Allocator
 	idAllocator        idalloc.Allocator
 	etcdClient         *clientv3.Client
+	chunkManager       storage.ChunkManager
 	rootCoordClient    types.RootCoordClient
 	dataCoordClient    types.DataCoordClient
+}
+
+// Flusher returns the flusher.
+func (r *resourceImpl) Flusher() flusher.Flusher {
+	return r.flusher
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.
@@ -78,6 +101,11 @@ func (r *resourceImpl) IDAllocator() idalloc.Allocator {
 // ETCD returns the etcd client.
 func (r *resourceImpl) ETCD() *clientv3.Client {
 	return r.etcdClient
+}
+
+// ChunkManager returns the chunk manager.
+func (r *resourceImpl) ChunkManager() storage.ChunkManager {
+	return r.chunkManager
 }
 
 // RootCoordClient returns the root coordinator client.

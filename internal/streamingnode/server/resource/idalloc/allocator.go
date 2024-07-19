@@ -17,9 +17,9 @@
 package idalloc
 
 import (
-	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -47,13 +47,11 @@ func NewIDAllocator(rc types.RootCoordClient) Allocator {
 }
 
 type remoteBatchAllocator interface {
-	batchAllocate(ctx context.Context, count uint32) (uint64, int, error)
+	batchAllocate(count uint32) (int64, int, error)
 }
 
 type Allocator interface {
-	// Allocate allocates a timestamp.
-	Allocate(ctx context.Context) (uint64, error)
-
+	allocator.Interface
 	// Sync expire the local allocator messages,
 	// syncs the local allocator and remote allocator.
 	Sync()
@@ -65,8 +63,12 @@ type allocatorImpl struct {
 	localAllocator  *localAllocator
 }
 
-// AllocateOne allocates a timestamp.
-func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
+func (ta *allocatorImpl) Alloc(count uint32) (int64, int64, error) {
+	panic("TODO: implement me")
+}
+
+// AllocOne allocates a timestamp.
+func (ta *allocatorImpl) AllocOne() (int64, error) {
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 
@@ -75,7 +77,7 @@ func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
 		return id, nil
 	}
 	// allocate from remote.
-	return ta.allocateRemote(ctx)
+	return ta.allocateRemote()
 }
 
 // Sync expire the local allocator messages,
@@ -88,9 +90,9 @@ func (ta *allocatorImpl) Sync() {
 }
 
 // allocateRemote allocates timestamp from remote root coordinator.
-func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
+func (ta *allocatorImpl) allocateRemote() (int64, error) {
 	// Update local allocator from remote.
-	start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
+	start, count, err := ta.remoteAllocator.batchAllocate(batchAllocateSize)
 	if err != nil {
 		return 0, err
 	}

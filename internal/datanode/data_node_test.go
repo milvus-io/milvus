@@ -94,8 +94,7 @@ func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.broker = broker
 	node.timeTickSender = util.NewTimeTickSender(broker, 0)
 
-	syncMgr, _ := syncmgr.NewSyncManager(node.chunkManager)
-
+	syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 	node.syncMgr = syncMgr
 	node.writeBufferManager = writebuffer.NewManager(syncMgr)
 

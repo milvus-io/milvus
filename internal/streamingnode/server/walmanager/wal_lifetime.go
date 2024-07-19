@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -18,6 +18,7 @@ func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
 	l := &walLifetime{
 		ctx:       ctx,
 		cancel:    cancel,
+		channel:   channel,
 		finish:    make(chan struct{}),
 		opener:    opener,
 		statePair: newWALStatePair(),
@@ -34,8 +35,9 @@ func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
 // term is always increasing, available is always before unavailable in same term, such as:
 // (-1, false) -> (0, true) -> (1, true) -> (2, true) -> (3, false) -> (7, true) -> ...
 type walLifetime struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx     context.Context
+	cancel  context.CancelFunc
+	channel string
 
 	finish    chan struct{}
 	opener    wal.Opener
@@ -130,7 +132,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
-		// TODO: flusher.Close()
+		resource.Resource().Flusher().Close(w.channel)
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.
@@ -150,7 +152,6 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	l, err := w.opener.Open(expectedState.Context(), &wal.OpenOption{
 		Channel: expectedState.GetPChannelInfo(),
 	})
-	// TODO: flusher.Open()
 	if err != nil {
 		logger.Warn("open new wal fail", zap.Error(err))
 		// Open new wal at expected term failed, push expected term to current state unavailable.
@@ -159,9 +160,9 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 		return
 	}
 	logger.Info("open new wal done")
-	err = flusher.Open(l)
+	err = resource.Resource().Flusher().Open(l)
 	if err != nil {
-		logger.Warn("Register flusher fail", zap.Error(err))
+		logger.Warn("open flusher fail", zap.Error(err))
 		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
 		return
 	}

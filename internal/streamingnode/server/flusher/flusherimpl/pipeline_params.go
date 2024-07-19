@@ -14,12 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package flusher
+package flusherimpl
 
 import (
+	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/util" // TODO: move util to flushcommon
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 )
 
 var (
@@ -29,8 +34,17 @@ var (
 
 func initPipelineParams() {
 	initOnce.Do(func() {
+		rsc := resource.Resource()
+		syncMgr := syncmgr.NewSyncManager(rsc.ChunkManager())
+		coordBroker := broker.NewCoordBroker(rsc.DataCoordClient(), 0 /*TODO: fix paramtable.Get().StreamingNodeCfg.GetNodeID()*/)
 		pipelineParams = &util.PipelineParams{
-			// TODO: resolve
+			Ctx:                context.Background(),
+			Broker:             coordBroker,
+			SyncMgr:            syncMgr,
+			ChunkManager:       rsc.ChunkManager(),
+			WriteBufferManager: writebuffer.NewManager(syncMgr),
+			CheckpointUpdater:  util.NewChannelCheckpointUpdater(coordBroker),
+			Allocator:          rsc.IDAllocator(),
 		}
 	})
 }
