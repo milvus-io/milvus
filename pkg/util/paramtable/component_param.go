@@ -2864,6 +2864,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
@@ -3101,6 +3102,16 @@ the number of binlog file reaches to max value.`,
 		Export: true,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
+
+	p.GrowingSegmentsMemSizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
+		Version:      "2.4.6",
+		DefaultValue: "4096",
+		Doc: `The size threshold in MB, if the total size of growing segments of each shard 
+exceeds this threshold, the largest growing segment will be sealed.`,
+		Export: true,
+	}
+	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",

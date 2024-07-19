@@ -450,6 +450,11 @@ dataCoord:
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
     segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  sealPolicy:
+    channel:
+      # The size threshold in MB, if the total size of growing segments of each shard
+      # exceeds this threshold, the largest growing segment will be sealed.
+      growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:
