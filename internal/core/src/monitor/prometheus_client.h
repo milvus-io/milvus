@@ -23,7 +23,7 @@
 #include <sstream>
 #include <string>
 
-namespace milvus::storage {
+namespace milvus::monitor {
 
 class PrometheusClient {
  public:
@@ -58,24 +58,24 @@ extern const std::unique_ptr<PrometheusClient> prometheusClient;
 #define DEFINE_PROMETHEUS_GAUGE_FAMILY(name, desc)                \
     prometheus::Family<prometheus::Gauge>& name##_family =        \
         prometheus::BuildGauge().Name(#name).Help(desc).Register( \
-            milvus::storage::prometheusClient->GetRegistry());
+            milvus::monitor::prometheusClient->GetRegistry());
 #define DEFINE_PROMETHEUS_GAUGE(alias, name, labels) \
     prometheus::Gauge& alias = name##_family.Add(labels);
 
 #define DEFINE_PROMETHEUS_COUNTER_FAMILY(name, desc)                \
     prometheus::Family<prometheus::Counter>& name##_family =        \
         prometheus::BuildCounter().Name(#name).Help(desc).Register( \
-            milvus::storage::prometheusClient->GetRegistry());
+            milvus::monitor::prometheusClient->GetRegistry());
 #define DEFINE_PROMETHEUS_COUNTER(alias, name, labels) \
     prometheus::Counter& alias = name##_family.Add(labels);
 
 #define DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(name, desc)                \
     prometheus::Family<prometheus::Histogram>& name##_family =        \
         prometheus::BuildHistogram().Name(#name).Help(desc).Register( \
-            milvus::storage::prometheusClient->GetRegistry());
+            milvus::monitor::prometheusClient->GetRegistry());
 #define DEFINE_PROMETHEUS_HISTOGRAM(alias, name, labels) \
     prometheus::Histogram& alias =                       \
-        name##_family.Add(labels, milvus::storage::buckets);
+        name##_family.Add(labels, milvus::monitor::buckets);
 #define DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(alias, name, labels, buckets) \
     prometheus::Histogram& alias = name##_family.Add(labels, buckets);
 
@@ -128,4 +128,10 @@ DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_space_bytes);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file);
 
-}  // namespace milvus::storage
+// search metrics
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar_proportion);
+
+}  // namespace milvus::monitor

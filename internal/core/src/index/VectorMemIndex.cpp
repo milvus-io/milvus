@@ -50,7 +50,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/space.h"
 #include "storage/Util.h"
-#include "storage/prometheus_client.h"
+#include "monitor/prometheus_client.h"
 
 namespace milvus::index {
 
@@ -798,10 +798,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
     }
-    milvus::storage::internal_storage_download_duration.Observe(
+    milvus::monitor::internal_storage_download_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
             .count());
-    milvus::storage::internal_storage_write_disk_duration.Observe(
+    milvus::monitor::internal_storage_write_disk_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             write_disk_duration_sum)
             .count());
@@ -820,7 +820,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
     }
-    milvus::storage::internal_storage_deserialize_duration.Observe(
+    milvus::monitor::internal_storage_deserialize_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());

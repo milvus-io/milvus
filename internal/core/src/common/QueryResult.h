@@ -106,8 +106,11 @@ struct VectorIterator {
         int idx = 0;
         for (auto& iter : iterators_) {
             if (iter->HasNext()) {
+                auto origin_pair = iter->Next();
+                origin_pair.first = convert_to_segment_offset(
+                        origin_pair.first, idx);
                 auto off_dis_pair =
-                    std::make_shared<OffsetDisPair>(iter->Next(), idx++);
+                    std::make_shared<OffsetDisPair>(origin_pair, idx++);
                 heap_.push(off_dis_pair);
             }
         }

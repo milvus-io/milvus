@@ -3,9 +3,10 @@ package attributes
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestAttributes(t *testing.T) {
@@ -38,6 +39,5 @@ func TestAttributes(t *testing.T) {
 
 	attr = new(Attributes)
 	attr = WithServerID(attr, 1)
-	serverID = GetServerID(attr)
 	assert.Equal(t, int64(1), *GetServerID(attr))
 }

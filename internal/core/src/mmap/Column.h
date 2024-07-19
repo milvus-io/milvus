@@ -39,7 +39,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Array.h"
 #include "knowhere/dataset.h"
-#include "storage/prometheus_client.h"
+#include "monitor/prometheus_client.h"
 #include "storage/MmapChunkManager.h"
 
 namespace milvus {
@@ -371,14 +371,14 @@ class ColumnBase {
     void
     UpdateMetricWhenMmap(bool is_map_anonymous, size_t mapped_size) {
         if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-            milvus::storage::internal_mmap_allocated_space_bytes_anon.Observe(
+            milvus::monitor::internal_mmap_allocated_space_bytes_anon.Observe(
                 mapped_size);
-            milvus::storage::internal_mmap_in_used_space_bytes_anon.Increment(
+            milvus::monitor::internal_mmap_in_used_space_bytes_anon.Increment(
                 mapped_size);
         } else {
-            milvus::storage::internal_mmap_allocated_space_bytes_file.Observe(
+            milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
                 mapped_size);
-            milvus::storage::internal_mmap_in_used_space_bytes_file.Increment(
+            milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
                 mapped_size);
         }
     }
@@ -386,10 +386,10 @@ class ColumnBase {
     void
     UpdateMetricWhenMunmap(size_t mapped_size) {
         if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-            milvus::storage::internal_mmap_in_used_space_bytes_anon.Decrement(
+            milvus::monitor::internal_mmap_in_used_space_bytes_anon.Decrement(
                 mapped_size);
         } else {
-            milvus::storage::internal_mmap_in_used_space_bytes_file.Decrement(
+            milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
                 mapped_size);
         }
     }
