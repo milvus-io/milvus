@@ -246,11 +246,9 @@ class TestIndexOperation(TestcaseBase):
         """
         schema = cf.gen_array_collection_schema()
         collection_w = self.init_collection_wrap(schema=schema)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "create index on json field is not supported: expected=supported field, "
-                             "actual=create index on Array field: invalid parameter"}
-        collection_w.create_index(ct.default_string_array_field_name, {},
-                                  check_task=CheckTasks.err_res, check_items=error)
+        collection_w.create_index(ct.default_string_array_field_name, {})
+        assert collection_w.index()[0].params == {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0,
+                                                  'state': 3}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
