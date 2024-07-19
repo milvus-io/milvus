@@ -22,13 +22,16 @@ type Flusher interface {
 	// Open ASYNCHRONOUSLY creates and starts pipelines belonging to the pchannel/WAL.
 	// If a pipeline creation fails, the flusher will keep retrying to create it indefinitely.
 	Open(w wal.WAL) error
-
 	// Close SYNCHRONOUSLY stops and removes pipelines belonging to the pchannel.
 	Close(pchannel string)
 
+	// Register create pipeline belonging to the vchannel.
+	Register(vchannel string, wal wal.WAL)
+	// Deregister stops and removes pipeline belonging to the vchannel.
+	Deregister(vchannel string)
+
 	// Start flusher service.
 	Start()
-
 	// Stop flusher, will synchronously flush all remaining data.
 	Stop()
 }

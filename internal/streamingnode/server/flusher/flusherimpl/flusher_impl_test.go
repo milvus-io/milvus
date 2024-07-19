@@ -17,12 +17,14 @@
 package flusherimpl
 
 import (
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/stretchr/testify/suite"
-	"testing"
 )
 
 type FlusherSuite struct {

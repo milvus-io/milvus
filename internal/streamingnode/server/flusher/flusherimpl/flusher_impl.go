@@ -84,6 +84,14 @@ func (f *flusherImpl) Close(pchannel string) {
 	f.fgMgr.RemoveFlowgraphsByPChannel(pchannel)
 }
 
+func (f *flusherImpl) Register(vchannel string, wal wal.WAL) {
+	f.tasks.Insert(vchannel, wal)
+}
+
+func (f *flusherImpl) Deregister(vchannel string) {
+	f.fgMgr.RemoveFlowgraph(vchannel)
+}
+
 func (f *flusherImpl) Start() {
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
@@ -107,6 +115,15 @@ func (f *flusherImpl) Start() {
 			}
 		}
 	}()
+}
+
+func (f *flusherImpl) Stop() {
+	f.stopOnce.Do(func() {
+		close(f.stopChan)
+		f.fgMgr.ClearFlowgraphs()
+		f.wbMgr.Stop()
+		f.cpUpdater.Close()
+	})
 }
 
 func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
@@ -141,13 +158,4 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	ds.Start()
 	f.fgMgr.AddFlowgraph(ds)
 	return nil
-}
-
-func (f *flusherImpl) Stop() {
-	f.stopOnce.Do(func() {
-		close(f.stopChan)
-		f.fgMgr.ClearFlowgraphs()
-		f.wbMgr.Stop()
-		f.cpUpdater.Close()
-	})
 }

@@ -34,16 +34,22 @@ var (
 
 func initPipelineParams() {
 	initOnce.Do(func() {
-		rsc := resource.Resource()
-		syncMgr := syncmgr.NewSyncManager(rsc.ChunkManager())
-		coordBroker := broker.NewCoordBroker(rsc.DataCoordClient(), 0 /*TODO: fix paramtable.Get().StreamingNodeCfg.GetNodeID()*/)
+		var (
+			rsc         = resource.Resource()
+			syncMgr     = syncmgr.NewSyncManager(rsc.ChunkManager())
+			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), 0 /*TODO: fix paramtable.Get().StreamingNodeCfg.GetNodeID()*/)
+			wbMgr       = writebuffer.NewManager(syncMgr)
+			cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
+		)
+		wbMgr.Start()
+		go cpUpdater.Start()
 		pipelineParams = &util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             coordBroker,
 			SyncMgr:            syncMgr,
 			ChunkManager:       rsc.ChunkManager(),
-			WriteBufferManager: writebuffer.NewManager(syncMgr),
-			CheckpointUpdater:  util.NewChannelCheckpointUpdater(coordBroker),
+			WriteBufferManager: wbMgr,
+			CheckpointUpdater:  cpUpdater,
 			Allocator:          rsc.IDAllocator(),
 		}
 	})
