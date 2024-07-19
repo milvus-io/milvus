@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/resolver"
+
 	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc/resolver"
 )
 
 func TestNewBuilder(t *testing.T) {
