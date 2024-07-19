@@ -9,9 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/prometheus_client.h"
+#include "prometheus_client.h"
 
-namespace milvus::storage {
+namespace milvus::monitor {
 
 const prometheus::Histogram::BucketBoundaries buckets = {1,
                                                          2,
@@ -47,8 +47,12 @@ const prometheus::Histogram::BucketBoundaries bytesBuckets = {
     536870912,    // 512M
     1073741824};  // 1G
 
-const std::unique_ptr<PrometheusClient> prometheusClient =
-    std::make_unique<PrometheusClient>();
+const prometheus::Histogram::BucketBoundaries ratioBuckets =
+    {0.0,  0.05, 0.1,  0.15, 0.2,  0.25, 0.3,  0.35, 0.4,  0.45, 0.5,
+     0.55, 0.6,  0.65, 0.7,  0.75, 0.8,  0.85, 0.9,  0.95, 1.0};
+
+const std::unique_ptr<PrometheusClient>
+    prometheusClient = std::make_unique<PrometheusClient>();
 
 /******************GetMetrics*************************************************************
  * !!! NOT use SUMMARY metrics here, because when parse SUMMARY metrics in Milvus,
@@ -166,6 +170,27 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_deserialize_duration,
                             internal_storage_load_duration,
                             deserializeDurationLabels)
 
+// search latency metrics
+std::map<std::string, std::string> scalarLatencyLabels{
+    {"type", "scalar_latency"}};
+std::map<std::string, std::string> vectorLatencyLabels{
+    {"type", "vector_latency"}};
+std::map<std::string, std::string> scalarProportionLabels{
+    {"type", "scalar_proportion"}};
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
+                                   "[cpp]latency(us) of search on segment")
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar,
+                            internal_core_search_latency,
+                            scalarLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector,
+                            internal_core_search_latency,
+                            vectorLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_search_latency_scalar_proportion,
+    internal_core_search_latency,
+    scalarProportionLabels,
+    ratioBuckets)
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
@@ -193,4 +218,4 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon,
 DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file,
                         internal_mmap_in_used_space_bytes,
                         mmapAllocatedSpaceFileLabel)
-}  // namespace milvus::storage
+}  // namespace milvus::monitor
