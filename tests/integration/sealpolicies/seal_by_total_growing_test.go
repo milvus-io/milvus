@@ -37,8 +37,8 @@ import (
 )
 
 func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key, "10")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key)
 
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.SyncPeriod.Key, "5")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.SyncPeriod.Key)
