@@ -32,7 +32,8 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
         const Index& index =
             segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
 
-        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID) {
+        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
+            index.GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
             return false;
         }
     }
