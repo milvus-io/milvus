@@ -539,6 +539,10 @@ func (m *mockRootCoordClient) ShowSegments(ctx context.Context, req *milvuspb.Sh
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) GetVChannels(ctx context.Context, req *rootcoordpb.GetVChannelsRequest, opts ...grpc.CallOption) (*rootcoordpb.GetVChannelsResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) DescribeSegments(ctx context.Context, req *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	panic("implement me")
 }
