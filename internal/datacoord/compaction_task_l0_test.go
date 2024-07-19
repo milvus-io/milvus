@@ -221,16 +221,11 @@ func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskSt
 	}
 }
 
-func (s *L0CompactionTaskSuite) SetupSubTest() {
-	s.SetupTest()
-}
-
 func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 	s.Run("test pipelining needReassignNodeID", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = NullNodeID
-		t.allocator = alloc
 		got := t.Process()
 		s.False(got)
 		s.Equal(datapb.CompactionTaskState_pipelining, t.State)
@@ -240,7 +235,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	s.Run("test pipelining BuildCompactionRequest failed", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
-		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
@@ -276,7 +270,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	s.Run("test pipelining Compaction failed", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
-		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
@@ -315,7 +308,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	s.Run("test pipelining success", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
-		t.allocator = alloc
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
