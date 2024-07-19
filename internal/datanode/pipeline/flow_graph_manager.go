@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 
 	"go.uber.org/zap"
 
@@ -32,6 +33,7 @@ import (
 type FlowgraphManager interface {
 	AddFlowgraph(ds *DataSyncService)
 	RemoveFlowgraph(channel string)
+	RemoveFlowgraphsByPChannel(pchannel string)
 	ClearFlowgraphs()
 
 	GetFlowgraphService(channel string) (*DataSyncService, bool)
@@ -73,6 +75,15 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		util.RateCol.RemoveFlowGraphChannel(channel)
 	}
+}
+
+func (fm *fgManagerImpl) RemoveFlowgraphsByPChannel(pchannel string) {
+	fm.flowgraphs.Range(func(vchannel string, ds *DataSyncService) bool {
+		if funcutil.ToPhysicalChannel(vchannel) == pchannel {
+			fm.RemoveFlowgraph(vchannel)
+		}
+		return true
+	})
 }
 
 func (fm *fgManagerImpl) ClearFlowgraphs() {

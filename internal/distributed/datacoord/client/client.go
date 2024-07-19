@@ -341,6 +341,18 @@ func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	})
 }
 
+// GetChannelRecoveryInfo returns the corresponding vchannel info.
+func (c *Client) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetChannelRecoveryInfoResponse, error) {
+		return client.GetChannelRecoveryInfo(ctx, req)
+	})
+}
+
 // GetFlushedSegments returns flushed segment list of requested collection/parition
 //
 // ctx is the context to control request deadline and cancellation

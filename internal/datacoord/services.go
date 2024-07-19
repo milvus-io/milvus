@@ -901,6 +901,42 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	return resp, nil
 }
 
+// GetChannelRecoveryInfo get recovery channel info.
+// Called by: StreamingNode.
+func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("vchannel", req.GetVchannel()),
+	)
+	log.Info("get channel recovery info request received")
+	resp := &datapb.GetChannelRecoveryInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
+	collection, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
+	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
+	log.Info("datacoord get channel recovery info",
+		zap.String("channel", channelInfo.GetChannelName()),
+		zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
+		zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
+		zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
+		zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
+		zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+	)
+
+	resp.Info = channelInfo
+	resp.Schema = collection.Schema
+	return resp, nil
+}
+
 // GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {

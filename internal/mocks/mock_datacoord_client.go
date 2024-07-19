@@ -72,9 +72,9 @@ type MockDataCoordClient_AlterIndex_Call struct {
 }
 
 // AlterIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.AlterIndexRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.AlterIndexRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) AlterIndex(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_AlterIndex_Call {
 	return &MockDataCoordClient_AlterIndex_Call{Call: _e.mock.On("AlterIndex",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -142,9 +142,9 @@ type MockDataCoordClient_AssignSegmentID_Call struct {
 }
 
 // AssignSegmentID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.AssignSegmentIDRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.AssignSegmentIDRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) AssignSegmentID(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_AssignSegmentID_Call {
 	return &MockDataCoordClient_AssignSegmentID_Call{Call: _e.mock.On("AssignSegmentID",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -212,9 +212,9 @@ type MockDataCoordClient_BroadcastAlteredCollection_Call struct {
 }
 
 // BroadcastAlteredCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.AlterCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.AlterCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) BroadcastAlteredCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_BroadcastAlteredCollection_Call {
 	return &MockDataCoordClient_BroadcastAlteredCollection_Call{Call: _e.mock.On("BroadcastAlteredCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -282,9 +282,9 @@ type MockDataCoordClient_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CheckHealthRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CheckHealthRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) CheckHealth(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_CheckHealth_Call {
 	return &MockDataCoordClient_CheckHealth_Call{Call: _e.mock.On("CheckHealth",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -393,9 +393,9 @@ type MockDataCoordClient_CreateIndex_Call struct {
 }
 
 // CreateIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.CreateIndexRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.CreateIndexRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) CreateIndex(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_CreateIndex_Call {
 	return &MockDataCoordClient_CreateIndex_Call{Call: _e.mock.On("CreateIndex",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -463,9 +463,9 @@ type MockDataCoordClient_DescribeIndex_Call struct {
 }
 
 // DescribeIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.DescribeIndexRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.DescribeIndexRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) DescribeIndex(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_DescribeIndex_Call {
 	return &MockDataCoordClient_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -533,9 +533,9 @@ type MockDataCoordClient_DropIndex_Call struct {
 }
 
 // DropIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.DropIndexRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.DropIndexRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) DropIndex(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_DropIndex_Call {
 	return &MockDataCoordClient_DropIndex_Call{Call: _e.mock.On("DropIndex",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -603,9 +603,9 @@ type MockDataCoordClient_DropVirtualChannel_Call struct {
 }
 
 // DropVirtualChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.DropVirtualChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.DropVirtualChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) DropVirtualChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_DropVirtualChannel_Call {
 	return &MockDataCoordClient_DropVirtualChannel_Call{Call: _e.mock.On("DropVirtualChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -673,9 +673,9 @@ type MockDataCoordClient_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.FlushRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.FlushRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) Flush(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_Flush_Call {
 	return &MockDataCoordClient_Flush_Call{Call: _e.mock.On("Flush",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -743,9 +743,9 @@ type MockDataCoordClient_GcConfirm_Call struct {
 }
 
 // GcConfirm is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GcConfirmRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GcConfirmRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GcConfirm(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GcConfirm_Call {
 	return &MockDataCoordClient_GcConfirm_Call{Call: _e.mock.On("GcConfirm",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -813,9 +813,9 @@ type MockDataCoordClient_GcControl_Call struct {
 }
 
 // GcControl is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GcControlRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GcControlRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GcControl(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GcControl_Call {
 	return &MockDataCoordClient_GcControl_Call{Call: _e.mock.On("GcControl",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -840,6 +840,76 @@ func (_c *MockDataCoordClient_GcControl_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MockDataCoordClient_GcControl_Call) RunAndReturn(run func(context.Context, *datapb.GcControlRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_GcControl_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetChannelRecoveryInfo provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) GetChannelRecoveryInfo(ctx context.Context, in *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.GetChannelRecoveryInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetChannelRecoveryInfoRequest, ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetChannelRecoveryInfoRequest, ...grpc.CallOption) *datapb.GetChannelRecoveryInfoResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetChannelRecoveryInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetChannelRecoveryInfoRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_GetChannelRecoveryInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelRecoveryInfo'
+type MockDataCoordClient_GetChannelRecoveryInfo_Call struct {
+	*mock.Call
+}
+
+// GetChannelRecoveryInfo is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.GetChannelRecoveryInfoRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) GetChannelRecoveryInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetChannelRecoveryInfo_Call {
+	return &MockDataCoordClient_GetChannelRecoveryInfo_Call{Call: _e.mock.On("GetChannelRecoveryInfo",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_GetChannelRecoveryInfo_Call) Run(run func(ctx context.Context, in *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption)) *MockDataCoordClient_GetChannelRecoveryInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetChannelRecoveryInfoRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetChannelRecoveryInfo_Call) Return(_a0 *datapb.GetChannelRecoveryInfoResponse, _a1 error) *MockDataCoordClient_GetChannelRecoveryInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetChannelRecoveryInfo_Call) RunAndReturn(run func(context.Context, *datapb.GetChannelRecoveryInfoRequest, ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error)) *MockDataCoordClient_GetChannelRecoveryInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -883,9 +953,9 @@ type MockDataCoordClient_GetCollectionStatistics_Call struct {
 }
 
 // GetCollectionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetCollectionStatisticsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetCollectionStatisticsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetCollectionStatistics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetCollectionStatistics_Call {
 	return &MockDataCoordClient_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -953,9 +1023,9 @@ type MockDataCoordClient_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetCompactionStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetCompactionStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetCompactionState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetCompactionState_Call {
 	return &MockDataCoordClient_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1023,9 +1093,9 @@ type MockDataCoordClient_GetCompactionStateWithPlans_Call struct {
 }
 
 // GetCompactionStateWithPlans is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetCompactionPlansRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetCompactionPlansRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetCompactionStateWithPlans(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetCompactionStateWithPlans_Call {
 	return &MockDataCoordClient_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1093,9 +1163,9 @@ type MockDataCoordClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetComponentStates_Call {
 	return &MockDataCoordClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1163,9 +1233,9 @@ type MockDataCoordClient_GetFlushAllState_Call struct {
 }
 
 // GetFlushAllState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetFlushAllStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetFlushAllStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetFlushAllState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetFlushAllState_Call {
 	return &MockDataCoordClient_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1233,9 +1303,9 @@ type MockDataCoordClient_GetFlushState_Call struct {
 }
 
 // GetFlushState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetFlushStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetFlushStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetFlushState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetFlushState_Call {
 	return &MockDataCoordClient_GetFlushState_Call{Call: _e.mock.On("GetFlushState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1303,9 +1373,9 @@ type MockDataCoordClient_GetFlushedSegments_Call struct {
 }
 
 // GetFlushedSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetFlushedSegmentsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetFlushedSegmentsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetFlushedSegments(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetFlushedSegments_Call {
 	return &MockDataCoordClient_GetFlushedSegments_Call{Call: _e.mock.On("GetFlushedSegments",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1373,9 +1443,9 @@ type MockDataCoordClient_GetImportProgress_Call struct {
 }
 
 // GetImportProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetImportProgressRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetImportProgressRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetImportProgress(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetImportProgress_Call {
 	return &MockDataCoordClient_GetImportProgress_Call{Call: _e.mock.On("GetImportProgress",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1443,9 +1513,9 @@ type MockDataCoordClient_GetIndexBuildProgress_Call struct {
 }
 
 // GetIndexBuildProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.GetIndexBuildProgressRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.GetIndexBuildProgressRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetIndexBuildProgress(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetIndexBuildProgress_Call {
 	return &MockDataCoordClient_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1513,9 +1583,9 @@ type MockDataCoordClient_GetIndexInfos_Call struct {
 }
 
 // GetIndexInfos is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.GetIndexInfoRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.GetIndexInfoRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetIndexInfos(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetIndexInfos_Call {
 	return &MockDataCoordClient_GetIndexInfos_Call{Call: _e.mock.On("GetIndexInfos",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1583,9 +1653,9 @@ type MockDataCoordClient_GetIndexState_Call struct {
 }
 
 // GetIndexState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.GetIndexStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.GetIndexStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetIndexState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetIndexState_Call {
 	return &MockDataCoordClient_GetIndexState_Call{Call: _e.mock.On("GetIndexState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1653,9 +1723,9 @@ type MockDataCoordClient_GetIndexStatistics_Call struct {
 }
 
 // GetIndexStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.GetIndexStatisticsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.GetIndexStatisticsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetIndexStatistics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetIndexStatistics_Call {
 	return &MockDataCoordClient_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1723,9 +1793,9 @@ type MockDataCoordClient_GetInsertBinlogPaths_Call struct {
 }
 
 // GetInsertBinlogPaths is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetInsertBinlogPathsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetInsertBinlogPathsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetInsertBinlogPaths(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetInsertBinlogPaths_Call {
 	return &MockDataCoordClient_GetInsertBinlogPaths_Call{Call: _e.mock.On("GetInsertBinlogPaths",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1793,9 +1863,9 @@ type MockDataCoordClient_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetMetrics_Call {
 	return &MockDataCoordClient_GetMetrics_Call{Call: _e.mock.On("GetMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1863,9 +1933,9 @@ type MockDataCoordClient_GetPartitionStatistics_Call struct {
 }
 
 // GetPartitionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetPartitionStatisticsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetPartitionStatisticsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetPartitionStatistics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetPartitionStatistics_Call {
 	return &MockDataCoordClient_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1933,9 +2003,9 @@ type MockDataCoordClient_GetRecoveryInfo_Call struct {
 }
 
 // GetRecoveryInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetRecoveryInfoRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetRecoveryInfoRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetRecoveryInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetRecoveryInfo_Call {
 	return &MockDataCoordClient_GetRecoveryInfo_Call{Call: _e.mock.On("GetRecoveryInfo",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2003,9 +2073,9 @@ type MockDataCoordClient_GetRecoveryInfoV2_Call struct {
 }
 
 // GetRecoveryInfoV2 is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetRecoveryInfoRequestV2
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetRecoveryInfoRequestV2
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetRecoveryInfoV2(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetRecoveryInfoV2_Call {
 	return &MockDataCoordClient_GetRecoveryInfoV2_Call{Call: _e.mock.On("GetRecoveryInfoV2",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2073,9 +2143,9 @@ type MockDataCoordClient_GetSegmentIndexState_Call struct {
 }
 
 // GetSegmentIndexState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.GetSegmentIndexStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.GetSegmentIndexStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetSegmentIndexState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetSegmentIndexState_Call {
 	return &MockDataCoordClient_GetSegmentIndexState_Call{Call: _e.mock.On("GetSegmentIndexState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2143,9 +2213,9 @@ type MockDataCoordClient_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetSegmentInfoRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetSegmentInfoRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetSegmentInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetSegmentInfo_Call {
 	return &MockDataCoordClient_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2213,9 +2283,9 @@ type MockDataCoordClient_GetSegmentInfoChannel_Call struct {
 }
 
 // GetSegmentInfoChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetSegmentInfoChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetSegmentInfoChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetSegmentInfoChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetSegmentInfoChannel_Call {
 	return &MockDataCoordClient_GetSegmentInfoChannel_Call{Call: _e.mock.On("GetSegmentInfoChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2283,9 +2353,9 @@ type MockDataCoordClient_GetSegmentStates_Call struct {
 }
 
 // GetSegmentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetSegmentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetSegmentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetSegmentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetSegmentStates_Call {
 	return &MockDataCoordClient_GetSegmentStates_Call{Call: _e.mock.On("GetSegmentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2353,9 +2423,9 @@ type MockDataCoordClient_GetSegmentsByStates_Call struct {
 }
 
 // GetSegmentsByStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.GetSegmentsByStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.GetSegmentsByStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetSegmentsByStates(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetSegmentsByStates_Call {
 	return &MockDataCoordClient_GetSegmentsByStates_Call{Call: _e.mock.On("GetSegmentsByStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2423,9 +2493,9 @@ type MockDataCoordClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetStatisticsChannel_Call {
 	return &MockDataCoordClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2493,9 +2563,9 @@ type MockDataCoordClient_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetTimeTickChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetTimeTickChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) GetTimeTickChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetTimeTickChannel_Call {
 	return &MockDataCoordClient_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2563,9 +2633,9 @@ type MockDataCoordClient_ImportV2_Call struct {
 }
 
 // ImportV2 is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ImportRequestInternal
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ImportRequestInternal
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ImportV2(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ImportV2_Call {
 	return &MockDataCoordClient_ImportV2_Call{Call: _e.mock.On("ImportV2",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2633,9 +2703,9 @@ type MockDataCoordClient_ListImports_Call struct {
 }
 
 // ListImports is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ListImportsRequestInternal
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ListImportsRequestInternal
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ListImports(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ListImports_Call {
 	return &MockDataCoordClient_ListImports_Call{Call: _e.mock.On("ListImports",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2703,9 +2773,9 @@ type MockDataCoordClient_ListIndexes_Call struct {
 }
 
 // ListIndexes is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *indexpb.ListIndexesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *indexpb.ListIndexesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ListIndexes(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ListIndexes_Call {
 	return &MockDataCoordClient_ListIndexes_Call{Call: _e.mock.On("ListIndexes",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2773,9 +2843,9 @@ type MockDataCoordClient_ManualCompaction_Call struct {
 }
 
 // ManualCompaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ManualCompactionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ManualCompactionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ManualCompaction(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ManualCompaction_Call {
 	return &MockDataCoordClient_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2843,9 +2913,9 @@ type MockDataCoordClient_MarkSegmentsDropped_Call struct {
 }
 
 // MarkSegmentsDropped is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.MarkSegmentsDroppedRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.MarkSegmentsDroppedRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) MarkSegmentsDropped(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_MarkSegmentsDropped_Call {
 	return &MockDataCoordClient_MarkSegmentsDropped_Call{Call: _e.mock.On("MarkSegmentsDropped",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2913,9 +2983,9 @@ type MockDataCoordClient_ReportDataNodeTtMsgs_Call struct {
 }
 
 // ReportDataNodeTtMsgs is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.ReportDataNodeTtMsgsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.ReportDataNodeTtMsgsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ReportDataNodeTtMsgs(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ReportDataNodeTtMsgs_Call {
 	return &MockDataCoordClient_ReportDataNodeTtMsgs_Call{Call: _e.mock.On("ReportDataNodeTtMsgs",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2983,9 +3053,9 @@ type MockDataCoordClient_SaveBinlogPaths_Call struct {
 }
 
 // SaveBinlogPaths is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.SaveBinlogPathsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.SaveBinlogPathsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) SaveBinlogPaths(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_SaveBinlogPaths_Call {
 	return &MockDataCoordClient_SaveBinlogPaths_Call{Call: _e.mock.On("SaveBinlogPaths",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3053,9 +3123,9 @@ type MockDataCoordClient_SetSegmentState_Call struct {
 }
 
 // SetSegmentState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.SetSegmentStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.SetSegmentStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) SetSegmentState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_SetSegmentState_Call {
 	return &MockDataCoordClient_SetSegmentState_Call{Call: _e.mock.On("SetSegmentState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3123,9 +3193,9 @@ type MockDataCoordClient_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ShowConfigurationsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ShowConfigurationsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ShowConfigurations(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ShowConfigurations_Call {
 	return &MockDataCoordClient_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3193,9 +3263,9 @@ type MockDataCoordClient_UpdateChannelCheckpoint_Call struct {
 }
 
 // UpdateChannelCheckpoint is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.UpdateChannelCheckpointRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.UpdateChannelCheckpointRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) UpdateChannelCheckpoint(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_UpdateChannelCheckpoint_Call {
 	return &MockDataCoordClient_UpdateChannelCheckpoint_Call{Call: _e.mock.On("UpdateChannelCheckpoint",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3263,9 +3333,9 @@ type MockDataCoordClient_UpdateSegmentStatistics_Call struct {
 }
 
 // UpdateSegmentStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.UpdateSegmentStatisticsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.UpdateSegmentStatisticsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) UpdateSegmentStatistics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_UpdateSegmentStatistics_Call {
 	return &MockDataCoordClient_UpdateSegmentStatistics_Call{Call: _e.mock.On("UpdateSegmentStatistics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3333,9 +3403,9 @@ type MockDataCoordClient_WatchChannels_Call struct {
 }
 
 // WatchChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.WatchChannelsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.WatchChannelsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) WatchChannels(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_WatchChannels_Call {
 	return &MockDataCoordClient_WatchChannels_Call{Call: _e.mock.On("WatchChannels",
 		append([]interface{}{ctx, in}, opts...)...)}

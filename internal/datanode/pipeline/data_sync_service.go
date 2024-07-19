@@ -161,7 +161,9 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 					return nil, err
 				}
 				segmentPks.Insert(segment.GetID(), stats)
-				tickler.Inc()
+				if tickler != nil {
+					tickler.Inc()
+				}
 
 				return struct{}{}, nil
 			})
@@ -190,7 +192,9 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 	return metacache, nil
 }
 
-func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, unflushed, flushed []*datapb.SegmentInfo) (*DataSyncService, error) {
+func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
+	info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache,
+	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
@@ -241,7 +245,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	// init flowgraph
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
-	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config)
+	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +305,27 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 		return nil, err
 	}
 
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos, nil)
+}
+
+func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
+	// recover segment checkpoints
+	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+	if err != nil {
+		return nil, err
+	}
+	flushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
+	if err != nil {
+		return nil, err
+	}
+
+	// init metaCache meta
+	metaCache, err := initMetaCache(initCtx, nil, pipelineParams.ChunkManager, info, nil, unflushedSegmentInfos, flushedSegmentInfos)
+	if err != nil {
+		return nil, err
+	}
+
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, nil, unflushedSegmentInfos, flushedSegmentInfos, input)
 }
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {

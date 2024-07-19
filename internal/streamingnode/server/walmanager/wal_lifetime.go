@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -156,6 +157,12 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 		return
 	}
 	logger.Info("open new wal done")
+	err = flusher.Open(l)
+	if err != nil {
+		logger.Warn("Register flusher fail", zap.Error(err))
+		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
+		return
+	}
 	// -> (expectedTerm,true)
 	w.statePair.SetCurrentState(newAvailableCurrentState(l))
 }
