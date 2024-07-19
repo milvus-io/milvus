@@ -346,6 +346,18 @@ func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	})
 }
 
+// GetVChannels returns all vchannels belonging to the pchannel.
+func (c *Client) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsRequest, opts ...grpc.CallOption) (*rootcoordpb.GetVChannelsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.GetVChannelsResponse, error) {
+		return client.GetVChannels(ctx, in)
+	})
+}
+
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
