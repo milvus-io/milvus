@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -49,6 +50,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func sortKeyValuePairs(pairs []*commonpb.KeyValuePair) {
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].Key > pairs[j].Key
+	})
+}
 func TestGetIndexStateTask_Execute(t *testing.T) {
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -610,6 +616,7 @@ func Test_parseIndexParams(t *testing.T) {
 		}
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
+		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
 	})
@@ -651,6 +658,7 @@ func Test_parseIndexParams(t *testing.T) {
 		}
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
+		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
 	})
@@ -877,6 +885,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 		err = cit.parseIndexParams()
 		assert.NoError(t, err)
+		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
 	})
@@ -904,6 +913,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
+		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
 	})
@@ -931,6 +941,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
+		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
 	})
