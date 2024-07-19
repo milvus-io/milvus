@@ -60,14 +60,13 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 	}
 
 	// calculate each node's score
-	nodeItems := b.convertToNodeItems(collectionID, nodes)
-	if len(nodeItems) == 0 {
+	nodeItemsMap := b.convertToNodeItems(collectionID, nodes)
+	if len(nodeItemsMap) == 0 {
 		return nil
 	}
 
-	nodeItemsMap := lo.SliceToMap(nodeItems, func(item *nodeItem) (int64, *nodeItem) { return item.nodeID, item })
 	queue := newPriorityQueue()
-	for _, item := range nodeItems {
+	for _, item := range nodeItemsMap {
 		queue.push(item)
 	}
 
@@ -139,33 +138,45 @@ func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *
 	return true
 }
 
-func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []int64) []*nodeItem {
-	ret := make([]*nodeItem, 0, len(nodeIDs))
+func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []int64) map[int64]*nodeItem {
+	totalScore := 0
+	nodeScoreMap := make(map[int64]*nodeItem)
 	for _, node := range nodeIDs {
-		priority := b.calculateScore(collectionID, node)
-		nodeItem := newNodeItem(priority, node)
-		ret = append(ret, &nodeItem)
+		score := b.calculateScore(collectionID, node)
+		nodeItem := newNodeItem(score, node)
+		nodeScoreMap[node] = &nodeItem
+		totalScore += score
 	}
-	return ret
+
+	if totalScore == 0 {
+		return nodeScoreMap
+	}
+
+	average := totalScore / len(nodeIDs)
+	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
+	// use average * delegatorOverloadFactor * delegator_num, to preserve fixed memory size for delegator
+	for _, node := range nodeIDs {
+		collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(node))
+		if len(collectionViews) > 0 {
+			newScore := nodeScoreMap[node].getPriority() + int(float64(average)*delegatorOverloadFactor)*len(collectionViews)
+			nodeScoreMap[node].setPriority(newScore)
+		}
+	}
+	return nodeScoreMap
 }
 
 func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
-	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
-
 	nodeRowCount := 0
-	nodeCollectionRowCount := make(map[int64]int)
 	// calculate global sealed segment row count
 	globalSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
 	for _, s := range globalSegments {
 		nodeRowCount += int(s.GetNumOfRows())
-		nodeCollectionRowCount[s.CollectionID] += int(s.GetNumOfRows())
 	}
 
 	// calculate global growing segment row count
 	views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(nodeID))
 	for _, view := range views {
 		nodeRowCount += int(float64(view.NumOfGrowingRows))
-		nodeRowCount += int(float64(nodeCollectionRowCount[view.CollectionID]) * delegatorOverloadFactor)
 	}
 
 	// calculate executing task cost in scheduler
@@ -182,7 +193,6 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 	collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(nodeID))
 	for _, view := range collectionViews {
 		collectionRowCount += int(float64(view.NumOfGrowingRows))
-		collectionRowCount += int(float64(collectionRowCount) * delegatorOverloadFactor)
 	}
 
 	// calculate executing task cost in scheduler
@@ -266,7 +276,7 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 
 func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
-	nodeScore := make(map[int64]int, 0)
+	nodeScore := b.convertToNodeItems(replica.GetCollectionID(), onlineNodes)
 	totalScore := 0
 
 	// list all segment which could be balanced, and calculate node's score
@@ -278,10 +288,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
 		segmentDist[node] = segments
-
-		rowCount := b.calculateScore(replica.GetCollectionID(), node)
-		totalScore += rowCount
-		nodeScore[node] = rowCount
+		totalScore += nodeScore[node].getPriority()
 	}
 
 	if totalScore == 0 {
@@ -292,7 +299,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 	segmentsToMove := make([]*meta.Segment, 0)
 	average := totalScore / len(onlineNodes)
 	for node, segments := range segmentDist {
-		leftScore := nodeScore[node]
+		leftScore := nodeScore[node].getPriority()
 		if leftScore <= average {
 			continue
 		}
