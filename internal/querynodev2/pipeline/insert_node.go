@@ -90,23 +90,25 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Dec()
 	nodeMsg := in.(*insertNodeMsg)
 
-	sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
-		return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
-	})
+	if len(nodeMsg.insertMsgs) > 0 {
+		sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
+			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
+		})
 
-	insertDatas := make(map[UniqueID]*delegator.InsertData)
-	collection := iNode.manager.Collection.Get(iNode.collectionID)
-	if collection == nil {
-		log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
-		panic("insertNode with collection not exist")
+		insertDatas := make(map[UniqueID]*delegator.InsertData)
+		collection := iNode.manager.Collection.Get(iNode.collectionID)
+		if collection == nil {
+			log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
+			panic("insertNode with collection not exist")
+		}
+
+		// get InsertData and merge datas of same segment
+		for _, msg := range nodeMsg.insertMsgs {
+			iNode.addInsertData(insertDatas, msg, collection)
+		}
+
+		iNode.delegator.ProcessInsert(insertDatas)
 	}
-
-	// get InsertData and merge datas of same segment
-	for _, msg := range nodeMsg.insertMsgs {
-		iNode.addInsertData(insertDatas, msg, collection)
-	}
-
-	iNode.delegator.ProcessInsert(insertDatas)
 
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Inc()
 
