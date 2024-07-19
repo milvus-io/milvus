@@ -41,6 +41,7 @@ import (
 )
 
 type upsertTask struct {
+	baseTask
 	Condition
 
 	upsertMsg *msgstream.UpsertMsg
@@ -133,6 +134,11 @@ func (it *upsertTask) getChannels() []pChan {
 }
 
 func (it *upsertTask) OnEnqueue() error {
+	if it.req.Base == nil {
+		it.req.Base = commonpbutil.NewMsgBase()
+	}
+	it.req.Base.MsgType = commonpb.MsgType_Upsert
+	it.req.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 

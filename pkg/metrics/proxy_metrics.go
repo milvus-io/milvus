@@ -322,6 +322,16 @@ var (
 			Name:      "slow_query_count",
 			Help:      "count of slow query executed",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	// ProxyReqInQueueLatency records the latency that requests wait in the queue, like "CreateCollection".
+	ProxyReqInQueueLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "req_in_queue_latency",
+			Help:      "latency which request waits in the queue",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, functionLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -370,6 +380,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRateLimitReqCount)
 
 	registry.MustRegister(ProxySlowQueryCount)
+	registry.MustRegister(ProxyReqInQueueLatency)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {
