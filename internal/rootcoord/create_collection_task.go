@@ -358,8 +358,9 @@ func (t *createCollectionTask) assignChannels() error {
 		return fmt.Errorf("no enough channels, want: %d, got: %d", t.Req.GetShardsNum(), len(chanNames))
 	}
 
-	for i := int32(0); i < t.Req.GetShardsNum(); i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", chanNames[i], t.collID, i)
+	shardNum := int(t.Req.GetShardsNum())
+	for i := 0; i < shardNum; i++ {
+		vchanNames[i] = funcutil.GetVirtualChannel(chanNames[i], t.collID, i)
 	}
 	t.channels = collectionChannels{
 		virtualChannels:  vchanNames,
