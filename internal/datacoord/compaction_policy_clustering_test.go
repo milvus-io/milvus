@@ -16,9 +16,14 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -31,7 +36,7 @@ type ClusteringCompactionPolicySuite struct {
 	mockAlloc          *NMockAllocator
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
-	handler            Handler
+	handler            *NMockHandler
 	mockPlanContext    *MockCompactionPlanContext
 
 	clusteringCompactionPolicy *clusteringCompactionPolicy
@@ -51,6 +56,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	}
 	mockAllocator := newMockAllocator()
 	mockHandler := NewNMockHandler(s.T())
+	s.handler = mockHandler
 	s.clusteringCompactionPolicy = newClusteringCompactionPolicy(meta, mockAllocator, mockHandler)
 }
 
@@ -61,4 +67,118 @@ func (s *ClusteringCompactionPolicySuite) TestTrigger() {
 	s.True(ok)
 	s.NotNil(gotViews)
 	s.Equal(0, len(gotViews))
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAbnormal() {
+	// mock error in handler.GetCollection
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, errors.New("mock Error")).Once()
+	views, triggerID, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
+	s.Error(err)
+	s.Nil(views)
+	s.Equal(int64(0), triggerID)
+
+	// mock "collection not exist" in handler.GetCollection
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	views2, triggerID2, err2 := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
+	s.NoError(err2)
+	s.Nil(views2)
+	s.Equal(int64(0), triggerID2)
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKeySchema() {
+	coll := &collectionInfo{
+		ID:     100,
+		Schema: newTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
+	s.clusteringCompactionPolicy.meta = &meta{
+		compactionTaskMeta: compactionTaskMeta,
+	}
+	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+		TriggerID:    1,
+		PlanID:       10,
+		CollectionID: 100,
+		State:        datapb.CompactionTaskState_executing,
+	})
+
+	views, triggerID, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 100, false)
+	s.NoError(err)
+	s.Nil(views)
+	s.Equal(int64(0), triggerID)
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
+	coll := &collectionInfo{
+		ID:     100,
+		Schema: newTestScalarClusteringKeySchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
+	s.clusteringCompactionPolicy.meta = &meta{
+		compactionTaskMeta: compactionTaskMeta,
+	}
+	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+		TriggerID:    1,
+		PlanID:       10,
+		CollectionID: 100,
+		State:        datapb.CompactionTaskState_executing,
+	})
+
+	views3, triggerID3, err3 := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 100, false)
+	s.NoError(err3)
+	s.Nil(views3)
+	s.Equal(int64(1), triggerID3)
+}
+
+func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting() {
+	s.Run("no collection is compacting", func() {
+		compactionTaskMeta := newTestCompactionTaskMeta(s.T())
+		s.clusteringCompactionPolicy.meta = &meta{
+			compactionTaskMeta: compactionTaskMeta,
+		}
+		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+		s.False(compacting)
+		s.Equal(int64(0), triggerID)
+	})
+
+	s.Run("collection is compacting, different state", func() {
+		tests := []struct {
+			state        datapb.CompactionTaskState
+			isCompacting bool
+			triggerID    int64
+		}{
+			{datapb.CompactionTaskState_pipelining, true, 1},
+			{datapb.CompactionTaskState_executing, true, 1},
+			{datapb.CompactionTaskState_completed, false, 1},
+			{datapb.CompactionTaskState_failed, false, 1},
+			{datapb.CompactionTaskState_timeout, false, 1},
+			{datapb.CompactionTaskState_analyzing, true, 1},
+			{datapb.CompactionTaskState_indexing, true, 1},
+			{datapb.CompactionTaskState_cleaned, false, 1},
+			{datapb.CompactionTaskState_meta_saved, true, 1},
+		}
+
+		for _, test := range tests {
+			s.Run(test.state.String(), func() {
+				collID := int64(19530)
+				compactionTaskMeta := newTestCompactionTaskMeta(s.T())
+				s.clusteringCompactionPolicy.meta = &meta{
+					compactionTaskMeta: compactionTaskMeta,
+				}
+				compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+					TriggerID:    1,
+					PlanID:       10,
+					CollectionID: collID,
+					State:        test.state,
+				})
+
+				compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+				s.Equal(test.isCompacting, compacting)
+				s.Equal(test.triggerID, triggerID)
+			})
+		}
+	})
 }
