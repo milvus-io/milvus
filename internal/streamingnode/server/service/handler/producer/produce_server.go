@@ -143,11 +143,7 @@ func (p *ProduceServer) recvLoop() (err error) {
 // handleProduce handles the produce message request.
 func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	p.logger.Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
-	msg := message.NewMutableMessageBuilder().
-		WithPayload(req.GetMessage().GetPayload()).
-		WithProperties(req.GetMessage().GetProperties()).
-		BuildMutable()
-
+	msg := message.NewMutableMessage(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
 	if err := p.validateMessage(msg); err != nil {
 		p.logger.Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))
 		p.sendProduceResult(req.RequestId, nil, err)

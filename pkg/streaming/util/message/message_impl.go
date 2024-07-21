@@ -69,6 +69,28 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	}
 }
 
+// TimeTick returns the time tick of current message.
+func (m *messageImpl) TimeTick() uint64 {
+	value, ok := m.properties.Get(messageTimeTick)
+	if !ok {
+		panic(fmt.Sprintf("there's a bug in the message codes, timetick lost in properties of message"))
+	}
+	tt, err := DecodeUint64(value)
+	if err != nil {
+		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick %s in properties of message", value))
+	}
+	return tt
+}
+
+// VChannel returns the vchannel of current message.
+func (m *messageImpl) VChannel() string {
+	value, ok := m.properties.Get(messageVChannel)
+	if !ok {
+		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message"))
+	}
+	return value
+}
+
 type immutableMessageImpl struct {
 	messageImpl
 	id MessageID
@@ -92,6 +114,14 @@ func (m *immutableMessageImpl) TimeTick() uint64 {
 	return tt
 }
 
+func (m *immutableMessageImpl) VChannel() string {
+	value, ok := m.properties.Get(messageVChannel)
+	if !ok {
+		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message, id: %+v", m.id))
+	}
+	return value
+}
+
 func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 	value, ok := m.properties.Get(messageLastConfirmed)
 	if !ok {
@@ -107,12 +137,4 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 // MessageID returns the message id.
 func (m *immutableMessageImpl) MessageID() MessageID {
 	return m.id
-}
-
-func (m *immutableMessageImpl) VChannel() string {
-	value, ok := m.properties.Get(messageVChannel)
-	if !ok {
-		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message, id: %+v", m.id))
-	}
-	return value
 }

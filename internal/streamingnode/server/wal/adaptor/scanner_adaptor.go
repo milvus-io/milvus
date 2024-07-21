@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
@@ -21,13 +22,15 @@ func newScannerAdaptor(
 	readOption wal.ReadOption,
 	cleanup func(),
 ) wal.Scanner {
+	if readOption.MesasgeHandler == nil {
+		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
+	}
 	s := &scannerAdaptorImpl{
 		logger:        log.With(zap.String("name", name), zap.String("channel", l.Channel().Name)),
 		innerWAL:      l,
 		readOption:    readOption,
-		sendingCh:     make(chan message.ImmutableMessage, 1),
 		reorderBuffer: utility.NewReOrderBuffer(),
-		pendingQueue:  utility.NewImmutableMessageQueue(),
+		pendingQueue:  typeutil.NewMultipartQueue[message.ImmutableMessage](),
 		cleanup:       cleanup,
 		ScannerHelper: helper.NewScannerHelper(name),
 	}
@@ -41,9 +44,8 @@ type scannerAdaptorImpl struct {
 	logger        *log.MLogger
 	innerWAL      walimpls.WALImpls
 	readOption    wal.ReadOption
-	sendingCh     chan message.ImmutableMessage
-	reorderBuffer *utility.ReOrderByTimeTickBuffer // only support time tick reorder now.
-	pendingQueue  *utility.ImmutableMessageQueue   //
+	reorderBuffer *utility.ReOrderByTimeTickBuffer                   // only support time tick reorder now.
+	pendingQueue  *typeutil.MultipartQueue[message.ImmutableMessage] //
 	cleanup       func()
 }
 
@@ -52,9 +54,9 @@ func (s *scannerAdaptorImpl) Channel() types.PChannelInfo {
 	return s.innerWAL.Channel()
 }
 
-// Chan returns the channel of message.
+// Chan returns the message channel of the scanner.
 func (s *scannerAdaptorImpl) Chan() <-chan message.ImmutableMessage {
-	return s.sendingCh
+	return s.readOption.MesasgeHandler.(defaultMessageHandler)
 }
 
 // Close the scanner, release the underlying resources.
@@ -68,7 +70,7 @@ func (s *scannerAdaptorImpl) Close() error {
 }
 
 func (s *scannerAdaptorImpl) executeConsume() {
-	defer close(s.sendingCh)
+	defer s.readOption.MesasgeHandler.Close()
 
 	innerScanner, err := s.innerWAL.Read(s.Context(), walimpls.ReadOption{
 		Name:          s.Name(),
@@ -83,36 +85,29 @@ func (s *scannerAdaptorImpl) executeConsume() {
 	for {
 		// generate the event channel and do the event loop.
 		// TODO: Consume from local cache.
-		upstream, sending := s.getEventCh(innerScanner)
-		select {
-		case <-s.Context().Done():
+		upstream := s.getUpstream(innerScanner)
+
+		msg, ok, err := s.readOption.MesasgeHandler.Handle(s.Context(), upstream, s.pendingQueue.Next())
+		if err != nil {
 			s.Finish(err)
 			return
-		case msg, ok := <-upstream:
-			if !ok {
-				s.Finish(innerScanner.Error())
-				return
-			}
-			s.handleUpstream(msg)
-		case sending <- s.pendingQueue.Next():
+		}
+		if ok {
 			s.pendingQueue.UnsafeAdvance()
+		}
+		if msg != nil {
+			s.handleUpstream(msg)
 		}
 	}
 }
 
-func (s *scannerAdaptorImpl) getEventCh(scanner walimpls.ScannerImpls) (<-chan message.ImmutableMessage, chan<- message.ImmutableMessage) {
-	if s.pendingQueue.Len() == 0 {
-		// If pending queue is empty,
-		// no more message can be sent,
-		// we always need to recv message from upstream to avoid starve.
-		return scanner.Chan(), nil
-	}
+func (s *scannerAdaptorImpl) getUpstream(scanner walimpls.ScannerImpls) <-chan message.ImmutableMessage {
 	// TODO: configurable pending buffer count.
 	// If the pending queue is full, we need to wait until it's consumed to avoid scanner overloading.
 	if s.pendingQueue.Len() > 16 {
-		return nil, s.sendingCh
+		return nil
 	}
-	return scanner.Chan(), s.sendingCh
+	return scanner.Chan()
 }
 
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {

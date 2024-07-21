@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -230,26 +230,11 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 			defer swg.Done()
 			// ...rocksmq has a dirty implement of properties,
 			// without commonpb.MsgHeader, it can not work.
-			header := commonpb.MsgHeader{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-					MsgID:   int64(i),
-				},
-			}
-			payload, err := proto.Marshal(&header)
-			if err != nil {
-				panic(err)
-			}
 			properties := map[string]string{
 				"id":    fmt.Sprintf("%d", i),
 				"const": "t",
 			}
-			typ := message.MessageTypeUnknown
-			msg := message.NewMutableMessageBuilder().
-				WithMessageType(typ).
-				WithPayload(payload).
-				WithProperties(properties).
-				BuildMutable()
+			msg := message.CreateTestEmptyInsertMesage(int64(i), properties)
 			id, err := w.Append(ctx, msg)
 			assert.NoError(f.t, err)
 			assert.NotNil(f.t, id)
@@ -257,27 +242,20 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 		}(i)
 	}
 	swg.Wait()
-	// send a final hint message
-	header := commonpb.MsgHeader{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Insert,
-			MsgID:   int64(f.messageCount - 1),
-		},
-	}
-	payload, err := proto.Marshal(&header)
-	if err != nil {
-		panic(err)
-	}
+
 	properties := map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),
 		"const": "t",
 		"term":  strconv.FormatInt(int64(f.term), 10),
 	}
-	msg := message.NewMutableMessageBuilder().
-		WithPayload(payload).
-		WithProperties(properties).
-		WithMessageType(message.MessageTypeTimeTick).
-		BuildMutable()
+	msg, err := message.NewTimeTickMessageBuilderV1().WithMessageHeader(&message.TimeTickMessageHeader{}).WithPayload(&msgpb.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_TimeTick,
+			MsgID:   int64(f.messageCount - 1),
+		},
+	}).WithProperties(properties).BuildMutable()
+	assert.NoError(f.t, err)
+
 	id, err := w.Append(ctx, msg)
 	assert.NoError(f.t, err)
 	ids[f.messageCount-1] = msg.IntoImmutableMessage(id)
