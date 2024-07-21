@@ -86,7 +86,7 @@ func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHan
 		closeSig: make(chan struct{}),
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
-	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.view, m.allocator, m.compactionHandler, m.handler)
+	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	return m
 }
 
@@ -158,7 +158,7 @@ func (m *CompactionTriggerManager) startLoop() {
 
 func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error) {
 	log.Info("receive manual trigger", zap.Int64("collectionID", collectionID))
-	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(context.Background(), collectionID, 0, true)
+	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(context.Background(), collectionID, true)
 	if err != nil {
 		return 0, err
 	}
@@ -266,7 +266,6 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
 		return
 	}
-	view.GetSegmentsView()
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
@@ -284,7 +283,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().UnixMilli(),
-		CollectionTtl:      view.(*ClusteringSegmentsView).compactionTime.collectionTTL.Nanoseconds(),
+		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_ClusteringCompaction,
 		CollectionID:       view.GetGroupLabel().CollectionID,
