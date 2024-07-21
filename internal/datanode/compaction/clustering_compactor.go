@@ -592,10 +592,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 			if (remained+1)%100 == 0 {
 				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
-				currentBufferWrittenMemorySize := t.getCurrentBufferWrittenMemorySize()
-				log.Debug("current buffer size", zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize),
-					zap.Int64("currentBufferWrittenMemorySize", currentBufferWrittenMemorySize))
-
 				// trigger flushBinlog
 				currentSegmentNumRows := clusterBuffer.currentSegmentRowNum.Load()
 				if currentSegmentNumRows > t.plan.GetMaxSegmentRows() ||
@@ -618,7 +614,8 @@ func (t *clusteringCompactionTask) mappingSegment(
 					}
 				} else if currentBufferTotalMemorySize > t.getMemoryBufferBlockFlushThreshold() && !t.hasSignal.Load() {
 					// reach flushBinlog trigger threshold
-					log.Debug("largest buffer need to flush", zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+					log.Debug("largest buffer need to flush",
+						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
 					t.flushChan <- FlushSignal{}
 					t.hasSignal.Store(true)
 				}
@@ -1161,7 +1158,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 		segmentID = buffer.writer.GetSegmentID()
 		buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
 	}
-	if buffer.writer == nil || buffer.currentSegmentRowNum.Load()+buffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() {
+	if buffer.writer == nil || buffer.currentSegmentRowNum.Load() > t.plan.GetMaxSegmentRows() {
 		pack = true
 		segmentID, err = t.segIDAlloc.AllocOne()
 		if err != nil {
