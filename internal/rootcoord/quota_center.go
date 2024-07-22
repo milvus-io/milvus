@@ -270,13 +270,14 @@ func getRateTypes(scope internalpb.RateScope, opType opType) typeutil.Set[intern
 
 func (q *QuotaCenter) Start() {
 	q.wg.Add(1)
-	go q.run()
+	go func() {
+		defer q.wg.Done()
+		q.run()
+	}()
 }
 
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
-	defer q.wg.Done()
-
 	interval := Params.QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
 	ticker := time.NewTicker(interval)
@@ -957,6 +958,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(memFactors)
 	growingSegFactors := q.getGrowingSegmentsSizeFactor()
 	updateCollectionFactor(growingSegFactors)
+	l0Factors := q.getL0SegmentsSizeFactor()
+	updateCollectionFactor(l0Factors)
 
 	ttCollections := make([]int64, 0)
 	memoryCollections := make([]int64, 0)
@@ -1210,6 +1213,26 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 			zap.Float64("highWatermark", high),
 			zap.Float64("lowWatermark", low),
 			zap.Float64("factor", factor))
+	}
+	return collectionFactor
+}
+
+// getL0SegmentsSizeFactor checks wether any collection
+func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
+	if !Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	l0segmentSizeLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
+	l0SegmentSizeHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
+
+	collectionFactor := make(map[int64]float64)
+	for collectionID, l0RowCount := range q.dataCoordMetrics.CollectionL0RowCount {
+		if l0RowCount < l0segmentSizeLowWaterLevel {
+			continue
+		}
+		factor := float64(l0SegmentSizeHighWaterLevel-l0RowCount) / float64(l0SegmentSizeHighWaterLevel-l0segmentSizeLowWaterLevel)
+		collectionFactor[collectionID] = factor
 	}
 	return collectionFactor
 }
