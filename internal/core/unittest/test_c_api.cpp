@@ -1915,11 +1915,11 @@ testReduceSearchWithExpr(int N,
     std::vector<CSearchResult> results;
     CSearchResult res1;
     CSearchResult res2;
-    auto res = CSearch(
-        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1);
+    auto res =
+        CSearch(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
     ASSERT_EQ(res.error_code, Success);
-    res = CSearch(
-        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2);
+    res =
+        CSearch(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
     ASSERT_EQ(res.error_code, Success);
     results.push_back(res1);
     results.push_back(res2);
