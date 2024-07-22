@@ -188,7 +188,7 @@ func (t *clusteringCompactionTask) init() error {
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
-	
+
 	var pkField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
@@ -616,7 +616,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 						pack:   pack,
 						id:     clusterBuffer.id,
 					}
-				} else if currentBufferTotalMemorySize > t.getMemoryBufferBlockFlushThreshold() && !t.hasSignal.Load() {
+				} else if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() && !t.hasSignal.Load() {
 					// reach flushBinlog trigger threshold
 					log.Debug("largest buffer need to flush", zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
 					t.flushChan <- FlushSignal{}
@@ -639,8 +639,8 @@ func (t *clusteringCompactionTask) mappingSegment(
 						default:
 							// currentSize := t.getCurrentBufferWrittenMemorySize()
 							currentSize := t.getBufferTotalUsedMemorySize()
-							if currentSize < t.getMemoryBufferBlockFlushThreshold() {
-								log.Debug("memory is already below the block watermark, continue writing",
+							if currentSize < t.getMemoryBufferHighWatermark() {
+								log.Debug("memory is already below the high watermark, continue writing",
 									zap.Int64("currentSize", currentSize))
 								break loop
 							}
@@ -692,7 +692,7 @@ func (t *clusteringCompactionTask) getMemoryBufferLowWatermark() int64 {
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferHighWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.9)
+	return int64(float64(t.memoryBufferSize) * 0.7)
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferBlockFlushThreshold() int64 {
