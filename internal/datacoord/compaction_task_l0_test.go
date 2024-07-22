@@ -178,25 +178,24 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 	var task CompactionTask
 
-	alloc := NewNMockAllocator(s.T())
-	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
+	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
 
 	task = &l0CompactionTask{
-		allocator: alloc,
+		allocator: s.mockAlloc,
 	}
 	_, err := task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 
 	task = &mixCompactionTask{
-		allocator: alloc,
+		allocator: s.mockAlloc,
 	}
 	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 
 	task = &clusteringCompactionTask{
-		allocator: alloc,
+		allocator: s.mockAlloc,
 	}
 	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
@@ -222,7 +221,6 @@ func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskSt
 }
 
 func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
-	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 	s.Run("test pipelining needReassignNodeID", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = NullNodeID
@@ -233,6 +231,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining BuildCompactionRequest failed", func() {
+		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"
@@ -268,6 +267,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
+		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"
@@ -306,6 +306,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining success", func() {
+		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"
