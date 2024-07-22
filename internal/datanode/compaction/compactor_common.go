@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"strconv"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

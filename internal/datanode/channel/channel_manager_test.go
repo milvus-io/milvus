@@ -18,6 +18,7 @@ package channel
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"os"
 	"testing"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -44,10 +44,6 @@ import (
 
 func TestMain(t *testing.M) {
 	paramtable.Init()
-	err := util.InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
 	code := t.Run()
 	os.Exit(code)
 }

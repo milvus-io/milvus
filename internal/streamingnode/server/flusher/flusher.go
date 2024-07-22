@@ -19,19 +19,22 @@ package flusher
 import "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 
 type Flusher interface {
-	// Open ASYNCHRONOUSLY creates and starts pipelines belonging to the pchannel/WAL.
+	// RegisterPChannel ASYNCHRONOUSLY creates and starts pipelines belonging to the pchannel/WAL.
 	// If a pipeline creation fails, the flusher will keep retrying to create it indefinitely.
-	Open(w wal.WAL) error
-	// Close SYNCHRONOUSLY stops and removes pipelines belonging to the pchannel.
-	Close(pchannel string)
+	RegisterPChannel(w wal.WAL) error
 
-	// Register create pipeline belonging to the vchannel.
-	Register(vchannel string, wal wal.WAL)
-	// Deregister stops and removes pipeline belonging to the vchannel.
-	Deregister(vchannel string)
+	// DeregisterPChannel stops and removes pipelines belonging to the pchannel.
+	DeregisterPChannel(pchannel string)
+
+	// RegisterVChannel ASYNCHRONOUSLY create pipeline belonging to the vchannel.
+	RegisterVChannel(vchannel string, wal wal.WAL)
+
+	// DeregisterVChannel stops and removes pipeline belonging to the vchannel.
+	DeregisterVChannel(vchannel string)
 
 	// Start flusher service.
 	Start()
+
 	// Stop flusher, will synchronously flush all remaining data.
 	Stop()
 }

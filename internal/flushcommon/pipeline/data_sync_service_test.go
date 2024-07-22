@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"math"
 	"math/rand"
 	"testing"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"

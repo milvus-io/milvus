@@ -38,4 +38,5 @@ type DataCoord interface {
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 	UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error
+	GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error)
 }

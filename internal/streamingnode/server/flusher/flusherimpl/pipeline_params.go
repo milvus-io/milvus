@@ -18,9 +18,9 @@ package flusherimpl
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"

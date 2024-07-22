@@ -22,6 +22,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"io"
 	"math/rand"
 	"os"
@@ -35,7 +36,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
@@ -233,14 +233,6 @@ func (node *DataNode) Init() error {
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
 		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
-
-		err := util.InitGlobalRateCollector()
-		if err != nil {
-			log.Error("DataNode server init rateCollector failed", zap.Error(err))
-			initError = err
-			return
-		}
-		log.Info("DataNode server init rateCollector done")
 
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
 		log.Info("DataNode server init dispatcher client done")

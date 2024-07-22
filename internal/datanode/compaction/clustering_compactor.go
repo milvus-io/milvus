@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	sio "io"
 	"math"
 	"path"
@@ -37,7 +38,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -188,7 +188,7 @@ func (t *clusteringCompactionTask) init() error {
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
-	
+
 	var pkField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")

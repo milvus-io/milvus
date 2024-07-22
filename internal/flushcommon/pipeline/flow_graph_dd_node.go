@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -183,7 +182,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			util.RateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			util2.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
@@ -217,7 +216,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
-			util.RateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			util2.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).

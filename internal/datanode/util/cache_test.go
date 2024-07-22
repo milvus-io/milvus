@@ -28,10 +28,6 @@ import (
 
 func TestMain(t *testing.M) {
 	paramtable.Init()
-	err := InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
 	code := t.Run()
 	os.Exit(code)
 }

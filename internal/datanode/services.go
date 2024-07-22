@@ -22,6 +22,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	io2 "github.com/milvus-io/milvus/internal/flushcommon/io"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -30,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
-	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -224,7 +224,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
 	var task compaction.Compactor
-	binlogIO := io.NewBinlogIO(node.chunkManager)
+	binlogIO := io2.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compaction.NewLevelZeroCompactionTask(
@@ -332,7 +332,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 			if newSeg.GetState() == commonpb.SegmentState_Flushed {
 				log.Info("segment loading PKs", zap.Int64("segmentID", segID))
 				newSegments = append(newSegments, newSeg)
-				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+				future := io2.GetOrCreateStatsPool().Submit(func() (any, error) {
 					var val *metacache.BloomFilterSet
 					var err error
 					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})

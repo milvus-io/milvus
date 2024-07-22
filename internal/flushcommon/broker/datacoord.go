@@ -146,3 +146,12 @@ func (dc *dataCoordBroker) UpdateSegmentStatistics(ctx context.Context, req *dat
 
 	return nil
 }
+
+func (dc *dataCoordBroker) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	resp, err := dc.client.GetChannelRecoveryInfo(ctx, req)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("failed to GetChannelRecoveryInfo", zap.Error(err))
+		return nil, err
+	}
+	return resp, nil
+}

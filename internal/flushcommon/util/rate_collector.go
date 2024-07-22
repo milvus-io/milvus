@@ -19,14 +19,17 @@ package util
 import (
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// RateCol is global RateCollector in DataNode.
+// rateCol is global RateCollector in DataNode.
 var (
-	RateCol  *RateCollector
+	rateCol  *RateCollector
 	initOnce sync.Once
 )
 
@@ -38,26 +41,34 @@ type RateCollector struct {
 	flowGraphTt   map[string]typeutil.Timestamp
 }
 
-func InitGlobalRateCollector() error {
-	var err error
+func initGlobalRateCollector() {
 	initOnce.Do(func() {
-		RateCol, err = NewRateCollector()
+		var err error
+		rateCol, err = newRateCollector()
+		if err != nil {
+			log.Warn("DataNode server init rateCollector failed", zap.Error(err))
+			panic(err)
+		}
+		rateCol.Register(metricsinfo.InsertConsumeThroughput)
+		rateCol.Register(metricsinfo.DeleteConsumeThroughput)
 	})
-	RateCol.Register(metricsinfo.InsertConsumeThroughput)
-	RateCol.Register(metricsinfo.DeleteConsumeThroughput)
-	return err
 }
 
 func DeregisterRateCollector(label string) {
-	RateCol.Deregister(label)
+	rateCol.Deregister(label)
 }
 
 func RegisterRateCollector(label string) {
-	RateCol.Register(label)
+	rateCol.Register(label)
+}
+
+func GetRateCollector() *RateCollector {
+	initGlobalRateCollector()
+	return rateCol
 }
 
 // newRateCollector returns a new RateCollector.
-func NewRateCollector() (*RateCollector, error) {
+func newRateCollector() (*RateCollector, error) {
 	rc, err := ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, false)
 	if err != nil {
 		return nil, err

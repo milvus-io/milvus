@@ -65,7 +65,7 @@ func NewFlusher(params *util2.PipelineParams) flusher.Flusher {
 	}
 }
 
-func (f *flusherImpl) Open(wal wal.WAL) error {
+func (f *flusherImpl) RegisterPChannel(wal wal.WAL) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	resp, err := resource.Resource().RootCoordClient().GetVChannels(ctx, &rootcoordpb.GetVChannelsRequest{
@@ -80,15 +80,15 @@ func (f *flusherImpl) Open(wal wal.WAL) error {
 	return nil
 }
 
-func (f *flusherImpl) Close(pchannel string) {
+func (f *flusherImpl) DeregisterPChannel(pchannel string) {
 	f.fgMgr.RemoveFlowgraphsByPChannel(pchannel)
 }
 
-func (f *flusherImpl) Register(vchannel string, wal wal.WAL) {
+func (f *flusherImpl) RegisterVChannel(vchannel string, wal wal.WAL) {
 	f.tasks.Insert(vchannel, wal)
 }
 
-func (f *flusherImpl) Deregister(vchannel string) {
+func (f *flusherImpl) DeregisterVChannel(vchannel string) {
 	f.fgMgr.RemoveFlowgraph(vchannel)
 }
 
@@ -103,13 +103,12 @@ func (f *flusherImpl) Start() {
 				return
 			case <-ticker.C:
 				f.tasks.Range(func(vchannel string, wal wal.WAL) bool {
-					log := log.With(zap.String("vchannel", vchannel))
 					err := f.buildPipeline(vchannel, wal)
 					if err != nil {
-						log.Warn("build pipeline failed", zap.Error(err))
+						log.Warn("build pipeline failed", zap.String("vchannel", vchannel), zap.Error(err))
 						return true
 					}
-					log.Info("build pipeline done")
+					log.Info("build pipeline done", zap.String("vchannel", vchannel))
 					return true
 				})
 			}

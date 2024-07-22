@@ -26,7 +26,7 @@ import (
 
 func TestRateCollector(t *testing.T) {
 	t.Run("test FlowGraphTt", func(t *testing.T) {
-		collector, err := NewRateCollector()
+		collector, err := newRateCollector()
 		assert.NoError(t, err)
 
 		c, minTt := collector.GetMinFlowGraphTt()

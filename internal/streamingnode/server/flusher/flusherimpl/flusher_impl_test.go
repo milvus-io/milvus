@@ -17,7 +17,12 @@
 package flusherimpl
 
 import (
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/stretchr/testify/mock"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -56,7 +61,26 @@ func (s *FlusherSuite) SetupTest() {
 }
 
 func (s *FlusherSuite) TestFlusher() {
-	// TODO:
+	s.flusher.Start()
+	defer s.flusher.Stop()
+
+	vchannels := []string{
+		"ch-0", "ch-1", "ch-2",
+	}
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().DropVirtualChannel()
+
+	scanner := mock_wal.NewMockScanner(s.T())
+	scanner.EXPECT().Chan().Return(make(chan message.ImmutableMessage, 1024))
+	wal := mock_wal.NewMockWAL(s.T())
+	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner, nil)
+
+	err := s.flusher.RegisterPChannel(wal)
+	s.NoError(err)
+
+	s.Eventuallyf(func() bool {
+		return
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func TestFlusherSuite(t *testing.T) {

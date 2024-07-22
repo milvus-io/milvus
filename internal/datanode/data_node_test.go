@@ -18,6 +18,8 @@ package datanode
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"math/rand"
 	"os"
 	"strconv"
@@ -31,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -71,11 +72,6 @@ func TestMain(t *testing.M) {
 	// change to specific channel for test
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
-
-	err = util.InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
 
 	code := t.Run()
 	os.Exit(code)
@@ -204,10 +200,10 @@ func TestDataNode(t *testing.T) {
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
-		util.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
+		util2.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		util.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
+		util2.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
 	})
 }

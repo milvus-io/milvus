@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
