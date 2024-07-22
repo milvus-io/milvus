@@ -894,6 +894,9 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
 	}
+	for k, v := range reqParams {
+            params[k] = v
+        }
 	if reqParams != nil {
 		radius, radiusOk := reqParams[ParamRadius]
 		rangeFilter, rangeFilterOk := reqParams[ParamRangeFilter]
