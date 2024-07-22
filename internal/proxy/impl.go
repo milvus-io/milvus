@@ -3998,11 +3998,8 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 					DbName:          dbName,
 					CollectionNames: []string{collection},
 				})
-				if err != nil {
+				if err = merr.CheckRPCCall(flushRsp, err); err != nil {
 					return err
-				}
-				if flushRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					return merr.Error(flushRsp.GetStatus())
 				}
 				return nil
 			})

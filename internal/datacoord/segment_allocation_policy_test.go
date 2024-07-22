@@ -198,8 +198,8 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 }
 
 func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key, "100")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TotalGrowingSizeThresholdInMB.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key)
 
 	seg0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:      0,
