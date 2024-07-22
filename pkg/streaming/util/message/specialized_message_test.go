@@ -31,10 +31,9 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.Equal(t, int64(1), insertMsg.MessageHeader().CollectionId)
 
 	h := insertMsg.MessageHeader()
-	h.Partitions[0].SegmentAssignments = append(h.Partitions[0].SegmentAssignments, &message.SegmentAssignment{
+	h.Partitions[0].SegmentAssignment = &message.SegmentAssignment{
 		SegmentId: 1,
-		Row:       100,
-	})
+	}
 	insertMsg.OverwriteMessageHeader(h)
 
 	createColMsg, err := message.AsMutableCreateCollection(m)
@@ -47,7 +46,7 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, insertMsg2)
 	assert.Equal(t, int64(1), insertMsg2.MessageHeader().CollectionId)
-	assert.Len(t, insertMsg2.MessageHeader().Partitions[0].SegmentAssignments, 1)
+	assert.Equal(t, insertMsg2.MessageHeader().Partitions[0].SegmentAssignment.SegmentId, int64(1))
 
 	createColMsg2, err := message.AsMutableCreateCollection(m)
 	assert.NoError(t, err)

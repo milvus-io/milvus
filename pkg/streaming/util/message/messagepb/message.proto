@@ -42,16 +42,15 @@ message InsertMessageHeader {
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
 message PartitionSegmentAssignment {
-    int64 partition_id                             = 1;
-    uint64 rows                                    = 2;
-    uint64 binary_size                             = 3;
-    repeated SegmentAssignment segment_assignments = 4;
+    int64 partition_id                   = 1;
+    uint64 rows                          = 2;
+    uint64 binary_size                   = 3;
+    SegmentAssignment segment_assignment = 4;
 }
 
 // SegmentAssignment is the assignment of a segment.
 message SegmentAssignment {
     int64 segment_id = 1;
-    uint64 row       = 2;
 }
 
 // DeleteMessageHeader

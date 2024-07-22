@@ -13,19 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func CreateTestInsertMessage(t *testing.T, rowsPerSegment map[int64]int, timetick uint64, messageID MessageID) MutableMessage {
-	headers := make([]*SegmentAssignment, 0, len(rowsPerSegment))
-	for segmentID, rowNum := range rowsPerSegment {
-		headers = append(headers, &SegmentAssignment{
-			SegmentId: segmentID,
-			Row:       uint64(rowNum),
-		})
-	}
-
-	totalRows := 0
-	for _, v := range rowsPerSegment {
-		totalRows += v
-	}
+func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timetick uint64, messageID MessageID) MutableMessage {
 	timestamps := make([]uint64, 0, totalRows)
 	for i := 0; i < totalRows; i++ {
 		timestamps = append(timestamps, uint64(0))
@@ -77,10 +65,10 @@ func CreateTestInsertMessage(t *testing.T, rowsPerSegment map[int64]int, timetic
 			CollectionId: 1,
 			Partitions: []*PartitionSegmentAssignment{
 				{
-					PartitionId:        2,
-					Rows:               uint64(totalRows),
-					BinarySize:         10000,
-					SegmentAssignments: headers,
+					PartitionId:       2,
+					Rows:              uint64(totalRows),
+					BinarySize:        10000,
+					SegmentAssignment: &SegmentAssignment{SegmentId: segmentID},
 				},
 			},
 		}).

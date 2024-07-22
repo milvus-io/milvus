@@ -21,10 +21,14 @@ func TestNewMsgPackFromInsertMessage(t *testing.T) {
 		6: 5000,
 	}
 	tt := uint64(time.Now().UnixNano())
-	insertMsg := message.CreateTestInsertMessage(t, fieldCount, tt, id)
-	immutableMessage := insertMsg.IntoImmutableMessage(id)
+	immutableMessages := make([]message.ImmutableMessage, 0, len(fieldCount))
+	for segmentID, rowNum := range fieldCount {
+		insertMsg := message.CreateTestInsertMessage(t, segmentID, rowNum, tt, id)
+		immutableMessage := insertMsg.IntoImmutableMessage(id)
+		immutableMessages = append(immutableMessages, immutableMessage)
+	}
 
-	pack, err := NewMsgPackFromMessage(immutableMessage)
+	pack, err := NewMsgPackFromMessage(immutableMessages...)
 	assert.NoError(t, err)
 	assert.NotNil(t, pack)
 	assert.Equal(t, tt, pack.BeginTs)

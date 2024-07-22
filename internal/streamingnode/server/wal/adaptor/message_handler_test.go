@@ -16,7 +16,8 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 	tt := uint64(100)
 	msg := message.CreateTestInsertMessage(
 		t,
-		map[int64]int{1: 1000, 2: 2000, 3: 2000, 4: 1000},
+		1,
+		1000,
 		tt,
 		messageID,
 	)
