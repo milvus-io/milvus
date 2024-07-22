@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -924,9 +925,7 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
-	if hoo == nil {
-		return "", merr.WrapErrServiceInternal("internal: Milvus Proxy is not ready yet. please wait")
-	}
+	hoo := hookutil.GetHook()
 	user, err := hoo.VerifyAPIKey(rawToken)
 	if err != nil {
 		log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
