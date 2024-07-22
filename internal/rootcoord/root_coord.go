@@ -1568,6 +1568,22 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return &milvuspb.ShowSegmentsResponse{Status: merr.Success()}, nil
 }
 
+// GetVChannels returns all vchannels belonging to the pchannel.
+func (c *Core) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsRequest) (*rootcoordpb.GetVChannelsResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.GetVChannelsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &rootcoordpb.GetVChannelsResponse{
+		Status: merr.Success(),
+	}
+	vchannels := c.meta.GetVChannelsByPchannel(in.GetPchannel())
+	resp.Vchannels = vchannels
+	return resp, nil
+}
+
 // AllocTimestamp alloc timestamp
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {

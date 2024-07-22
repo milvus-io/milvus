@@ -27,10 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
-	"github.com/milvus-io/milvus/internal/datanode/pipeline"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/util"
-	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
+	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"

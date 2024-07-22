@@ -28,6 +28,13 @@ func OptRootCoordClient(rootCoordClient types.RootCoordClient) optResourceInit {
 	}
 }
 
+// OptDataCoordClient provides the data coordinator client to the resource.
+func OptDataCoordClient(dataCoordClient types.DataCoordClient) optResourceInit {
+	return func(r *resourceImpl) {
+		r.dataCoordClient = dataCoordClient
+	}
+}
+
 // Init initializes the singleton of resources.
 // Should be call when streaming node startup.
 func Init(opts ...optResourceInit) {
@@ -55,6 +62,7 @@ type resourceImpl struct {
 	idAllocator        idalloc.Allocator
 	etcdClient         *clientv3.Client
 	rootCoordClient    types.RootCoordClient
+	dataCoordClient    types.DataCoordClient
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.
@@ -75,6 +83,11 @@ func (r *resourceImpl) ETCD() *clientv3.Client {
 // RootCoordClient returns the root coordinator client.
 func (r *resourceImpl) RootCoordClient() types.RootCoordClient {
 	return r.rootCoordClient
+}
+
+// DataCoordClient returns the data coordinator client.
+func (r *resourceImpl) DataCoordClient() types.DataCoordClient {
+	return r.dataCoordClient
 }
 
 // assertNotNil panics if the resource is nil.

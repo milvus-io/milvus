@@ -454,6 +454,11 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	return s.rootCoord.ShowSegments(ctx, in)
 }
 
+// GetVChannels returns all vchannels belonging to the pchannel.
+func (s *Server) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsRequest) (*rootcoordpb.GetVChannelsResponse, error) {
+	return s.rootCoord.GetVChannels(ctx, in)
+}
+
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)

@@ -137,6 +137,10 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.GetVChannels(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.GetMetrics(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -348,6 +352,10 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.ShowSegments(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.GetVChannels(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{
