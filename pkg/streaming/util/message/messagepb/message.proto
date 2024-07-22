@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package milvus.proto.message;
+
+option go_package = "github.com/milvus-io/milvus/pkg/streaming/util/message/messagepb";
+
+///
+/// Message Payload Definitions
+/// Some message payload is defined at msg.proto at milvus-proto for
+/// compatibility.
+/// 1. InsertRequest
+/// 2. DeleteRequest
+/// 3. TimeTickRequest
+/// 4. CreateCollectionRequest
+/// 5. DropCollectionRequest
+/// 6. CreatePartitionRequest
+/// 7. DropPartitionRequest
+///
+
+// FlushMessagePayload is the payload of flush message.
+message FlushMessagePayload {
+    int64 collection_id =
+        1;  // indicate which the collection that segment belong to.
+    repeated int64 segment_id = 2;  // indicate which segment to flush.
+}
+
+///
+/// Message Header Definitions
+/// Used to fast handling at streaming node write ahead.
+/// The header should be simple and light enough to be parsed.
+/// Do not put too much information in the header if unnecessary.
+///
+
+// TimeTickMessageHeader just nothing.
+message TimeTickMessageHeader {}
+
+// InsertMessageHeader is the header of insert message.
+message InsertMessageHeader {
+    int64 collection_id                            = 1;
+    repeated PartitionSegmentAssignment partitions = 2;
+}
+
+// PartitionSegmentAssignment is the segment assignment of a partition.
+message PartitionSegmentAssignment {
+    int64 partition_id                   = 1;
+    uint64 rows                          = 2;
+    uint64 binary_size                   = 3;
+    SegmentAssignment segment_assignment = 4;
+}
+
+// SegmentAssignment is the assignment of a segment.
+message SegmentAssignment {
+    int64 segment_id = 1;
+}
+
+// DeleteMessageHeader
+message DeleteMessageHeader {
+    int64 collection_id = 1;
+}
+
+// FlushMessageHeader just nothing.
+message FlushMessageHeader {}
+
+// CreateCollectionMessageHeader is the header of create collection message.
+message CreateCollectionMessageHeader {
+    int64 collection_id = 1;
+}
+
+// DropCollectionMessageHeader is the header of drop collection message.
+message DropCollectionMessageHeader {
+    int64 collection_id = 1;
+}
+
+// CreatePartitionMessageHeader is the header of create partition message.
+message CreatePartitionMessageHeader {
+    int64 collection_id = 1;
+    int64 partition_id  = 2;
+}
+
+// DropPartitionMessageHeader is the header of drop partition message.
+message DropPartitionMessageHeader {
+    int64 collection_id = 1;
+    int64 partition_id  = 2;
+}

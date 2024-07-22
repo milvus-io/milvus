@@ -384,6 +384,11 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 }
 
 func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error) {
+	return GetTsMsgFromConsumerMsg(ms.unmarshal, msg)
+}
+
+// GetTsMsgFromConsumerMsg get TsMsg from consumer message
+func GetTsMsgFromConsumerMsg(unmarshalDispatcher UnmarshalDispatcher, msg common.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
 	if msg.Payload() == nil {
 		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
@@ -395,7 +400,7 @@ func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error
 	if header.Base == nil {
 		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
 	}
-	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
+	tsMsg, err := unmarshalDispatcher.Unmarshal(msg.Payload(), header.Base.MsgType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 	}

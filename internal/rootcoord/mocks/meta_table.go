@@ -48,8 +48,8 @@ type IMetaTable_AddCollection_Call struct {
 }
 
 // AddCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - coll *model.Collection
+//   - ctx context.Context
+//   - coll *model.Collection
 func (_e *IMetaTable_Expecter) AddCollection(ctx interface{}, coll interface{}) *IMetaTable_AddCollection_Call {
 	return &IMetaTable_AddCollection_Call{Call: _e.mock.On("AddCollection", ctx, coll)}
 }
@@ -91,7 +91,7 @@ type IMetaTable_AddCredential_Call struct {
 }
 
 // AddCredential is a helper method to define mock.On call
-//  - credInfo *internalpb.CredentialInfo
+//   - credInfo *internalpb.CredentialInfo
 func (_e *IMetaTable_Expecter) AddCredential(credInfo interface{}) *IMetaTable_AddCredential_Call {
 	return &IMetaTable_AddCredential_Call{Call: _e.mock.On("AddCredential", credInfo)}
 }
@@ -133,8 +133,8 @@ type IMetaTable_AddPartition_Call struct {
 }
 
 // AddPartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - partition *model.Partition
+//   - ctx context.Context
+//   - partition *model.Partition
 func (_e *IMetaTable_Expecter) AddPartition(ctx interface{}, partition interface{}) *IMetaTable_AddPartition_Call {
 	return &IMetaTable_AddPartition_Call{Call: _e.mock.On("AddPartition", ctx, partition)}
 }
@@ -176,11 +176,11 @@ type IMetaTable_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - alias string
-//  - collectionName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - alias string
+//   - collectionName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) AlterAlias(ctx interface{}, dbName interface{}, alias interface{}, collectionName interface{}, ts interface{}) *IMetaTable_AlterAlias_Call {
 	return &IMetaTable_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, dbName, alias, collectionName, ts)}
 }
@@ -222,10 +222,10 @@ type IMetaTable_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - oldColl *model.Collection
-//  - newColl *model.Collection
-//  - ts uint64
+//   - ctx context.Context
+//   - oldColl *model.Collection
+//   - newColl *model.Collection
+//   - ts uint64
 func (_e *IMetaTable_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}) *IMetaTable_AlterCollection_Call {
 	return &IMetaTable_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, ts)}
 }
@@ -267,7 +267,7 @@ type IMetaTable_AlterCredential_Call struct {
 }
 
 // AlterCredential is a helper method to define mock.On call
-//  - credInfo *internalpb.CredentialInfo
+//   - credInfo *internalpb.CredentialInfo
 func (_e *IMetaTable_Expecter) AlterCredential(credInfo interface{}) *IMetaTable_AlterCredential_Call {
 	return &IMetaTable_AlterCredential_Call{Call: _e.mock.On("AlterCredential", credInfo)}
 }
@@ -309,10 +309,10 @@ type IMetaTable_AlterDatabase_Call struct {
 }
 
 // AlterDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - oldDB *model.Database
-//  - newDB *model.Database
-//  - ts uint64
+//   - ctx context.Context
+//   - oldDB *model.Database
+//   - newDB *model.Database
+//   - ts uint64
 func (_e *IMetaTable_Expecter) AlterDatabase(ctx interface{}, oldDB interface{}, newDB interface{}, ts interface{}) *IMetaTable_AlterDatabase_Call {
 	return &IMetaTable_AlterDatabase_Call{Call: _e.mock.On("AlterDatabase", ctx, oldDB, newDB, ts)}
 }
@@ -354,10 +354,10 @@ type IMetaTable_ChangeCollectionState_Call struct {
 }
 
 // ChangeCollectionState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - state etcdpb.CollectionState
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionID int64
+//   - state etcdpb.CollectionState
+//   - ts uint64
 func (_e *IMetaTable_Expecter) ChangeCollectionState(ctx interface{}, collectionID interface{}, state interface{}, ts interface{}) *IMetaTable_ChangeCollectionState_Call {
 	return &IMetaTable_ChangeCollectionState_Call{Call: _e.mock.On("ChangeCollectionState", ctx, collectionID, state, ts)}
 }
@@ -399,11 +399,11 @@ type IMetaTable_ChangePartitionState_Call struct {
 }
 
 // ChangePartitionState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - partitionID int64
-//  - state etcdpb.PartitionState
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionID int64
+//   - state etcdpb.PartitionState
+//   - ts uint64
 func (_e *IMetaTable_Expecter) ChangePartitionState(ctx interface{}, collectionID interface{}, partitionID interface{}, state interface{}, ts interface{}) *IMetaTable_ChangePartitionState_Call {
 	return &IMetaTable_ChangePartitionState_Call{Call: _e.mock.On("ChangePartitionState", ctx, collectionID, partitionID, state, ts)}
 }
@@ -445,11 +445,11 @@ type IMetaTable_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - alias string
-//  - collectionName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - alias string
+//   - collectionName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) CreateAlias(ctx interface{}, dbName interface{}, alias interface{}, collectionName interface{}, ts interface{}) *IMetaTable_CreateAlias_Call {
 	return &IMetaTable_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, dbName, alias, collectionName, ts)}
 }
@@ -491,9 +491,9 @@ type IMetaTable_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - db *model.Database
-//  - ts uint64
+//   - ctx context.Context
+//   - db *model.Database
+//   - ts uint64
 func (_e *IMetaTable_Expecter) CreateDatabase(ctx interface{}, db interface{}, ts interface{}) *IMetaTable_CreateDatabase_Call {
 	return &IMetaTable_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, db, ts)}
 }
@@ -535,8 +535,8 @@ type IMetaTable_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//  - tenant string
-//  - entity *milvuspb.RoleEntity
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
 func (_e *IMetaTable_Expecter) CreateRole(tenant interface{}, entity interface{}) *IMetaTable_CreateRole_Call {
 	return &IMetaTable_CreateRole_Call{Call: _e.mock.On("CreateRole", tenant, entity)}
 }
@@ -578,7 +578,7 @@ type IMetaTable_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//  - username string
+//   - username string
 func (_e *IMetaTable_Expecter) DeleteCredential(username interface{}) *IMetaTable_DeleteCredential_Call {
 	return &IMetaTable_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", username)}
 }
@@ -630,10 +630,10 @@ type IMetaTable_DescribeAlias_Call struct {
 }
 
 // DescribeAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - alias string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - alias string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) DescribeAlias(ctx interface{}, dbName interface{}, alias interface{}, ts interface{}) *IMetaTable_DescribeAlias_Call {
 	return &IMetaTable_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", ctx, dbName, alias, ts)}
 }
@@ -675,10 +675,10 @@ type IMetaTable_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - alias string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - alias string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) DropAlias(ctx interface{}, dbName interface{}, alias interface{}, ts interface{}) *IMetaTable_DropAlias_Call {
 	return &IMetaTable_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, dbName, alias, ts)}
 }
@@ -720,9 +720,9 @@ type IMetaTable_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) DropDatabase(ctx interface{}, dbName interface{}, ts interface{}) *IMetaTable_DropDatabase_Call {
 	return &IMetaTable_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, dbName, ts)}
 }
@@ -764,8 +764,8 @@ type IMetaTable_DropGrant_Call struct {
 }
 
 // DropGrant is a helper method to define mock.On call
-//  - tenant string
-//  - role *milvuspb.RoleEntity
+//   - tenant string
+//   - role *milvuspb.RoleEntity
 func (_e *IMetaTable_Expecter) DropGrant(tenant interface{}, role interface{}) *IMetaTable_DropGrant_Call {
 	return &IMetaTable_DropGrant_Call{Call: _e.mock.On("DropGrant", tenant, role)}
 }
@@ -807,8 +807,8 @@ type IMetaTable_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//  - tenant string
-//  - roleName string
+//   - tenant string
+//   - roleName string
 func (_e *IMetaTable_Expecter) DropRole(tenant interface{}, roleName interface{}) *IMetaTable_DropRole_Call {
 	return &IMetaTable_DropRole_Call{Call: _e.mock.On("DropRole", tenant, roleName)}
 }
@@ -862,11 +862,11 @@ type IMetaTable_GetCollectionByID_Call struct {
 }
 
 // GetCollectionByID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - collectionID int64
-//  - ts uint64
-//  - allowUnavailable bool
+//   - ctx context.Context
+//   - dbName string
+//   - collectionID int64
+//   - ts uint64
+//   - allowUnavailable bool
 func (_e *IMetaTable_Expecter) GetCollectionByID(ctx interface{}, dbName interface{}, collectionID interface{}, ts interface{}, allowUnavailable interface{}) *IMetaTable_GetCollectionByID_Call {
 	return &IMetaTable_GetCollectionByID_Call{Call: _e.mock.On("GetCollectionByID", ctx, dbName, collectionID, ts, allowUnavailable)}
 }
@@ -920,8 +920,8 @@ type IMetaTable_GetCollectionByIDWithMaxTs_Call struct {
 }
 
 // GetCollectionByIDWithMaxTs is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *IMetaTable_Expecter) GetCollectionByIDWithMaxTs(ctx interface{}, collectionID interface{}) *IMetaTable_GetCollectionByIDWithMaxTs_Call {
 	return &IMetaTable_GetCollectionByIDWithMaxTs_Call{Call: _e.mock.On("GetCollectionByIDWithMaxTs", ctx, collectionID)}
 }
@@ -975,10 +975,10 @@ type IMetaTable_GetCollectionByName_Call struct {
 }
 
 // GetCollectionByName is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - collectionName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) GetCollectionByName(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_GetCollectionByName_Call {
 	return &IMetaTable_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbName, collectionName, ts)}
 }
@@ -1022,7 +1022,7 @@ type IMetaTable_GetCollectionVirtualChannels_Call struct {
 }
 
 // GetCollectionVirtualChannels is a helper method to define mock.On call
-//  - colID int64
+//   - colID int64
 func (_e *IMetaTable_Expecter) GetCollectionVirtualChannels(colID interface{}) *IMetaTable_GetCollectionVirtualChannels_Call {
 	return &IMetaTable_GetCollectionVirtualChannels_Call{Call: _e.mock.On("GetCollectionVirtualChannels", colID)}
 }
@@ -1076,7 +1076,7 @@ type IMetaTable_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
-//  - username string
+//   - username string
 func (_e *IMetaTable_Expecter) GetCredential(username interface{}) *IMetaTable_GetCredential_Call {
 	return &IMetaTable_GetCredential_Call{Call: _e.mock.On("GetCredential", username)}
 }
@@ -1130,9 +1130,9 @@ type IMetaTable_GetDatabaseByID_Call struct {
 }
 
 // GetDatabaseByID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - ts uint64
 func (_e *IMetaTable_Expecter) GetDatabaseByID(ctx interface{}, dbID interface{}, ts interface{}) *IMetaTable_GetDatabaseByID_Call {
 	return &IMetaTable_GetDatabaseByID_Call{Call: _e.mock.On("GetDatabaseByID", ctx, dbID, ts)}
 }
@@ -1186,9 +1186,9 @@ type IMetaTable_GetDatabaseByName_Call struct {
 }
 
 // GetDatabaseByName is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) GetDatabaseByName(ctx interface{}, dbName interface{}, ts interface{}) *IMetaTable_GetDatabaseByName_Call {
 	return &IMetaTable_GetDatabaseByName_Call{Call: _e.mock.On("GetDatabaseByName", ctx, dbName, ts)}
 }
@@ -1232,7 +1232,7 @@ type IMetaTable_GetVChannelsByPchannel_Call struct {
 }
 
 // GetVChannelsByPchannel is a helper method to define mock.On call
-//  - pchannel string
+//   - pchannel string
 func (_e *IMetaTable_Expecter) GetVChannelsByPchannel(pchannel interface{}) *IMetaTable_GetVChannelsByPchannel_Call {
 	return &IMetaTable_GetVChannelsByPchannel_Call{Call: _e.mock.On("GetVChannelsByPchannel", pchannel)}
 }
@@ -1274,8 +1274,8 @@ type IMetaTable_IsAlias_Call struct {
 }
 
 // IsAlias is a helper method to define mock.On call
-//  - db string
-//  - name string
+//   - db string
+//   - name string
 func (_e *IMetaTable_Expecter) IsAlias(db interface{}, name interface{}) *IMetaTable_IsAlias_Call {
 	return &IMetaTable_IsAlias_Call{Call: _e.mock.On("IsAlias", db, name)}
 }
@@ -1329,10 +1329,10 @@ type IMetaTable_ListAliases_Call struct {
 }
 
 // ListAliases is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - collectionName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) ListAliases(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_ListAliases_Call {
 	return &IMetaTable_ListAliases_Call{Call: _e.mock.On("ListAliases", ctx, dbName, collectionName, ts)}
 }
@@ -1376,7 +1376,7 @@ type IMetaTable_ListAliasesByID_Call struct {
 }
 
 // ListAliasesByID is a helper method to define mock.On call
-//  - collID int64
+//   - collID int64
 func (_e *IMetaTable_Expecter) ListAliasesByID(collID interface{}) *IMetaTable_ListAliasesByID_Call {
 	return &IMetaTable_ListAliasesByID_Call{Call: _e.mock.On("ListAliasesByID", collID)}
 }
@@ -1420,7 +1420,7 @@ type IMetaTable_ListAllAvailCollections_Call struct {
 }
 
 // ListAllAvailCollections is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *IMetaTable_Expecter) ListAllAvailCollections(ctx interface{}) *IMetaTable_ListAllAvailCollections_Call {
 	return &IMetaTable_ListAllAvailCollections_Call{Call: _e.mock.On("ListAllAvailCollections", ctx)}
 }
@@ -1517,10 +1517,10 @@ type IMetaTable_ListCollections_Call struct {
 }
 
 // ListCollections is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - ts uint64
-//  - onlyAvail bool
+//   - ctx context.Context
+//   - dbName string
+//   - ts uint64
+//   - onlyAvail bool
 func (_e *IMetaTable_Expecter) ListCollections(ctx interface{}, dbName interface{}, ts interface{}, onlyAvail interface{}) *IMetaTable_ListCollections_Call {
 	return &IMetaTable_ListCollections_Call{Call: _e.mock.On("ListCollections", ctx, dbName, ts, onlyAvail)}
 }
@@ -1627,8 +1627,8 @@ type IMetaTable_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//  - ctx context.Context
-//  - ts uint64
+//   - ctx context.Context
+//   - ts uint64
 func (_e *IMetaTable_Expecter) ListDatabases(ctx interface{}, ts interface{}) *IMetaTable_ListDatabases_Call {
 	return &IMetaTable_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, ts)}
 }
@@ -1682,7 +1682,7 @@ type IMetaTable_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
-//  - tenant string
+//   - tenant string
 func (_e *IMetaTable_Expecter) ListPolicy(tenant interface{}) *IMetaTable_ListPolicy_Call {
 	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", tenant)}
 }
@@ -1736,7 +1736,7 @@ type IMetaTable_ListUserRole_Call struct {
 }
 
 // ListUserRole is a helper method to define mock.On call
-//  - tenant string
+//   - tenant string
 func (_e *IMetaTable_Expecter) ListUserRole(tenant interface{}) *IMetaTable_ListUserRole_Call {
 	return &IMetaTable_ListUserRole_Call{Call: _e.mock.On("ListUserRole", tenant)}
 }
@@ -1778,9 +1778,9 @@ type IMetaTable_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//  - tenant string
-//  - entity *milvuspb.GrantEntity
-//  - operateType milvuspb.OperatePrivilegeType
+//   - tenant string
+//   - entity *milvuspb.GrantEntity
+//   - operateType milvuspb.OperatePrivilegeType
 func (_e *IMetaTable_Expecter) OperatePrivilege(tenant interface{}, entity interface{}, operateType interface{}) *IMetaTable_OperatePrivilege_Call {
 	return &IMetaTable_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", tenant, entity, operateType)}
 }
@@ -1822,10 +1822,10 @@ type IMetaTable_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//  - tenant string
-//  - userEntity *milvuspb.UserEntity
-//  - roleEntity *milvuspb.RoleEntity
-//  - operateType milvuspb.OperateUserRoleType
+//   - tenant string
+//   - userEntity *milvuspb.UserEntity
+//   - roleEntity *milvuspb.RoleEntity
+//   - operateType milvuspb.OperateUserRoleType
 func (_e *IMetaTable_Expecter) OperateUserRole(tenant interface{}, userEntity interface{}, roleEntity interface{}, operateType interface{}) *IMetaTable_OperateUserRole_Call {
 	return &IMetaTable_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", tenant, userEntity, roleEntity, operateType)}
 }
@@ -1867,9 +1867,9 @@ type IMetaTable_RemoveCollection_Call struct {
 }
 
 // RemoveCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionID int64
+//   - ts uint64
 func (_e *IMetaTable_Expecter) RemoveCollection(ctx interface{}, collectionID interface{}, ts interface{}) *IMetaTable_RemoveCollection_Call {
 	return &IMetaTable_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, collectionID, ts)}
 }
@@ -1911,11 +1911,11 @@ type IMetaTable_RemovePartition_Call struct {
 }
 
 // RemovePartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - collectionID int64
-//  - partitionID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+//   - partitionID int64
+//   - ts uint64
 func (_e *IMetaTable_Expecter) RemovePartition(ctx interface{}, dbID interface{}, collectionID interface{}, partitionID interface{}, ts interface{}) *IMetaTable_RemovePartition_Call {
 	return &IMetaTable_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, dbID, collectionID, partitionID, ts)}
 }
@@ -1957,12 +1957,12 @@ type IMetaTable_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - oldName string
-//  - newDBName string
-//  - newName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbName string
+//   - oldName string
+//   - newDBName string
+//   - newName string
+//   - ts uint64
 func (_e *IMetaTable_Expecter) RenameCollection(ctx interface{}, dbName interface{}, oldName interface{}, newDBName interface{}, newName interface{}, ts interface{}) *IMetaTable_RenameCollection_Call {
 	return &IMetaTable_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, dbName, oldName, newDBName, newName, ts)}
 }
@@ -2016,8 +2016,8 @@ type IMetaTable_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//  - tenant string
-//  - entity *milvuspb.GrantEntity
+//   - tenant string
+//   - entity *milvuspb.GrantEntity
 func (_e *IMetaTable_Expecter) SelectGrant(tenant interface{}, entity interface{}) *IMetaTable_SelectGrant_Call {
 	return &IMetaTable_SelectGrant_Call{Call: _e.mock.On("SelectGrant", tenant, entity)}
 }
@@ -2071,9 +2071,9 @@ type IMetaTable_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//  - tenant string
-//  - entity *milvuspb.RoleEntity
-//  - includeUserInfo bool
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
+//   - includeUserInfo bool
 func (_e *IMetaTable_Expecter) SelectRole(tenant interface{}, entity interface{}, includeUserInfo interface{}) *IMetaTable_SelectRole_Call {
 	return &IMetaTable_SelectRole_Call{Call: _e.mock.On("SelectRole", tenant, entity, includeUserInfo)}
 }
@@ -2127,9 +2127,9 @@ type IMetaTable_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//  - tenant string
-//  - entity *milvuspb.UserEntity
-//  - includeRoleInfo bool
+//   - tenant string
+//   - entity *milvuspb.UserEntity
+//   - includeRoleInfo bool
 func (_e *IMetaTable_Expecter) SelectUser(tenant interface{}, entity interface{}, includeRoleInfo interface{}) *IMetaTable_SelectUser_Call {
 	return &IMetaTable_SelectUser_Call{Call: _e.mock.On("SelectUser", tenant, entity, includeRoleInfo)}
 }

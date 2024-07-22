@@ -59,16 +59,13 @@ func TestProducer(t *testing.T) {
 	assert.NotNil(t, producer)
 	ch := make(chan struct{})
 	go func() {
-		msgID, err := producer.Produce(ctx, message.NewMutableMessageBuilder().
-			WithMessageType(message.MessageTypeUnknown).
-			WithPayload([]byte{}).
-			BuildMutable())
+		msg := message.CreateTestEmptyInsertMesage(1, nil)
+		msgID, err := producer.Produce(ctx, msg)
 		assert.Error(t, err)
 		assert.Nil(t, msgID)
-		msgID, err = producer.Produce(ctx, message.NewMutableMessageBuilder().
-			WithMessageType(message.MessageTypeUnknown).
-			WithPayload([]byte{}).
-			BuildMutable())
+
+		msg = message.CreateTestEmptyInsertMesage(1, nil)
+		msgID, err = producer.Produce(ctx, msg)
 		assert.NoError(t, err)
 		assert.NotNil(t, msgID)
 		close(ch)
@@ -101,10 +98,8 @@ func TestProducer(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	_, err = producer.Produce(ctx, message.NewMutableMessageBuilder().
-		WithMessageType(message.MessageTypeUnknown).
-		WithPayload([]byte{}).
-		BuildMutable())
+	msg := message.CreateTestEmptyInsertMesage(1, nil)
+	_, err = producer.Produce(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, producer.IsAvailable())
 	producer.Close()

@@ -1,30 +1,35 @@
 package message_test
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 func TestMessage(t *testing.T) {
-	b := message.NewMutableMessageBuilder()
-	mutableMessage := b.
-		WithMessageType(message.MessageTypeTimeTick).
-		WithPayload([]byte("payload")).
+	b := message.NewTimeTickMessageBuilderV1()
+	mutableMessage, err := b.WithMessageHeader(&message.TimeTickMessageHeader{}).
 		WithProperties(map[string]string{"key": "value"}).
-		BuildMutable()
+		WithPayload(&msgpb.TimeTickMsg{}).BuildMutable()
+	assert.NoError(t, err)
 
-	assert.Equal(t, "payload", string(mutableMessage.Payload()))
+	payload, err := proto.Marshal(&message.TimeTickMessageHeader{})
+	assert.NoError(t, err)
+
+	assert.True(t, bytes.Equal(payload, mutableMessage.Payload()))
 	assert.True(t, mutableMessage.Properties().Exist("key"))
 	v, ok := mutableMessage.Properties().Get("key")
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 24, mutableMessage.EstimateSize())
+	assert.Equal(t, 20, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
@@ -96,6 +101,6 @@ func TestMessage(t *testing.T) {
 	})
 
 	assert.Panics(t, func() {
-		message.NewMutableMessageBuilder().BuildMutable()
+		message.NewTimeTickMessageBuilderV1().BuildMutable()
 	})
 }

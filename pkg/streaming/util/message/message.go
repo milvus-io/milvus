@@ -1,5 +1,7 @@
 package message
 
+import "github.com/golang/protobuf/proto"
+
 var (
 	_ BasicMessage     = (*messageImpl)(nil)
 	_ MutableMessage   = (*messageImpl)(nil)
@@ -75,4 +77,31 @@ type ImmutableMessage interface {
 
 	// MessageID returns the message id of current message.
 	MessageID() MessageID
+}
+
+// specializedMutableMessage is the specialized mutable message interface.
+type specializedMutableMessage[H proto.Message] interface {
+	BasicMessage
+
+	// VChannel returns the vchannel of the message.
+	VChannel() string
+
+	// TimeTick returns the time tick of the message.
+	TimeTick() uint64
+
+	// MessageHeader returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	MessageHeader() H
+
+	// OverwriteMessageHeader overwrites the message header.
+	OverwriteMessageHeader(header H)
+}
+
+// specializedImmutableMessage is the specialized immutable message interface.
+type specializedImmutableMessage[H proto.Message] interface {
+	ImmutableMessage
+
+	// MessageHeader returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	MessageHeader() H
 }

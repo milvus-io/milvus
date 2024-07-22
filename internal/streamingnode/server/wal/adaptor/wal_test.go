@@ -10,11 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -154,26 +152,10 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 			time.Sleep(time.Duration(5+rand.Int31n(10)) * time.Millisecond)
 			// ...rocksmq has a dirty implement of properties,
 			// without commonpb.MsgHeader, it can not work.
-			header := commonpb.MsgHeader{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-					MsgID:   int64(i),
-				},
-			}
-			payload, err := proto.Marshal(&header)
-			if err != nil {
-				panic(err)
-			}
-			properties := map[string]string{
+			msg := message.CreateTestEmptyInsertMesage(int64(i), map[string]string{
 				"id":    fmt.Sprintf("%d", i),
 				"const": "t",
-			}
-			typ := message.MessageTypeUnknown
-			msg := message.NewMutableMessageBuilder().
-				WithMessageType(typ).
-				WithPayload(payload).
-				WithProperties(properties).
-				BuildMutable()
+			})
 			id, err := w.Append(ctx, msg)
 			assert.NoError(f.t, err)
 			assert.NotNil(f.t, id)
@@ -181,27 +163,12 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 		}(i)
 	}
 	swg.Wait()
-	// send a final hint message
-	header := commonpb.MsgHeader{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Insert,
-			MsgID:   int64(f.messageCount - 1),
-		},
-	}
-	payload, err := proto.Marshal(&header)
-	if err != nil {
-		panic(err)
-	}
-	properties := map[string]string{
+
+	msg := message.CreateTestEmptyInsertMesage(int64(f.messageCount-1), map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),
 		"const": "t",
 		"term":  strconv.FormatInt(int64(f.term), 10),
-	}
-	msg := message.NewMutableMessageBuilder().
-		WithPayload(payload).
-		WithProperties(properties).
-		WithMessageType(message.MessageTypeUnknown).
-		BuildMutable()
+	})
 	id, err := w.Append(ctx, msg)
 	assert.NoError(f.t, err)
 	messages[f.messageCount-1] = msg.IntoImmutableMessage(id)
