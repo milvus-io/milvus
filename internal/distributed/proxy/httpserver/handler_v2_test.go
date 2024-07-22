@@ -471,7 +471,7 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(12)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
@@ -599,6 +599,15 @@ func TestCreateCollection(t *testing.T) {
         }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "missing required parameters, error: `book_xxx` hasn't defined in schema",
 		errCode: 1802,
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+		        "fields": [
+		            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
+		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+		        ]
+		    }, "params": {"partitionKeyIsolation": "true"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
