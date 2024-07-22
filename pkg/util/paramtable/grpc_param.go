@@ -19,8 +19,12 @@ package paramtable
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -219,6 +223,7 @@ type GrpcClientConfig struct {
 	MaxAttempts             ParamItem `refreshable:"false"`
 	InitialBackoff          ParamItem `refreshable:"false"`
 	MaxBackoff              ParamItem `refreshable:"false"`
+	BackoffMultiplier       ParamItem `refreshable:"false"`
 	MinResetInterval        ParamItem `refreshable:"false"`
 	MaxCancelError          ParamItem `refreshable:"false"`
 	MinSessionCheckInterval ParamItem `refreshable:"false"`
@@ -397,6 +402,14 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.MaxBackoff.Init(base.mgr)
 
+	p.BackoffMultiplier = ParamItem{
+		Key:          "grpc.client.backoffMultiplier",
+		Version:      "2.5.0",
+		DefaultValue: "2.0",
+		Export:       true,
+	}
+	p.BackoffMultiplier.Init(base.mgr)
+
 	compressionEnabled := fmt.Sprintf("%t", DefaultCompressionEnabled)
 	p.CompressionEnabled = ParamItem{
 		Key:     "grpc.client.compressionEnabled",
@@ -477,4 +490,43 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.MaxCancelError.Init(base.mgr)
+}
+
+// GetDialOptionsFromConfig returns grpc dial options from config.
+func (p *GrpcClientConfig) GetDialOptionsFromConfig() []grpc.DialOption {
+	compress := ""
+	if p.CompressionEnabled.GetAsBool() {
+		compress = "zstd"
+	}
+	return []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(p.ClientMaxRecvSize.GetAsInt()),
+			grpc.MaxCallSendMsgSize(p.ClientMaxSendSize.GetAsInt()),
+			grpc.UseCompressor(compress),
+		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                p.KeepAliveTime.GetAsDuration(time.Millisecond),
+			Timeout:             p.KeepAliveTimeout.GetAsDuration(time.Millisecond),
+			PermitWithoutStream: true,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  100 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: p.DialTimeout.GetAsDuration(time.Millisecond),
+		}),
+	}
+}
+
+// GetDefaultRetryPolicy returns default grpc retry policy.
+func (p *GrpcClientConfig) GetDefaultRetryPolicy() map[string]interface{} {
+	return map[string]interface{}{
+		"maxAttempts":       p.MaxAttempts.GetAsInt(),
+		"initialBackoff":    fmt.Sprintf("%fs", p.InitialBackoff.GetAsFloat()),
+		"maxBackoff":        fmt.Sprintf("%fs", p.MaxBackoff.GetAsFloat()),
+		"backoffMultiplier": p.BackoffMultiplier.GetAsFloat(),
+	}
 }

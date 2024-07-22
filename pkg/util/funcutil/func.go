@@ -212,7 +212,11 @@ func GetAvailablePort() int {
 
 // IsPhysicalChannel checks if the channel is a physical channel
 func IsPhysicalChannel(channel string) bool {
-	return strings.Count(channel, "_") == 1
+	i := strings.LastIndex(channel, "_")
+	if i == -1 {
+		return true
+	}
+	return !strings.Contains(channel[i+1:], "v")
 }
 
 // ToPhysicalChannel get physical channel name from virtual channel name
@@ -225,6 +229,10 @@ func ToPhysicalChannel(vchannel string) string {
 		return vchannel
 	}
 	return vchannel[:index]
+}
+
+func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
+	return fmt.Sprintf("%s_%dv%d", pchannel, collectionID, idx)
 }
 
 // ConvertChannelName assembles channel name according to parameters.

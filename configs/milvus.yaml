@@ -443,9 +443,6 @@ dataCoord:
     # The max number of binlog file for one segment, the segment will be sealed if
     # the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
-    # The size threshold in MB, if the total size of growing segments
-    # exceeds this threshold, the largest growing segment will be sealed.
-    totalGrowingSizeThresholdInMB: 4096
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     # A compaction will happen on small segments if the segment after compaction will have
@@ -455,6 +452,11 @@ dataCoord:
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
     segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  sealPolicy:
+    channel:
+      # The size threshold in MB, if the total size of growing segments of each shard
+      # exceeds this threshold, the largest growing segment will be sealed.
+      growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   enableCompaction: true # Enable data segment compaction
   compaction:
@@ -464,28 +466,29 @@ dataCoord:
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
     clustering:
-      enable: true
-      autoEnable: false
-      triggerInterval: 600
+      enable: true # Enable clustering compaction
+      autoEnable: false # Enable auto background clustering compaction
+      triggerInterval: 600 # clustering compaction trigger interval in seconds
       stateCheckInterval: 10
       gcInterval: 600
-      minInterval: 3600
-      maxInterval: 259200
-      newDataRatioThreshold: 0.2
-      newDataSizeThreshold: 512m
-      timeout: 7200
+      minInterval: 3600 # The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction
+      maxInterval: 259200 # If a collection haven't been clustering compacted for longer than maxInterval, force compact
+      newDataSizeThreshold: 512m # If new data size is large than newDataSizeThreshold, execute clustering compaction
+      timeout: 7200 # timeout in seconds for clustering compaction, the task will stop if timeout
       dropTolerance: 86400
       # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
       # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
       # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
       preferSegmentSize: 512m       
       maxSegmentSize: 1024m
-      maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
-      maxCentroidsNum: 10240
-      minCentroidsNum: 16
-      minClusterSizeRatio: 0.01
-      maxClusterSizeRatio: 10
-      maxClusterSize: 5g
+      
+      # vector clustering related
+      maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
+      maxCentroidsNum: 10240 # maximum centroids number in Kmeans train
+      minCentroidsNum: 16 # minimum centroids number in Kmeans train
+      minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
+      maxClusterSizeRatio: 10 #maximum cluster size / avg size in Kmeans train
+      maxClusterSize: 5g # maximum cluster size in Kmeans train
 
     levelzero:
       forceTrigger:
@@ -577,8 +580,19 @@ dataNode:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
 
   clusteringCompaction:
-    memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.
-    workPoolSize: 8
+    memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
+    workPoolSize: 8 # worker pool size for one clustering compaction job
+
+streamingNode:
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
+  port: 19532
+  grpc:
+    serverMaxSendSize: 536870912
+    serverMaxRecvSize: 536870912
+    clientMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
 
 # Configures the system log output.
 log:

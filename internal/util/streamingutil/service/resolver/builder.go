@@ -1,9 +1,9 @@
 package resolver
 
 import (
-	"errors"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"

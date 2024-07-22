@@ -12,9 +12,9 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func NewMockRootCoordClient(t *testing.T) *mocks.MockRootCoordClient {
@@ -27,9 +27,7 @@ func NewMockRootCoordClient(t *testing.T) *mocks.MockRootCoordClient {
 			}
 			c := counter.Add(uint64(atr.Count))
 			return &rootcoordpb.AllocTimestampResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
+				Status:    merr.Success(),
 				Timestamp: c - uint64(atr.Count),
 				Count:     atr.Count,
 			}, nil
@@ -42,11 +40,9 @@ func NewMockRootCoordClient(t *testing.T) *mocks.MockRootCoordClient {
 			}
 			c := counter.Add(uint64(atr.Count))
 			return &rootcoordpb.AllocIDResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				ID:    int64(c - uint64(atr.Count)),
-				Count: atr.Count,
+				Status: merr.Success(),
+				ID:     int64(c - uint64(atr.Count)),
+				Count:  atr.Count,
 			}, nil
 		},
 	).Maybe()

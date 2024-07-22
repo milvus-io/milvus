@@ -129,6 +129,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
+		// TODO: flusher.Close()
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.
@@ -148,6 +149,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	l, err := w.opener.Open(expectedState.Context(), &wal.OpenOption{
 		Channel: expectedState.GetPChannelInfo(),
 	})
+	// TODO: flusher.Open()
 	if err != nil {
 		logger.Warn("open new wal fail", zap.Error(err))
 		// Open new wal at expected term failed, push expected term to current state unavailable.

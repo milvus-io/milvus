@@ -132,14 +132,10 @@ func NewClusteringCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
-	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
-	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
 	return &clusteringCompactionTask{
 		ctx:                ctx,
 		cancel:             cancel,
 		binlogIO:           binlogIO,
-		logIDAlloc:         logIDAlloc,
-		segIDAlloc:         segIDAlloc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
@@ -179,12 +175,23 @@ func (t *clusteringCompactionTask) GetCollection() int64 {
 }
 
 func (t *clusteringCompactionTask) init() error {
+	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
+		return merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	}
+	if len(t.plan.GetSegmentBinlogs()) == 0 {
+		return merr.WrapErrIllegalCompactionPlan("empty segment binlogs")
+	}
 	t.collectionID = t.GetCollection()
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	t.logIDAlloc = logIDAlloc
+	t.segIDAlloc = segIDAlloc
+	
 	var pkField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
-		return errors.New("empty schema in compactionPlan")
+		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
 	for _, field := range t.plan.Schema.Fields {
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
@@ -209,22 +216,19 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("clusteringCompaction-%d", t.GetPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
-	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
-		// this shouldn't be reached
-		log.Warn("compact wrong, illegal compaction type")
-		return nil, merr.WrapErrIllegalCompactionPlan()
+	// 0, verify and init
+	err := t.init()
+	if err != nil {
+		log.Error("compaction task init failed", zap.Error(err))
+		return nil, err
 	}
+
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
 	}
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
-
-	err := t.init()
-	if err != nil {
-		return nil, err
-	}
 	defer t.cleanUp(ctx)
 
 	// 1, download delta logs to build deltaMap
@@ -1031,7 +1035,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	// Unable to deal with all empty segments cases, so return error
 	if binlogNum == 0 {
 		log.Warn("compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrIllegalCompactionPlan()
+		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
 	for idx := 0; idx < binlogNum; idx++ {
