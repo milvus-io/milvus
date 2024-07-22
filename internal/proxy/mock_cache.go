@@ -275,70 +275,6 @@ func (_c *MockCache_GetCollectionName_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// GetCollectionNamesByID provides a mock function with given fields: ctx, collectionID
-func (_m *MockCache) GetCollectionNamesByID(ctx context.Context, collectionID []int64) ([]string, []string, error) {
-	ret := _m.Called(ctx, collectionID)
-
-	var r0 []string
-	var r1 []string
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, []int64) ([]string, []string, error)); ok {
-		return rf(ctx, collectionID)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, []int64) []string); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, []int64) []string); ok {
-		r1 = rf(ctx, collectionID)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]string)
-		}
-	}
-
-	if rf, ok := ret.Get(2).(func(context.Context, []int64) error); ok {
-		r2 = rf(ctx, collectionID)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
-}
-
-// MockCache_GetCollectionNamesByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionNamesByID'
-type MockCache_GetCollectionNamesByID_Call struct {
-	*mock.Call
-}
-
-// GetCollectionNamesByID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID []int64
-func (_e *MockCache_Expecter) GetCollectionNamesByID(ctx interface{}, collectionID interface{}) *MockCache_GetCollectionNamesByID_Call {
-	return &MockCache_GetCollectionNamesByID_Call{Call: _e.mock.On("GetCollectionNamesByID", ctx, collectionID)}
-}
-
-func (_c *MockCache_GetCollectionNamesByID_Call) Run(run func(ctx context.Context, collectionID []int64)) *MockCache_GetCollectionNamesByID_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]int64))
-	})
-	return _c
-}
-
-func (_c *MockCache_GetCollectionNamesByID_Call) Return(_a0 []string, _a1 []string, _a2 error) *MockCache_GetCollectionNamesByID_Call {
-	_c.Call.Return(_a0, _a1, _a2)
-	return _c
-}
-
-func (_c *MockCache_GetCollectionNamesByID_Call) RunAndReturn(run func(context.Context, []int64) ([]string, []string, error)) *MockCache_GetCollectionNamesByID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetCollectionSchema provides a mock function with given fields: ctx, database, collectionName
 func (_m *MockCache) GetCollectionSchema(ctx context.Context, database string, collectionName string) (*schemaInfo, error) {
 	ret := _m.Called(ctx, database, collectionName)
@@ -1062,13 +998,13 @@ func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID
-func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64) []string {
-	ret := _m.Called(ctx, collectionID)
+// RemoveCollectionsByID provides a mock function with given fields: ctx, database, collectionID
+func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, database string, collectionID int64) []string {
+	ret := _m.Called(ctx, database, collectionID)
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(context.Context, int64) []string); ok {
-		r0 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) []string); ok {
+		r0 = rf(ctx, database, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -1085,14 +1021,15 @@ type MockCache_RemoveCollectionsByID_Call struct {
 
 // RemoveCollectionsByID is a helper method to define mock.On call
 //   - ctx context.Context
+//   - database string
 //   - collectionID int64
-func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}) *MockCache_RemoveCollectionsByID_Call {
-	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID)}
+func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, database interface{}, collectionID interface{}) *MockCache_RemoveCollectionsByID_Call {
+	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, database, collectionID)}
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64)) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, database string, collectionID int64)) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
 	})
 	return _c
 }
@@ -1175,8 +1112,8 @@ func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, 
 }
 
 // RemovePartition provides a mock function with given fields: ctx, database, collectionName, partitionName
-func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionName string, partitionName string) {
-	_m.Called(ctx, database, collectionName, partitionName)
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, partitionName string) {
+	_m.Called(ctx, database, collectionID, partitionName)
 }
 
 // MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
@@ -1187,15 +1124,15 @@ type MockCache_RemovePartition_Call struct {
 // RemovePartition is a helper method to define mock.On call
 //   - ctx context.Context
 //   - database string
-//   - collectionName string
+//   - collectionID UniqueID
 //   - partitionName string
-func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
-	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionName, partitionName)}
+func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionID interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
+	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, partitionName)}
 }
 
-func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionName string, partitionName string)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID UniqueID, partitionName string)) *MockCache_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(UniqueID), args[3].(string))
 	})
 	return _c
 }

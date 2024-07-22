@@ -518,7 +518,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		collectionNames: []string{t.Req.GetCollectionName()},
 		collectionID:    InvalidCollectionID,
 		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_CreateCollection)},
 	}, &nullStep{})
 	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
 		baseStep:  baseStep{core: t.core},

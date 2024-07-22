@@ -92,7 +92,6 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("err"))
-		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &alterCollectionTask{
@@ -122,7 +121,6 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
@@ -157,7 +155,6 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
@@ -192,7 +189,6 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {

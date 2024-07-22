@@ -67,20 +67,16 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// meta cache of all aliases should also be cleaned.
-	aliases := t.core.meta.ListAliasesByID(collMeta.CollectionID)
-
 	ts := t.GetTs()
 
 	redoTask := newBaseRedoTask(t.core.stepExecutor)
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: append(aliases, collMeta.Name),
-		collectionID:    collMeta.CollectionID,
-		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
+		baseStep:     baseStep{core: t.core},
+		dbName:       t.Req.GetDbName(),
+		collectionID: collMeta.CollectionID,
+		ts:           ts,
+		opts:         []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	})
 	redoTask.AddSyncStep(&changeCollectionStateStep{
 		baseStep:     baseStep{core: t.core},

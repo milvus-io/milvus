@@ -747,14 +747,14 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	globalMetaCache.RemoveCollectionsByID(ctx, dbName, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	globalMetaCache.RemoveCollectionsByID(ctx, dbName, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
@@ -979,96 +979,6 @@ func TestGlobalMetaCache_UpdateDBInfo(t *testing.T) {
 		}, nil).Once()
 		err := cache.updateDBInfo(ctx)
 		assert.NoError(t, err)
-		assert.Len(t, cache.dbCollectionInfo, 1)
-		assert.Len(t, cache.dbCollectionInfo["db1"], 1)
-		assert.Equal(t, "collection1", cache.dbCollectionInfo["db1"][1])
-	})
-}
-
-func TestGlobalMetaCache_GetCollectionNamesByID(t *testing.T) {
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	queryCoord := mocks.NewMockQueryCoordClient(t)
-	shardMgr := newShardClientMgr()
-	ctx := context.Background()
-
-	t.Run("fail to update db info", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Code:      500,
-			},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1})
-		assert.Error(t, err)
-	})
-
-	t.Run("not found collection", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1"},
-			CollectionIds:   []int64{1},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{2})
-		assert.Error(t, err)
-	})
-
-	t.Run("not found collection 2", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1"},
-			CollectionIds:   []int64{1},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			DbNames: []string{"db1"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionNames: []string{"collection1", "collection2"},
-			CollectionIds:   []int64{1, 2},
-		}, nil).Once()
-
-		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
-		assert.NoError(t, err)
-		dbNames, collectionNames, err := cache.GetCollectionNamesByID(ctx, []int64{1, 2})
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"collection1", "collection2"}, collectionNames)
-		assert.Equal(t, []string{"db1", "db1"}, dbNames)
 	})
 }
 

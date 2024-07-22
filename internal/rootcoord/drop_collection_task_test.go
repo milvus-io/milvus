@@ -119,7 +119,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 
 	t.Run("failed to expire cache", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1)}
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
@@ -128,9 +128,6 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll.Clone(), nil)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64"),
-		).Return([]string{})
 
 		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
@@ -146,7 +143,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 
 	t.Run("failed to change collection state", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
-		coll := &model.Collection{Name: collectionName}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1)}
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
@@ -161,9 +158,6 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("error mock ChangeCollectionState"))
-		meta.On("ListAliasesByID",
-			mock.Anything,
-		).Return([]string{})
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
@@ -190,7 +184,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		pchans := ticker.getDmlChannelNames(shardNum)
 		ticker.addDmlChannels(pchans...)
 
-		coll := &model.Collection{Name: collectionName, ShardsNum: int32(shardNum), PhysicalChannelNames: pchans}
+		coll := &model.Collection{Name: collectionName, CollectionID: int64(1), ShardsNum: int32(shardNum), PhysicalChannelNames: pchans}
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
@@ -205,9 +199,6 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		meta.On("ListAliasesByID",
-			mock.Anything,
-		).Return([]string{})
 		removeCollectionMetaCalled := false
 		removeCollectionMetaChan := make(chan struct{}, 1)
 		meta.On("RemoveCollection",

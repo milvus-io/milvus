@@ -59,8 +59,6 @@ type Cache interface {
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
-	// GetCollectionNamesByID get collection name and database name by collection id
-	GetCollectionNamesByID(ctx context.Context, collectionID []UniqueID) ([]string, []string, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -75,8 +73,8 @@ type Cache interface {
 	DeprecateShardCache(database, collectionName string)
 	InvalidateShardLeaderCache(collections []int64)
 	RemoveCollection(ctx context.Context, database, collectionName string)
-	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
-	RemovePartition(ctx context.Context, database, collectionName string, partitionName string)
+	RemoveCollectionsByID(ctx context.Context, database string, collectionID UniqueID) []string
+	RemovePartition(ctx context.Context, database string, collectionID UniqueID, partitionName string)
 
 	// GetCredentialInfo operate credential cache
 	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -255,19 +253,20 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	dbInfo           map[string]*databaseInfo                // database -> db_info
-	collInfo         map[string]map[string]*collectionInfo   // database -> collectionName -> collection_info
-	collLeader       map[string]map[string]*shardLeaders     // database -> collectionName -> collection_leaders
-	dbCollectionInfo map[string]map[typeutil.UniqueID]string // database -> collectionID -> collectionName
-	credMap          map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
-	privilegeInfos   map[string]struct{}                     // privileges cache
-	userToRoles      map[string]map[string]struct{}          // user to role cache
-	mu               sync.RWMutex
-	credMut          sync.RWMutex
-	leaderMut        sync.RWMutex
-	shardMgr         shardClientMgr
-	sfGlobal         conc.Singleflight[*collectionInfo]
-	sfDB             conc.Singleflight[*databaseInfo]
+	dbInfo         map[string]*databaseInfo                         // database -> db_info
+	collNameInfo   map[string]map[string]typeutil.UniqueID          // database -> collectionName -> collection_id
+	collInfo       map[string]map[typeutil.UniqueID]*collectionInfo // database -> collectionID   -> collection_info
+	collShard      map[string]map[string]typeutil.UniqueID          // database -> collectionName -> collection_id
+	collNameShard  map[string]map[typeutil.UniqueID]*shardLeaders   // database -> collectionID   -> collection_leaders
+	credMap        map[string]*internalpb.CredentialInfo            // cache for credential, lazy load
+	privilegeInfos map[string]struct{}                              // privileges cache
+	userToRoles    map[string]map[string]struct{}                   // user to role cache
+	mu             sync.RWMutex
+	credMut        sync.RWMutex
+	leaderMut      sync.RWMutex
+	shardMgr       shardClientMgr
+	sfGlobal       conc.Singleflight[*collectionInfo]
+	sfDB           conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -300,16 +299,17 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:        rootCoord,
-		queryCoord:       queryCoord,
-		dbInfo:           map[string]*databaseInfo{},
-		collInfo:         map[string]map[string]*collectionInfo{},
-		collLeader:       map[string]map[string]*shardLeaders{},
-		dbCollectionInfo: map[string]map[typeutil.UniqueID]string{},
-		credMap:          map[string]*internalpb.CredentialInfo{},
-		shardMgr:         shardMgr,
-		privilegeInfos:   map[string]struct{}{},
-		userToRoles:      map[string]map[string]struct{}{},
+		rootCoord:      rootCoord,
+		queryCoord:     queryCoord,
+		dbInfo:         map[string]*databaseInfo{},
+		collNameInfo:   map[string]map[string]typeutil.UniqueID{},
+		collInfo:       map[string]map[typeutil.UniqueID]*collectionInfo{},
+		collShard:      map[string]map[string]typeutil.UniqueID{},
+		collNameShard:  map[string]map[typeutil.UniqueID]*shardLeaders{},
+		credMap:        map[string]*internalpb.CredentialInfo{},
+		shardMgr:       shardMgr,
+		privilegeInfos: map[string]struct{}{},
+		userToRoles:    map[string]map[string]struct{}{},
 	}, nil
 }
 
@@ -322,14 +322,14 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 		return nil, false
 	}
 	if collectionName == "" {
-		for _, collection := range db {
-			if collection.collID == collectionID {
-				return collection, collection.isCollectionCached()
-			}
+		if collection, ok := db[collectionID]; ok {
+			return collection, collection.isCollectionCached()
 		}
 	} else {
-		if collection, ok := db[collectionName]; ok {
-			return collection, collection.isCollectionCached()
+		if collectionID, ok := m.collNameInfo[database][collectionName]; ok {
+			if collection, ok := db[collectionID]; ok {
+				return collection, collection.isCollectionCached()
+			}
 		}
 	}
 
@@ -340,13 +340,14 @@ func (m *MetaCache) getCollectionShardLeader(database, collectionName string) (*
 	m.leaderMut.RLock()
 	defer m.leaderMut.RUnlock()
 
-	db, ok := m.collLeader[database]
+	db, ok := m.collNameShard[database]
 	if !ok {
 		return nil, false
 	}
-
-	if leaders, ok := db[collectionName]; ok {
-		return leaders, !leaders.deprecated.Load()
+	if collectionID, ok := m.collShard[database][collectionName]; ok {
+		if leaders, ok := db[collectionID]; ok {
+			return leaders, !leaders.deprecated.Load()
+		}
 	}
 	return nil, false
 }
@@ -380,12 +381,15 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	})
 
-	collectionName = collection.Schema.GetName()
+	if collectionName == "" {
+		collectionName = collection.Schema.GetName()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, dbOk := m.collInfo[database]
 	if !dbOk {
-		m.collInfo[database] = make(map[string]*collectionInfo)
+		m.collNameInfo[database] = make(map[string]typeutil.UniqueID)
+		m.collInfo[database] = make(map[typeutil.UniqueID]*collectionInfo)
 	}
 
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
@@ -394,7 +398,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	schemaInfo := newSchemaInfo(collection.Schema)
-	m.collInfo[database][collectionName] = &collectionInfo{
+	m.collNameInfo[database][collectionName] = collection.CollectionID
+	m.collInfo[database][collection.CollectionID] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
 		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
@@ -405,7 +410,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
-	return m.collInfo[database][collectionName], nil
+	return m.collInfo[database][collection.CollectionID], nil
 }
 
 func buildSfKeyByName(database, collectionName string) string {
@@ -495,50 +500,6 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 	return collInfo.getBasicInfo(), nil
 }
 
-func (m *MetaCache) GetCollectionNamesByID(ctx context.Context, collectionIDs []UniqueID) ([]string, []string, error) {
-	hasUpdate := false
-
-	dbNames := make([]string, 0)
-	collectionNames := make([]string, 0)
-	for _, collectionID := range collectionIDs {
-		dbName, collectionName := m.innerGetCollectionByID(collectionID)
-		if dbName != "" {
-			dbNames = append(dbNames, dbName)
-			collectionNames = append(collectionNames, collectionName)
-			continue
-		}
-		if hasUpdate {
-			return nil, nil, errors.New("collection not found after meta cache has been updated")
-		}
-		hasUpdate = true
-		err := m.updateDBInfo(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		dbName, collectionName = m.innerGetCollectionByID(collectionID)
-		if dbName == "" {
-			return nil, nil, errors.New("collection not found")
-		}
-		dbNames = append(dbNames, dbName)
-		collectionNames = append(collectionNames, collectionName)
-	}
-
-	return dbNames, collectionNames, nil
-}
-
-func (m *MetaCache) innerGetCollectionByID(collectionID int64) (string, string) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for database, db := range m.dbCollectionInfo {
-		name, ok := db[collectionID]
-		if ok {
-			return database, name
-		}
-	}
-	return "", ""
-}
-
 func (m *MetaCache) updateDBInfo(ctx context.Context) error {
 	databaseResp, err := m.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
@@ -549,7 +510,6 @@ func (m *MetaCache) updateDBInfo(ctx context.Context) error {
 		return err
 	}
 
-	dbInfo := make(map[string]map[int64]string)
 	for _, dbName := range databaseResp.DbNames {
 		resp, err := m.rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -569,12 +529,10 @@ func (m *MetaCache) updateDBInfo(ctx context.Context) error {
 		for i, collection := range resp.CollectionNames {
 			collections[resp.CollectionIds[i]] = collection
 		}
-		dbInfo[dbName] = collections
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.dbCollectionInfo = dbInfo
 
 	return nil
 }
@@ -820,18 +778,28 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	defer m.mu.Unlock()
 	_, dbOk := m.collInfo[database]
 	if dbOk {
-		delete(m.collInfo[database], collectionName)
+		if collectionID, ok := m.collNameInfo[database][collectionName]; ok {
+			if collectionInfo, ok := m.collInfo[database][collectionID]; ok {
+				if collectionInfo.schema.Name == collectionName {
+					delete(m.collInfo[database], collectionID)
+				}
+			}
+			delete(m.collNameInfo[database], collectionName)
+		}
 	}
 }
 
-func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
+func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, database string, collectionID UniqueID) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var collNames []string
-	for database, db := range m.collInfo {
-		for k, v := range db {
-			if v.collID == collectionID {
-				delete(m.collInfo[database], k)
+	if db, dbOk := m.collInfo[database]; dbOk {
+		if _, ok := db[collectionID]; ok {
+			delete(m.collInfo[database], collectionID)
+		}
+		for k, v := range m.collNameInfo[database] {
+			if v == collectionID {
+				delete(m.collNameInfo[database], k)
 				collNames = append(collNames, k)
 			}
 		}
@@ -839,31 +807,23 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 	return collNames
 }
 
-func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionName, partitionName string) {
+func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, partitionName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var ok bool
-	var collInfo *collectionInfo
+	if _, dbOk := m.collInfo[database]; dbOk {
+		if collInfo, ok := m.collInfo[database][collectionID]; ok {
+			partInfo := collInfo.partInfo
+			if partInfo == nil {
+				return
+			}
+			filteredInfos := lo.Filter(partInfo.partitionInfos, func(info *partitionInfo, idx int) bool {
+				return info.name != partitionName
+			})
 
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
+			m.collInfo[database][collectionID].partInfo = parsePartitionsInfo(filteredInfos, collInfo.schema.hasPartitionKeyField)
+		}
 	}
-
-	if !ok {
-		return
-	}
-
-	partInfo := m.collInfo[database][collectionName].partInfo
-	if partInfo == nil {
-		return
-	}
-	filteredInfos := lo.Filter(partInfo.partitionInfos, func(info *partitionInfo, idx int) bool {
-		return info.name != partitionName
-	})
-
-	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(filteredInfos, collInfo.schema.hasPartitionKeyField)
 }
 
 // GetCredentialInfo returns the credential related to provided username
@@ -927,6 +887,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		return nil, err
 	}
 
+	collectionID = info.collID
 	cacheShardLeaders, ok := m.getCollectionShardLeader(database, collectionName)
 	if withCache {
 		if ok {
@@ -965,11 +926,13 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 
 	// lock leader
 	m.leaderMut.Lock()
-	if _, ok := m.collLeader[database]; !ok {
-		m.collLeader[database] = make(map[string]*shardLeaders)
+	if _, ok := m.collNameShard[database]; !ok {
+		m.collShard[database] = make(map[string]typeutil.UniqueID)
+		m.collNameShard[database] = make(map[typeutil.UniqueID]*shardLeaders)
 	}
 
-	m.collLeader[database][collectionName] = newShardLeaders
+	m.collShard[database][collectionName] = collectionID
+	m.collNameShard[database][collectionID] = newShardLeaders
 	m.leaderMut.Unlock()
 
 	iterator := newShardLeaders.GetReader()
@@ -1006,8 +969,15 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 // DeprecateShardCache clear the shard leader cache of a collection
 func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
-	if shards, ok := m.getCollectionShardLeader(database, collectionName); ok {
-		shards.deprecated.Store(true)
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+
+	if db, ok := m.collNameShard[database]; ok {
+		if collectionID, ok := m.collShard[database][collectionName]; ok {
+			if leaders, ok := db[collectionID]; ok {
+				leaders.deprecated.Store(true)
+			}
+		}
 	}
 }
 
@@ -1016,10 +986,9 @@ func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
 
-	collectionSet := typeutil.NewUniqueSet(collections...)
-	for _, db := range m.collLeader {
-		for _, shardLeaders := range db {
-			if collectionSet.Contain(shardLeaders.collectionID) {
+	for _, db := range m.collNameShard {
+		for _, collectionID := range collections {
+			if shardLeaders, ok := db[collectionID]; ok {
 				shardLeaders.deprecated.Store(true)
 			}
 		}
@@ -1141,6 +1110,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
+	delete(m.collNameInfo, database)
 	delete(m.dbInfo, database)
 }
 

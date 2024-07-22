@@ -2332,14 +2332,16 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
 		// invalidate meta cache
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DropPartition,
 			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
+			DbName:        dbName,
+			CollectionID:  collectionID,
+			PartitionName: partitionName,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
