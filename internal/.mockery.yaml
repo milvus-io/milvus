@@ -38,6 +38,8 @@ packages:
     interfaces:
       StreamingNodeHandlerService_ConsumeServer:
       StreamingNodeHandlerService_ProduceServer:
+      StreamingCoordAssignmentServiceClient:
+      StreamingCoordAssignmentService_AssignmentDiscoverClient:
       StreamingCoordAssignmentService_AssignmentDiscoverServer:
       StreamingNodeManagerServiceClient:
       StreamingNodeHandlerServiceClient:
