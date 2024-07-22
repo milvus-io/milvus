@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -45,7 +44,6 @@ type PipelineParams struct {
 	MsgStreamFactory   dependency.Factory
 	DispClient         msgdispatcher.Client
 	ChunkManager       storage.ChunkManager
-	Session            *sessionutil.Session
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface

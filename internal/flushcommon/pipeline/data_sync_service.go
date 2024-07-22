@@ -207,7 +207,7 @@ func getServiceWithChannel(initCtx context.Context, params *util2.PipelineParams
 		collectionID: collectionID,
 		vChannelName: channelName,
 		metacache:    metacache,
-		serverID:     params.Session.ServerID,
+		serverID:     paramtable.GetNodeID(),
 	}
 
 	err := params.WriteBufferManager.Register(channelName, metacache, storageV2Cache,
@@ -312,13 +312,22 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineP
 
 func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
 	// recover segment checkpoints
-	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
-	if err != nil {
-		return nil, err
+	var (
+		err                   error
+		unflushedSegmentInfos []*datapb.SegmentInfo
+		flushedSegmentInfos   []*datapb.SegmentInfo
+	)
+	if len(info.GetVchan().GetUnflushedSegmentIds()) > 0 {
+		unflushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
-	flushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
+	if len(info.GetVchan().GetFlushedSegmentIds()) > 0 {
+		flushedSegmentInfos, err = pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// init metaCache meta

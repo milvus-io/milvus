@@ -93,6 +93,8 @@ func (f *flusherImpl) DeregisterVChannel(vchannel string) {
 }
 
 func (f *flusherImpl) Start() {
+	f.wbMgr.Start()
+	go f.cpUpdater.Start()
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()

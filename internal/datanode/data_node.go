@@ -418,7 +418,6 @@ func getPipelineParams(node *DataNode) *util2.PipelineParams {
 		MsgStreamFactory:   node.factory,
 		DispClient:         node.dispClient,
 		ChunkManager:       node.chunkManager,
-		Session:            node.session,
 		WriteBufferManager: node.writeBufferManager,
 		CheckpointUpdater:  node.channelCheckpointUpdater,
 		Allocator:          node.allocator,

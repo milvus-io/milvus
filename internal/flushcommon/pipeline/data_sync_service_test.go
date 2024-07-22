@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -207,7 +206,6 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 				Ctx:                context.TODO(),
 				Broker:             mockBroker,
 				ChunkManager:       cm,
-				Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 				SyncMgr:            syncmgr.NewMockSyncManager(t),
 				WriteBufferManager: wbManager,
 				Allocator:          allocator.NewMockAllocator(t),
@@ -250,7 +248,6 @@ func TestGetChannelWithTickler(t *testing.T) {
 		Ctx:                context.TODO(),
 		Broker:             broker.NewMockBroker(t),
 		ChunkManager:       chunkManager,
-		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: writebuffer.NewMockBufferManager(t),
 		Allocator:          allocator.NewMockAllocator(t),
@@ -346,7 +343,6 @@ func (s *DataSyncServiceSuite) SetupTest() {
 		MsgStreamFactory:   s.factory,
 		Broker:             s.broker,
 		ChunkManager:       s.chunkManager,
-		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		CheckpointUpdater:  s.channelCheckpointUpdater,
 		SyncMgr:            syncmgr.NewMockSyncManager(s.T()),
 		WriteBufferManager: s.wbManager,

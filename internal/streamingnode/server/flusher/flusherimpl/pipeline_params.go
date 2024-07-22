@@ -18,9 +18,9 @@ package flusherimpl
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -42,8 +42,6 @@ func initPipelineParams() {
 			wbMgr       = writebuffer.NewManager(syncMgr)
 			cpUpdater   = util2.NewChannelCheckpointUpdater(coordBroker)
 		)
-		wbMgr.Start()
-		go cpUpdater.Start()
 		pipelineParams = &util2.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             coordBroker,

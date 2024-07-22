@@ -62,7 +62,6 @@ func Init(opts ...optResourceInit) {
 	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 
 	assertNotNil(r.TSOAllocator())
-	assertNotNil(r.ETCD())
 	assertNotNil(r.RootCoordClient())
 }
 
