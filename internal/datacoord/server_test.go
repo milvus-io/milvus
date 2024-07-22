@@ -3339,6 +3339,57 @@ func TestDataCoord_EnableActiveStandby(t *testing.T) {
 	}, time.Second*5, time.Millisecond*100)
 }
 
+func TestLoadCollectionFromRootCoord(t *testing.T) {
+	broker := broker.NewMockBroker(t)
+	s := &Server{
+		broker: broker,
+		meta:   &meta{collections: make(map[UniqueID]*collectionInfo)},
+	}
+
+	t.Run("has collection fail with error", func(t *testing.T) {
+		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
+			Return(false, errors.New("has collection error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "has collection error")
+	})
+
+	t.Run("has collection with not found", func(t *testing.T) {
+		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
+	})
+
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
+
+	t.Run("describeCollectionInternal fail", func(t *testing.T) {
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("describeCollectionInternal error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "describeCollectionInternal error")
+	})
+
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+	}, nil).Twice()
+
+	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
+		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.Error(t, err, "ShowPartitionsInternal error")
+	})
+
+	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
+	t.Run("ok", func(t *testing.T) {
+		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(s.meta.collections))
+		_, ok := s.meta.collections[1]
+		assert.True(t, ok)
+	})
+}
+
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.CheckAutoBalanceConfigInterval.Key)
