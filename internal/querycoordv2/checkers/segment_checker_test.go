@@ -448,7 +448,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.SegmentID())
 	suite.EqualValues(1, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test less version exist on leader
 	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
