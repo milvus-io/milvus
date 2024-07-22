@@ -22,7 +22,8 @@ prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
 default_index_params = ct.default_index
-default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE"}
+default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE",
+                            'indexed_rows': 0, 'pending_index_rows': 0, 'state': 3, 'total_rows': 0}
 default_sparse_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
@@ -2100,6 +2101,7 @@ class TestAutoIndex(TestcaseBase):
                 expect_autoindex_params = index_params
         if index_params.get("metric_type"):
             expect_autoindex_params["metric_type"] = index_params["metric_type"]
+            expect_autoindex_params.update({'indexed_rows': 0, 'pending_index_rows': 0, 'state': 3, 'total_rows': 0})
         assert actual_index_params == expect_autoindex_params
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2126,7 +2128,8 @@ class TestAutoIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         collection_w.create_index(binary_field_name, {})
-        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING'}
+        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING',
+                                                  'indexed_rows': 0, 'pending_index_rows': 0, 'state': 3, 'total_rows': 0}
 
 
 @pytest.mark.tags(CaseLabel.GPU)

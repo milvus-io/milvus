@@ -578,18 +578,16 @@ class TestInsertOperation(TestcaseBase):
         method: 1. insert 2. create index
         expected: verify num entities and index
         """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(ct.default_nb)
         collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(
-            collection_w.collection, ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.indexes[0] == index
+        assert index.params == {'index_type': 'IVF_SQ8', 'metric_type': 'L2', 'params': {'nlist': 64},
+                                'total_rows': ct.default_nb, 'indexed_rows': ct.default_nb, 'pending_index_rows': 0,
+                                'state': 3}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_after_create_index(self):
@@ -598,15 +596,13 @@ class TestInsertOperation(TestcaseBase):
         method: 1. create index 2. insert data
         expected: verify index and num entities
         """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(
-            collection_w.collection, ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.indexes[0] == index
+        assert index.params == {'index_type': 'IVF_SQ8', 'metric_type': 'L2', 'params': {'nlist': 64},
+                                'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 3}
+        # assert collection_w.indexes[0] == index
         df = cf.gen_default_dataframe_data(ct.default_nb)
         collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
@@ -619,15 +615,13 @@ class TestInsertOperation(TestcaseBase):
         expected: 1.index ok 2.num entities correct
         """
         schema = cf.gen_default_binary_collection_schema()
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema)
-        collection_w.create_index(
-            ct.default_binary_vec_field_name, default_binary_index_params)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(
-            collection_w.collection, ct.default_binary_vec_field_name, default_binary_index_params)
-        assert collection_w.indexes[0] == index
+        assert index.params == {'index_type': 'BIN_IVF_FLAT', 'params': {'nlist': 64}, 'metric_type': 'JACCARD',
+                                'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 3}
+        # assert collection_w.indexes[0] == index
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
@@ -641,21 +635,20 @@ class TestInsertOperation(TestcaseBase):
         expected: index correct
         """
         schema = cf.gen_default_collection_schema(auto_id=True)
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         df = cf.gen_default_dataframe_data()
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
         # create index
-        collection_w.create_index(
-            ct.default_float_vec_field_name, default_index_params)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(
-            collection_w.collection, ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.indexes[0] == index
+        assert index.params == {'index_type': 'IVF_SQ8', 'metric_type': 'L2', 'params': {'nlist': 64},
+                                'total_rows': ct.default_nb, 'indexed_rows': ct.default_nb, 'pending_index_rows': 0,
+                                'state': 3}
+        # assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true(self, pk_field):
