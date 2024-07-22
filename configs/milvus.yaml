@@ -206,7 +206,7 @@ proxy:
   maxDimension: 32768 # Maximum dimension of a vector
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
-  ginLogging: true
+  ginLogging: false
   ginLogSkipPaths: "/" # skipped url path for gin log split by comma
   maxTaskNum: 1024 # max task number of proxy task queue
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info

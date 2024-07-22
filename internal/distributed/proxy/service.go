@@ -65,6 +65,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -169,6 +170,18 @@ func (s *Server) registerHTTPServer() {
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
+	ginHandler.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+
+		// Process request
+		c.Next()
+
+		latency := time.Now().Sub(start)
+		metrics.RestfulReqLatency.WithLabelValues(
+			path,
+		).Observe(float64(latency.Milliseconds()))
+	})
 	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
 		Formatter: func(param gin.LogFormatterParams) string {

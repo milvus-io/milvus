@@ -90,6 +90,7 @@ const (
 	lockSource               = "lock_source"
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
+	restfulPathLableName     = "path"
 
 	// entities label
 	LoadedLabel         = "loaded"

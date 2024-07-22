@@ -242,6 +242,16 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
 
+	// RestfulReqLatency records the latency for restful
+	RestfulReqLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_req_latency",
+			Help:      "latency of each request",
+			Buckets:   buckets, // unit: ms
+		}, []string{restfulPathLableName})
+
 	// ProxyReceiveBytes record the received bytes of messages in Proxy
 	ProxyReceiveBytes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -367,6 +377,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyFunctionCall)
 	registry.MustRegister(ProxyReqLatency)
+	registry.MustRegister(RestfulReqLatency)
 
 	registry.MustRegister(ProxyReceiveBytes)
 	registry.MustRegister(ProxyReadReqSendBytes)
