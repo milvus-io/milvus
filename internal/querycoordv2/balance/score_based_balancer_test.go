@@ -84,15 +84,16 @@ func (suite *ScoreBasedBalancerTestSuite) TearDownTest() {
 
 func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 	cases := []struct {
-		name          string
-		comment       string
-		distributions map[int64][]*meta.Segment
-		assignments   [][]*meta.Segment
-		nodes         []int64
-		collectionIDs []int64
-		segmentCnts   []int
-		states        []session.State
-		expectPlans   [][]SegmentAssignPlan
+		name               string
+		comment            string
+		distributions      map[int64][]*meta.Segment
+		assignments        [][]*meta.Segment
+		nodes              []int64
+		collectionIDs      []int64
+		segmentCnts        []int
+		states             []session.State
+		expectPlans        [][]SegmentAssignPlan
+		unstableAssignment bool
 	}{
 		{
 			name:          "test empty cluster assigning one collection",
@@ -109,6 +110,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			collectionIDs: []int64{0},
 			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
 			segmentCnts:   []int{0, 0, 0},
+			// assign segment to empty cluster will cause unstable assignment
+			unstableAssignment: true,
 			expectPlans: [][]SegmentAssignPlan{
 				{
 					// as assign segments is used while loading collection,
@@ -233,7 +236,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			}
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes, false)
-				suite.ElementsMatch(c.expectPlans[i], plans)
+				if c.unstableAssignment {
+					suite.Len(plans, len(c.expectPlans[i]))
+				} else {
+					suite.ElementsMatch(c.expectPlans[i], plans)
+				}
 			}
 		})
 	}
