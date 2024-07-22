@@ -122,7 +122,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		task, err := task.NewSegmentTask(s.ctx,
+		t, err := task.NewSegmentTask(s.ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -140,13 +140,15 @@ func (s *Server) balanceSegments(ctx context.Context,
 			)
 			continue
 		}
-		task.SetReason("manual balance")
-		err = s.taskScheduler.Add(task)
+		t.SetReason("manual balance")
+		// set manual balance to normal, to avoid manual balance be canceled by other segment task
+		t.SetPriority(task.TaskPriorityNormal)
+		err = s.taskScheduler.Add(t)
 		if err != nil {
-			task.Cancel(err)
+			t.Cancel(err)
 			return err
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, t)
 	}
 
 	if sync {
@@ -198,7 +200,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
 			actions = append(actions, releaseAction)
 		}
-		task, err := task.NewChannelTask(s.ctx,
+		t, err := task.NewChannelTask(s.ctx,
 			Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -215,13 +217,15 @@ func (s *Server) balanceChannels(ctx context.Context,
 			)
 			continue
 		}
-		task.SetReason("manual balance")
-		err = s.taskScheduler.Add(task)
+		t.SetReason("manual balance")
+		// set manual balance channel to high, to avoid manual balance be canceled by other channel task
+		t.SetPriority(task.TaskPriorityHigh)
+		err = s.taskScheduler.Add(t)
 		if err != nil {
-			task.Cancel(err)
+			t.Cancel(err)
 			return err
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, t)
 	}
 
 	if sync {
