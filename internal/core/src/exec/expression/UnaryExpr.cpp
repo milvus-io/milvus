@@ -212,15 +212,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>();
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>();
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>();
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>();
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
