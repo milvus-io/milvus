@@ -49,6 +49,9 @@ export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 if [[ ! `conan remote list` == *default-conan-local* ]]; then
     conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
 fi
+
+conan profile detect
+
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
