@@ -2824,7 +2824,7 @@ user-task-polling:
 		Key:          "queryNode.enableSegmentPrune",
 		Version:      "2.3.4",
 		DefaultValue: "false",
-		Doc:          "use partition prune function on shard delegator",
+		Doc:          "use partition stats to prune data in search/query on shard delegator",
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
@@ -2885,7 +2885,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
-	TotalGrowingSizeThresholdInMB  ParamItem `refreshable:"true"`
+	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
@@ -3126,15 +3126,15 @@ the number of binlog file reaches to max value.`,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
 
-	p.TotalGrowingSizeThresholdInMB = ParamItem{
-		Key:          "dataCoord.segment.totalGrowingSizeThresholdInMB",
+	p.GrowingSegmentsMemSizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
 		Version:      "2.4.6",
 		DefaultValue: "4096",
-		Doc: `The size threshold in MB, if the total size of growing segments 
+		Doc: `The size threshold in MB, if the total size of growing segments of each shard 
 exceeds this threshold, the largest growing segment will be sealed.`,
 		Export: true,
 	}
-	p.TotalGrowingSizeThresholdInMB.Init(base.mgr)
+	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
@@ -3369,6 +3369,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
 		Version:      "2.4.6",
 		DefaultValue: "600",
+		Doc:          "clustering compaction trigger interval in seconds",
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
@@ -3414,6 +3415,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.timeout",
 		Version:      "2.4.6",
 		DefaultValue: "3600",
+		Doc:          "timeout in seconds for clustering compaction, the task will stop if timeout",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
 
@@ -4171,7 +4173,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
-		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
+		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
 		Export:       true,
