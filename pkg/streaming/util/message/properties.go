@@ -2,11 +2,12 @@ package message
 
 const (
 	// preserved properties
-	messageVersion       = "_v"  // message version for compatibility.
-	messageTypeKey       = "_t"  // message type key.
-	messageTimeTick      = "_tt" // message time tick.
-	messageLastConfirmed = "_lc" // message last confirmed message id.
-	messageVChannel      = "_vc" // message virtual channel.
+	messageVersion          = "_v"  // message version for compatibility.
+	messageTypeKey          = "_t"  // message type key.
+	messageTimeTick         = "_tt" // message time tick.
+	messageLastConfirmed    = "_lc" // message last confirmed message id.
+	messageVChannel         = "_vc" // message virtual channel.
+	messageSpecialiedHeader = "_sh" // specialized message header.
 )
 
 var (

@@ -1077,6 +1077,14 @@ func (s *Server) stopServerLoop() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
+	has, err := s.broker.HasCollection(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

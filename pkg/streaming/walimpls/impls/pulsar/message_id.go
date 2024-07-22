@@ -1,7 +1,7 @@
 package pulsar
 
 import (
-	"encoding/hex"
+	"encoding/base64"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
@@ -10,6 +10,12 @@ import (
 )
 
 var _ message.MessageID = pulsarID{}
+
+// NewPulsarID creates a new pulsarID
+// TODO: remove in future.
+func NewPulsarID(id pulsar.MessageID) message.MessageID {
+	return pulsarID{id}
+}
 
 func UnmarshalMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalMessageID(data)
@@ -20,9 +26,9 @@ func UnmarshalMessageID(data string) (message.MessageID, error) {
 }
 
 func unmarshalMessageID(data string) (pulsarID, error) {
-	val, err := hex.DecodeString(data)
+	val, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when decode hex with err: %s, id: %s", err.Error(), data)
+		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when decode base64 with err: %s, id: %s", err.Error(), data)
 	}
 	msgID, err := pulsar.DeserializeMessageID(val)
 	if err != nil {
@@ -33,6 +39,13 @@ func unmarshalMessageID(data string) (pulsarID, error) {
 
 type pulsarID struct {
 	pulsar.MessageID
+}
+
+// PulsarID returns the pulsar message id.
+// Don't delete this function until conversion logic removed.
+// TODO: remove in future.
+func (id pulsarID) PulsarID() pulsar.MessageID {
+	return id.MessageID
 }
 
 func (id pulsarID) WALName() string {
@@ -69,5 +82,5 @@ func (id pulsarID) EQ(other message.MessageID) bool {
 }
 
 func (id pulsarID) Marshal() string {
-	return hex.EncodeToString(id.Serialize())
+	return base64.StdEncoding.EncodeToString(id.Serialize())
 }
