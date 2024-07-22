@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -100,7 +101,7 @@ type DataNode struct {
 	segmentCache             *util.Cache
 	compactionExecutor       compaction.Executor
 	timeTickSender           *util.TimeTickSender
-	channelCheckpointUpdater *util.ChannelCheckpointUpdater
+	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -270,7 +271,7 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
-		node.channelCheckpointUpdater = util.NewChannelCheckpointUpdater(node.broker)
+		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		log.Info("init datanode done", zap.String("Address", node.address))
@@ -415,8 +416,8 @@ func (node *DataNode) GetSession() *sessionutil.Session {
 	return node.session
 }
 
-func getPipelineParams(node *DataNode) *util.PipelineParams {
-	return &util.PipelineParams{
+func getPipelineParams(node *DataNode) *util2.PipelineParams {
+	return &util2.PipelineParams{
 		Ctx:                node.ctx,
 		Broker:             node.broker,
 		SyncMgr:            node.syncMgr,

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -35,26 +36,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type (
-	// UniqueID is type int64
-	UniqueID = typeutil.UniqueID
-
-	// Timestamp is type uint64
-	Timestamp = typeutil.Timestamp
-
-	// IntPrimaryKey is type int64
-	IntPrimaryKey = typeutil.IntPrimaryKey
-
-	// DSL is type string
-	DSL = string
-)
-
 type PipelineParams struct {
 	Ctx                context.Context
 	Broker             broker.Broker
 	SyncMgr            syncmgr.SyncManager
-	TimeTickSender     *TimeTickSender     // reference to TimeTickSender
-	CompactionExecutor compaction.Executor // reference to compaction executor
+	TimeTickSender     *util.TimeTickSender // reference to TimeTickSender
+	CompactionExecutor compaction.Executor  // reference to compaction executor
 	MsgStreamFactory   dependency.Factory
 	DispClient         msgdispatcher.Client
 	ChunkManager       storage.ChunkManager
@@ -66,8 +53,8 @@ type PipelineParams struct {
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
 type TimeRange struct {
-	TimestampMin Timestamp
-	TimestampMax Timestamp
+	TimestampMin typeutil.Timestamp
+	TimestampMax typeutil.Timestamp
 }
 
 func StartTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span) {

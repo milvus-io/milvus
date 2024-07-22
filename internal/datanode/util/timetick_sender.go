@@ -31,10 +31,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type StatsUpdater interface {
-	Update(channel string, ts Timestamp, stats []*commonpb.SegmentStats)
+	Update(channel string, ts typeutil.Timestamp, stats []*commonpb.SegmentStats)
 }
 
 // TimeTickSender is to merge channel states updated by flow graph node and send to datacoord periodically

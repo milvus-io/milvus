@@ -35,7 +35,7 @@ type RateCollector struct {
 	*ratelimitutil.RateCollector
 
 	flowGraphTtMu sync.Mutex
-	flowGraphTt   map[string]Timestamp
+	flowGraphTt   map[string]typeutil.Timestamp
 }
 
 func InitGlobalRateCollector() error {
@@ -64,12 +64,12 @@ func NewRateCollector() (*RateCollector, error) {
 	}
 	return &RateCollector{
 		RateCollector: rc,
-		flowGraphTt:   make(map[string]Timestamp),
+		flowGraphTt:   make(map[string]typeutil.Timestamp),
 	}, nil
 }
 
 // UpdateFlowGraphTt updates RateCollector's flow graph time tick.
-func (r *RateCollector) UpdateFlowGraphTt(channel string, t Timestamp) {
+func (r *RateCollector) UpdateFlowGraphTt(channel string, t typeutil.Timestamp) {
 	r.flowGraphTtMu.Lock()
 	defer r.flowGraphTtMu.Unlock()
 	r.flowGraphTt[channel] = t
@@ -83,7 +83,7 @@ func (r *RateCollector) RemoveFlowGraphChannel(channel string) {
 }
 
 // GetMinFlowGraphTt returns the vchannel and minimal time tick of flow graphs.
-func (r *RateCollector) GetMinFlowGraphTt() (string, Timestamp) {
+func (r *RateCollector) GetMinFlowGraphTt() (string, typeutil.Timestamp) {
 	r.flowGraphTtMu.Lock()
 	defer r.flowGraphTtMu.Unlock()
 	minTt := typeutil.MaxTimestamp

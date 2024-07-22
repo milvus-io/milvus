@@ -3,11 +3,10 @@ package resource
 import (
 	"reflect"
 
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/types"
 )

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -66,11 +67,11 @@ func TestFlowGraphManager(t *testing.T) {
 	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
 	dispClient.EXPECT().Deregister(mock.Anything)
 
-	pipelineParams := &util.PipelineParams{
+	pipelineParams := &util2.PipelineParams{
 		Ctx:                context.TODO(),
 		Broker:             mockBroker,
 		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
-		CheckpointUpdater:  util.NewChannelCheckpointUpdater(mockBroker),
+		CheckpointUpdater:  util2.NewChannelCheckpointUpdater(mockBroker),
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: wbm,
 		Allocator:          allocator.NewMockAllocator(t),

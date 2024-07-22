@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const returnError = "ReturnError"
@@ -81,9 +82,9 @@ type DataFactory struct {
 
 type RootCoordFactory struct {
 	types.RootCoordClient
-	ID             UniqueID
+	ID             typeutil.UniqueID
 	collectionName string
-	collectionID   UniqueID
+	collectionID   typeutil.UniqueID
 	pkType         schemapb.DataType
 
 	ReportImportErr        bool
@@ -235,7 +236,7 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 	}, nil
 }
 
-func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string, pkDataType schemapb.DataType) *etcdpb.CollectionMeta {
+func (mf *MetaFactory) GetCollectionMeta(collectionID typeutil.UniqueID, collectionName string, pkDataType schemapb.DataType) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "test collection by meta factory",
@@ -251,9 +252,9 @@ func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName s
 	return &etcdpb.CollectionMeta{
 		ID:           collectionID,
 		Schema:       &sch,
-		CreateTime:   Timestamp(1),
-		SegmentIDs:   make([]UniqueID, 0),
-		PartitionIDs: []UniqueID{0},
+		CreateTime:   typeutil.Timestamp(1),
+		SegmentIDs:   make([]typeutil.UniqueID, 0),
+		PartitionIDs: []typeutil.UniqueID{0},
 	}
 }
 
@@ -669,16 +670,16 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
-				Timestamp: Timestamp(idx + 1000),
+				Timestamp: typeutil.Timestamp(idx + 1000),
 				SourceID:  0,
 			},
 			CollectionName: "col1",
 			PartitionName:  "default",
 			SegmentID:      1,
-			CollectionID:   UniqueID(0),
+			CollectionID:   typeutil.UniqueID(0),
 			ShardName:      chanName,
-			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
-			RowIDs:         []UniqueID{UniqueID(idx)},
+			Timestamps:     []typeutil.Timestamp{typeutil.Timestamp(idx + 1000)},
+			RowIDs:         []typeutil.UniqueID{typeutil.UniqueID(idx)},
 			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
 			FieldsData: df.columnData,
 			Version:    msgpb.InsertDataVersion_ColumnBased,
@@ -688,7 +689,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 	return msg
 }
 
-func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts Timestamp) *msgstream.InsertMsg {
+func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts typeutil.Timestamp) *msgstream.InsertMsg {
 	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
@@ -705,10 +706,10 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 			CollectionName: "col1",
 			PartitionName:  "default",
 			SegmentID:      1,
-			CollectionID:   UniqueID(0),
+			CollectionID:   typeutil.UniqueID(0),
 			ShardName:      chanName,
-			Timestamps:     []Timestamp{ts},
-			RowIDs:         []UniqueID{UniqueID(idx)},
+			Timestamps:     []typeutil.Timestamp{ts},
+			RowIDs:         []typeutil.UniqueID{typeutil.UniqueID(idx)},
 			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
 			FieldsData: df.columnData,
 			Version:    msgpb.InsertDataVersion_ColumnBased,
@@ -718,7 +719,7 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 	return msg
 }
 
-func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts Timestamp) (inMsgs []msgstream.TsMsg) {
+func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts typeutil.Timestamp) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
 		msg := df.GenMsgStreamInsertMsgWithTs(i, chanName, ts)
 		var tsMsg msgstream.TsMsg = msg
@@ -737,9 +738,9 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMs
 
 func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName string) *msgstream.DeleteMsg {
 	idx := 100
-	timestamps := make([]Timestamp, len(pks))
+	timestamps := make([]typeutil.Timestamp, len(pks))
 	for i := 0; i < len(pks); i++ {
-		timestamps[i] = Timestamp(i) + 1000
+		timestamps[i] = typeutil.Timestamp(i) + 1000
 	}
 	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -749,7 +750,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     0,
-				Timestamp: Timestamp(idx + 1000),
+				Timestamp: typeutil.Timestamp(idx + 1000),
 				SourceID:  0,
 			},
 			CollectionName: "col1",
@@ -764,7 +765,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 	return msg
 }
 
-func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.PrimaryKey, chanName string, ts Timestamp) *msgstream.DeleteMsg {
+func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.PrimaryKey, chanName string, ts typeutil.Timestamp) *msgstream.DeleteMsg {
 	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
@@ -781,17 +782,17 @@ func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.Primar
 			CollectionName: "col1",
 			PartitionName:  "default",
 			PartitionID:    1,
-			CollectionID:   UniqueID(0),
+			CollectionID:   typeutil.UniqueID(0),
 			ShardName:      chanName,
 			PrimaryKeys:    storage.ParsePrimaryKeys2IDs(pks),
-			Timestamps:     []Timestamp{ts},
+			Timestamps:     []typeutil.Timestamp{ts},
 			NumRows:        int64(len(pks)),
 		},
 	}
 	return msg
 }
 
-func (m *RootCoordFactory) setCollectionID(id UniqueID) {
+func (m *RootCoordFactory) setCollectionID(id typeutil.UniqueID) {
 	m.collectionID = id
 }
 
@@ -942,7 +943,7 @@ func EmptyBfsFactory(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
 	return metacache.NewBloomFilterSet()
 }
 
-func GetWatchInfoByOpID(opID UniqueID, channel string, state datapb.ChannelWatchState) *datapb.ChannelWatchInfo {
+func GetWatchInfoByOpID(opID typeutil.UniqueID, channel string, state datapb.ChannelWatchState) *datapb.ChannelWatchInfo {
 	return &datapb.ChannelWatchInfo{
 		OpID:  opID,
 		State: state,

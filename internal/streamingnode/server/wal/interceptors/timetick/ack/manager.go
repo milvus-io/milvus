@@ -31,14 +31,14 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 	defer ta.mu.Unlock()
 
 	// allocate one from underlying allocator first.
-	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
+	ts, err := resource.Resource().TSOAllocator().AllocOne()
 	if err != nil {
 		return nil, err
 	}
 
 	// create new timestampAck for ack process.
 	// add ts to heap wait for ack.
-	tsWithAck := newAcker(ts, ta.lastConfirmedMessageID)
+	tsWithAck := newAcker(uint64(ts), ta.lastConfirmedMessageID)
 	ta.notAckHeap.Push(tsWithAck)
 	return tsWithAck, nil
 }

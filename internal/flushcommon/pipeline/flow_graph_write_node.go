@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -66,7 +67,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	var spans []trace.Span
 	for _, msg := range fgMsg.InsertMessages {
-		ctx, sp := util.StartTracer(msg, "WriteNode")
+		ctx, sp := util2.StartTracer(msg, "WriteNode")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}

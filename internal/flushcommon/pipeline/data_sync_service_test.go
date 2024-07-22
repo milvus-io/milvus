@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -125,16 +126,16 @@ type testInfo struct {
 	channelNil   bool
 	inMsgFactory dependency.Factory
 
-	collID   util.UniqueID
+	collID   typeutil.UniqueID
 	chanName string
 
-	ufCollID   util.UniqueID
-	ufSegID    util.UniqueID
+	ufCollID   typeutil.UniqueID
+	ufSegID    typeutil.UniqueID
 	ufchanName string
 	ufNor      int64
 
-	fCollID   util.UniqueID
-	fSegID    util.UniqueID
+	fCollID   typeutil.UniqueID
+	fSegID    typeutil.UniqueID
 	fchanName string
 	fNor      int64
 
@@ -202,7 +203,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 					})
 				}, nil)
 
-			pipelineParams := &util.PipelineParams{
+			pipelineParams := &util2.PipelineParams{
 				Ctx:                context.TODO(),
 				Broker:             mockBroker,
 				ChunkManager:       cm,
@@ -245,7 +246,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 	meta := util.NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
 	info.Schema = meta.GetSchema()
 
-	pipelineParams := &util.PipelineParams{
+	pipelineParams := &util2.PipelineParams{
 		Ctx:                context.TODO(),
 		Broker:             broker.NewMockBroker(t),
 		ChunkManager:       chunkManager,
@@ -301,12 +302,12 @@ type DataSyncServiceSuite struct {
 	suite.Suite
 	util.MockDataSuiteBase
 
-	pipelineParams           *util.PipelineParams // node param
+	pipelineParams           *util2.PipelineParams // node param
 	chunkManager             *mocks.ChunkManager
 	broker                   *broker.MockBroker
 	allocator                *allocator.MockAllocator
 	wbManager                *writebuffer.MockBufferManager
-	channelCheckpointUpdater *util.ChannelCheckpointUpdater
+	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 	factory                  *dependency.MockFactory
 	ms                       *msgstream.MockMsgStream
 	msChan                   chan *msgstream.MsgPack
@@ -328,7 +329,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "0.01")
 	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "10")
-	s.channelCheckpointUpdater = util.NewChannelCheckpointUpdater(s.broker)
+	s.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(s.broker)
 
 	go s.channelCheckpointUpdater.Start()
 	s.msChan = make(chan *msgstream.MsgPack, 1)
@@ -340,7 +341,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.ms.EXPECT().Chan().Return(s.msChan)
 	s.ms.EXPECT().Close().Return()
 
-	s.pipelineParams = &util.PipelineParams{
+	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
 		MsgStreamFactory:   s.factory,
 		Broker:             s.broker,
@@ -360,7 +361,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		insertChannelName = fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
 
 		Factory  = &util.MetaFactory{}
-		collMeta = Factory.GetCollectionMeta(util.UniqueID(0), "coll1", schemapb.DataType_Int64)
+		collMeta = Factory.GetCollectionMeta(typeutil.UniqueID(0), "coll1", schemapb.DataType_Int64)
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -437,7 +438,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	sync.Start()
 	defer sync.close()
 
-	timeRange := util.TimeRange{
+	timeRange := util2.TimeRange{
 		TimestampMin: 0,
 		TimestampMax: math.MaxUint64 - 1,
 	}
@@ -472,7 +473,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		TimeTickMsg: msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     util.UniqueID(0),
+				MsgID:     typeutil.UniqueID(0),
 				Timestamp: tsoutil.GetCurrentTime(),
 				SourceID:  0,
 			},

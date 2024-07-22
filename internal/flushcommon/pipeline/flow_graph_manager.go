@@ -19,13 +19,12 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -106,7 +105,7 @@ func (fm *fgManagerImpl) HasFlowgraph(channel string) bool {
 	return exist
 }
 
-func (fm *fgManagerImpl) HasFlowgraphWithOpID(channel string, opID util.UniqueID) bool {
+func (fm *fgManagerImpl) HasFlowgraphWithOpID(channel string, opID typeutil.UniqueID) bool {
 	ds, exist := fm.flowgraphs.Get(channel)
 	return exist && ds.opID == opID
 }

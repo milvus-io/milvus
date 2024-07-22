@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/util"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -62,15 +64,15 @@ type ddNode struct {
 	BaseNode
 
 	ctx          context.Context
-	collectionID util.UniqueID
+	collectionID typeutil.UniqueID
 	vChannelName string
 
 	dropMode           atomic.Value
 	compactionExecutor compaction.Executor
 
 	// for recovery
-	growingSegInfo    map[util.UniqueID]*datapb.SegmentInfo // segmentID
-	sealedSegInfo     map[util.UniqueID]*datapb.SegmentInfo // segmentID
+	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
+	sealedSegInfo     map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
 	droppedSegmentIDs []int64
 }
 
@@ -103,7 +105,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		fgMsg := FlowGraphMsg{
 			BaseMsg:        flowgraph.NewBaseMsg(true),
 			InsertMessages: make([]*msgstream.InsertMsg, 0),
-			TimeRange: util.TimeRange{
+			TimeRange: util2.TimeRange{
 				TimestampMin: msMsg.TimestampMin(),
 				TimestampMax: msMsg.TimestampMax(),
 			},
@@ -122,7 +124,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	var spans []trace.Span
 	for _, msg := range msMsg.TsMessages() {
-		ctx, sp := util.StartTracer(msg, "DDNode-Operate")
+		ctx, sp := util2.StartTracer(msg, "DDNode-Operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -134,7 +136,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	fgMsg := FlowGraphMsg{
 		InsertMessages: make([]*msgstream.InsertMsg, 0),
-		TimeRange: util.TimeRange{
+		TimeRange: util2.TimeRange{
 			TimestampMin: msMsg.TimestampMin(),
 			TimestampMax: msMsg.TimestampMax(),
 		},
@@ -270,7 +272,7 @@ func (ddn *ddNode) tryToFilterSegmentInsertMessages(msg *msgstream.InsertMsg) bo
 	return false
 }
 
-func (ddn *ddNode) isDropped(segID util.UniqueID) bool {
+func (ddn *ddNode) isDropped(segID typeutil.UniqueID) bool {
 	for _, droppedSegmentID := range ddn.droppedSegmentIDs {
 		if droppedSegmentID == segID {
 			return true
@@ -283,7 +285,7 @@ func (ddn *ddNode) Close() {
 	log.Info("Flowgraph DD Node closing")
 }
 
-func newDDNode(ctx context.Context, collID util.UniqueID, vChannelName string, droppedSegmentIDs []util.UniqueID,
+func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
 	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
@@ -294,8 +296,8 @@ func newDDNode(ctx context.Context, collID util.UniqueID, vChannelName string, d
 		ctx:                ctx,
 		BaseNode:           baseNode,
 		collectionID:       collID,
-		sealedSegInfo:      make(map[util.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
-		growingSegInfo:     make(map[util.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
+		sealedSegInfo:      make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
+		growingSegInfo:     make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
 		compactionExecutor: executor,

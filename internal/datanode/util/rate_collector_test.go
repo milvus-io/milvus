@@ -37,6 +37,6 @@ func TestRateCollector(t *testing.T) {
 		collector.UpdateFlowGraphTt("channel3", 50)
 		c, minTt = collector.GetMinFlowGraphTt()
 		assert.Equal(t, "channel3", c)
-		assert.Equal(t, Timestamp(50), minTt)
+		assert.Equal(t, typeutil.Timestamp(50), minTt)
 	})
 }

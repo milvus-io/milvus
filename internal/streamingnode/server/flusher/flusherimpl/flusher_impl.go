@@ -23,9 +23,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -46,13 +46,13 @@ type flusherImpl struct {
 	fgMgr     pipeline.FlowgraphManager
 	syncMgr   syncmgr.SyncManager
 	wbMgr     writebuffer.BufferManager
-	cpUpdater *util.ChannelCheckpointUpdater
+	cpUpdater *util2.ChannelCheckpointUpdater
 
 	stopOnce sync.Once
 	stopChan chan struct{}
 }
 
-func NewFlusher(params *util.PipelineParams) flusher.Flusher {
+func NewFlusher(params *util2.PipelineParams) flusher.Flusher {
 	fgMgr := pipeline.NewFlowgraphManager()
 	return &flusherImpl{
 		tasks:     typeutil.NewConcurrentMap[string, wal.WAL](),

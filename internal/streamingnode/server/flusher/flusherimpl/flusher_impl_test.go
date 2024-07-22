@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -56,7 +56,7 @@ func (s *FlusherSuite) SetupTest() {
 }
 
 func (s *FlusherSuite) TestFlusher() {
-
+	// TODO:
 }
 
 func TestFlusherSuite(t *testing.T) {

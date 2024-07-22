@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -64,9 +64,9 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 	}
 
 	var (
-		collectionID  = util.UniqueID(1)
+		collectionID  = typeutil.UniqueID(1)
 		channelName   = fmt.Sprintf("by-dev-rootcoord-dml-%s", t.Name())
-		droppedSegIDs = []util.UniqueID{}
+		droppedSegIDs = []typeutil.UniqueID{}
 	)
 
 	for _, test := range tests {
@@ -120,9 +120,9 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		}
 		// valid inputs
 		tests := []struct {
-			ddnCollID util.UniqueID
+			ddnCollID typeutil.UniqueID
 
-			msgCollID     util.UniqueID
+			msgCollID     typeutil.UniqueID
 			expectedChlen int
 
 			description string
@@ -170,22 +170,22 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 	t.Run("Test DDNode Operate DropPartition Msg", func(t *testing.T) {
 		// valid inputs
 		tests := []struct {
-			ddnCollID util.UniqueID
+			ddnCollID typeutil.UniqueID
 
-			msgCollID    util.UniqueID
-			msgPartID    util.UniqueID
-			expectOutput []util.UniqueID
+			msgCollID    typeutil.UniqueID
+			msgPartID    typeutil.UniqueID
+			expectOutput []typeutil.UniqueID
 
 			description string
 		}{
 			{
 				1, 1, 101,
-				[]util.UniqueID{101},
+				[]typeutil.UniqueID{101},
 				"DropCollectionMsg collID == ddNode collID",
 			},
 			{
 				1, 2, 101,
-				[]util.UniqueID{},
+				[]typeutil.UniqueID{},
 				"DropCollectionMsg collID != ddNode collID",
 			},
 		}
@@ -220,12 +220,12 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 	})
 
 	t.Run("Test DDNode Operate and filter insert msg", func(t *testing.T) {
-		var collectionID util.UniqueID = 1
+		var collectionID typeutil.UniqueID = 1
 		// Prepare ddNode states
 		ddn := ddNode{
 			ctx:               context.Background(),
 			collectionID:      collectionID,
-			droppedSegmentIDs: []util.UniqueID{100},
+			droppedSegmentIDs: []typeutil.UniqueID{100},
 		}
 
 		tsMessages := []msgstream.TsMsg{getInsertMsg(100, 10000), getInsertMsg(200, 20000)}
@@ -237,10 +237,10 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 	t.Run("Test DDNode Operate Delete Msg", func(t *testing.T) {
 		tests := []struct {
-			ddnCollID   util.UniqueID
-			inMsgCollID util.UniqueID
+			ddnCollID   typeutil.UniqueID
+			inMsgCollID typeutil.UniqueID
 
-			MsgEndTs util.Timestamp
+			MsgEndTs typeutil.Timestamp
 
 			expectedRtLen int
 			description   string
@@ -283,16 +283,16 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 	tests := []struct {
 		description string
 
-		droppedSegIDs  []util.UniqueID
-		sealedSegInfo  map[util.UniqueID]*datapb.SegmentInfo
-		growingSegInfo map[util.UniqueID]*datapb.SegmentInfo
+		droppedSegIDs  []typeutil.UniqueID
+		sealedSegInfo  map[typeutil.UniqueID]*datapb.SegmentInfo
+		growingSegInfo map[typeutil.UniqueID]*datapb.SegmentInfo
 
 		inMsg    *msgstream.InsertMsg
 		expected bool
 	}{
 		{
 			"test dropped segments true",
-			[]util.UniqueID{100},
+			[]typeutil.UniqueID{100},
 			nil,
 			nil,
 			getInsertMsg(100, 10000),
@@ -300,7 +300,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test dropped segments true 2",
-			[]util.UniqueID{100, 101, 102},
+			[]typeutil.UniqueID{100, 101, 102},
 			nil,
 			nil,
 			getInsertMsg(102, 10000),
@@ -308,8 +308,8 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test sealed segments msgTs <= segmentTs true",
-			[]util.UniqueID{},
-			map[util.UniqueID]*datapb.SegmentInfo{
+			[]typeutil.UniqueID{},
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -319,8 +319,8 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test sealed segments msgTs <= segmentTs true",
-			[]util.UniqueID{},
-			map[util.UniqueID]*datapb.SegmentInfo{
+			[]typeutil.UniqueID{},
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -330,8 +330,8 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test sealed segments msgTs > segmentTs false",
-			[]util.UniqueID{},
-			map[util.UniqueID]*datapb.SegmentInfo{
+			[]typeutil.UniqueID{},
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -341,9 +341,9 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test growing segments msgTs <= segmentTs true",
-			[]util.UniqueID{},
+			[]typeutil.UniqueID{},
 			nil,
-			map[util.UniqueID]*datapb.SegmentInfo{
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -352,9 +352,9 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test growing segments msgTs > segmentTs false",
-			[]util.UniqueID{},
+			[]typeutil.UniqueID{},
 			nil,
-			map[util.UniqueID]*datapb.SegmentInfo{
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -363,12 +363,12 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		},
 		{
 			"test not exist",
-			[]util.UniqueID{},
-			map[util.UniqueID]*datapb.SegmentInfo{
+			[]typeutil.UniqueID{},
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				400: getSegmentInfo(500, 50000),
 				500: getSegmentInfo(400, 50000),
 			},
-			map[util.UniqueID]*datapb.SegmentInfo{
+			map[typeutil.UniqueID]*datapb.SegmentInfo{
 				200: getSegmentInfo(200, 50000),
 				300: getSegmentInfo(300, 50000),
 			},
@@ -378,7 +378,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 		// for pChannel reuse on same collection
 		{
 			"test insert msg with different channelName",
-			[]util.UniqueID{100},
+			[]typeutil.UniqueID{100},
 			nil,
 			nil,
 			getInsertMsgWithChannel(100, 10000, anotherChannelName),
@@ -406,10 +406,10 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			description string
 			segRemained bool
 
-			segTs util.Timestamp
-			msgTs util.Timestamp
+			segTs typeutil.Timestamp
+			msgTs typeutil.Timestamp
 
-			sealedSegInfo map[util.UniqueID]*datapb.SegmentInfo
+			sealedSegInfo map[typeutil.UniqueID]*datapb.SegmentInfo
 			inMsg         *msgstream.InsertMsg
 			msgFiltered   bool
 		}{
@@ -418,7 +418,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				true,
 				50000,
 				10000,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -430,7 +430,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				true,
 				50000,
 				10000,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -442,7 +442,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 				false,
 				50000,
 				10000,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 70000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -475,14 +475,14 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			description string
 			segRemained bool
 
-			growingSegInfo map[util.UniqueID]*datapb.SegmentInfo
+			growingSegInfo map[typeutil.UniqueID]*datapb.SegmentInfo
 			inMsg          *msgstream.InsertMsg
 			msgFiltered    bool
 		}{
 			{
 				"msgTs<segTs",
 				true,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -492,7 +492,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			{
 				"msgTs==segTs",
 				true,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -502,7 +502,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			{
 				"msgTs>segTs",
 				false,
-				map[util.UniqueID]*datapb.SegmentInfo{
+				map[typeutil.UniqueID]*datapb.SegmentInfo{
 					100: getSegmentInfo(100, 50000),
 					101: getSegmentInfo(101, 50000),
 				},
@@ -536,7 +536,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 	tests := []struct {
 		indroppedSegment []*datapb.SegmentInfo
-		inSeg            util.UniqueID
+		inSeg            typeutil.UniqueID
 
 		expectedOut bool
 
@@ -582,18 +582,18 @@ func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 	}
 }
 
-func getSegmentInfo(segmentID util.UniqueID, ts util.Timestamp) *datapb.SegmentInfo {
+func getSegmentInfo(segmentID typeutil.UniqueID, ts typeutil.Timestamp) *datapb.SegmentInfo {
 	return &datapb.SegmentInfo{
 		ID:          segmentID,
 		DmlPosition: &msgpb.MsgPosition{Timestamp: ts},
 	}
 }
 
-func getInsertMsg(segmentID util.UniqueID, ts util.Timestamp) *msgstream.InsertMsg {
+func getInsertMsg(segmentID typeutil.UniqueID, ts typeutil.Timestamp) *msgstream.InsertMsg {
 	return getInsertMsgWithChannel(segmentID, ts, ddNodeChannelName)
 }
 
-func getInsertMsgWithChannel(segmentID util.UniqueID, ts util.Timestamp, vChannelName string) *msgstream.InsertMsg {
+func getInsertMsgWithChannel(segmentID typeutil.UniqueID, ts typeutil.Timestamp, vChannelName string) *msgstream.InsertMsg {
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{EndTimestamp: ts},
 		InsertRequest: msgpb.InsertRequest{

@@ -21,14 +21,15 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/datanode/broker"
-	"github.com/milvus-io/milvus/internal/datanode/util" // TODO: move util to flushcommon
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var (
-	pipelineParams *util.PipelineParams
+	pipelineParams *util2.PipelineParams
 	initOnce       sync.Once
 )
 
@@ -37,13 +38,13 @@ func initPipelineParams() {
 		var (
 			rsc         = resource.Resource()
 			syncMgr     = syncmgr.NewSyncManager(rsc.ChunkManager())
-			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), 0 /*TODO: fix paramtable.Get().StreamingNodeCfg.GetNodeID()*/)
+			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
 			wbMgr       = writebuffer.NewManager(syncMgr)
-			cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
+			cpUpdater   = util2.NewChannelCheckpointUpdater(coordBroker)
 		)
 		wbMgr.Start()
 		go cpUpdater.Start()
-		pipelineParams = &util.PipelineParams{
+		pipelineParams = &util2.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             coordBroker,
 			SyncMgr:            syncMgr,
@@ -55,7 +56,7 @@ func initPipelineParams() {
 	})
 }
 
-func GetPipelineParams() *util.PipelineParams {
+func GetPipelineParams() *util2.PipelineParams {
 	initPipelineParams()
 	return pipelineParams
 }
