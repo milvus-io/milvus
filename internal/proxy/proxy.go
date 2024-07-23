@@ -148,6 +148,10 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
+	if hookError := initHook(); hookError != nil {
+		log.Warn("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
+		hoo = defaultHook{}
+	}
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }

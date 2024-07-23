@@ -159,6 +159,7 @@ func TestHTTPWrapper(t *testing.T) {
 func TestGrpcWrapper(t *testing.T) {
 	getTestCases := []rawTestCase{}
 	getTestCasesNeedAuth := []rawTestCase{}
+	proxy.SetMockAPIHook("", nil)
 	needAuthPrefix := "/auth"
 	ginHandler := gin.Default()
 	app := ginHandler.Group("")
@@ -374,6 +375,7 @@ func TestTimeout(t *testing.T) {
 func TestDatabaseWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
 		Status:  &StatusSuccess,
 		DbNames: []string{DefaultCollectionName, "exist"},
@@ -466,6 +468,7 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(11)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
@@ -693,6 +696,7 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 func TestMethodGet(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
 		Status: &StatusSuccess,
 	}, nil).Once()
@@ -918,6 +922,7 @@ var commonErrorStatus = &commonpb.Status{
 func TestMethodDelete(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DeleteCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -969,6 +974,7 @@ func TestMethodDelete(t *testing.T) {
 func TestMethodPost(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
@@ -1077,6 +1083,7 @@ func TestMethodPost(t *testing.T) {
 func TestDML(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
@@ -1198,6 +1205,7 @@ func TestDML(t *testing.T) {
 func TestSearchV2(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	proxy.SetMockAPIHook("", nil)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
