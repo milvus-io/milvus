@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"plugin"
 	"sync"
+	"sync/atomic"
 
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
@@ -38,10 +38,32 @@ var (
 	initOnce  sync.Once
 )
 
+// hookContainer is Container to wrap hook.Hook interface
+// this struct is used to be stored in atomic.Value
+// since different type stored in it will cause panicking.
+type hookContainer struct {
+	hook hook.Hook
+}
+
+// extensionContainer is Container to wrap hook.Extension interface
+// this struct is used to be stored in atomic.Value
+// since different type stored in it will cause panicking.
+type extensionContainer struct {
+	extension hook.Extension
+}
+
+func storeHook(hook hook.Hook) {
+	hoo.Store(hookContainer{hook: hook})
+}
+
+func storeExtension(ext hook.Extension) {
+	extension.Store(extensionContainer{extension: ext})
+}
+
 func initHook() error {
 	// setup default hook & extension
-	hoo.Store(DefaultHook{})
-	extension.Store(DefaultExtension{})
+	storeHook(DefaultHook{})
+	storeExtension(DefaultExtension{})
 
 	path := paramtable.Get().ProxyCfg.SoPath.GetValue()
 	if path == "" {
@@ -70,17 +92,17 @@ func initHook() error {
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
-	hoo.Store(hookVal)
+	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
 		log.Info("receive the hook refresh event", zap.Any("event", event))
 		go func() {
-			hookVal := hoo.Load().(hook.Hook)
+			hookVal := GetHook()
 			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
 			log.Info("refresh hook configs", zap.Any("config", soConfig))
 			if err = hookVal.Init(soConfig); err != nil {
 				log.Panic("fail to init configs for the hook when refreshing", zap.Error(err))
 			}
-			hoo.Store(hookVal)
+			storeHook(hookVal)
 		}()
 	})
 
@@ -93,7 +115,7 @@ func initHook() error {
 	if !ok {
 		return fmt.Errorf("fail to convert the `Extension` interface")
 	}
-	extension.Store(extVal)
+	storeExtension(extVal)
 
 	return nil
 }
@@ -116,11 +138,11 @@ func InitOnceHook() {
 // GetHook returns singleton hook.Hook instance.
 func GetHook() hook.Hook {
 	InitOnceHook()
-	return hoo.Load().(hook.Hook)
+	return hoo.Load().(hookContainer).hook
 }
 
 // GetHook returns singleton hook.Extension instance.
 func GetExtension() hook.Extension {
 	InitOnceHook()
-	return extension.Load().(hook.Extension)
+	return extension.Load().(extensionContainer).extension
 }
