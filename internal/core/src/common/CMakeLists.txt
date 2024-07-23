@@ -24,6 +24,7 @@ set(COMMON_SRC
         EasyAssert.cpp
         FieldData.cpp
         RegexQuery.cpp
+        NullBitmapConcatenater.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
