@@ -12,20 +12,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-  - name: Generate CCache Hash
-    env:
-      CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
-    run: |
-      echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-      echo "Set CCache hash to ${CORE_HASH}"
-    shell: bash
-  - name: Cache CCache Volumes
-    if: ${{ inputs.kind == 'all' || inputs.kind == 'cpp' }}
-    uses: actions/cache/save@v4
-    with:
-      path: .docker/amd64-${{ inputs.os }}-ccache
-      key: ${{ inputs.os }}-ccache-${{ env.corehash }}
-      restore-keys: ${{ inputs.os }}-ccache-
   - name: Cache Conan Packages
     if: ${{ inputs.kind == 'all' || inputs.kind == 'cpp' }}
     uses: actions/cache/save@v4
