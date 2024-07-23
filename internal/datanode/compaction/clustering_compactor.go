@@ -22,6 +22,8 @@ import (
 	sio "io"
 	"math"
 	"path"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -447,7 +449,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
+		t.clusterBufferLocks.RLock(buffer.id)
 		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
+		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	return totalBufferSize
 }
@@ -546,6 +550,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			err := pkIter.Next()
 			if err != nil {
 				if err == sio.EOF {
+					pkIter.Close()
 					break
 				} else {
 					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
@@ -923,6 +928,10 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 			return err
 		}
 	}
+
+	writer = nil
+	runtime.GC()
+	debug.FreeOSMemory()
 	log.Info("finish flush binlogs", zap.Int64("flushCount", t.flushCount.Load()),
 		zap.Int64("cost", time.Since(start).Milliseconds()))
 	return nil
