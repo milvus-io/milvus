@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"reflect"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -20,6 +22,20 @@ type optResourceInit func(r *resourceImpl)
 func OptFlusher(flusher flusher.Flusher) optResourceInit {
 	return func(r *resourceImpl) {
 		r.flusher = flusher
+	}
+}
+
+// OptSyncManager provides the sync manager to the resource.
+func OptSyncManager(syncMgr syncmgr.SyncManager) optResourceInit {
+	return func(r *resourceImpl) {
+		r.syncMgr = syncMgr
+	}
+}
+
+// OptBufferManager provides the write buffer manager to the resource.
+func OptBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
+	return func(r *resourceImpl) {
+		r.wbMgr = wbMgr
 	}
 }
 
@@ -73,7 +89,10 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	flusher            flusher.Flusher
+	flusher flusher.Flusher
+	syncMgr syncmgr.SyncManager
+	wbMgr   writebuffer.BufferManager
+
 	timestampAllocator idalloc.Allocator
 	idAllocator        idalloc.Allocator
 	etcdClient         *clientv3.Client
@@ -85,6 +104,16 @@ type resourceImpl struct {
 // Flusher returns the flusher.
 func (r *resourceImpl) Flusher() flusher.Flusher {
 	return r.flusher
+}
+
+// SyncManager returns the sync manager.
+func (r *resourceImpl) SyncManager() syncmgr.SyncManager {
+	return r.syncMgr
+}
+
+// BufferManager returns the write buffer manager.
+func (r *resourceImpl) BufferManager() writebuffer.BufferManager {
+	return r.wbMgr
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.

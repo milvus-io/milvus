@@ -21,7 +21,7 @@ import "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 type Flusher interface {
 	// RegisterPChannel ASYNCHRONOUSLY creates and starts pipelines belonging to the pchannel/WAL.
 	// If a pipeline creation fails, the flusher will keep retrying to create it indefinitely.
-	RegisterPChannel(w wal.WAL) error
+	RegisterPChannel(pchannel string, w wal.WAL) error
 
 	// DeregisterPChannel stops and removes pipelines belonging to the pchannel.
 	DeregisterPChannel(pchannel string)

@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -32,7 +31,6 @@ import (
 type FlowgraphManager interface {
 	AddFlowgraph(ds *DataSyncService)
 	RemoveFlowgraph(channel string)
-	RemoveFlowgraphsByPChannel(pchannel string)
 	ClearFlowgraphs()
 
 	GetFlowgraphService(channel string) (*DataSyncService, bool)
@@ -74,15 +72,6 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		util.GetRateCollector().RemoveFlowGraphChannel(channel)
 	}
-}
-
-func (fm *fgManagerImpl) RemoveFlowgraphsByPChannel(pchannel string) {
-	fm.flowgraphs.Range(func(vchannel string, ds *DataSyncService) bool {
-		if funcutil.ToPhysicalChannel(vchannel) == pchannel {
-			fm.RemoveFlowgraph(vchannel)
-		}
-		return true
-	})
 }
 
 func (fm *fgManagerImpl) ClearFlowgraphs() {

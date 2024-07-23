@@ -18,6 +18,9 @@ package flusherimpl
 
 import (
 	"context"
+	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"sync"
 	"time"
 
@@ -38,38 +41,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+var (
+	tickDuration = 3 * time.Second
+)
+
 var _ flusher.Flusher = (*flusherImpl)(nil)
 
 type flusherImpl struct {
-	tasks *typeutil.ConcurrentMap[string, wal.WAL] // unwatched vchannels
-
 	fgMgr     pipeline.FlowgraphManager
 	syncMgr   syncmgr.SyncManager
 	wbMgr     writebuffer.BufferManager
 	cpUpdater *util2.ChannelCheckpointUpdater
 
+	tasks    *typeutil.ConcurrentMap[string, wal.WAL]     // unwatched vchannels
+	scanners *typeutil.ConcurrentMap[string, wal.Scanner] // watched scanners
+
 	stopOnce sync.Once
 	stopChan chan struct{}
 }
 
-func NewFlusher(params *util2.PipelineParams) flusher.Flusher {
+func NewFlusher() flusher.Flusher {
+	params := GetPipelineParams()
 	fgMgr := pipeline.NewFlowgraphManager()
 	return &flusherImpl{
-		tasks:     typeutil.NewConcurrentMap[string, wal.WAL](),
 		fgMgr:     fgMgr,
 		syncMgr:   params.SyncMgr,
 		wbMgr:     params.WriteBufferManager,
 		cpUpdater: params.CheckpointUpdater,
+		tasks:     typeutil.NewConcurrentMap[string, wal.WAL](),
+		scanners:  typeutil.NewConcurrentMap[string, wal.Scanner](),
 		stopOnce:  sync.Once{},
 		stopChan:  make(chan struct{}),
 	}
 }
 
-func (f *flusherImpl) RegisterPChannel(wal wal.WAL) error {
+func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	resp, err := resource.Resource().RootCoordClient().GetVChannels(ctx, &rootcoordpb.GetVChannelsRequest{
-		Pchannel: wal.WALName(),
+		Pchannel: pchannel,
 	})
 	if err != nil {
 		return err
@@ -81,7 +91,13 @@ func (f *flusherImpl) RegisterPChannel(wal wal.WAL) error {
 }
 
 func (f *flusherImpl) DeregisterPChannel(pchannel string) {
-	f.fgMgr.RemoveFlowgraphsByPChannel(pchannel)
+	f.scanners.Range(func(vchannel string, scanner wal.Scanner) bool {
+		if funcutil.ToPhysicalChannel(vchannel) != pchannel {
+			return true
+		}
+		f.DeregisterVChannel(vchannel)
+		return true
+	})
 }
 
 func (f *flusherImpl) RegisterVChannel(vchannel string, wal wal.WAL) {
@@ -89,14 +105,21 @@ func (f *flusherImpl) RegisterVChannel(vchannel string, wal wal.WAL) {
 }
 
 func (f *flusherImpl) DeregisterVChannel(vchannel string) {
+	if scanner, ok := f.scanners.GetAndRemove(vchannel); ok {
+		err := scanner.Close()
+		if err != nil {
+			log.Warn("scanner error", zap.String("vchannel", vchannel), zap.Error(err))
+		}
+	}
 	f.fgMgr.RemoveFlowgraph(vchannel)
+	f.wbMgr.RemoveChannel(vchannel)
 }
 
 func (f *flusherImpl) Start() {
 	f.wbMgr.Start()
 	go f.cpUpdater.Start()
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
+		ticker := time.NewTicker(tickDuration)
 		defer ticker.Stop()
 		for {
 			select {
@@ -121,6 +144,13 @@ func (f *flusherImpl) Start() {
 func (f *flusherImpl) Stop() {
 	f.stopOnce.Do(func() {
 		close(f.stopChan)
+		f.scanners.Range(func(vchannel string, scanner wal.Scanner) bool {
+			err := scanner.Close()
+			if err != nil {
+				log.Warn("scanner error", zap.String("vchannel", vchannel), zap.Error(err))
+			}
+			return true
+		})
 		f.fgMgr.ClearFlowgraphs()
 		f.wbMgr.Stop()
 		f.cpUpdater.Close()
@@ -131,7 +161,9 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	if f.fgMgr.HasFlowgraph(vchannel) {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+
+	// Get recovery info from datacoord.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 	resp, err := resource.Resource().DataCoordClient().
 		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
@@ -139,20 +171,31 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 		return err
 	}
 
-	var messageID message.MessageID // TODO: parse info.GetSeekPosition().GetMsgID() into message.MessageID
-	policy := options.DeliverPolicyStartFrom(messageID)
-	filter := func(msg message.ImmutableMessage) bool {
-		return msg.VChannel() == vchannel
+	// Convert common.MessageID to message.messageID.
+	mqWrapperID, err := adaptor.DeserializeToMQWrapperID(resp.GetInfo().GetSeekPosition().GetMsgID(), w.WALName())
+	if err != nil {
+		return err
 	}
-	ro := wal.ReadOption{DeliverPolicy: policy, MessageFilter: filter}
+	messageID := adaptor.MustGetMessageIDFromMQWrapperID(mqWrapperID)
+
+	// Create scanner.
+	policy := options.DeliverPolicyStartFrom(messageID)
+	filter := func(msg message.ImmutableMessage) bool { return msg.VChannel() == vchannel }
+	handler := adaptor2.NewMsgPackAdaptorHandler()
+	ro := wal.ReadOption{
+		DeliverPolicy:  policy,
+		MessageFilter:  filter,
+		MesasgeHandler: handler,
+	}
 	scanner, err := w.Read(ctx, ro)
 	if err != nil {
 		return err
 	}
+	f.scanners.Insert(vchannel, scanner)
 
-	scanner.Chan() // TODO: resolve it, pass scanner into it
+	// Build and add pipeline.
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, GetPipelineParams(),
-		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, nil)
+		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan())
 	if err != nil {
 		return err
 	}

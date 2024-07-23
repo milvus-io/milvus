@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -15,10 +16,10 @@ import (
 
 type defaultMessageHandler chan message.ImmutableMessage
 
-func (h defaultMessageHandler) Handle(ctx context.Context, upstream <-chan message.ImmutableMessage, msg message.ImmutableMessage) (incoming message.ImmutableMessage, ok bool, err error) {
+func (d defaultMessageHandler) Handle(ctx context.Context, upstream <-chan message.ImmutableMessage, msg message.ImmutableMessage) (incoming message.ImmutableMessage, ok bool, err error) {
 	var sendingCh chan message.ImmutableMessage
 	if msg != nil {
-		sendingCh = h
+		sendingCh = d
 	}
 	select {
 	case <-ctx.Done():
@@ -50,6 +51,7 @@ func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 // MsgPackAdaptorHandler is the handler for message pack.
 type MsgPackAdaptorHandler struct {
 	logger         *log.MLogger
+	closeOnce      sync.Once
 	channel        chan *msgstream.MsgPack
 	pendings       []message.ImmutableMessage                   // pendings hold the vOld message which has same time tick.
 	pendingMsgPack *typeutil.MultipartQueue[*msgstream.MsgPack] // pendingMsgPack hold unsent msgPack.
@@ -125,7 +127,9 @@ func (m *MsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableM
 	}
 }
 
-// Close close the handler.
+// Close closes the handler.
 func (m *MsgPackAdaptorHandler) Close() {
-	close(m.channel)
+	m.closeOnce.Do(func() {
+		close(m.channel)
+	})
 }

@@ -21,9 +21,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -37,9 +35,9 @@ func initPipelineParams() {
 	initOnce.Do(func() {
 		var (
 			rsc         = resource.Resource()
-			syncMgr     = syncmgr.NewSyncManager(rsc.ChunkManager())
+			syncMgr     = rsc.SyncManager()
+			wbMgr       = rsc.BufferManager()
 			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
-			wbMgr       = writebuffer.NewManager(syncMgr)
 			cpUpdater   = util2.NewChannelCheckpointUpdater(coordBroker)
 		)
 		pipelineParams = &util2.PipelineParams{

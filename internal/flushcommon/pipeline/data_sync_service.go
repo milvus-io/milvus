@@ -111,7 +111,9 @@ func (dsService *DataSyncService) close() {
 		)
 		if dsService.fg != nil {
 			log.Info("dataSyncService closing flowgraph")
-			dsService.dispClient.Deregister(dsService.vchannelName)
+			if dsService.dispClient != nil {
+				dsService.dispClient.Deregister(dsService.vchannelName)
+			}
 			dsService.fg.Close()
 			log.Info("dataSyncService flowgraph closed")
 		}
