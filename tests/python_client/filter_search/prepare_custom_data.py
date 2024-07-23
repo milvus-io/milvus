@@ -16,7 +16,7 @@ import glob
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir=".", bucket_name="milvus-bucket"):
+def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="127.0.0.1", data_size=1000000, partition_key="scalar_3", insert_mode="import", data_dir=".", bucket_name="milvus-bucket", enable_isolation="true"):
 
     if user and pwd:
         connections.connect(
@@ -45,7 +45,8 @@ def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="
     ]
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True, num_partitions=1)
     collection = Collection(name=collection_name, schema=schema, num_partitions=1)
-    collection.set_properties({"partitionkey.isolation": "true"})
+
+    collection.set_properties({"partitionkey.isolation": enable_isolation})
     logger.info(f"collection {collection_name} created: {collection.describe()}")
     index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 30, "efConstruction": 360}}
     logger.info(f"collection {collection_name} created")
@@ -174,6 +175,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--user", type=str, default="root")
     parser.add_argument("--pwd", type=str, default="P1?dBuk!6QL}=4C%skrbgoWk!QV>9t6&")
+    parser.add_argument("--enable_isolation", type=str, default="true")
     parser.add_argument("--minio_host", type=str, default="10.104.32.34")
     parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--partition_key", type=str, default="scalar_3")
@@ -181,4 +183,4 @@ if __name__ == "__main__":
     parser.add_argument("--bucket_name", type=str, default="milvus-bucket")
     parser.add_argument("--data_dir", type=str, default=".")
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, user=args.user, pwd=args.pwd, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir, bucket_name=args.bucket_name)
+    prepare_data(host=args.host, port=args.port, user=args.user, pwd=args.pwd, minio_host=args.minio_host, data_size=args.data_size, partition_key=args.partition_key, insert_mode=args.insert_mode, data_dir=args.data_dir, bucket_name=args.bucket_name, enable_isolation=args.enable_isolation)
