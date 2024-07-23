@@ -37,16 +37,13 @@ NullBitmapConcatenater::ConcatenateBitmaps() {
             // concatenated ... |             |     |             |     | ...
             //                  +-------------+-----+-------------+-----+
             //                  |     dst_byte      |   dst_byte + 1    |
-            uint8_t mask = 0xff << dst_offset;
-            auto src_byte_cnt =
-                (bitmap.second + 7) / 8 -
-                1;  // always treat the last byte as trailing bits
+            // always treat the last byte as trailing bits
+            auto src_byte_cnt = (bitmap.second + 7) / 8 - 1;
             auto trailing_bits = bitmap.second % 8 == 0 ? 8 : bitmap.second % 8;
             for (size_t i = 0; i < src_byte_cnt; i++, dst_byte++) {
                 uint8_t data_byte = bitmap.first[i];
-                concatenated_bitmap_.first[dst_byte] |=
-                    (data_byte & mask) >> dst_offset;
-                concatenated_bitmap_.first[dst_byte + 1] = (data_byte & ~mask)
+                concatenated_bitmap_.first[dst_byte] |= data_byte >> dst_offset;
+                concatenated_bitmap_.first[dst_byte + 1] = data_byte
                                                            << (8 - dst_offset);
             }
             // process trailing bits
