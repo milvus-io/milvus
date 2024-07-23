@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -91,6 +92,11 @@ func (it *insertTask) getChannels() []pChan {
 }
 
 func (it *insertTask) OnEnqueue() error {
+	if it.insertMsg.Base == nil {
+		it.insertMsg.Base = commonpbutil.NewMsgBase()
+	}
+	it.insertMsg.Base.MsgType = commonpb.MsgType_Insert
+	it.insertMsg.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
