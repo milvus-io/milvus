@@ -119,6 +119,17 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
 
 		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
+
+		params.Save("common.gcenabled", "false")
+		assert.False(t, Params.GCEnabled.GetAsBool())
+		params.Save("common.gchelper.enabled", "false")
+		assert.False(t, Params.GCHelperEnabled.GetAsBool())
+		params.Save("common.overloadedMemoryThresholdPercentage", "40")
+		assert.Equal(t, 0.4, Params.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		params.Save("common.gchelper.maximumGoGC", "100")
+		assert.Equal(t, 100, Params.MaximumGOGCConfig.GetAsInt())
+		params.Save("common.gchelper.minimumGoGC", "80")
+		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

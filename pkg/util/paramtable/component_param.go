@@ -267,6 +267,12 @@ type commonConfig struct {
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
+
+	GCEnabled                           ParamItem `refreshable:"false"`
+	GCHelperEnabled                     ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
+	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
+	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -822,6 +828,45 @@ like the old password verification when updating the credential`,
 		DefaultValue: "false",
 	}
 	p.EnableVectorClusteringKey.Init(base.mgr)
+
+	p.GCEnabled = ParamItem{
+		Key:          "common.gcenabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCEnabled.Init(base.mgr)
+
+	p.GCHelperEnabled = ParamItem{
+		Key:          "common.gchelper.enabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCHelperEnabled.Init(base.mgr)
+
+	p.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "common.overloadedMemoryThresholdPercentage",
+		Version:      "2.4.7",
+		DefaultValue: "90",
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	p.OverloadedMemoryThresholdPercentage.Init(base.mgr)
+
+	p.MaximumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.maximumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "200",
+	}
+	p.MaximumGOGCConfig.Init(base.mgr)
+
+	p.MinimumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.minimumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "30",
+	}
+	p.MinimumGOGCConfig.Init(base.mgr)
 }
 
 type gpuConfig struct {
