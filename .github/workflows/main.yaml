@@ -90,7 +90,7 @@ jobs:
           echo "useasan=ON" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
@@ -104,6 +104,13 @@ jobs:
         with:
           name: code
           path: code.zip
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+
   UT-Cpp:
     name: UT for Cpp
     needs: Build
@@ -127,7 +134,7 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
@@ -150,6 +157,12 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
   UT-Go:
     name: UT for Go
     needs: Build
@@ -173,7 +186,7 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'go'
@@ -195,6 +208,13 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
   integration-test:
     name: Integration Test
     needs: Build
@@ -218,7 +238,7 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'go'
@@ -239,6 +259,13 @@ jobs:
             ./it_coverage.txt
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go, integration-test]
