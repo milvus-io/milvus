@@ -36,19 +36,19 @@ func (m MockAPIHook) VerifyAPIKey(apiKey string) (string, error) {
 
 func SetMockAPIHook(apiUser string, mockErr error) {
 	if apiUser == "" && mockErr == nil {
-		hoo.Store(&DefaultHook{})
+		storeHook(&DefaultHook{})
 		return
 	}
-	hoo.Store(&MockAPIHook{
+	storeHook(&MockAPIHook{
 		MockErr: mockErr,
 		User:    apiUser,
 	})
 }
 
 func SetTestHook(hookVal hook.Hook) {
-	hoo.Store(hookVal)
+	storeHook(hookVal)
 }
 
 func SetTestExtension(extVal hook.Extension) {
-	extension.Store(extVal)
+	storeExtension(extVal)
 }
