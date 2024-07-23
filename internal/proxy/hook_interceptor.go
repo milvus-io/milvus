@@ -18,16 +18,16 @@ import (
 var hoo hook.Hook
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
+	if hoo == nil {
+		hookutil.InitOnceHook()
+		hoo = hookutil.Hoo
+	}
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		return HookInterceptor(ctx, req, getCurrentUser(ctx), info.FullMethod, handler)
 	}
 }
 
 func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error) {
-	if hoo == nil {
-		hookutil.InitOnceHook()
-		hoo = hookutil.Hoo
-	}
 	var (
 		newCtx   context.Context
 		isMock   bool
