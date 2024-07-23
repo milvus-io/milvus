@@ -48,6 +48,7 @@ func (stats *FieldStats) Clone() FieldStats {
 		Type:      stats.Type,
 		Max:       stats.Max,
 		Min:       stats.Min,
+		BFType:    stats.BFType,
 		BF:        stats.BF,
 		Centroids: stats.Centroids,
 	}
