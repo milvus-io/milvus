@@ -37,6 +37,7 @@ const (
 	TriggerTypeLevelZeroViewIDLE
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
+	TriggerTypeSingle
 )
 
 type TriggerManager interface {
@@ -67,6 +68,7 @@ type CompactionTriggerManager struct {
 	meta             *meta
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
+	singlePolicy     *singleCompactionPolicy
 
 	closeSig chan struct{}
 	closeWg  sync.WaitGroup
@@ -85,6 +87,7 @@ func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHan
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
+	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 	return m
 }
 
@@ -106,6 +109,8 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
+	singleTicker := time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	defer singleTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -142,6 +147,25 @@ func (m *CompactionTriggerManager) startLoop() {
 			events, err := m.clusteringPolicy.Trigger()
 			if err != nil {
 				log.Warn("Fail to trigger clustering policy", zap.Error(err))
+				continue
+			}
+			ctx := context.Background()
+			if len(events) > 0 {
+				for triggerType, views := range events {
+					m.notify(ctx, triggerType, views)
+				}
+			}
+		case <-singleTicker.C:
+			if !m.singlePolicy.Enable() {
+				continue
+			}
+			if m.compactionHandler.isFull() {
+				log.RatedInfo(10, "Skip trigger single compaction since compactionHandler is full")
+				continue
+			}
+			events, err := m.singlePolicy.Trigger()
+			if err != nil {
+				log.Warn("Fail to trigger single policy", zap.Error(err))
 				continue
 			}
 			ctx := context.Background()
@@ -204,6 +228,15 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					zap.String("reason", reason),
 					zap.String("output view", outView.String()))
 				m.SubmitClusteringViewToScheduler(ctx, outView)
+			}
+		case TriggerTypeSingle:
+			log.Debug("Start to trigger a single compaction by TriggerTypeSingle")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a MixCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitSingleViewToScheduler(ctx, outView)
 			}
 		}
 	}
@@ -303,6 +336,52 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		zap.String("type", task.GetType().String()),
 		zap.Int64("MaxSegmentRows", task.MaxSegmentRows),
 		zap.Int64("PreferSegmentRows", task.PreferSegmentRows),
+	)
+}
+
+func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
+	taskID, _, err := m.allocator.allocN(1)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		return
+	}
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		return
+	}
+	var totalRows int64 = 0
+	for _, s := range view.GetSegmentsView() {
+		totalRows += s.NumOfRows
+	}
+	task := &datapb.CompactionTask{
+		PlanID:             taskID,
+		TriggerID:          view.(*MixSegmentView).triggerID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().UnixMilli(),
+		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
+		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		TotalRows:          totalRows,
+		LastStateStartTime: time.Now().UnixMilli(),
+	}
+	err = m.compactionHandler.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to execute compaction task",
+			zap.Int64("collection", task.CollectionID),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+	}
+	log.Info("Finish to submit a single compaction task",
+		zap.Int64("taskID", taskID),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
 	)
 }
 
