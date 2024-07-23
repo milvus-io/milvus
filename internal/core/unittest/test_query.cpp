@@ -555,6 +555,7 @@ TEST(Query, FillSegment) {
     {
         auto field = proto.add_fields();
         field->set_name("fakevec");
+        field->set_nullable(false);
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
         field->set_fieldid(100);
@@ -570,6 +571,7 @@ TEST(Query, FillSegment) {
     {
         auto field = proto.add_fields();
         field->set_name("the_key");
+        field->set_nullable(false);
         field->set_fieldid(101);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
@@ -579,6 +581,7 @@ TEST(Query, FillSegment) {
     {
         auto field = proto.add_fields();
         field->set_name("the_value");
+        field->set_nullable(true);
         field->set_fieldid(102);
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
@@ -595,6 +598,7 @@ TEST(Query, FillSegment) {
         dataset.get_col<float>(FieldId(100));  // vector field
     const auto std_i32_vec =
         dataset.get_col<int32_t>(FieldId(102));  // scalar field
+    const auto i32_vec_valid_data = dataset.get_col_valid(FieldId(102));
 
     std::vector<std::unique_ptr<SegmentInternalInterface>> segments;
     segments.emplace_back([&] {
@@ -659,6 +663,8 @@ TEST(Query, FillSegment) {
         auto output_i32_field_data =
             fields_data.at(i32_field_id)->scalars().int_data().data();
         ASSERT_EQ(output_i32_field_data.size(), topk * num_queries);
+        auto output_i32_valid_data = fields_data.at(i32_field_id)->valid_data();
+        ASSERT_EQ(output_i32_valid_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {
             int64_t val = std::get<int64_t>(result->primary_keys_[i]);
@@ -666,6 +672,7 @@ TEST(Query, FillSegment) {
             auto internal_offset = result->seg_offsets_[i];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
+            auto std_i32_valid = i32_vec_valid_data[internal_offset];
             std::vector<float> std_vfloat(dim);
             std::copy_n(std_vfloat_vec.begin() + dim * internal_offset,
                         dim,
@@ -684,6 +691,10 @@ TEST(Query, FillSegment) {
                 int i32;
                 memcpy(&i32, &output_i32_field_data[i], sizeof(int32_t));
                 ASSERT_EQ(i32, std_i32);
+                // check int32 valid field
+                bool i32_valid;
+                memcpy(&i32_valid, &output_i32_valid_data[i], sizeof(bool));
+                ASSERT_EQ(i32_valid, std_i32_valid);
             }
         }
     }

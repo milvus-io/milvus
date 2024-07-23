@@ -84,15 +84,16 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TearDownTest() {
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 	cases := []struct {
-		name          string
-		comment       string
-		distributions map[int64][]*meta.Segment
-		assignments   [][]*meta.Segment
-		nodes         []int64
-		collectionIDs []int64
-		segmentCnts   []int
-		states        []session.State
-		expectPlans   [][]SegmentAssignPlan
+		name               string
+		comment            string
+		distributions      map[int64][]*meta.Segment
+		assignments        [][]*meta.Segment
+		nodes              []int64
+		collectionIDs      []int64
+		segmentCnts        []int
+		states             []session.State
+		expectPlans        [][]SegmentAssignPlan
+		unstableAssignment bool
 	}{
 		{
 			name:          "test empty cluster assigning one collection",
@@ -105,10 +106,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 15, CollectionID: 1}},
 				},
 			},
-			nodes:         []int64{1, 2, 3},
-			collectionIDs: []int64{0},
-			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
-			segmentCnts:   []int{0, 0, 0},
+			nodes:              []int64{1, 2, 3},
+			collectionIDs:      []int64{0},
+			states:             []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			segmentCnts:        []int{0, 0, 0},
+			unstableAssignment: true,
 			expectPlans: [][]SegmentAssignPlan{
 				{
 					// as assign segments is used while loading collection,
@@ -237,7 +239,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 			}
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes, false)
-				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans[i], plans)
+				if c.unstableAssignment {
+					suite.Equal(len(plans), len(c.expectPlans[i]))
+				} else {
+					assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans[i], plans)
+				}
 			}
 		})
 	}

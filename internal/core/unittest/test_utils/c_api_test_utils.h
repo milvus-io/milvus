@@ -119,28 +119,61 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
 const char*
 get_default_schema_config() {
     static std::string conf = R"(name: "default-collection"
-                            fields: <
-                              fieldID: 100
-                              name: "fakevec"
-                              data_type: FloatVector
-                              type_params: <
-                                key: "dim"
-                                value: "16"
-                              >
-                              index_params: <
-                                key: "metric_type"
-                                value: "L2"
-                              >
-                            >
-                            fields: <
-                              fieldID: 101
-                              name: "age"
-                              data_type: Int64
-                              is_primary_key: true
-                            >)";
+                                fields: <
+                                  fieldID: 100
+                                  name: "fakevec"
+                                  data_type: FloatVector
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "metric_type"
+                                    value: "L2"
+                                  >
+                                >
+                                fields: <
+                                  fieldID: 101
+                                  name: "age"
+                                  data_type: Int64
+                                  is_primary_key: true
+                                >)";
     static std::string fake_conf = "";
     return conf.c_str();
 }
+
+const char*
+get_default_schema_config_nullable() {
+    static std::string conf = R"(name: "default-collection"
+                                fields: <
+                                  fieldID: 100
+                                  name: "fakevec"
+                                  data_type: FloatVector
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "metric_type"
+                                    value: "L2"
+                                  >
+                                >
+                                fields: <
+                                  fieldID: 101
+                                  name: "age"
+                                  data_type: Int64
+                                  is_primary_key: true
+                                >
+                                fields: <
+                                  fieldID: 102
+                                  name: "nullable"
+                                  data_type: Int32
+                                  nullable:true
+                                >)";
+    static std::string fake_conf = "";
+    return conf.c_str();
+}
+
 
 CStatus
 CSearch(CSegmentInterface c_segment,
