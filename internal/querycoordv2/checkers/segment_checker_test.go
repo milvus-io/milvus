@@ -381,6 +381,18 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+
 	// set target
 	channels := []*datapb.VchannelInfo{
 		{
@@ -414,6 +426,18 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -466,6 +490,17 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, partitionID))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
+
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
 
 	// set target
 	channels := []*datapb.VchannelInfo{
@@ -531,6 +566,16 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -597,6 +642,18 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
+
 	segments := []*datapb.SegmentInfo{}
 	channels := []*datapb.VchannelInfo{
 		{
@@ -640,6 +697,11 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 
 func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
 	checker := suite.checker
+	suite.checker.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Hostname: "localhost",
+		Address:  "localhost",
+	}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)

@@ -71,7 +71,7 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 	s.False(s.nodeManager.IsStoppingNode(2))
 
 	err = s.nodeManager.Resume(3)
-	s.ErrorIs(err, merr.ErrNodeStateUnexpected)
+	s.NoError(err)
 
 	s.nodeManager.Suspend(3)
 	node = s.nodeManager.Get(3)

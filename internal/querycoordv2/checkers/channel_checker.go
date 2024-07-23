@@ -230,6 +230,11 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
+		nodeInfo := c.nodeMgr.Get(ch.Node)
+		// skip release channel for suspended node
+		if nodeInfo == nil || nodeInfo.GetState() == session.NodeStateSuspend {
+			continue
+		}
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
 		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replica, action)
 		if err != nil {
