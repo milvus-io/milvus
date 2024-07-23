@@ -69,7 +69,7 @@ InsertData::serialize_to_remote_file() {
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] =
         std::to_string(field_data_->Size());
-    //(todo:smellthemoon) set nullable
+    des_event_data.extras[NULLABLE] = field_data_->IsNullable();
 
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp

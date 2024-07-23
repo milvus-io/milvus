@@ -23,18 +23,19 @@
 namespace milvus::storage {
 
 // create payload writer for numeric data type
-PayloadWriter::PayloadWriter(const DataType column_type)
-    : column_type_(column_type) {
+PayloadWriter::PayloadWriter(const DataType column_type, bool nullable)
+    : column_type_(column_type), nullable_(nullable) {
     builder_ = CreateArrowBuilder(column_type);
-    schema_ = CreateArrowSchema(column_type);
+    schema_ = CreateArrowSchema(column_type, nullable);
 }
 
 // create payload writer for vector data type
-PayloadWriter::PayloadWriter(const DataType column_type, int dim)
-    : column_type_(column_type) {
+PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
+    : column_type_(column_type), nullable_(nullable) {
     AssertInfo(column_type != DataType::VECTOR_SPARSE_FLOAT,
                "PayloadWriter for Sparse Float Vector should be created "
                "using the constructor without dimension");
+    AssertInfo(nullable == false, "only scalcar type support null now");
     init_dimension(dim);
 }
 
@@ -48,7 +49,7 @@ PayloadWriter::init_dimension(int dim) {
 
     dimension_ = dim;
     builder_ = CreateArrowBuilder(column_type_, dim);
-    schema_ = CreateArrowSchema(column_type_, dim);
+    schema_ = CreateArrowSchema(column_type_, dim, nullable_);
 }
 
 void

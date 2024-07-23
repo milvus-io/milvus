@@ -312,7 +312,7 @@ class IndexingRecord {
         }
         auto& indexing = field_indexings_.at(fieldId);
         auto type = indexing->get_field_meta().get_data_type();
-        auto field_raw_data = record.get_field_data_base(fieldId);
+        auto field_raw_data = record.get_data_base(fieldId);
         if (type == DataType::VECTOR_FLOAT &&
             reserved_offset + size >= indexing->get_build_threshold()) {
             indexing->AppendSegmentIndexDense(
@@ -349,11 +349,11 @@ class IndexingRecord {
 
         if (type == DataType::VECTOR_FLOAT &&
             reserved_offset + size >= indexing->get_build_threshold()) {
-            auto vec_base = record.get_field_data_base(fieldId);
+            auto vec_base = record.get_data_base(fieldId);
             indexing->AppendSegmentIndexDense(
                 reserved_offset, size, vec_base, data->Data());
         } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
-            auto vec_base = record.get_field_data_base(fieldId);
+            auto vec_base = record.get_data_base(fieldId);
             indexing->AppendSegmentIndexSparse(
                 reserved_offset,
                 size,
