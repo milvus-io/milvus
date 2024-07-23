@@ -13,6 +13,7 @@ on:
       - 'build/**'
       - 'tests/integration/**' # run integration test
       - '.github/workflows/main.yaml'
+      - '.github/actions'
       - '.env'
       - docker-compose.yml
       - Makefile
@@ -30,6 +31,7 @@ on:
       - 'build/**'
       - 'tests/integration/**' # run integration test
       - '.github/workflows/main.yaml'
+      - '.github/actions'
       - '.env'
       - docker-compose.yml
       - Makefile
