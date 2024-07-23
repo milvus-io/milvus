@@ -139,8 +139,11 @@ func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 
-	for _, key := range keys {
-		delete(m.configCache, key)
+	set := typeutil.NewSet(keys...)
+	for key, _ := range m.configCache {
+		if set.Contain(formatKey(key)) {
+			delete(m.configCache, key)
+		}
 	}
 }
 
