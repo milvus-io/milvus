@@ -312,6 +312,8 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		zap.Int64("taskID", taskID),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
+		zap.Int64("MaxSegmentRows", task.MaxSegmentRows),
+		zap.Int64("PreferSegmentRows", task.PreferSegmentRows),
 	)
 }
 
