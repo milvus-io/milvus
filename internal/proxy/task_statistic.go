@@ -94,6 +94,9 @@ func (g *getStatisticsTask) OnEnqueue() error {
 	g.GetStatisticsRequest = &internalpb.GetStatisticsRequest{
 		Base: commonpbutil.NewMsgBase(),
 	}
+
+	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
+	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -106,10 +109,6 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-PreExecute")
 	defer sp.End()
-
-	// TODO: Maybe we should create a new MsgType: GetStatistics?
-	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
-	g.Base.SourceID = paramtable.GetNodeID()
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
 	if err != nil { // err is not nil if collection not exists
@@ -634,12 +633,12 @@ func (g *getCollectionStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getCollectionStatisticsTask) OnEnqueue() error {
 	g.Base = commonpbutil.NewMsgBase()
+	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
+	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
-	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
-	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -717,12 +716,12 @@ func (g *getPartitionStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getPartitionStatisticsTask) OnEnqueue() error {
 	g.Base = commonpbutil.NewMsgBase()
+	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
+	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
-	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
-	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 

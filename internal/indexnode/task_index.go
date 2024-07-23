@@ -376,6 +376,8 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
+
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()))
 	return nil
@@ -566,7 +568,6 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 			break
 		}
 	}
-	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 
 	return nil
 }

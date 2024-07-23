@@ -46,6 +46,7 @@ const (
 )
 
 type searchTask struct {
+	baseTask
 	Condition
 	ctx context.Context
 	*internalpb.SearchRequest

@@ -307,7 +307,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		if _, err = t.refreshBufferWriter(buffer); err != nil {
+		if _, err = t.refreshBufferWriterWithPack(buffer); err != nil {
 			return err
 		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -361,7 +361,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
-		if _, err = t.refreshBufferWriter(clusterBuffer); err != nil {
+		if _, err = t.refreshBufferWriterWithPack(clusterBuffer); err != nil {
 			return err
 		}
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
@@ -411,6 +411,10 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	// force flush all buffers
 	err := t.flushAll(ctx)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := t.checkBuffersAfterCompaction(); err != nil {
 		return nil, nil, err
 	}
 
@@ -592,10 +596,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 			if (remained+1)%100 == 0 {
 				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
-				currentBufferWrittenMemorySize := t.getCurrentBufferWrittenMemorySize()
-				log.Debug("current buffer size", zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize),
-					zap.Int64("currentBufferWrittenMemorySize", currentBufferWrittenMemorySize))
-
 				// trigger flushBinlog
 				currentSegmentNumRows := clusterBuffer.currentSegmentRowNum.Load()
 				if currentSegmentNumRows > t.plan.GetMaxSegmentRows() ||
@@ -603,7 +603,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 					// reach segment/binlog max size
 					t.clusterBufferLocks.Lock(clusterBuffer.id)
 					writer := clusterBuffer.writer
-					pack, _ := t.refreshBufferWriter(clusterBuffer)
+					pack, _ := t.refreshBufferWriterWithPack(clusterBuffer)
 					log.Debug("buffer need to flush", zap.Int("bufferID", clusterBuffer.id),
 						zap.Bool("pack", pack),
 						zap.Int64("current segment", writer.GetSegmentID()),
@@ -616,9 +616,10 @@ func (t *clusteringCompactionTask) mappingSegment(
 						pack:   pack,
 						id:     clusterBuffer.id,
 					}
-				} else if currentBufferTotalMemorySize > t.getMemoryBufferBlockFlushThreshold() && !t.hasSignal.Load() {
+				} else if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() && !t.hasSignal.Load() {
 					// reach flushBinlog trigger threshold
-					log.Debug("largest buffer need to flush", zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+					log.Debug("largest buffer need to flush",
+						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
 					t.flushChan <- FlushSignal{}
 					t.hasSignal.Store(true)
 				}
@@ -639,8 +640,8 @@ func (t *clusteringCompactionTask) mappingSegment(
 						default:
 							// currentSize := t.getCurrentBufferWrittenMemorySize()
 							currentSize := t.getBufferTotalUsedMemorySize()
-							if currentSize < t.getMemoryBufferBlockFlushThreshold() {
-								log.Debug("memory is already below the block watermark, continue writing",
+							if currentSize < t.getMemoryBufferHighWatermark() {
+								log.Debug("memory is already below the high watermark, continue writing",
 									zap.Int64("currentSize", currentSize))
 								break loop
 							}
@@ -692,7 +693,7 @@ func (t *clusteringCompactionTask) getMemoryBufferLowWatermark() int64 {
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferHighWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.9)
+	return int64(float64(t.memoryBufferSize) * 0.7)
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferBlockFlushThreshold() int64 {
@@ -763,7 +764,10 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 		buffer := t.clusterBuffers[bufferId]
 		writer := buffer.writer
 		currentMemorySize -= int64(writer.WrittenMemorySize())
-		pack, _ := t.refreshBufferWriter(buffer)
+		if err := t.refreshBufferWriter(buffer); err != nil {
+			t.clusterBufferLocks.Unlock(bufferId)
+			return err
+		}
 		t.clusterBufferLocks.Unlock(bufferId)
 
 		log.Info("currentMemorySize after flush buffer binlog",
@@ -772,7 +776,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 			zap.Uint64("WrittenMemorySize()", writer.WrittenMemorySize()),
 			zap.Int64("RowNum", writer.GetRowNum()))
 		future := t.flushPool.Submit(func() (any, error) {
-			err := t.flushBinlog(ctx, buffer, writer, pack)
+			err := t.flushBinlog(ctx, buffer, writer, false)
 			if err != nil {
 				return nil, err
 			}
@@ -856,7 +860,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 		zap.Int64("row num", seg.GetNumOfRows()))
 
 	// clear segment binlogs cache
-	buffer.flushedBinlogs[writer.GetSegmentID()] = nil
+	delete(buffer.flushedBinlogs, writer.GetSegmentID())
 	//set old writer nil
 	writer = nil
 	return nil
@@ -1153,7 +1157,7 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 	return buckets
 }
 
-func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (bool, error) {
+func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {
 	var segmentID int64
 	var err error
 	var pack bool
@@ -1161,7 +1165,7 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 		segmentID = buffer.writer.GetSegmentID()
 		buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
 	}
-	if buffer.writer == nil || buffer.currentSegmentRowNum.Load()+buffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() {
+	if buffer.writer == nil || buffer.currentSegmentRowNum.Load() > t.plan.GetMaxSegmentRows() {
 		pack = true
 		segmentID, err = t.segIDAlloc.AllocOne()
 		if err != nil {
@@ -1179,6 +1183,33 @@ func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) (b
 	return pack, nil
 }
 
+func (t *clusteringCompactionTask) refreshBufferWriter(buffer *ClusterBuffer) error {
+	var segmentID int64
+	var err error
+	segmentID = buffer.writer.GetSegmentID()
+	buffer.bufferMemorySize.Add(int64(buffer.writer.WrittenMemorySize()))
+
+	writer, err := NewSegmentWriter(t.plan.GetSchema(), t.plan.MaxSegmentRows, segmentID, t.partitionID, t.collectionID)
+	if err != nil {
+		return err
+	}
+
+	buffer.writer = writer
+	return nil
+}
+
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
+}
+
+func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
+	for _, buffer := range t.clusterBuffers {
+		if len(buffer.flushedBinlogs) != 0 {
+			log.Warn("there are some binlogs have leaked, please check", zap.Int("buffer id", buffer.id),
+				zap.Int64s("leak segments", lo.Keys(buffer.flushedBinlogs)))
+			log.Debug("leak binlogs", zap.Any("buffer flushedBinlogs", buffer.flushedBinlogs))
+			return fmt.Errorf("there are some binlogs have leaked")
+		}
+	}
+	return nil
 }

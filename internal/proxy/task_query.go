@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -43,6 +44,7 @@ const (
 )
 
 type queryTask struct {
+	baseTask
 	Condition
 	*internalpb.RetrieveRequest
 
@@ -710,6 +712,10 @@ func (t *queryTask) SetTs(ts Timestamp) {
 }
 
 func (t *queryTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
 	t.Base.MsgType = commonpb.MsgType_Retrieve
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }

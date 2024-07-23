@@ -266,12 +266,12 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_AlterDatabase
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterDatabase
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	return nil
 }
@@ -345,12 +345,12 @@ func (t *describeDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DescribeDatabase
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *describeDatabaseTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterCollection
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	return nil
 }
