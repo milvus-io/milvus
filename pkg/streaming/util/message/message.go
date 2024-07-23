@@ -13,6 +13,11 @@ type BasicMessage interface {
 	// MessageType returns the type of message.
 	MessageType() MessageType
 
+	// VChannel returns the virtual channel of current message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	VChannel() string
+
 	// Version returns the message version.
 	// 0: old version before streamingnode.
 	// from 1: new version after streamingnode.
@@ -57,11 +62,6 @@ type ImmutableMessage interface {
 
 	// WALName returns the name of message related wal.
 	WALName() string
-
-	// VChannel returns the virtual channel of current message.
-	// Available only when the message's version greater than 0.
-	// Otherwise, it will panic.
-	VChannel() string
 
 	// TimeTick returns the time tick of current message.
 	// Available only when the message's version greater than 0.

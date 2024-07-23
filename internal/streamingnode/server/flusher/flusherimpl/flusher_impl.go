@@ -90,12 +90,12 @@ func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 	return nil
 }
 
-func (f *flusherImpl) DeregisterPChannel(pchannel string) {
+func (f *flusherImpl) UnregisterPChannel(pchannel string) {
 	f.scanners.Range(func(vchannel string, scanner wal.Scanner) bool {
 		if funcutil.ToPhysicalChannel(vchannel) != pchannel {
 			return true
 		}
-		f.DeregisterVChannel(vchannel)
+		f.UnregisterVChannel(vchannel)
 		return true
 	})
 }
@@ -104,7 +104,7 @@ func (f *flusherImpl) RegisterVChannel(vchannel string, wal wal.WAL) {
 	f.tasks.Insert(vchannel, wal)
 }
 
-func (f *flusherImpl) DeregisterVChannel(vchannel string) {
+func (f *flusherImpl) UnregisterVChannel(vchannel string) {
 	if scanner, ok := f.scanners.GetAndRemove(vchannel); ok {
 		err := scanner.Close()
 		if err != nil {

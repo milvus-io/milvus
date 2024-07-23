@@ -137,7 +137,7 @@ func (s *FlusherSuite) TestFlusher() {
 		})
 	}, 10*time.Second, 10*time.Millisecond)
 
-	s.flusher.DeregisterPChannel(s.pchannel)
+	s.flusher.UnregisterPChannel(s.pchannel)
 	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
 	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())
 
@@ -152,7 +152,7 @@ func (s *FlusherSuite) TestFlusher() {
 	}, 10*time.Second, 10*time.Millisecond)
 
 	for _, vchannel := range s.vchannels {
-		s.flusher.DeregisterVChannel(vchannel)
+		s.flusher.UnregisterVChannel(vchannel)
 	}
 	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
 	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())

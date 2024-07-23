@@ -132,7 +132,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
-		resource.Resource().Flusher().DeregisterPChannel(w.channel)
+		resource.Resource().Flusher().UnregisterPChannel(w.channel)
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.

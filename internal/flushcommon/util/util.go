@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -47,6 +48,7 @@ type PipelineParams struct {
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface
+	FlushMsgHandler    flusher.FlushMsgHandler
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

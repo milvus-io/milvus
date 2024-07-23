@@ -79,6 +79,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 				test.inSealedSegs,
 				test.inGrowingSegs,
 				compaction.NewExecutor(),
+				nil,
 			)
 			require.NoError(t, err)
 			require.NotNil(t, ddNode)

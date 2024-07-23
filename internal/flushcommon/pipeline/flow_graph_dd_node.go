@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"reflect"
 	"sync/atomic"
 
@@ -68,6 +69,7 @@ type ddNode struct {
 
 	dropMode           atomic.Value
 	compactionExecutor compaction.Executor
+	flushMsgHandler    flusher.FlushMsgHandler
 
 	// for recovery
 	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
@@ -230,6 +232,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
+
+		case commonpb.MsgType_Flush:
+			if ddn.flushMsgHandler != nil {
+				ddn.flushMsgHandler(ddn.vChannelName, nil)
+			}
 		}
 	}
 
@@ -285,7 +292,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.FlushMsgHandler,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -300,6 +307,7 @@ func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName strin
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
 		compactionExecutor: executor,
+		flushMsgHandler:    handler,
 	}
 
 	dd.dropMode.Store(false)

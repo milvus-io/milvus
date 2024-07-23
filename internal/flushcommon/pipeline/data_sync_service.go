@@ -262,6 +262,7 @@ func getServiceWithChannel(initCtx context.Context, params *util2.PipelineParams
 		flushed,
 		unflushed,
 		params.CompactionExecutor,
+		params.FlushMsgHandler,
 	)
 	if err != nil {
 		return nil, err

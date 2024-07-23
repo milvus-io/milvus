@@ -16,25 +16,6 @@
 
 package flusher
 
-import "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+// TODO: type FlushMsgHandler = func(vchannel string, msg FlushMsg)
 
-type Flusher interface {
-	// RegisterPChannel ASYNCHRONOUSLY creates and starts pipelines belonging to the pchannel/WAL.
-	// If a pipeline creation fails, the flusher will keep retrying to create it indefinitely.
-	RegisterPChannel(pchannel string, w wal.WAL) error
-
-	// UnregisterPChannel stops and removes pipelines belonging to the pchannel.
-	UnregisterPChannel(pchannel string)
-
-	// RegisterVChannel ASYNCHRONOUSLY create pipeline belonging to the vchannel.
-	RegisterVChannel(vchannel string, wal wal.WAL)
-
-	// UnregisterVChannel stops and removes pipeline belonging to the vchannel.
-	UnregisterVChannel(vchannel string)
-
-	// Start flusher service.
-	Start()
-
-	// Stop flusher, will synchronously flush all remaining data.
-	Stop()
-}
+type FlushMsgHandler = func(vchannel string, segmentIDs []int64)
