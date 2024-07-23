@@ -852,7 +852,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 
 	// clear segment binlogs cache
 	delete(buffer.flushedBinlogs, writer.GetSegmentID())
-	//set old writer nil
+	// set old writer nil
 	writer = nil
 	return nil
 }
