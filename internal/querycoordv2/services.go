@@ -940,54 +940,10 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		// 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
 		// 4. All segments of the shard in target should be in the distribution
 		for _, leader := range leaders {
-			log := log.With(zap.Int64("leaderID", leader.ID))
-			info := s.nodeMgr.Get(leader.ID)
-
-			// Check whether leader is online
-			err := checkNodeAvailable(leader.ID, info)
-			if err != nil {
-				log.Info("leader is not available", zap.Error(err))
-				multierr.AppendInto(&channelErr, fmt.Errorf("leader not available: %w", err))
+			if err := utils.CheckLeaderAvailable(s.nodeMgr, leader, currentTargets); err != nil {
+				multierr.AppendInto(&channelErr, err)
 				continue
 			}
-			// Check whether QueryNodes are online and available
-			isAvailable := true
-			for id, version := range leader.Segments {
-				info := s.nodeMgr.Get(version.GetNodeID())
-				err = checkNodeAvailable(version.GetNodeID(), info)
-				if err != nil {
-					log.Info("leader is not available due to QueryNode unavailable",
-						zap.Int64("segmentID", id),
-						zap.Error(err))
-					isAvailable = false
-					multierr.AppendInto(&channelErr, err)
-					break
-				}
-			}
-
-			// Avoid iterating all segments if any QueryNode unavailable
-			if !isAvailable {
-				continue
-			}
-
-			// Check whether segments are fully loaded
-			for segmentID, info := range currentTargets {
-				if info.GetInsertChannel() != leader.Channel {
-					continue
-				}
-
-				_, exist := leader.Segments[segmentID]
-				if !exist {
-					log.Info("leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
-					multierr.AppendInto(&channelErr, merr.WrapErrSegmentLack(segmentID))
-					isAvailable = false
-					break
-				}
-			}
-			if !isAvailable {
-				continue
-			}
-
 			readableLeaders[leader.ID] = leader
 		}
 

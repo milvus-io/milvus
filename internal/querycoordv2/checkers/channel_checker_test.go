@@ -76,7 +76,7 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer)
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -189,6 +189,13 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
+
+	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	view1 := utils.CreateTestLeaderView(1, 1, "test-insert-channel", map[int64]int64{1: 1}, nil)
+	view2 := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, nil)
+	checker.dist.LeaderViewManager.Update(1, view1)
+	checker.dist.LeaderViewManager.Update(2, view2)
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
