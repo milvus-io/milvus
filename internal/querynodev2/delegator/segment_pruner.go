@@ -102,7 +102,11 @@ func PruneSegments(ctx context.Context,
 		}
 
 		// 1. parse expr for prune
-		expr := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
+		expr, err := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
+		if err != nil {
+			log.Ctx(ctx).RatedWarn(10, "failed to parse expr for segment prune, fallback to common search/query", zap.Error(err))
+			return
+		}
 
 		// 2. prune segments by scalar field
 		targetSegmentStats := make([]storage.SegmentStats, 0, 32)
