@@ -2,7 +2,6 @@ package writebuffer
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -10,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

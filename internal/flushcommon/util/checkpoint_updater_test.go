@@ -19,7 +19,6 @@ package util
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
+// TODO: func(vchannel string, msg FlushMsg)
 func flushMsgHandlerImpl() func(vchannel string, segmentIDs []int64) {
 	wbMgr := GetPipelineParams().WriteBufferManager
 	return func(vchannel string, segmentIDs []int64) {

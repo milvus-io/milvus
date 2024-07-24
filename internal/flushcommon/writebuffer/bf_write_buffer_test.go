@@ -2,7 +2,6 @@ package writebuffer
 
 import (
 	"fmt"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"math/rand"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

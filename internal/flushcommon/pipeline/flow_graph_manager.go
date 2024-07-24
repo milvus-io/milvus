@@ -19,9 +19,10 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
+
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

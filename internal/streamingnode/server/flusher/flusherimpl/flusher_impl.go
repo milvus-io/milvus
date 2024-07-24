@@ -18,9 +18,6 @@ package flusherimpl
 
 import (
 	"context"
-	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"sync"
 	"time"
 
@@ -35,15 +32,16 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	tickDuration = 3 * time.Second
-)
+var tickDuration = 3 * time.Second
 
 var _ flusher.Flusher = (*flusherImpl)(nil)
 

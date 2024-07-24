@@ -19,7 +19,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"reflect"
 	"sync/atomic"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
