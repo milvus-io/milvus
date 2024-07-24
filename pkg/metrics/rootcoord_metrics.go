@@ -176,7 +176,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "force_deny_writing_counter",
-			Help:      "The number of that milvus turns into force-deny-writing states",
+			Help:      "The number of times milvus turns into force-deny-writing states",
 		})
 
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.
