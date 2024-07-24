@@ -83,10 +83,13 @@ jobs:
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
           pip3 install conan==1.61.0
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            sudo ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
-          fi
-          make milvus -j2
+
+          brew uninstall llvm@15
+          brew install llvm@14
+
+          clang --version
+
+          make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
         if: ${{ failure() }}
