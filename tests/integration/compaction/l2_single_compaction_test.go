@@ -1,0 +1,246 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package compaction
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
+)
+
+type L2SingleCompactionSuite struct {
+	integration.MiniClusterSuite
+}
+
+func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := s.Cluster
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+
+	const (
+		dim        = 128
+		dbName     = "default"
+		rowNum     = 10000
+		deleteCnt  = 5000
+		indexType  = integration.IndexFaissIvfFlat
+		metricType = metric.L2
+	)
+
+	collectionName := "TestL2SingleCompaction" + funcutil.GenRandomStr()
+
+	pk := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            integration.Int64Field,
+		IsPrimaryKey:    true,
+		Description:     "",
+		DataType:        schemapb.DataType_Int64,
+		TypeParams:      nil,
+		IndexParams:     nil,
+		AutoID:          false,
+		IsClusteringKey: true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      102,
+		Name:         integration.FloatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+		IndexParams: nil,
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
+	}
+
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
+	})
+	s.NoError(err)
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+
+	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	// flush
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+
+	segments, err := c.MetaWatcher.ShowSegments()
+	s.NoError(err)
+	s.NotEmpty(segments)
+	for _, segment := range segments {
+		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+	}
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// create index
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
+	})
+	err = merr.CheckRPCCall(createIndexStatus, err)
+	s.NoError(err)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	// load
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(loadStatus, err)
+	s.NoError(err)
+	s.WaitForLoad(ctx, collectionName)
+
+	compactReq := &milvuspb.ManualCompactionRequest{
+		CollectionID:    showCollectionsResp.CollectionIds[0],
+		MajorCompaction: true,
+	}
+	compactResp, err := c.Proxy.ManualCompaction(ctx, compactReq)
+	s.NoError(err)
+	log.Info("compact", zap.Any("compactResp", compactResp))
+
+	compacted := func() bool {
+		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+			CompactionID: compactResp.GetCompactionID(),
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetState() == commonpb.CompactionState_Completed
+	}
+	for !compacted() {
+		time.Sleep(3 * time.Second)
+	}
+	log.Info("compact done")
+
+	// delete
+	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           fmt.Sprintf("%s < %d", integration.Int64Field, deleteCnt),
+	})
+	err = merr.CheckRPCCall(deleteResult, err)
+	s.NoError(err)
+
+	// flush l0
+	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	err = merr.CheckRPCCall(flushResp, err)
+	s.NoError(err)
+	flushTs, has = flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// wait for l0 compaction completed
+	showSegments := func() bool {
+		segments, err = c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		log.Info("ShowSegments result", zap.Any("segments", segments))
+		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Flushed
+		})
+		if len(flushed) == 1 &&
+			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
+			flushed[0].GetNumOfRows() == rowNum {
+			log.Info("l0 compaction done, wait for single compaction")
+		}
+		return len(flushed) == 1 &&
+			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
+			flushed[0].GetNumOfRows() == rowNum-deleteCnt
+	}
+	for !showSegments() {
+		select {
+		case <-ctx.Done():
+			s.Fail("waiting for compaction timeout")
+			return
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	log.Info("TestL2SingleCompaction succeed")
+}
+
+func TestL2SingleCompaction(t *testing.T) {
+	suite.Run(t, new(L2SingleCompactionSuite))
+}

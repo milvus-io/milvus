@@ -183,7 +183,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	return coll, nil
 }
 
-func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
+func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
 	if err != nil {
 		log.Warn("collection properties auto compaction not valid, returning false", zap.Error(err))
@@ -387,7 +387,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
+		if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
 			log.RatedInfo(20, "collection auto compaction disabled")
 			return nil
 		}
@@ -488,7 +488,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
+	if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
 		log.RatedInfo(20, "collection auto compaction disabled",
 			zap.Int64("collectionID", collectionID),
 		)
@@ -772,12 +772,44 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
+func isDeltalogTooManySegment(segment *SegmentInfo) bool {
+	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
+	log.Debug("isDeltalogTooManySegment",
+		zap.Int64("collectionID", segment.CollectionID),
+		zap.Int64("segmentID", segment.ID),
+		zap.Int("deltaLogCount", deltaLogCount))
+	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
+}
+
+func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
+	totalDeletedRows := 0
+	totalDeleteLogSize := int64(0)
+	for _, deltaLogs := range segment.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			totalDeletedRows += int(l.GetEntriesNum())
+			totalDeleteLogSize += l.GetMemorySize()
+		}
+	}
+
+	// currently delta log size and delete ratio policy is applied
+	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
+		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
+	if is {
+		log.Info("total delete entities is too much",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int64("numRows", segment.GetNumOfRows()),
+			zap.Int("deleted rows", totalDeletedRows),
+			zap.Int64("delete log size", totalDeleteLogSize))
+	}
+	return is
+}
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+	if isDeltalogTooManySegment(segment) {
 		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
 		return true
 	}
@@ -808,22 +840,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
-	totalDeletedRows := 0
-	totalDeleteLogSize := int64(0)
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetMemorySize()
-		}
-	}
-
 	// currently delta log size and delete ratio policy is applied
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		log.Info("total delete entities is too much, trigger compaction",
-			zap.Int64("segmentID", segment.ID),
-			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
+	if isDeleteRowsTooManySegment(segment) {
 		return true
 	}
 
