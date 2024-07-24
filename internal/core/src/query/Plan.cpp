@@ -80,21 +80,10 @@ ParsePlaceholderGroup(const Plan* plan,
     return result;
 }
 
-std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema,
-                       const void* serialized_expr_plan,
-                       const int64_t size) {
-    // Note: serialized_expr_plan is of binary format
-    proto::plan::PlanNode plan_node;
-    plan_node.ParseFromArray(serialized_expr_plan, size);
-    return ProtoParser(schema).CreatePlan(plan_node);
-}
-
-std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema,
-                         const void* serialized_expr_plan,
-                         const int64_t size) {
-    proto::plan::PlanNode plan_node;
+void
+ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
+                   const void* serialized_expr_plan,
+                   int64_t size) {
     google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
                                                         size);
     google::protobuf::io::CodedInputStream input_stream(&array_stream);
@@ -104,6 +93,24 @@ CreateRetrievePlanByExpr(const Schema& schema,
     if (!res) {
         PanicInfo(UnexpectedError, "parse plan node proto failed");
     }
+}
+
+std::unique_ptr<Plan>
+CreateSearchPlanByExpr(const Schema& schema,
+                       const void* serialized_expr_plan,
+                       const int64_t size) {
+    // Note: serialized_expr_plan is of binary format
+    proto::plan::PlanNode plan_node;
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
+    return ProtoParser(schema).CreatePlan(plan_node);
+}
+
+std::unique_ptr<RetrievePlan>
+CreateRetrievePlanByExpr(const Schema& schema,
+                         const void* serialized_expr_plan,
+                         const int64_t size) {
+    proto::plan::PlanNode plan_node;
+    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
     return ProtoParser(schema).CreateRetrievePlan(plan_node);
 }
 
