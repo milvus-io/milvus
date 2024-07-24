@@ -14,6 +14,10 @@ import (
 )
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+	return handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+}
+
+func handleExprWithErrorListener(schema *typeutil.SchemaHelper, exprStr string, errorListener errorListener) interface{} {
 	if isEmptyExpression(exprStr) {
 		return &ExprWithType{
 			dataType: schemapb.DataType_Bool,
@@ -22,21 +26,19 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	}
 
 	inputStream := antlr.NewInputStream(exprStr)
-	errorListener := &errorListener{}
-
 	lexer := getLexer(inputStream, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	parser := getParser(lexer, errorListener)
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	ast := parser.Expr()
-	if errorListener.err != nil {
-		return errorListener.err
+	if errorListener.Error() != nil {
+		return errorListener.Error()
 	}
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
