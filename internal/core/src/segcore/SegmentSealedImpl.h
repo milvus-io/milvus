@@ -117,6 +117,15 @@ class SegmentSealedImpl : public SegmentSealed {
         return insert_record_.search_pk(pk, ts);
     }
 
+    bool
+    is_nullable(FieldId field_id) const override {
+        auto it = fields_.find(field_id);
+        AssertInfo(it != fields_.end(),
+                   "Cannot find field with field_id: " +
+                       std::to_string(field_id.get()));
+        return it->second->IsNullable();
+    };
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -167,10 +176,10 @@ class SegmentSealedImpl : public SegmentSealed {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,

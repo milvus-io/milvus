@@ -460,6 +460,13 @@ class ThreadSafeValidData {
         return data_[offset];
     }
 
+    bool*
+    get_chunk_data(size_t offset) {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        Assert(offset < length_);
+        return &data_[offset];
+    }
+
  private:
     mutable std::shared_mutex mutex_{};
     FixedVector<bool> data_;
@@ -770,8 +777,28 @@ struct InsertRecord {
     }
 
     bool
-    is_valid_data_exist(FieldId field_id) {
+    is_data_exist(FieldId field_id) const {
+        return data_.find(field_id) != data_.end();
+    }
+
+    bool
+    is_valid_data_exist(FieldId field_id) const {
         return valid_data_.find(field_id) != valid_data_.end();
+    }
+
+    SpanBase
+    get_span_base(FieldId field_id, int64_t chunk_id) const {
+        auto data = get_data_base(field_id);
+        if (is_valid_data_exist(field_id)) {
+            auto size = data->get_chunk_size(chunk_id);
+            auto element_offset = data->get_element_offset(chunk_id);
+            return SpanBase(
+                data->get_chunk_data(chunk_id),
+                get_valid_data(field_id)->get_chunk_data(element_offset),
+                size,
+                data->get_element_size());
+        }
+        return data->get_span_base(chunk_id);
     }
 
     // append a column of scalar or sparse float vector type
