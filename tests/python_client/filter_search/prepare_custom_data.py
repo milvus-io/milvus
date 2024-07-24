@@ -155,6 +155,9 @@ def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="
                 logger.info(f"insert {len(data)} cost time {time.time() - t0}")
     else:
         raise ValueError(f"insert_mode {insert_mode} not supported")
+    collection.compact()
+    collection.wait_for_compaction_completed()
+    t0 = time.time()
     collection.create_index("emb", index_params=index_params)
     index_list = utility.list_indexes(collection_name=collection_name)
     for index_name in index_list:
@@ -164,7 +167,13 @@ def prepare_data(host="127.0.0.1", port=19530, user=None, pwd=None, minio_host="
             progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
             logger.info(f"collection {collection_name} index {index_name} progress: {progress}")
         logger.info(f"collection {collection_name} index {index_name} progress: {progress}")
+    tt = time.time() - t0
+    logger.info(f"create index cost time {tt}")
+    collection.compact()
+    collection.wait_for_compaction_completed()
+    t0 = time.time()
     collection.load()
+    logger.info(f"load collection cost time {time.time() - t0}")
     num = collection.num_entities
     logger.info(f"collection {collection_name} loaded, num_entities: {num}")
 
