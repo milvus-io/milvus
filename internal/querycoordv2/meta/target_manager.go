@@ -71,6 +71,7 @@ type TargetManagerInterface interface {
 	IsNextTargetExist(collectionID int64) bool
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
+	CanSegmentBeMoved(collectionID, segmentID int64) bool
 }
 
 type TargetManager struct {

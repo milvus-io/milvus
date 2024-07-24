@@ -157,7 +157,7 @@ type taskScheduler struct {
 
 	distMgr   *meta.DistributionManager
 	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	broker    meta.Broker
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
@@ -177,7 +177,7 @@ type taskScheduler struct {
 func NewScheduler(ctx context.Context,
 	meta *meta.Meta,
 	distMgr *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
