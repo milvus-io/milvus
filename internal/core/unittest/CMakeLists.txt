@@ -108,12 +108,9 @@ endif()
 
 if (LINUX)
     message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN AND false )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
+    message( STATUS "Building Milvus using AddressSanitizer")
+    add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+    add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
 
     # check if memory leak exists in index builder
     set(INDEX_BUILDER_TEST_FILES
