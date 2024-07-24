@@ -1610,6 +1610,7 @@ func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
+	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
 
@@ -1646,8 +1647,8 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	}
 	resp, err = server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	suite.NoError(err)
-	suite.Equal(resp.IsHealthy, true)
-	suite.Empty(resp.Reasons)
+	suite.Equal(resp.IsHealthy, false)
+	suite.NotEmpty(resp.Reasons)
 }
 
 func (suite *ServiceSuite) TestGetShardLeaders() {

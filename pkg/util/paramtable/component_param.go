@@ -1635,8 +1635,9 @@ type queryCoordConfig struct {
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval  ParamItem `refreshable:"false"`
+	CollectionObserverInterval         ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
+	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2027,6 +2028,17 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckHealthInterval.Init(base.mgr)
+
+	p.UpdateCollectionLoadStatusInterval = ParamItem{
+		Key:          "queryCoord.updateCollectionLoadStatusInterval",
+		Version:      "2.4.7",
+		DefaultValue: "5",
+		PanicIfEmpty: true,
+		Doc:          "5m, max interval for updating collection loaded status",
+		Export:       true,
+	}
+
+	p.UpdateCollectionLoadStatusInterval.Init(base.mgr)
 
 	p.CheckHealthRPCTimeout = ParamItem{
 		Key:          "queryCoord.checkHealthRPCTimeout",

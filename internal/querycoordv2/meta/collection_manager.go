@@ -47,6 +47,7 @@ type Collection struct {
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
+	isReleasing     bool
 }
 
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
@@ -54,6 +55,18 @@ func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	defer collection.mut.Unlock()
 
 	collection.refreshNotifier = notifier
+}
+
+func (collection *Collection) SetReleasing() {
+	collection.mut.Lock()
+	defer collection.mut.Unlock()
+	collection.isReleasing = true
+}
+
+func (collection *Collection) IsReleasing() bool {
+	collection.mut.RLock()
+	defer collection.mut.RUnlock()
+	return collection.isReleasing
 }
 
 func (collection *Collection) IsRefreshed() bool {
@@ -362,6 +375,15 @@ func (m *CollectionManager) Exist(collectionID typeutil.UniqueID) bool {
 
 	_, ok := m.collections[collectionID]
 	return ok
+}
+
+func (m *CollectionManager) SetReleasing(collectionID typeutil.UniqueID) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+	coll, ok := m.collections[collectionID]
+	if ok {
+		coll.SetReleasing()
+	}
 }
 
 // GetAll returns the collection ID of all loaded collections
