@@ -19,7 +19,7 @@ func TestAck(t *testing.T) {
 	ctx := context.Background()
 
 	rc := idalloc.NewMockRootCoordClient(t)
-	resource.InitForTest(resource.OptRootCoordClient(rc))
+	resource.InitForTest(t, resource.OptRootCoordClient(rc))
 
 	ackManager := NewAckManager()
 	msgID := mock_message.NewMockMessageID(t)

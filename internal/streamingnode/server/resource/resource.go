@@ -7,9 +7,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -67,6 +70,13 @@ func OptDataCoordClient(dataCoordClient types.DataCoordClient) optResourceInit {
 	}
 }
 
+// OptStreamingNodeCatalog provides the streaming node catalog to the resource.
+func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
+	return func(r *resourceImpl) {
+		r.streamingNodeCatalog = catalog
+	}
+}
+
 // Init initializes the singleton of resources.
 // Should be call when streaming node startup.
 func Init(opts ...optResourceInit) {
@@ -76,10 +86,15 @@ func Init(opts ...optResourceInit) {
 	}
 	r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
 	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+	r.segmentAssignStatsManager = stats.NewStatsManager()
+	r.segmentSealedInspector = inspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
 
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.RootCoordClient())
 	assertNotNil(r.DataCoordClient())
+	assertNotNil(r.StreamingNodeCatalog())
+	assertNotNil(r.SegmentAssignStatsManager())
+	assertNotNil(r.SegmentSealedInspector())
 }
 
 // Resource access the underlying singleton of resources.
@@ -94,12 +109,15 @@ type resourceImpl struct {
 	syncMgr syncmgr.SyncManager
 	wbMgr   writebuffer.BufferManager
 
-	timestampAllocator idalloc.Allocator
-	idAllocator        idalloc.Allocator
-	etcdClient         *clientv3.Client
-	chunkManager       storage.ChunkManager
-	rootCoordClient    types.RootCoordClient
-	dataCoordClient    types.DataCoordClient
+	timestampAllocator        idalloc.Allocator
+	idAllocator               idalloc.Allocator
+	etcdClient                *clientv3.Client
+	chunkManager              storage.ChunkManager
+	rootCoordClient           types.RootCoordClient
+	dataCoordClient           types.DataCoordClient
+	streamingNodeCatalog      metastore.StreamingNodeCataLog
+	segmentAssignStatsManager *stats.StatsManager
+	segmentSealedInspector    inspector.SealOperationInspector
 }
 
 // Flusher returns the flusher.
@@ -145,6 +163,21 @@ func (r *resourceImpl) RootCoordClient() types.RootCoordClient {
 // DataCoordClient returns the data coordinator client.
 func (r *resourceImpl) DataCoordClient() types.DataCoordClient {
 	return r.dataCoordClient
+}
+
+// StreamingNodeCataLog returns the streaming node catalog.
+func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
+	return r.streamingNodeCatalog
+}
+
+// SegmentAssignStatManager returns the segment assign stats manager.
+func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
+	return r.segmentAssignStatsManager
+}
+
+// SegmentSealedInspector returns the segment sealed inspector.
+func (r *resourceImpl) SegmentSealedInspector() inspector.SealOperationInspector {
+	return r.segmentSealedInspector
 }
 
 // assertNotNil panics if the resource is nil.
