@@ -170,6 +170,15 @@ var (
 			"name",
 		})
 
+	// RootCoordForceDenyWritingCounter records the number of times that milvus turns into force-deny-writing states.
+	RootCoordForceDenyWritingCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "force_deny_writing_counter",
+			Help:      "The number of that milvus turns into force-deny-writing states",
+		})
+
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.
 	RootCoordRateLimitRatio = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -241,6 +250,7 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
+	registry.MustRegister(RootCoordForceDenyWritingCounter)
 	registry.MustRegister(RootCoordRateLimitRatio)
 	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
 
