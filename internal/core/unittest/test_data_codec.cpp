@@ -390,7 +390,6 @@ TEST(storage, InsertDataStringNullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::STRING);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<std::string> new_data(data.size());
-    memcpy(new_data.data(), new_payload->Data(), new_payload->DataSize());
     data = {"test1", "test2", "", "", "test5"};
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] =
