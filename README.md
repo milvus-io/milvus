@@ -40,7 +40,9 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 <details>
   <summary><b>Hybrid search</b></summary>
-  In addition to vectors, Milvus supports data types such as Boolean, integers, floating-point numbers, and more. A collection in Milvus can hold multiple fields for accommodating different data features or properties. Milvus pairs scalar filtering with powerful vector similarity search to offer a modern, flexible platform for analyzing unstructured data. Check https://github.com/milvus-io/milvus/wiki/Hybrid-Search for examples and boolean expression rules.
+  Since Milvus 2.4, we introduced multi-vector support and a hybrid search framework, which means users can bring in several vector fields (up to 10) into a single collection. These vectors in different columns represent diverse facets of data, originating from different embedding models or undergoing distinct processing methods. The results of hybrid searches are integrated using reranking strategies, such as Reciprocal Rank Fusion (RRF) and Weighted Scoring.
+
+  This feature is particularly useful in comprehensive search scenarios, such as identifying the most similar person in a vector library based on various attributes like pictures, voice, fingerprints, etc. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md) for more.
   </details>
 
 <details>
