@@ -52,6 +52,9 @@ type HealthResponse struct {
 
 type HealthHandler struct {
 	indicators []Indicator
+
+	// unregister role when call stop by restful api
+	unregisteredRoles map[string]struct{}
 }
 
 var _ http.Handler = (*HealthHandler)(nil)
@@ -60,6 +63,13 @@ var defaultHandler = HealthHandler{}
 
 func Register(indicator Indicator) {
 	defaultHandler.indicators = append(defaultHandler.indicators, indicator)
+}
+
+func UnRegister(role string) {
+	if defaultHandler.unregisteredRoles == nil {
+		defaultHandler.unregisteredRoles = make(map[string]struct{})
+	}
+	defaultHandler.unregisteredRoles[role] = struct{}{}
 }
 
 func Handler() *HealthHandler {
@@ -72,6 +82,9 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx := context.Background()
 	for _, in := range handler.indicators {
+		if _, ok := handler.unregisteredRoles[in.GetName()]; ok {
+			continue
+		}
 		code := in.Health(ctx)
 		resp.Detail = append(resp.Detail, &IndicatorState{
 			Name: in.GetName(),
