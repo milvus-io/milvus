@@ -295,6 +295,11 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return s.dataCoord.AssignSegmentID(ctx, req)
 }
 
+// AllocSegment alloc a new growing segment, add it into segment meta.
+func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
+	return s.dataCoord.AllocSegment(ctx, req)
+}
+
 // GetSegmentStates gets states of segments
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return s.dataCoord.GetSegmentStates(ctx, req)
