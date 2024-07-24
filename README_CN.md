@@ -42,7 +42,9 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 <details>
   <summary><b>混合查询</b></summary>
-  除了向量以外，Milvus还支持布尔值、整型、浮点等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤。
+  Milvus 2.4 引入了多向量支持和混合查询框架，用户可以将多个向量字段（最多 10 个）导入到单个 Collection 中。这些来自不同的嵌入模型或经过不同的处理方法处理的向量分别代表了不同的数据特征。混合搜索的结果使用 reranking 策略对各向量列的结果进行融合，如 Reciprocal Rank Fusion (RRF) 和 Weighted Scoring。
+
+  该特性尤其适用于综合搜索场景，如基于多种属性（如照片、声音、指纹等）识别向量库中最相似的人。有关更多信息，请参阅 [混合搜索](https://milvus.io/cn/docs/multi-vector-search.md)。
   </details>
 
 <details>
