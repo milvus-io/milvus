@@ -12,8 +12,8 @@ func newTimeTickMsg(ts uint64, sourceID int64) (message.MutableMessage, error) {
 	// Common message's time tick is set on interceptor.
 	// TimeTickMsg's time tick should be set here.
 	msg, err := message.NewTimeTickMessageBuilderV1().
-		WithMessageHeader(&message.TimeTickMessageHeader{}).
-		WithPayload(&msgpb.TimeTickMsg{
+		WithHeader(&message.TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
 				commonpbutil.WithMsgID(0),

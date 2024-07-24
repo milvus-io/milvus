@@ -248,7 +248,7 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 		"const": "t",
 		"term":  strconv.FormatInt(int64(f.term), 10),
 	}
-	msg, err := message.NewTimeTickMessageBuilderV1().WithMessageHeader(&message.TimeTickMessageHeader{}).WithPayload(&msgpb.TimeTickMsg{
+	msg, err := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_TimeTick,
 			MsgID:   int64(f.messageCount - 1),
