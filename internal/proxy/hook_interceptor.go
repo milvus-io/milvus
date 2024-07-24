@@ -92,10 +92,8 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 
 func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error) {
 	if hoo == nil {
-		if hookError := initHook(); hookError != nil {
-			logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
-			hoo = defaultHook{}
-		}
+		log.Warn("hook is not initialized")
+		return nil, errors.New("hook is not initialized")
 	}
 	var (
 		newCtx   context.Context
