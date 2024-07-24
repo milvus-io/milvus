@@ -84,9 +84,6 @@ jobs:
           brew install libomp ninja openblas ccache pkg-config
           pip3 install conan==1.61.0
 
-          brew uninstall llvm@15
-          brew install llvm@14
-
           clang --version
 
           make milvus
