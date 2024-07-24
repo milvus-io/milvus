@@ -19,7 +19,6 @@ package compaction
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	sio "io"
 	"math"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"

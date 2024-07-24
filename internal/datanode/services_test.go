@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"math/rand"
 	"testing"
 	"time"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

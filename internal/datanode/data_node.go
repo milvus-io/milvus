@@ -22,7 +22,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"io"
 	"math/rand"
 	"os"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"

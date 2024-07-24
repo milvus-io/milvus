@@ -18,7 +18,6 @@ package compaction
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"strconv"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"

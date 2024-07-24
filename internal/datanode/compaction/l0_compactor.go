@@ -19,7 +19,6 @@ package compaction
 import (
 	"context"
 	"fmt"
-	io2 "github.com/milvus-io/milvus/internal/flushcommon/io"
 	"math"
 	"sync"
 
@@ -29,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -44,7 +44,7 @@ import (
 )
 
 type LevelZeroCompactionTask struct {
-	io2.BinlogIO
+	io.BinlogIO
 	allocator allocator.Interface
 	cm        storage.ChunkManager
 
@@ -62,7 +62,7 @@ var _ Compactor = (*LevelZeroCompactionTask)(nil)
 
 func NewLevelZeroCompactionTask(
 	ctx context.Context,
-	binlogIO io2.BinlogIO,
+	binlogIO io.BinlogIO,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
@@ -250,7 +250,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 
 	// spilt all delete data to segments
 
-	retMap := t.applyBFInParallel(traceCtx, allDelta, io2.GetBFApplyPool(), segmentBfs)
+	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
 
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
 	retMap.Range(func(key int, value *BatchApplyRet) bool {
@@ -405,7 +405,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 
 	var (
 		futures = make([]*conc.Future[any], 0, len(targetSegments))
-		pool    = io2.GetOrCreateStatsPool()
+		pool    = io.GetOrCreateStatsPool()
 
 		mu  = &sync.Mutex{}
 		bfs = make(map[int64]*metacache.BloomFilterSet)
