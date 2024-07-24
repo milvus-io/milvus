@@ -41,7 +41,6 @@ type CodecIndex interface {
 	Delete() error
 	CleanLocalData() error
 	UpLoad() (map[string]int64, error)
-	UpLoadV2() (int64, error)
 }
 
 var _ CodecIndex = (*CgoIndex)(nil)
@@ -109,35 +108,6 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	}
 	var indexPtr C.CIndex
 	status := C.CreateIndex(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
-	if err := HandleCStatus(&status, "failed to create index"); err != nil {
-		return nil, err
-	}
-
-	index := &CgoIndex{
-		indexPtr: indexPtr,
-		close:    false,
-	}
-
-	runtime.SetFinalizer(index, func(index *CgoIndex) {
-		if index != nil && !index.close {
-			log.Error("there is leakage in index object, please check.")
-		}
-	})
-
-	return index, nil
-}
-
-func CreateIndexV2(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
-	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
-		return nil, err
-	}
-	var indexPtr C.CIndex
-	status := C.CreateIndexV2(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -425,35 +395,4 @@ func (index *CgoIndex) UpLoad() (map[string]int64, error) {
 	}
 
 	return res, nil
-}
-
-func (index *CgoIndex) UpLoadV2() (int64, error) {
-	var cBinarySet C.CBinarySet
-
-	status := C.SerializeIndexAndUpLoadV2(index.indexPtr, &cBinarySet)
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
-	if err := HandleCStatus(&status, "failed to serialize index and upload index"); err != nil {
-		return -1, err
-	}
-
-	buffer, err := GetBinarySetValue(cBinarySet, "index_store_version")
-	if err != nil {
-		return -1, err
-	}
-	var version int64
-
-	version = int64(buffer[7])
-	version = (version << 8) + int64(buffer[6])
-	version = (version << 8) + int64(buffer[5])
-	version = (version << 8) + int64(buffer[4])
-	version = (version << 8) + int64(buffer[3])
-	version = (version << 8) + int64(buffer[2])
-	version = (version << 8) + int64(buffer[1])
-	version = (version << 8) + int64(buffer[0])
-
-	return version, nil
 }

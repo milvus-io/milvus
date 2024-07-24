@@ -25,7 +25,6 @@
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "storage/space.h"
 
 namespace milvus::storage {
 
@@ -40,15 +39,6 @@ struct FileManagerContext {
           chunkManagerPtr(chunkManagerPtr) {
     }
 
-    FileManagerContext(const FieldDataMeta& fieldDataMeta,
-                       const IndexMeta& indexMeta,
-                       const ChunkManagerPtr& chunkManagerPtr,
-                       std::shared_ptr<milvus_storage::Space> space)
-        : fieldDataMeta(fieldDataMeta),
-          indexMeta(indexMeta),
-          chunkManagerPtr(chunkManagerPtr),
-          space_(space) {
-    }
     bool
     Valid() const {
         return chunkManagerPtr != nullptr;
@@ -57,7 +47,6 @@ struct FileManagerContext {
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 #define FILEMANAGER_TRY try {

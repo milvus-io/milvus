@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-storage/go/common/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func TestPerformance(t *testing.T) {

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -129,12 +128,12 @@ func (dsService *DataSyncService) GetMetaCache() metacache.MetaCache {
 	return dsService.metacache
 }
 
-func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
+func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	tickler.SetTotal(int32(len(unflushed) + len(flushed)))
-	return initMetaCache(initCtx, storageV2Cache, params.ChunkManager, info, tickler, unflushed, flushed)
+	return initMetaCache(initCtx, params.ChunkManager, info, tickler, unflushed, flushed)
 }
 
-func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2Cache, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
@@ -152,11 +151,7 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 				var stats []*storage.PkStatistics
 				var err error
-				if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-					stats, err = compaction.LoadStatsV2(storageV2Cache, segment, info.GetSchema())
-				} else {
-					stats, err = compaction.LoadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
-				}
+				stats, err = compaction.LoadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
 				if err != nil {
 					return nil, err
 				}
@@ -190,7 +185,7 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 	return metacache, nil
 }
 
-func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, unflushed, flushed []*datapb.SegmentInfo) (*DataSyncService, error) {
+func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, unflushed, flushed []*datapb.SegmentInfo) (*DataSyncService, error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
@@ -204,7 +199,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		serverID:     params.Session.ServerID,
 	}
 
-	err := params.WriteBufferManager.Register(channelName, metacache, storageV2Cache,
+	err := params.WriteBufferManager.Register(channelName, metacache,
 		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
 		writebuffer.WithIDAllocator(params.Allocator))
 	if err != nil {
@@ -287,21 +282,13 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 		return nil, err
 	}
 
-	var storageCache *metacache.StorageV2Cache
-	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storageCache, err = metacache.NewStorageV2Cache(info.Schema)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// init metaCache meta
-	metaCache, err := getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, storageCache)
+	metaCache, err := getMetaCacheWithTickler(initCtx, pipelineParams, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
 	if err != nil {
 		return nil, err
 	}
 
-	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
+	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos)
 }
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {
