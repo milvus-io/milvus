@@ -100,7 +100,7 @@ type DataNode struct {
 
 	segmentCache             *util.Cache
 	compactionExecutor       compaction.Executor
-	timeTickSender           *util.TimeTickSender
+	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
@@ -314,7 +314,7 @@ func (node *DataNode) Start() error {
 
 		go node.importScheduler.Start()
 
-		node.timeTickSender = util.NewTimeTickSender(node.broker, node.session.ServerID,
+		node.timeTickSender = util2.NewTimeTickSender(node.broker, node.session.ServerID,
 			retry.Attempts(20), retry.Sleep(time.Millisecond*100))
 		node.timeTickSender.Start()
 

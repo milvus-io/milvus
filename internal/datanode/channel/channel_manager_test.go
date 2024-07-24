@@ -112,7 +112,7 @@ func (s *OpRunnerSuite) TestWatchTimeout() {
 	commuCh := make(chan *opState)
 
 	mockReleaseFunc := func(channel string) { log.Info("mock release func") }
-	mockWatchFunc := func(ctx context.Context, param *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error) {
+	mockWatchFunc := func(ctx context.Context, param *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error) {
 		<-ctx.Done()
 		sig <- struct{}{}
 		return nil, errors.New("timeout")

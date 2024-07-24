@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -37,7 +36,7 @@ import (
 
 type (
 	releaseFunc func(channel string)
-	watchFunc   func(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error)
+	watchFunc   func(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error)
 )
 
 type ChannelManager interface {
@@ -227,7 +226,7 @@ func (m *ChannelManagerImpl) finishOp(opID int64, channel string) {
 }
 
 type opInfo struct {
-	tickler *util.Tickler
+	tickler *util2.Tickler
 }
 
 type opRunner struct {
@@ -337,7 +336,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		opState.state = datapb.ChannelWatchState_WatchFailure
 		return opState
 	}
-	tickler := util.NewTickler()
+	tickler := util2.NewTickler()
 	opInfo.tickler = tickler
 
 	var (
@@ -481,7 +480,7 @@ type opState struct {
 }
 
 // executeWatch will always return, won't be stuck, either success or fail.
-func executeWatch(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error) {
+func executeWatch(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error) {
 	dataSyncService, err := pipeline.NewDataSyncService(ctx, pipelineParams, info, tickler)
 	if err != nil {
 		return nil, err

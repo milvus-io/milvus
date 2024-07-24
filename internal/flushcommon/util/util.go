@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -40,8 +39,8 @@ type PipelineParams struct {
 	Ctx                context.Context
 	Broker             broker.Broker
 	SyncMgr            syncmgr.SyncManager
-	TimeTickSender     *util.TimeTickSender // reference to TimeTickSender
-	CompactionExecutor compaction.Executor  // reference to compaction executor
+	TimeTickSender     *TimeTickSender     // reference to TimeTickSender
+	CompactionExecutor compaction.Executor // reference to compaction executor
 	MsgStreamFactory   dependency.Factory
 	DispClient         msgdispatcher.Client
 	ChunkManager       storage.ChunkManager

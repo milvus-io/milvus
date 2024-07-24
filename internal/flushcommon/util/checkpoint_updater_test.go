@@ -40,6 +40,7 @@ type ChannelCPUpdaterSuite struct {
 }
 
 func (s *ChannelCPUpdaterSuite) SetupTest() {
+	paramtable.Init()
 	s.broker = broker.NewMockBroker(s.T())
 	s.updater = NewChannelCheckpointUpdater(s.broker)
 }

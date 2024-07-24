@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
@@ -79,7 +78,7 @@ func TestFlowGraphManager(t *testing.T) {
 		context.TODO(),
 		pipelineParams,
 		chanWatchInfo,
-		util.NewTickler(),
+		util2.NewTickler(),
 	)
 	assert.NoError(t, err)
 

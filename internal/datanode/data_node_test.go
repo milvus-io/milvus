@@ -88,7 +88,7 @@ func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
 	node.broker = broker
-	node.timeTickSender = util.NewTimeTickSender(broker, 0)
+	node.timeTickSender = util2.NewTimeTickSender(broker, 0)
 
 	syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 	node.syncMgr = syncMgr

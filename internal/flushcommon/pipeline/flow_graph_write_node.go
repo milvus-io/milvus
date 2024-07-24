@@ -11,7 +11,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -25,7 +24,7 @@ type writeNode struct {
 
 	channelName string
 	wbManager   writebuffer.BufferManager
-	updater     util.StatsUpdater
+	updater     util2.StatsUpdater
 	metacache   metacache.MetaCache
 }
 
@@ -123,7 +122,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 func newWriteNode(
 	_ context.Context,
 	writeBufferManager writebuffer.BufferManager,
-	updater util.StatsUpdater,
+	updater util2.StatsUpdater,
 	config *nodeConfig,
 ) *writeNode {
 	baseNode := BaseNode{}

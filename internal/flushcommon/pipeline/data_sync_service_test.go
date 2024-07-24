@@ -217,7 +217,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 				ctx,
 				pipelineParams,
 				getWatchInfo(test),
-				util.NewTickler(),
+				util2.NewTickler(),
 			)
 
 			if !test.isValidCase {
@@ -287,7 +287,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 		},
 	}
 
-	metaCache, err := getMetaCacheWithTickler(context.TODO(), pipelineParams, info, util.NewTickler(), unflushed, flushed, nil)
+	metaCache, err := getMetaCacheWithTickler(context.TODO(), pipelineParams, info, util2.NewTickler(), unflushed, flushed, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, metaCache)
 	assert.Equal(t, int64(1), metaCache.Collection())
@@ -347,7 +347,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 		SyncMgr:            syncmgr.NewMockSyncManager(s.T()),
 		WriteBufferManager: s.wbManager,
 		Allocator:          s.allocator,
-		TimeTickSender:     util.NewTimeTickSender(s.broker, 0),
+		TimeTickSender:     util2.NewTimeTickSender(s.broker, 0),
 		DispClient:         msgdispatcher.NewClient(s.factory, typeutil.DataNodeRole, 1),
 	}
 }
@@ -426,7 +426,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		ctx,
 		s.pipelineParams,
 		watchInfo,
-		util.NewTickler(),
+		util2.NewTickler(),
 	)
 	s.Require().NoError(err)
 	s.Require().NotNil(sync)

@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -62,8 +61,8 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender *util.TimeTickSender // reference to TimeTickSender
-	compactor      compaction.Executor  // reference to compaction executor
+	timetickSender *util2.TimeTickSender // reference to TimeTickSender
+	compactor      compaction.Executor   // reference to compaction executor
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
@@ -132,7 +131,7 @@ func (dsService *DataSyncService) GetMetaCache() metacache.MetaCache {
 	return dsService.metacache
 }
 
-func getMetaCacheWithTickler(initCtx context.Context, params *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
+func getMetaCacheWithTickler(initCtx context.Context, params *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
 	tickler.SetTotal(int32(len(unflushed) + len(flushed)))
 	return initMetaCache(initCtx, storageV2Cache, params.ChunkManager, info, tickler, unflushed, flushed)
 }
@@ -285,7 +284,7 @@ func getServiceWithChannel(initCtx context.Context, params *util2.PipelineParams
 // NewDataSyncService gets a dataSyncService, but flowgraphs are not running
 // initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
 // NewDataSyncService stops and returns the initCtx.Err()
-func NewDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*DataSyncService, error) {
+func NewDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*DataSyncService, error) {
 	// recover segment checkpoints
 	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
 	if err != nil {
