@@ -245,8 +245,8 @@ pip3 install conan==1.64.1
 #### Install GO 1.80
 
 ```bash
-wget https://go.dev/dl/go1.21.10.linux-arm64.tar.gz
-tar zxf go1.21.10.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.21.11.linux-arm64.tar.gz
+tar zxf go1.21.11.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin

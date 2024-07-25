@@ -56,7 +56,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         with:
-          go-version: '~1.21.10'
+          go-version: '~1.21.11'
       - name: Mac Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
