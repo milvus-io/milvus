@@ -76,6 +76,8 @@ func (job *ReleaseCollectionJob) Execute() error {
 		return nil
 	}
 
+	job.meta.CollectionManager.SetReleasing(req.GetCollectionID())
+
 	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
 	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
 		return partition.GetPartitionID()

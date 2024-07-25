@@ -1610,6 +1610,7 @@ func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
+	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
 
