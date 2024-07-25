@@ -922,10 +922,10 @@ func (q *QuotaCenter) recordMetrics() {
 			for _, state := range states {
 				if state == errorCode {
 					hasException = 1
+					metrics.RootCoordForceDenyWritingCounter.Inc()
 				}
 			}
 			metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), dbm.Name).Set(hasException)
-			metrics.RootCoordForceDenyWritingCounter.Inc()
 		}
 	}
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
