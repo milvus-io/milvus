@@ -90,8 +90,8 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 	}
 	channelCountPerNode := totalChannelNum / avaNodeNum
 	maxChannelCountPerNode := channelCountPerNode
-	reminder := totalChannelNum % avaNodeNum
-	if reminder > 0 {
+	remainder := totalChannelNum % avaNodeNum
+	if remainder > 0 {
 		maxChannelCountPerNode += 1
 	}
 	for _, nChannels := range cluster {
@@ -101,8 +101,8 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 		}
 
 		toReleaseCount := chCount - channelCountPerNode
-		if reminder > 0 && chCount >= maxChannelCountPerNode {
-			reminder -= 1
+		if remainder > 0 && chCount >= maxChannelCountPerNode {
+			remainder -= 1
 			toReleaseCount = chCount - maxChannelCountPerNode
 		}
 

@@ -286,4 +286,31 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 		})
 		s.ElementsMatch([]int64{3, 1}, nodeIDs)
 	})
+
+	s.Run("assign to reach average", func() {
+		curCluster := []*NodeChannelInfo{
+			{1, getChannels(map[string]int64{"ch-1": 1, "ch-2": 1, "ch-3": 1})},
+			{2, getChannels(map[string]int64{"ch-4": 1, "ch-5": 1, "ch-6": 4, "ch-7": 4, "ch-8": 4})},
+		}
+		unassigned := NewNodeChannelInfo(bufferID,
+			getChannel("new-ch-1", 1),
+			getChannel("new-ch-2", 1),
+			getChannel("new-ch-3", 1),
+		)
+
+		opSet := AvgAssignByCountPolicy(curCluster, unassigned, nil)
+		s.NotNil(opSet)
+
+		s.Equal(3, opSet.GetChannelNumber())
+		s.Equal(2, opSet.Len())
+		for _, op := range opSet.Collect() {
+			if op.Type == Delete {
+				s.Equal(int64(bufferID), op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.Equal(int64(1), op.NodeID)
+			}
+		}
+	})
 }
