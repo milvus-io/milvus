@@ -965,7 +965,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[0:2*Dim], result1[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector := proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[0]}
-	assert.EqualExportedValues(t, tmpSparseFloatVector, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.EqualExportedValues(t, *tmpSparseFloatVector, *result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
 
 	AppendFieldData(result2, fieldDataArray2, 0)
 	AppendFieldData(result2, fieldDataArray1, 0)
@@ -982,7 +982,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[2*Dim:4*Dim], result2[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector = proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[1]}
-	assert.EqualExportedValues(t, tmpSparseFloatVector, result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.EqualExportedValues(t, *tmpSparseFloatVector, *result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
 }
 
 func TestEstimateEntitySize(t *testing.T) {
