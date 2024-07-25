@@ -413,3 +413,7 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 
 	return t.meta.UpdateSegmentsInfo(operators...)
 }
+
+func (t *l0CompactionTask) Clean() bool {
+	return true
+}

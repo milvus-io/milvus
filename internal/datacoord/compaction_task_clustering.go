@@ -87,7 +87,6 @@ func (t *clusteringCompactionTask) Process() bool {
 	if currentState != lastState {
 		ts := time.Now().Unix()
 		lastStateDuration := ts - t.GetLastStateStartTime()
-		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetClusteringKeyField().DataType)), fmt.Sprint(t.CollectionID), t.Channel, datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration * 1000))
@@ -105,15 +104,22 @@ func (t *clusteringCompactionTask) Process() bool {
 		if err != nil {
 			log.Warn("Failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
+		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 	}
 	log.Debug("process clustering task", zap.String("lastState", lastState), zap.String("currentState", currentState))
-	return t.State == datapb.CompactionTaskState_completed || t.State == datapb.CompactionTaskState_cleaned
+	return t.State == datapb.CompactionTaskState_completed ||
+		t.State == datapb.CompactionTaskState_cleaned ||
+		t.State == datapb.CompactionTaskState_failed ||
+		t.State == datapb.CompactionTaskState_timeout
 }
 
 // retryableProcess process task's state transfer, return error if not work as expected
 // the outer Process will set state and retry times according to the error type(retryable or not-retryable)
 func (t *clusteringCompactionTask) retryableProcess() error {
-	if t.State == datapb.CompactionTaskState_completed || t.State == datapb.CompactionTaskState_cleaned {
+	if t.State == datapb.CompactionTaskState_completed ||
+		t.State == datapb.CompactionTaskState_cleaned ||
+		t.State == datapb.CompactionTaskState_failed ||
+		t.State == datapb.CompactionTaskState_timeout {
 		return nil
 	}
 
@@ -140,12 +146,19 @@ func (t *clusteringCompactionTask) retryableProcess() error {
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_indexing:
 		return t.processIndexing()
-	case datapb.CompactionTaskState_timeout:
-		return t.processFailedOrTimeout()
-	case datapb.CompactionTaskState_failed:
-		return t.processFailedOrTimeout()
 	}
 	return nil
+}
+
+func (t *clusteringCompactionTask) Clean() bool {
+	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()))
+	log.Info("clean task")
+	err := t.doClean()
+	if err != nil {
+		log.Warn("clean task fail", zap.Error(err))
+		return false
+	}
+	return true
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
@@ -256,12 +269,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_executing:
 		if t.checkTimeout() {
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
-			if err == nil {
-				return t.processFailedOrTimeout()
-			} else {
-				return err
-			}
+			return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 		}
 		return nil
 	case datapb.CompactionTaskState_failed:
@@ -361,13 +369,13 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
-func (t *clusteringCompactionTask) processFailedOrTimeout() error {
+func (t *clusteringCompactionTask) doClean() error {
 	log.Info("clean task", zap.Int64("triggerID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()), zap.String("state", t.GetState().String()))
 	// revert segments meta
 	var operators []UpdateOperator
 	// revert level of input segments
-	// L1 : L1 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L1
-	// L2 : L2 ->(processPipelining)-> L2 ->(processFailedOrTimeout)-> L2
+	// L1 : L1 ->(processPipelining)-> L2 ->(doClean)-> L1
+	// L2 : L2 ->(processPipelining)-> L2 ->(doClean)-> L2
 	for _, segID := range t.InputSegments {
 		operators = append(operators, RevertSegmentLevelOperator(segID))
 	}
@@ -394,6 +402,7 @@ func (t *clusteringCompactionTask) processFailedOrTimeout() error {
 	err = t.meta.CleanPartitionStatsInfo(partitionStatsInfo)
 	if err != nil {
 		log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
+		return merr.WrapErrCleanPartitionStatsFail(fmt.Sprintf("%d-%d-%s-%d", t.GetCollectionID(), t.GetPartitionID(), t.GetChannel(), t.GetPlanID()))
 	}
 
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
