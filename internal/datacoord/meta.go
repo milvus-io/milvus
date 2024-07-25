@@ -1490,6 +1490,9 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 		cloned := segment.Clone()
 		cloned.DroppedAt = uint64(time.Now().UnixNano())
 		cloned.Compacted = true
+		// erase level and partitionStats version, to solve issue: https://github.com/milvus-io/milvus/issues/35003
+		cloned.PartitionStatsVersion = 0
+		cloned.Level = datapb.SegmentLevel_L1
 
 		compactFromSegInfos = append(compactFromSegInfos, cloned)
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())

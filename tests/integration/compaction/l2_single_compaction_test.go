@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,11 +49,6 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
 
 	const (
 		dim        = 128
@@ -216,7 +212,10 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 		segments, err = c.MetaWatcher.ShowSegments()
 		s.NoError(err)
 		s.NotEmpty(segments)
-		log.Info("ShowSegments result", zap.Any("segments", segments))
+
+		for _, segment := range segments {
+			log.Info("ShowSegments result", zap.Int64("id", segment.ID), zap.String("state", segment.GetState().String()), zap.String("level", segment.GetLevel().String()), zap.Int64("numOfRows", segment.GetNumOfRows()))
+		}
 		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
@@ -238,9 +237,48 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 		}
 	}
 
+	checkQuerySegmentInfo := func() bool {
+		querySegmentInfo, err := c.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		s.NoError(err)
+		return len(querySegmentInfo.GetInfos()) == 1
+	}
+
+	checkWaitGroup := sync.WaitGroup{}
+	checkWaitGroup.Add(1)
+	go func() {
+		defer checkWaitGroup.Done()
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, time.Minute*2)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("check query segment info timeout")
+				return
+			default:
+				if checkQuerySegmentInfo() {
+					return
+				}
+			}
+			time.Sleep(time.Second * 3)
+		}
+	}()
+
+	checkWaitGroup.Wait()
+
 	log.Info("TestL2SingleCompaction succeed")
 }
 
 func TestL2SingleCompaction(t *testing.T) {
+	paramtable.Init()
+	// to speed up the test
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "10")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "0")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+
 	suite.Run(t, new(L2SingleCompactionSuite))
 }
