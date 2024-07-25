@@ -202,6 +202,11 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		// don't return, maybe field is scalar field or sparseFloatVector
 	}
 
+	curV, err := dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+	if err != nil {
+		return true
+	}
+
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 		if err != nil {
@@ -225,7 +230,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			IndexParams:           indexParams,
 			TypeParams:            typeParams,
 			NumRows:               segIndex.NumRows,
-			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			CurrentIndexVersion:   curV,
 			CollectionID:          segment.GetCollectionID(),
 			PartitionID:           segment.GetPartitionID(),
 			SegmentID:             segment.GetID(),
@@ -251,7 +256,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			IndexParams:           indexParams,
 			TypeParams:            typeParams,
 			NumRows:               segIndex.NumRows,
-			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			CurrentIndexVersion:   curV,
 			CollectionID:          segment.GetCollectionID(),
 			PartitionID:           segment.GetPartitionID(),
 			SegmentID:             segment.GetID(),

@@ -54,17 +54,27 @@ func (_c *MockVersionManager_AddNode_Call) RunAndReturn(run func(*sessionutil.Se
 }
 
 // GetCurrentIndexEngineVersion provides a mock function with given fields:
-func (_m *MockVersionManager) GetCurrentIndexEngineVersion() int32 {
+func (_m *MockVersionManager) GetCurrentIndexEngineVersion() (int32, error) {
 	ret := _m.Called()
 
 	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (int32, error)); ok {
+		return rf()
+	}
 	if rf, ok := ret.Get(0).(func() int32); ok {
 		r0 = rf()
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockVersionManager_GetCurrentIndexEngineVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCurrentIndexEngineVersion'
@@ -84,28 +94,38 @@ func (_c *MockVersionManager_GetCurrentIndexEngineVersion_Call) Run(run func()) 
 	return _c
 }
 
-func (_c *MockVersionManager_GetCurrentIndexEngineVersion_Call) Return(_a0 int32) *MockVersionManager_GetCurrentIndexEngineVersion_Call {
-	_c.Call.Return(_a0)
+func (_c *MockVersionManager_GetCurrentIndexEngineVersion_Call) Return(_a0 int32, _a1 error) *MockVersionManager_GetCurrentIndexEngineVersion_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockVersionManager_GetCurrentIndexEngineVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_GetCurrentIndexEngineVersion_Call {
+func (_c *MockVersionManager_GetCurrentIndexEngineVersion_Call) RunAndReturn(run func() (int32, error)) *MockVersionManager_GetCurrentIndexEngineVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetMinimalIndexEngineVersion provides a mock function with given fields:
-func (_m *MockVersionManager) GetMinimalIndexEngineVersion() int32 {
+func (_m *MockVersionManager) GetMinimalIndexEngineVersion() (int32, error) {
 	ret := _m.Called()
 
 	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (int32, error)); ok {
+		return rf()
+	}
 	if rf, ok := ret.Get(0).(func() int32); ok {
 		r0 = rf()
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockVersionManager_GetMinimalIndexEngineVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMinimalIndexEngineVersion'
@@ -125,12 +145,12 @@ func (_c *MockVersionManager_GetMinimalIndexEngineVersion_Call) Run(run func()) 
 	return _c
 }
 
-func (_c *MockVersionManager_GetMinimalIndexEngineVersion_Call) Return(_a0 int32) *MockVersionManager_GetMinimalIndexEngineVersion_Call {
-	_c.Call.Return(_a0)
+func (_c *MockVersionManager_GetMinimalIndexEngineVersion_Call) Return(_a0 int32, _a1 error) *MockVersionManager_GetMinimalIndexEngineVersion_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockVersionManager_GetMinimalIndexEngineVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_GetMinimalIndexEngineVersion_Call {
+func (_c *MockVersionManager_GetMinimalIndexEngineVersion_Call) RunAndReturn(run func() (int32, error)) *MockVersionManager_GetMinimalIndexEngineVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }

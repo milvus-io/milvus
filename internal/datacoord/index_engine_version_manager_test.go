@@ -12,7 +12,9 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
 	// empty
-	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+	curV, err := m.GetCurrentIndexEngineVersion()
+	assert.Error(t, err)
+	assert.Zero(t, curV)
 
 	// startup
 	m.Startup(map[string]*sessionutil.Session{
@@ -23,8 +25,14 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 			},
 		},
 	})
-	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
-	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+
+	curV, err = m.GetCurrentIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(20), curV)
+
+	minV, err := m.GetMinimalIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(0), minV)
 
 	// add node
 	m.AddNode(&sessionutil.Session{
@@ -33,8 +41,14 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MinimalIndexVersion: 5},
 		},
 	})
-	assert.Equal(t, int32(10), m.GetCurrentIndexEngineVersion())
-	assert.Equal(t, int32(5), m.GetMinimalIndexEngineVersion())
+
+	curV, err = m.GetCurrentIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(10), curV)
+
+	minV, err = m.GetMinimalIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(5), minV)
 
 	// update
 	m.Update(&sessionutil.Session{
@@ -43,8 +57,14 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 2},
 		},
 	})
-	assert.Equal(t, int32(5), m.GetCurrentIndexEngineVersion())
-	assert.Equal(t, int32(2), m.GetMinimalIndexEngineVersion())
+
+	curV, err = m.GetCurrentIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(5), curV)
+
+	minV, err = m.GetMinimalIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), minV)
 
 	// remove
 	m.RemoveNode(&sessionutil.Session{
@@ -53,6 +73,12 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 3},
 		},
 	})
-	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
-	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+
+	curV, err = m.GetCurrentIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(20), curV)
+
+	minV, err = m.GetMinimalIndexEngineVersion()
+	assert.NoError(t, err)
+	assert.Equal(t, int32(0), minV)
 }

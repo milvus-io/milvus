@@ -837,14 +837,17 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
-			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
-				len(index.IndexFileKeys) > 0 {
+			curV, err := t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+			if err != nil {
+				return false
+			}
+			if index.CurrentIndexVersion < curV && len(index.IndexFileKeys) > 0 {
 				log.Info("index version is too old, trigger compaction",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID),
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+					zap.Int32("currentEngineVersion", curV))
 				return true
 			}
 		}
