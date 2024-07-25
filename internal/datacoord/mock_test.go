@@ -550,7 +550,7 @@ func (m *mockRootCoordClient) ShowSegments(ctx context.Context, req *milvuspb.Sh
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockRootCoordClient) GetVChannels(ctx context.Context, req *rootcoordpb.GetVChannelsRequest, opts ...grpc.CallOption) (*rootcoordpb.GetVChannelsResponse, error) {
+func (m *mockRootCoordClient) GetPChannelInfo(ctx context.Context, req *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 

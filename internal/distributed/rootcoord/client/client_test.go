@@ -137,7 +137,7 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
-			r, err := client.GetVChannels(ctx, nil)
+			r, err := client.GetPChannelInfo(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
@@ -355,7 +355,7 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
-		rTimeout, err := client.GetVChannels(shortCtx, nil)
+		rTimeout, err := client.GetPChannelInfo(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{
