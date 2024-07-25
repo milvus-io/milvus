@@ -18,7 +18,10 @@ package integration
 
 import (
 	"context"
+	"strconv"
 	"time"
+
+	"golang.org/x/exp/rand"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -106,6 +109,29 @@ func NewVarCharSameFieldData(fieldName string, numRows int, value string) *schem
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: GenerateSameStringArray(numRows, value),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewVarCharRandomFieldData(fieldName string, numRows int, prefix string, lower int, upper int) *schemapb.FieldData {
+	strVals := make([]string, numRows)
+	for i := 0; i < numRows; i++ {
+		number := rand.Intn(upper-lower) + lower
+		strVal := prefix + strconv.Itoa(number)
+		strVals[i] = strVal
+	}
+
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_String,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: strVals,
 					},
 				},
 			},
