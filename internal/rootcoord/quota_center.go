@@ -925,6 +925,7 @@ func (q *QuotaCenter) recordMetrics() {
 				}
 			}
 			metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), dbm.Name).Set(hasException)
+			metrics.RootCoordForceDenyWritingCounter.Inc()
 		}
 	}
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
