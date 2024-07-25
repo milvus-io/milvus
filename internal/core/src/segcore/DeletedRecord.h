@@ -58,15 +58,29 @@ class DeletedRecord {
         int64_t removed_num = 0;
         int64_t mem_add = 0;
         for (size_t i = 0; i < pks.size(); ++i) {
-            auto offsets = insert_record_->search_pk(pks[i], timestamps[i]);
+            auto delete_pk = pks[i];
+            auto delete_timestamp = timestamps[i];
+            auto offsets =
+                insert_record_->search_pk(delete_pk, delete_timestamp);
+            bool has_duplicate_pk_timestamps = false;
             for (auto offset : offsets) {
-                int64_t insert_row_offset = offset.get();
-                // Assert(insert_record->timestamps_.size() >= insert_row_offset);
-                if (insert_record_->timestamps_[insert_row_offset] <
-                    timestamps[i]) {
-                    InsertIntoInnerPairs(timestamps[i], {insert_row_offset});
+                int64_t row_offset = offset.get();
+                auto row_timestamp = insert_record_->timestamps_[row_offset];
+                // Assert(insert_record->timestamps_.size() >= row_offset);
+                if (row_timestamp < delete_timestamp) {
+                    InsertIntoInnerPairs(delete_timestamp, {row_offset});
                     removed_num++;
                     mem_add += sizeof(Timestamp) + sizeof(int64_t);
+                } else if (row_timestamp == delete_timestamp) {
+                    // if insert record have multi same (pk, timestamp) pairs,
+                    // need to remove the next pairs, just keep first
+                    if (!has_duplicate_pk_timestamps) {
+                        has_duplicate_pk_timestamps = true;
+                    } else {
+                        InsertIntoInnerPairs(delete_timestamp, {row_offset});
+                        removed_num++;
+                        mem_add += sizeof(Timestamp) + sizeof(int64_t);
+                    }
                 }
             }
         }
@@ -84,15 +98,24 @@ class DeletedRecord {
         auto end = deleted_pairs_.lower_bound(
             std::make_pair(timestamp, std::set<int64_t>{}));
         for (auto it = deleted_pairs_.begin(); it != end; it++) {
+            // this may happen if lower_bound end is deleted_pairs_ end and
+            // other threads insert node to deleted_pairs_ concurrently
+            if (it->first > timestamp) {
+                break;
+            }
             for (auto& v : it->second) {
-                bitset.set(v);
+                if (v < insert_barrier) {
+                    bitset.set(v);
+                }
             }
         }
 
         // handle the case where end points to an element with the same timestamp
         if (end != deleted_pairs_.end() && end->first == timestamp) {
             for (auto& v : end->second) {
-                bitset.set(v);
+                if (v < insert_barrier) {
+                    bitset.set(v);
+                }
             }
         }
     }
