@@ -53,7 +53,7 @@ namespace milvus {
 */
 constexpr size_t STRING_PADDING = 1;
 constexpr size_t ARRAY_PADDING = 1;
-constexpr size_t BLOCK_SIZE = 8192;
+constexpr size_t BLOCK_SIZE = 32;
 
 class ColumnBase {
  public:
