@@ -229,6 +229,17 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 	})
 }
 
+func (c *Client) AlterCollectionOrField(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.AlterCollectionOrField(ctx, request)
+	})
+}
+
 // CreatePartition create partition
 func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)

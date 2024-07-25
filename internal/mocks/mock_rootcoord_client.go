@@ -313,6 +313,76 @@ func (_c *MockRootCoordClient_AlterCollection_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// AlterCollectionOrField provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AlterCollectionOrField(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollection'
+type MockRootCoordClient_AlterCollectionOrField_Call struct {
+	*mock.Call
+}
+
+// AlterCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AlterCollectionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AlterCollectionOrField(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AlterCollectionOrField_Call {
+	return &MockRootCoordClient_AlterCollectionOrField_Call{Call: _e.mock.On("AlterCollectionOrField",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AlterCollectionOrField_Call) Run(run func(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AlterCollectionOrField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterCollectionOrField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AlterCollectionOrField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterCollectionOrField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AlterCollectionOrField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterDatabase provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))

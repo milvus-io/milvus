@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -125,7 +126,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
-		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, dbName, collectionName string, collectionID UniqueID) error {
 			return errors.New("err")
 		}
 
@@ -160,7 +161,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
-		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, dbName, collectionName string, collectionID UniqueID) error {
 			return errors.New("err")
 		}
 
@@ -195,7 +196,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
 
 		broker := newMockBroker()
-		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, dbName, collectionName string, collectionID UniqueID) error {
 			return nil
 		}
 
@@ -269,6 +270,38 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
 			Key:   common.PartitionKeyIsolationKey,
 			Value: "true",
+		})
+	})
+
+	t.Run("test update collection field props", func(t *testing.T) {
+		fieldName := "VarCharField"
+		coll := &model.Collection{
+			Fields: []*model.Field{
+				{
+					Name:         fieldName,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "100",
+						},
+					},
+				},
+			},
+		}
+
+		updateProps1 := []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "128",
+			},
+		}
+		updateFieldProperties(coll, fieldName, updateProps1)
+		assert.Len(t, coll.Fields[0].TypeParams, 1)
+		assert.Contains(t, coll.Fields[0].TypeParams, &commonpb.KeyValuePair{
+			Key:   common.MaxLengthKey,
+			Value: "128",
 		})
 	})
 }

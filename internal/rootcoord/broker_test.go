@@ -25,13 +25,13 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -226,7 +226,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, util.DefaultDBName, "", int64(1))
 		assert.Error(t, err)
 	})
 
@@ -244,7 +244,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, util.DefaultDBName, "", int64(1))
 		assert.Error(t, err)
 	})
 
@@ -262,7 +262,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, util.DefaultDBName, "", int64(1))
 		assert.Error(t, err)
 	})
 
@@ -281,10 +281,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 		b := newServerBroker(c)
 		ctx := context.Background()
 
-		req := &milvuspb.AlterCollectionRequest{
-			CollectionID: 1,
-		}
-		err := b.BroadcastAlteredCollection(ctx, req)
+		err := b.BroadcastAlteredCollection(ctx, util.DefaultDBName, "", int64(1))
 		assert.NoError(t, err)
 	})
 }

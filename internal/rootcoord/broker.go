@@ -24,7 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -59,7 +58,7 @@ type Broker interface {
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
-	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollection(ctx context.Context, dbName, collectionName string, collectionID UniqueID) error
 }
 
 type ServerBroker struct {
@@ -224,15 +223,15 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	return resp.GetStates(), nil
 }
 
-func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	log.Info("broadcasting request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
+func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, dbName, collectionName string, collectionID UniqueID) error {
+	log.Info("broadcasting request to alter collection", zap.String("collectionName", collectionName), zap.Int64("collectionID", collectionID))
 
-	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetDbName(), req.GetCollectionID(), typeutil.MaxTimestamp, false)
+	colMeta, err := b.s.meta.GetCollectionByID(ctx, dbName, collectionID, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
 
-	db, err := b.s.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
+	db, err := b.s.meta.GetDatabaseByName(ctx, dbName, typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}
@@ -242,7 +241,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		partitionIDs = append(partitionIDs, p.PartitionID)
 	}
 	dcReq := &datapb.AlterCollectionRequest{
-		CollectionID: req.GetCollectionID(),
+		CollectionID: collectionID,
 		Schema: &schemapb.CollectionSchema{
 			Name:        colMeta.Name,
 			Description: colMeta.Description,
@@ -264,7 +263,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
-	log.Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
+	log.Info("done to broadcast request to alter collection", zap.String("collectionName", collectionName), zap.Int64("collectionID", collectionID), zap.Any("props", colMeta.Properties))
 	return nil
 }
 

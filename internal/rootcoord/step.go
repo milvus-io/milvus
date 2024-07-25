@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -444,19 +443,21 @@ func (a *AlterCollectionStep) Desc() string {
 
 type BroadcastAlteredCollectionStep struct {
 	baseStep
-	req  *milvuspb.AlterCollectionRequest
-	core *Core
+	dbName         string
+	collectionName string
+	collectionID   UniqueID
+	core           *Core
 }
 
 func (b *BroadcastAlteredCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	// TODO: support online schema change mechanism
 	// It only broadcast collection properties to DataCoord service
-	err := b.core.broker.BroadcastAlteredCollection(ctx, b.req)
+	err := b.core.broker.BroadcastAlteredCollection(ctx, b.dbName, b.collectionName, b.collectionID)
 	return nil, err
 }
 
 func (b *BroadcastAlteredCollectionStep) Desc() string {
-	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
+	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.collectionID)
 }
 
 type AlterDatabaseStep struct {

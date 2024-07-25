@@ -1532,6 +1532,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Success(), nil
 	}
 
+	clonedColl.Schema = req.GetSchema()
 	clonedColl.Properties = properties
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil

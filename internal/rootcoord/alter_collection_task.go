@@ -33,6 +33,7 @@ import (
 type alterCollectionTask struct {
 	baseTask
 	Req *milvuspb.AlterCollectionRequest
+	// todo AlterCollectionFieldRequest
 }
 
 func (a *alterCollectionTask) Prepare(ctx context.Context) error {
@@ -46,7 +47,7 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	// Now we only support alter properties of collection
 	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter collection properties, but collection properties is empty")
+		return errors.New("only support alter collection/field properties, but collection/field properties is empty")
 	}
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
@@ -57,7 +58,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	newColl := oldColl.Clone()
-	updateCollectionProperties(newColl, a.Req.GetProperties())
+	// todo a.Req.FieldName
+	if "" == "" {
+		updateCollectionProperties(newColl, a.Req.GetProperties())
+	} else {
+		updateFieldProperties(newColl, "", a.Req.GetProperties())
+	}
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
@@ -68,11 +74,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		ts:       ts,
 	})
 
-	a.Req.CollectionID = oldColl.CollectionID
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
-		baseStep: baseStep{core: a.core},
-		req:      a.Req,
-		core:     a.core,
+		baseStep:       baseStep{core: a.core},
+		dbName:         a.Req.GetDbName(),
+		collectionName: oldColl.Name,
+		collectionID:   oldColl.CollectionID,
+		core:           a.core,
 	})
 
 	// properties needs to be refreshed in the cache
@@ -80,7 +87,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
 		dbName:          a.Req.GetDbName(),
-		collectionNames: append(aliases, a.Req.GetCollectionName()),
+		collectionNames: append(aliases, oldColl.Name),
 		collectionID:    oldColl.CollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
@@ -89,8 +96,21 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 }
 
 func updateCollectionProperties(coll *model.Collection, updatedProps []*commonpb.KeyValuePair) {
+	coll.Properties = newProperties(coll.Properties, updatedProps)
+}
+
+func updateFieldProperties(coll *model.Collection, fieldName string, updatedProps []*commonpb.KeyValuePair) {
+	for i, field := range coll.Fields {
+		if field.Name == fieldName {
+			coll.Fields[i].TypeParams = newProperties(field.TypeParams, updatedProps)
+			return
+		}
+	}
+}
+
+func newProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	props := make(map[string]string)
-	for _, prop := range coll.Properties {
+	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value
 	}
 
@@ -107,5 +127,5 @@ func updateCollectionProperties(coll *model.Collection, updatedProps []*commonpb
 		})
 	}
 
-	coll.Properties = propKV
+	return propKV
 }

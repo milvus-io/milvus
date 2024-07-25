@@ -1250,6 +1250,17 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 }
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return c.AlterCollectionOrField(ctx, &milvuspb.AlterCollectionRequest{
+		Base:           in.Base,
+		DbName:         in.DbName,
+		CollectionName: in.CollectionName,
+		// todo FieldName: ""
+		Properties: in.Properties,
+	})
+}
+
+// todo AlterCollectionOrFieldRequest
+func (c *Core) AlterCollectionOrField(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}

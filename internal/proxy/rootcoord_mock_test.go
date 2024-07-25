@@ -1095,6 +1095,10 @@ func (coord *RootCoordMock) AlterCollection(ctx context.Context, request *milvus
 	return &commonpb.Status{}, nil
 }
 
+func (coord *RootCoordMock) AlterCollectionOrField(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *RootCoordMock) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }

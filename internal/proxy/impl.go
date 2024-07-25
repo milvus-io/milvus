@@ -1218,13 +1218,25 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 }
 
 func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return node.alterCollectionOrField(ctx, "AlterCollection", &milvuspb.AlterCollectionRequest{
+		Base:           request.Base,
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+		Properties:     request.Properties,
+	})
+}
+
+func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return node.alterCollectionOrField(ctx, "AlterCollectionField", request)
+}
+
+func (node *Proxy) alterCollectionOrField(ctx context.Context, method string, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollection")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-"+method)
 	defer sp.End()
-	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()

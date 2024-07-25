@@ -256,6 +256,61 @@ func (_c *RootCoord_AlterCollection_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// AlterCollection provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AlterCollectionOrField(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_AlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollection'
+type RootCoord_AlterCollectionOrField_Call struct {
+	*mock.Call
+}
+
+// AlterCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionRequest
+func (_e *RootCoord_Expecter) AlterCollectionOrField(_a0 interface{}, _a1 interface{}) *RootCoord_AlterCollectionOrField_Call {
+	return &RootCoord_AlterCollectionOrField_Call{Call: _e.mock.On("AlterCollection", _a0, _a1)}
+}
+
+func (_c *RootCoord_AlterCollectionOrField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionRequest)) *RootCoord_AlterCollectionOrField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_AlterCollectionOrField_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_AlterCollectionOrField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_AlterCollectionOrField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)) *RootCoord_AlterCollectionOrField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterDatabase provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) AlterDatabase(_a0 context.Context, _a1 *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
