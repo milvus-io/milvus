@@ -186,6 +186,10 @@ func (m *GrpcRootCoordClient) ShowSegments(ctx context.Context, in *milvuspb.Sho
 	return &milvuspb.ShowSegmentsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	return &rootcoordpb.GetPChannelInfoResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	return &rootcoordpb.DescribeSegmentsResponse{}, m.Err
 }

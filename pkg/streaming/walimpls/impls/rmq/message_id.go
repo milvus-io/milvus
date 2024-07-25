@@ -8,6 +8,12 @@ import (
 
 var _ message.MessageID = rmqID(0)
 
+// NewRmqID creates a new rmqID.
+// TODO: remove in future.
+func NewRmqID(id int64) message.MessageID {
+	return rmqID(id)
+}
+
 // UnmarshalMessageID unmarshal the message id.
 func UnmarshalMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalMessageID(data)
@@ -28,6 +34,13 @@ func unmarshalMessageID(data string) (rmqID, error) {
 
 // rmqID is the message id for rmq.
 type rmqID int64
+
+// RmqID returns the message id for conversion
+// Don't delete this function until conversion logic removed.
+// TODO: remove in future.
+func (id rmqID) RmqID() int64 {
+	return int64(id)
+}
 
 // WALName returns the name of message id related wal.
 func (id rmqID) WALName() string {

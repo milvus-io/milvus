@@ -41,8 +41,7 @@ class GrowingDataGetter : public DataGetter<T> {
     const segcore::ConcurrentVector<T>* growing_raw_data_;
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId) {
-        growing_raw_data_ =
-            segment.get_insert_record().get_field_data<T>(fieldId);
+        growing_raw_data_ = segment.get_insert_record().get_data<T>(fieldId);
     }
 
     GrowingDataGetter(const GrowingDataGetter<T>& other)

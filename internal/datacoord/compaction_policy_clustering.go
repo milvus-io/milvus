@@ -35,15 +35,13 @@ import (
 )
 
 type clusteringCompactionPolicy struct {
-	meta              *meta
-	view              *FullViews
-	allocator         allocator
-	compactionHandler compactionPlanContext
-	handler           Handler
+	meta      *meta
+	allocator allocator
+	handler   Handler
 }
 
-func newClusteringCompactionPolicy(meta *meta, view *FullViews, allocator allocator, compactionHandler compactionPlanContext, handler Handler) *clusteringCompactionPolicy {
-	return &clusteringCompactionPolicy{meta: meta, view: view, allocator: allocator, compactionHandler: compactionHandler, handler: handler}
+func newClusteringCompactionPolicy(meta *meta, allocator allocator, handler Handler) *clusteringCompactionPolicy {
+	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
 func (policy *clusteringCompactionPolicy) Enable() bool {
@@ -56,19 +54,14 @@ func (policy *clusteringCompactionPolicy) Trigger() (map[CompactionTriggerType][
 	log.Info("start trigger clusteringCompactionPolicy...")
 	ctx := context.Background()
 	collections := policy.meta.GetCollections()
-	ts, err := policy.allocator.allocTimestamp(ctx)
-	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction")
-		return make(map[CompactionTriggerType][]CompactionView, 0), err
-	}
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
 	for _, collection := range collections {
-		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, ts, false)
+		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
-			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID))
-			return make(map[CompactionTriggerType][]CompactionView, 0), err
+			// not throw this error because no need to fail because of one collection
+			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
 		views = append(views, collectionViews...)
 	}
@@ -76,6 +69,7 @@ func (policy *clusteringCompactionPolicy) Trigger() (map[CompactionTriggerType][
 	return events, nil
 }
 
+// todo: remove this check after support partial clustering compaction
 func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context.Context, collectionID, partitionID int64, channel string) bool {
 	getCompactingL2Segment := func(segment *SegmentInfo) bool {
 		return segment.CollectionID == collectionID &&
@@ -97,28 +91,22 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 	return true
 }
 
-func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, ts Timestamp, manual bool) ([]CompactionView, int64, error) {
+func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, int64, error) {
 	log := log.With(zap.Int64("collectionID", collectionID))
-	log.Info("trigger collection clustering compaction")
+	log.Info("start trigger collection clustering compaction")
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn("fail to get collection")
+		log.Warn("fail to get collection from handler")
 		return nil, 0, err
+	}
+	if collection == nil {
+		log.Warn("collection not exist")
+		return nil, 0, nil
 	}
 	clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
 	if clusteringKeyField == nil {
 		log.Info("the collection has no clustering key, skip tigger clustering compaction")
 		return nil, 0, nil
-	}
-
-	// if not pass, alloc a new one
-	if ts == 0 {
-		tsNew, err := policy.allocator.allocTimestamp(ctx)
-		if err != nil {
-			log.Warn("allocate ts failed, skip to handle compaction")
-			return nil, 0, err
-		}
-		ts = tsNew
 	}
 
 	compacting, triggerID := policy.collectionIsClusteringCompacting(collection.ID)
@@ -146,14 +134,15 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	// partSegments is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range partSegments {
 		log := log.With(zap.Int64("partitionID", group.partitionID), zap.String("channel", group.channelName))
+
 		if !policy.checkAllL2SegmentsContains(ctx, group.collectionID, group.partitionID, group.channelName) {
 			log.Warn("clustering compaction cannot be done, otherwise the performance will fall back")
 			continue
 		}
 
-		ct, err := getCompactTime(ts, collection)
+		collectionTTL, err := getCollectionTTL(collection.Properties)
 		if err != nil {
-			log.Warn("get compact time failed, skip to handle compaction")
+			log.Warn("get collection ttl failed, skip to handle compaction")
 			return make([]CompactionView, 0), 0, err
 		}
 
@@ -178,7 +167,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			label:              segmentViews[0].label,
 			segments:           segmentViews,
 			clusteringKeyField: clusteringKeyField,
-			compactionTime:     ct,
+			collectionTTL:      collectionTTL,
 			triggerID:          newTriggerID,
 		}
 		views = append(views, view)
@@ -195,7 +184,7 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	}
 	var latestTriggerID int64 = 0
 	for triggerID := range triggers {
-		if latestTriggerID > triggerID {
+		if triggerID > latestTriggerID {
 			latestTriggerID = triggerID
 		}
 	}
@@ -278,7 +267,7 @@ type ClusteringSegmentsView struct {
 	label              *CompactionGroupLabel
 	segments           []*SegmentView
 	clusteringKeyField *schemapb.FieldSchema
-	compactionTime     *compactTime
+	collectionTTL      time.Duration
 	triggerID          int64
 }
 

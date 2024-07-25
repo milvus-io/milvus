@@ -57,11 +57,11 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     if (indexing_record_.SyncDataWithIndex(fieldId)) {
         VectorBase* vec_data_base =
             dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
-                insert_record_.get_field_data_base(fieldId));
+                insert_record_.get_data_base(fieldId));
         if (!vec_data_base) {
             vec_data_base =
                 dynamic_cast<segcore::ConcurrentVector<SparseFloatVector>*>(
-                    insert_record_.get_field_data_base(fieldId));
+                    insert_record_.get_data_base(fieldId));
         }
         if (vec_data_base && vec_data_base->num_chunk() > 0 &&
             chunk_mutex_.try_lock()) {
@@ -105,11 +105,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
+            if (field_meta.is_nullable()) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -230,8 +236,12 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
+            if (insert_record_.is_valid_data_exist(field_id)) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    field_data);
+            }
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
@@ -318,7 +328,7 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -420,7 +430,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_field_data_base(field_id);
+    auto vec = get_insert_record().get_data_base(field_id);
     return vec->get_span_base(chunk_id);
 }
 
@@ -457,7 +467,7 @@ std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    auto vec_ptr = insert_record_.get_field_data_base(field_id);
+    auto vec_ptr = insert_record_.get_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
         auto result = CreateVectorDataArray(count, field_meta);
@@ -514,6 +524,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
     auto result = CreateScalarDataArray(count, field_meta);
+    if (field_meta.is_nullable()) {
+        auto valid_data_ptr = insert_record_.get_valid_data(field_id);
+        auto res = result->mutable_valid_data()->mutable_data();
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            res[i] = valid_data_ptr->is_valid(offset);
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             bulk_subscript_impl<bool>(vec_ptr,

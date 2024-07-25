@@ -112,7 +112,7 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
         uint64_t offset = 0;
         for (auto i = 0; i < field_data->get_num_rows(); ++i) {
             indices.push_back(offset);
-            offset += field_data->Size(i);
+            offset += field_data->DataSize(i);
         }
         auto sparse_column = std::make_shared<SparseFloatColumn>(
             data_size, dim, data_type, mcm_, descriptor);
@@ -123,7 +123,7 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
         column = std::make_shared<Column>(
-            data_size, dim, data_type, mcm_, descriptor);
+            data_size, dim, data_type, mcm_, descriptor,field_data->IsNullable());
     }
     column->AppendBatch(field_data);
     return column;

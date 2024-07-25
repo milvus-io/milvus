@@ -104,7 +104,8 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
         lcm->Read(file, buf.get(), file_size);
 
-        auto index = milvus::storage::CreateFieldData(storage::DataType::INT8);
+        auto index =
+            milvus::storage::CreateFieldData(storage::DataType::INT8, false);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
         auto rawData = (uint8_t*)(index->Data());
@@ -268,7 +269,7 @@ auto
 PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     std::vector<NativeType> data =
         PrepareRawFieldData<NativeType>(opt_field_data_range);
-    auto field_data = storage::CreateFieldData(DT, 1, kEntityCnt);
+    auto field_data = storage::CreateFieldData(DT, false, 1, kEntityCnt);
     field_data->FillFieldData(data.data(), kEntityCnt);
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(kOptVecFieldDataMeta);

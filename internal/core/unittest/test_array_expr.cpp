@@ -815,8 +815,11 @@ TEST(Expr, PraseArrayContainsExpr) {
         auto schema = std::make_shared<Schema>();
         schema->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-        schema->AddField(
-            FieldName("array"), FieldId(101), DataType::ARRAY, DataType::INT64);
+        schema->AddField(FieldName("array"),
+                         FieldId(101),
+                         DataType::ARRAY,
+                         DataType::INT64,
+                         false);
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     }

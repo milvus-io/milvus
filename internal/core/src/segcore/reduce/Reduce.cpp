@@ -91,17 +91,21 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto& offsets = search_result->seg_offsets_;
     auto& distances = search_result->distances_;
 
+    int segment_row_count = segment->get_row_count();
+    //1. for sealed segment, segment_row_count will not change as delete records will take effect as bitset
+    //2. for growing segment, segment_row_count is the minimum position acknowledged, which will only increase after
+    //the time at which the search operation is executed, so it's safe here to keep this value inside stack
     for (auto i = 0; i < nq; ++i) {
         for (auto j = 0; j < topK; ++j) {
             auto index = i * topK + j;
             if (offsets[index] != INVALID_SEG_OFFSET) {
                 AssertInfo(0 <= offsets[index] &&
-                               offsets[index] < segment->get_row_count(),
+                               offsets[index] < segment_row_count,
                            fmt::format("invalid offset {}, segment {} with "
                                        "rows num {}, data or index corruption",
                                        offsets[index],
                                        segment->get_segment_id(),
-                                       segment->get_row_count()));
+                                       segment_row_count));
                 real_topks[i]++;
                 offsets[valid_index] = offsets[index];
                 distances[valid_index] = distances[index];
@@ -160,27 +164,19 @@ void
 ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
                                         int seg_res_idx,
                                         std::vector<int64_t>& real_topks) {
-    uint32_t size = 0;
-    for (int j = 0; j < total_nq_; j++) {
-        size += final_search_records_[seg_res_idx][j].size();
-    }
-    std::vector<milvus::PkType> primary_keys(size);
-    std::vector<float> distances(size);
-    std::vector<int64_t> seg_offsets(size);
-
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
         for (auto offset : final_search_records_[seg_res_idx][j]) {
-            primary_keys[index] = search_result->primary_keys_[offset];
-            distances[index] = search_result->distances_[offset];
-            seg_offsets[index] = search_result->seg_offsets_[offset];
+            search_result->primary_keys_[index] = search_result->primary_keys_[offset];
+            search_result->distances_[index] = search_result->distances_[offset];
+            search_result->seg_offsets_[index] = search_result->seg_offsets_[offset];
             index++;
             real_topks[j]++;
         }
     }
-    search_result->primary_keys_.swap(primary_keys);
-    search_result->distances_.swap(distances);
-    search_result->seg_offsets_.swap(seg_offsets);
+    search_result->primary_keys_.resize(index);
+    search_result->distances_.resize(index);
+    search_result->seg_offsets_.resize(index);
 }
 
 void

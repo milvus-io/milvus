@@ -89,3 +89,10 @@ ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 
 popd
+
+pushd $ROOT_DIR/pkg/streaming/util/message/messagepb
+
+# streaming node message protobuf
+${PROTOC_BIN} --proto_path=. --go_out=plugins=grpc,paths=source_relative:. message.proto
+
+popd

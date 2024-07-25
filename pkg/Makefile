@@ -18,3 +18,6 @@ generate-mockery: getdeps
 	$(INSTALL_PATH)/mockery --name=Client --dir=$(PWD)/mq/msgdispatcher --output=$(PWD)/mq/msgsdispatcher --filename=mock_client.go --with-expecter --structname=MockClient --outpkg=msgdispatcher --inpackage
 	$(INSTALL_PATH)/mockery --name=Logger --dir=$(PWD)/eventlog --output=$(PWD)/eventlog --filename=mock_logger.go --with-expecter --structname=MockLogger --outpkg=eventlog --inpackage
 	$(INSTALL_PATH)/mockery --name=MessageID --dir=$(PWD)/mq/msgstream/mqwrapper --output=$(PWD)/mq/msgstream/mqwrapper --filename=mock_id.go --with-expecter --structname=MockMessageID --outpkg=mqwrapper --inpackage
+
+generate-proto: 
+	$(ROOTPATH)/cmake_build/bin/protoc --proto_path=$(PWD)/streaming/util/message/messagepb --go_out=plugins=grpc,paths=source_relative:./streaming/util/message/messagepb $(PWD)/streaming/util/message/messagepb/message.proto

@@ -53,6 +53,7 @@ type TsMsg interface {
 	Unmarshal(MarshalType) (TsMsg, error)
 	Position() *MsgPosition
 	SetPosition(*MsgPosition)
+	SetTs(ts uint64)
 	Size() int
 }
 
@@ -109,6 +110,11 @@ func (bm *BaseMsg) Position() *MsgPosition {
 // SetPosition is used to set position of this message in msgstream
 func (bm *BaseMsg) SetPosition(position *MsgPosition) {
 	bm.MsgPosition = position
+}
+
+func (bm *BaseMsg) SetTs(ts uint64) {
+	bm.BeginTimestamp = ts
+	bm.EndTimestamp = ts
 }
 
 func convertToByteArray(input interface{}) ([]byte, error) {

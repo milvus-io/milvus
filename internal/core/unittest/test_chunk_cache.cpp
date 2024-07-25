@@ -66,7 +66,8 @@ TEST_F(ChunkCacheTest, Read) {
                                         fake_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
@@ -114,7 +115,8 @@ TEST_F(ChunkCacheTest, TestMultithreads) {
                                         fake_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type);
+                                        metric_type,
+                                        false);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();

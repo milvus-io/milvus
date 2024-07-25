@@ -1045,6 +1045,29 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 	})
 
+	t.Run("legacy_guarantee_ts", func(t *testing.T) {
+		qt := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+			},
+		}
+
+		skip := qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		qt.request.GuaranteeTimestamp = 1 // eventually
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		qt.request.GuaranteeTimestamp = 2 // bounded
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+	})
+
 	t.Run("failed", func(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)

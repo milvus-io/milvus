@@ -56,6 +56,7 @@ const (
 	TestRootCoordID = 200
 )
 
+// TODO: remove mockMetaTable, use mockery instead
 type mockMetaTable struct {
 	IMetaTable
 	ListDatabasesFunc                func(ctx context.Context, ts Timestamp) ([]*model.Database, error)

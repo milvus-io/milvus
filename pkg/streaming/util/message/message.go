@@ -1,5 +1,7 @@
 package message
 
+import "github.com/golang/protobuf/proto"
+
 var (
 	_ BasicMessage     = (*messageImpl)(nil)
 	_ MutableMessage   = (*messageImpl)(nil)
@@ -25,6 +27,16 @@ type BasicMessage interface {
 	// Properties returns the message properties.
 	// Should be used with read-only promise.
 	Properties() RProperties
+
+	// VChannel returns the virtual channel of current message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	VChannel() string
+
+	// TimeTick returns the time tick of current message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	TimeTick() uint64
 }
 
 // MutableMessage is the mutable message interface.
@@ -56,15 +68,8 @@ type ImmutableMessage interface {
 	// WALName returns the name of message related wal.
 	WALName() string
 
-	// VChannel returns the virtual channel of current message.
-	// Available only when the message's version greater than 0.
-	// Otherwise, it will panic.
-	VChannel() string
-
-	// TimeTick returns the time tick of current message.
-	// Available only when the message's version greater than 0.
-	// Otherwise, it will panic.
-	TimeTick() uint64
+	// MessageID returns the message id of current message.
+	MessageID() MessageID
 
 	// LastConfirmedMessageID returns the last confirmed message id of current message.
 	// last confirmed message is always a timetick message.
@@ -72,7 +77,39 @@ type ImmutableMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
+}
 
-	// MessageID returns the message id of current message.
-	MessageID() MessageID
+// specializedMutableMessage is the specialized mutable message interface.
+type specializedMutableMessage[H proto.Message, B proto.Message] interface {
+	BasicMessage
+
+	// VChannel returns the vchannel of the message.
+	VChannel() string
+
+	// TimeTick returns the time tick of the message.
+	TimeTick() uint64
+
+	// Header returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
+
+	// OverwriteHeader overwrites the message header.
+	OverwriteHeader(header H)
+}
+
+// specializedImmutableMessage is the specialized immutable message interface.
+type specializedImmutableMessage[H proto.Message, B proto.Message] interface {
+	ImmutableMessage
+
+	// Header returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
 }

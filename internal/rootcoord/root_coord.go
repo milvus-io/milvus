@@ -1568,6 +1568,16 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return &milvuspb.ShowSegmentsResponse{Status: merr.Success()}, nil
 }
 
+// GetPChannelInfo get pchannel info.
+func (c *Core) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.GetPChannelInfoResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return c.meta.GetPChannelInfo(in.GetPchannel()), nil
+}
+
 // AllocTimestamp alloc timestamp
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
