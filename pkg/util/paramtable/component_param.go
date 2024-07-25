@@ -82,13 +82,14 @@ type ComponentParam struct {
 	StreamingCoordCfg streamingCoordConfig
 	StreamingNodeCfg  streamingNodeConfig
 
-	RootCoordGrpcServerCfg  GrpcServerConfig
-	ProxyGrpcServerCfg      GrpcServerConfig
-	QueryCoordGrpcServerCfg GrpcServerConfig
-	QueryNodeGrpcServerCfg  GrpcServerConfig
-	DataCoordGrpcServerCfg  GrpcServerConfig
-	DataNodeGrpcServerCfg   GrpcServerConfig
-	IndexNodeGrpcServerCfg  GrpcServerConfig
+	RootCoordGrpcServerCfg     GrpcServerConfig
+	ProxyGrpcServerCfg         GrpcServerConfig
+	QueryCoordGrpcServerCfg    GrpcServerConfig
+	QueryNodeGrpcServerCfg     GrpcServerConfig
+	DataCoordGrpcServerCfg     GrpcServerConfig
+	DataNodeGrpcServerCfg      GrpcServerConfig
+	IndexNodeGrpcServerCfg     GrpcServerConfig
+	StreamingNodeGrpcServerCfg GrpcServerConfig
 
 	RootCoordGrpcClientCfg      GrpcClientConfig
 	ProxyGrpcClientCfg          GrpcClientConfig
@@ -99,8 +100,7 @@ type ComponentParam struct {
 	IndexNodeGrpcClientCfg      GrpcClientConfig
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
-
-	IntegrationTestCfg integrationTestConfig
+	IntegrationTestCfg          integrationTestConfig
 
 	RuntimeConfig runtimeConfig
 }
@@ -130,6 +130,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.IndexNodeCfg.init(bt)
+	p.StreamingCoordCfg.init(bt)
+	p.StreamingNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -145,6 +147,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
 	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
+	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
 	p.ProxyGrpcClientCfg.Init("proxy", bt)

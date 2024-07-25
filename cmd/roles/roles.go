@@ -130,14 +130,15 @@ func runComponent[T component](ctx context.Context,
 
 // MilvusRoles decides which components are brought up with Milvus.
 type MilvusRoles struct {
-	EnableRootCoord  bool `env:"ENABLE_ROOT_COORD"`
-	EnableProxy      bool `env:"ENABLE_PROXY"`
-	EnableQueryCoord bool `env:"ENABLE_QUERY_COORD"`
-	EnableQueryNode  bool `env:"ENABLE_QUERY_NODE"`
-	EnableDataCoord  bool `env:"ENABLE_DATA_COORD"`
-	EnableDataNode   bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
-	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
+	EnableRootCoord     bool `env:"ENABLE_ROOT_COORD"`
+	EnableProxy         bool `env:"ENABLE_PROXY"`
+	EnableQueryCoord    bool `env:"ENABLE_QUERY_COORD"`
+	EnableQueryNode     bool `env:"ENABLE_QUERY_NODE"`
+	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
+	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
+	EnableIndexCoord    bool `env:"ENABLE_INDEX_COORD"`
+	EnableIndexNode     bool `env:"ENABLE_INDEX_NODE"`
+	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
 
 	Local    bool
 	Alias    string
@@ -205,6 +206,11 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync
 func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	return runComponent(ctx, localMsg, wg, components.NewDataCoord, metrics.RegisterDataCoord)
+}
+
+func (mr *MilvusRoles) runStreamingNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewStreamingNode, metrics.RegisterStreamingNode)
 }
 
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
@@ -374,7 +380,7 @@ func (mr *MilvusRoles) Run() {
 
 	componentMap := make(map[string]component)
 	var rootCoord, queryCoord, indexCoord, dataCoord component
-	var proxy, dataNode, indexNode, queryNode component
+	var proxy, dataNode, indexNode, queryNode, streamingNode component
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 		componentMap[typeutil.RootCoordRole] = rootCoord
@@ -412,6 +418,11 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableProxy {
 		proxy = mr.runProxy(ctx, local, &wg)
 		componentMap[typeutil.ProxyRole] = proxy
+	}
+
+	if mr.EnableStreamingNode {
+		streamingNode = mr.runStreamingNode(ctx, local, &wg)
+		componentMap[typeutil.StreamingNodeRole] = streamingNode
 	}
 
 	wg.Wait()
@@ -480,7 +491,7 @@ func (mr *MilvusRoles) Run() {
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{queryNode, indexNode, dataNode}
+	nodes := []component{queryNode, indexNode, dataNode, streamingNode}
 	for idx, node := range nodes {
 		if node != nil {
 			log.Info("stop node", zap.Int("idx", idx), zap.Any("node", node))
