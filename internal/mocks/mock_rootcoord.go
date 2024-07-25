@@ -1411,6 +1411,61 @@ func (_c *RootCoord_GetMetrics_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
+// GetPChannelInfo provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) GetPChannelInfo(_a0 context.Context, _a1 *rootcoordpb.GetPChannelInfoRequest) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *rootcoordpb.GetPChannelInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetPChannelInfoRequest) (*rootcoordpb.GetPChannelInfoResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetPChannelInfoRequest) *rootcoordpb.GetPChannelInfoResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetPChannelInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetPChannelInfoRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_GetPChannelInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPChannelInfo'
+type RootCoord_GetPChannelInfo_Call struct {
+	*mock.Call
+}
+
+// GetPChannelInfo is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetPChannelInfoRequest
+func (_e *RootCoord_Expecter) GetPChannelInfo(_a0 interface{}, _a1 interface{}) *RootCoord_GetPChannelInfo_Call {
+	return &RootCoord_GetPChannelInfo_Call{Call: _e.mock.On("GetPChannelInfo", _a0, _a1)}
+}
+
+func (_c *RootCoord_GetPChannelInfo_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetPChannelInfoRequest)) *RootCoord_GetPChannelInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetPChannelInfoRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_GetPChannelInfo_Call) Return(_a0 *rootcoordpb.GetPChannelInfoResponse, _a1 error) *RootCoord_GetPChannelInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_GetPChannelInfo_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetPChannelInfoRequest) (*rootcoordpb.GetPChannelInfoResponse, error)) *RootCoord_GetPChannelInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetStatisticsChannel provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) GetStatisticsChannel(_a0 context.Context, _a1 *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1517,61 +1572,6 @@ func (_c *RootCoord_GetTimeTickChannel_Call) Return(_a0 *milvuspb.StringResponse
 }
 
 func (_c *RootCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)) *RootCoord_GetTimeTickChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetVChannels provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) GetVChannels(_a0 context.Context, _a1 *rootcoordpb.GetVChannelsRequest) (*rootcoordpb.GetVChannelsResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *rootcoordpb.GetVChannelsResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetVChannelsRequest) (*rootcoordpb.GetVChannelsResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetVChannelsRequest) *rootcoordpb.GetVChannelsResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.GetVChannelsResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetVChannelsRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_GetVChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVChannels'
-type RootCoord_GetVChannels_Call struct {
-	*mock.Call
-}
-
-// GetVChannels is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.GetVChannelsRequest
-func (_e *RootCoord_Expecter) GetVChannels(_a0 interface{}, _a1 interface{}) *RootCoord_GetVChannels_Call {
-	return &RootCoord_GetVChannels_Call{Call: _e.mock.On("GetVChannels", _a0, _a1)}
-}
-
-func (_c *RootCoord_GetVChannels_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetVChannelsRequest)) *RootCoord_GetVChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.GetVChannelsRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_GetVChannels_Call) Return(_a0 *rootcoordpb.GetVChannelsResponse, _a1 error) *RootCoord_GetVChannels_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_GetVChannels_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetVChannelsRequest) (*rootcoordpb.GetVChannelsResponse, error)) *RootCoord_GetVChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }

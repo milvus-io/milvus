@@ -191,10 +191,6 @@ func (m mockMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	return m.GetCollectionVirtualChannelsFunc(colID)
 }
 
-func (m mockMetaTable) GetVChannelsByPchannel(pchannel string) []string {
-	panic("unimplemented")
-}
-
 func (m mockMetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 	return m.AddCredentialFunc(credInfo)
 }
