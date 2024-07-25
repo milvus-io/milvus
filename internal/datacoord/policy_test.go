@@ -71,16 +71,16 @@ func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 		s.Nil(opSet)
 	})
 	s.Run("test uneven with conservative effect", func() {
-		// as we deem that the node having only one channel more than average as even, so there's no reallocation
-		// for this test case
-		// even distribution should have not results
 		uneven := []*NodeChannelInfo{
 			{100, getChannels(map[string]int64{"ch1": 1, "ch2": 1})},
 			{NodeID: 101},
 		}
 
 		opSet := AvgBalanceChannelPolicy(uneven)
-		s.Nil(opSet)
+		s.Equal(opSet.Len(), 1)
+		for _, op := range opSet.Collect() {
+			s.True(lo.Contains([]string{"ch1", "ch2"}, op.GetChannelNames()[0]))
+		}
 	})
 	s.Run("test uneven with zero", func() {
 		uneven := []*NodeChannelInfo{

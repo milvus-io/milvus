@@ -89,17 +89,32 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 		totalChannelNum += len(nodeChs.Channels)
 	}
 	channelCountPerNode := totalChannelNum / avaNodeNum
+	maxChannelCountPerNode := channelCountPerNode
+	reminder := totalChannelNum % avaNodeNum
+	if reminder > 0 {
+		maxChannelCountPerNode += 1
+	}
 	for _, nChannels := range cluster {
 		chCount := len(nChannels.Channels)
-		if chCount <= channelCountPerNode+1 {
+		if chCount == 0 {
+			continue
+		}
+
+		toReleaseCount := chCount - channelCountPerNode
+		if reminder > 0 && chCount >= maxChannelCountPerNode {
+			reminder -= 1
+			toReleaseCount = chCount - maxChannelCountPerNode
+		}
+
+		if toReleaseCount == 0 {
 			log.Info("node channel count is not much larger than average, skip reallocate",
 				zap.Int64("nodeID", nChannels.NodeID),
 				zap.Int("channelCount", chCount),
 				zap.Int("channelCountPerNode", channelCountPerNode))
 			continue
 		}
+
 		reallocate := NewNodeChannelInfo(nChannels.NodeID)
-		toReleaseCount := chCount - channelCountPerNode - 1
 		for _, ch := range nChannels.Channels {
 			reallocate.AddChannel(ch)
 			toReleaseCount--
@@ -144,6 +159,7 @@ func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInf
 			fromCluster = append(fromCluster, info)
 			channelNum += len(info.Channels)
 			nodeToAvg.Insert(info.NodeID)
+			return
 		}
 
 		// Get toCluster by filtering out execlusive nodes
@@ -152,6 +168,7 @@ func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInf
 		}
 
 		toCluster = append(toCluster, info)
+		channelNum += len(info.Channels)
 		nodeToAvg.Insert(info.NodeID)
 	})
 
