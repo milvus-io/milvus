@@ -592,6 +592,7 @@ grpc:
   log:
     level: WARNING
   gracefulStopTimeout: 10 # second, time to wait graceful stop finish
+  maxConcurrentStreams: 1000 # each http2 can serve 1000 concurrent request
   client:
     compressionEnabled: false
     dialTimeout: 200
