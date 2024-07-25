@@ -43,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -120,14 +122,14 @@ func (s *Server) init() error {
 		log.Info("Connected to tikv. Using tikv as metadata storage.")
 	}
 
-	err = s.startGrpc()
-	if err != nil {
-		log.Debug("DataCoord startGrpc failed", zap.Error(err))
+	if err := s.dataCoord.Init(); err != nil {
+		log.Error("dataCoord init error", zap.Error(err))
 		return err
 	}
 
-	if err := s.dataCoord.Init(); err != nil {
-		log.Error("dataCoord init error", zap.Error(err))
+	err = s.startGrpc()
+	if err != nil {
+		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -184,6 +186,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
+			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
@@ -195,9 +198,14 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
+			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 		)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
+	// register the streaming coord grpc service.
+	if streamingutil.IsStreamingServiceEnabled() {
+		s.dataCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+	}
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err

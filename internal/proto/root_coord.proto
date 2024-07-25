@@ -96,7 +96,7 @@ service RootCoord {
     rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
     rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
     rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
-    rpc GetVChannels(GetVChannelsRequest) returns (GetVChannelsResponse) {}
+    rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
 
     rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
@@ -220,12 +220,23 @@ message AlterDatabaseRequest {
   repeated common.KeyValuePair properties = 4;
 }
 
-message GetVChannelsRequest {
+message GetPChannelInfoRequest {
   common.MsgBase base = 1;
   string pchannel = 2;
 }
 
-message GetVChannelsResponse {
+message GetPChannelInfoResponse {
   common.Status status = 1;
-  repeated string vchannels = 2;
+  repeated CollectionInfoOnPChannel collections = 2;
 }
+
+message CollectionInfoOnPChannel {
+  int64 collection_id = 1;
+  repeated PartitionInfoOnPChannel partitions = 2;
+  string vchannel = 3;
+}
+
+message PartitionInfoOnPChannel {
+  int64 partition_id = 1;
+}
+

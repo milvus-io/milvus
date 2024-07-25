@@ -83,13 +83,13 @@ func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		insertMessage, err := message.AsImmutableInsertMessage(msg)
+		insertMessage, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to convert message to insert message")
 		}
 		// insertMsg has multiple partition and segment assignment is done by insert message header.
 		// so recover insert message from header before send it.
-		return recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage.MessageHeader(), msg.TimeTick())
+		return recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage.Header(), msg.TimeTick())
 	default:
 		return tsMsg, nil
 	}

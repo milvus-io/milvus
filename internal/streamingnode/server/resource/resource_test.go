@@ -19,7 +19,11 @@ func TestInit(t *testing.T) {
 	assert.Panics(t, func() {
 		Init(OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
 	})
-	Init(OptETCD(&clientv3.Client{}), OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
+	Init(
+		OptETCD(&clientv3.Client{}),
+		OptRootCoordClient(mocks.NewMockRootCoordClient(t)),
+		OptDataCoordClient(mocks.NewMockDataCoordClient(t)),
+	)
 
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())

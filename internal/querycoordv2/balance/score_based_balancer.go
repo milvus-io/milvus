@@ -82,6 +82,7 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		func(s *meta.Segment) {
@@ -112,6 +113,10 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 			}
 			targetNode.setPriority(targetNode.getPriority() + priorityChange)
 		}(s)
+
+		if len(plans) > balanceBatchSize {
+			break
+		}
 	}
 	return plans
 }
@@ -295,6 +300,8 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 		return nil
 	}
 
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
 	average := totalScore / len(onlineNodes)
@@ -309,6 +316,9 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 		})
 		for _, s := range segments {
 			segmentsToMove = append(segmentsToMove, s)
+			if len(segmentsToMove) >= balanceBatchSize {
+				break
+			}
 			leftScore -= b.calculateSegmentScore(s)
 			if leftScore <= average {
 				break

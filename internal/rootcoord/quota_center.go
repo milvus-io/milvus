@@ -1569,6 +1569,7 @@ func (q *QuotaCenter) recordMetrics() {
 						return false
 					}
 					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), name).Set(1.0)
+					metrics.RootCoordForceDenyWritingCounter.Inc()
 					return false
 				}
 				return true

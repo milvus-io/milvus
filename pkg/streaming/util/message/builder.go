@@ -46,47 +46,47 @@ var (
 )
 
 // createNewMessageBuilderV1 creates a new message builder with v1 marker.
-func createNewMessageBuilderV1[H proto.Message, P proto.Message]() func() *mutableMesasgeBuilder[H, P] {
-	return func() *mutableMesasgeBuilder[H, P] {
-		return newMutableMessageBuilder[H, P](VersionV1)
+func createNewMessageBuilderV1[H proto.Message, B proto.Message]() func() *mutableMesasgeBuilder[H, B] {
+	return func() *mutableMesasgeBuilder[H, B] {
+		return newMutableMessageBuilder[H, B](VersionV1)
 	}
 }
 
 // newMutableMessageBuilder creates a new builder.
 // Should only used at client side.
-func newMutableMessageBuilder[H proto.Message, P proto.Message](v Version) *mutableMesasgeBuilder[H, P] {
+func newMutableMessageBuilder[H proto.Message, B proto.Message](v Version) *mutableMesasgeBuilder[H, B] {
 	var h H
-	messageType := mustGetMessageTypeFromMessageHeader(h)
+	messageType := mustGetMessageTypeFromHeader(h)
 	properties := make(propertiesImpl)
 	properties.Set(messageTypeKey, messageType.marshal())
 	properties.Set(messageVersion, v.String())
-	return &mutableMesasgeBuilder[H, P]{
+	return &mutableMesasgeBuilder[H, B]{
 		properties: properties,
 	}
 }
 
 // mutableMesasgeBuilder is the builder for message.
-type mutableMesasgeBuilder[H proto.Message, P proto.Message] struct {
+type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	header     H
-	payload    P
+	body       B
 	properties propertiesImpl
 }
 
 // WithMessageHeader creates a new builder with determined message type.
-func (b *mutableMesasgeBuilder[H, P]) WithMessageHeader(h H) *mutableMesasgeBuilder[H, P] {
+func (b *mutableMesasgeBuilder[H, B]) WithHeader(h H) *mutableMesasgeBuilder[H, B] {
 	b.header = h
 	return b
 }
 
-// WithPayload creates a new builder with message payload.
-func (b *mutableMesasgeBuilder[H, P]) WithPayload(p P) *mutableMesasgeBuilder[H, P] {
-	b.payload = p
+// WithBody creates a new builder with message body.
+func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H, B] {
+	b.body = body
 	return b
 }
 
 // WithProperty creates a new builder with message property.
 // A key started with '_' is reserved for streaming system, should never used at user of client.
-func (b *mutableMesasgeBuilder[H, P]) WithProperty(key string, val string) *mutableMesasgeBuilder[H, P] {
+func (b *mutableMesasgeBuilder[H, B]) WithProperty(key string, val string) *mutableMesasgeBuilder[H, B] {
 	if b.properties.Exist(key) {
 		panic(fmt.Sprintf("message builder already set property field, key = %s", key))
 	}
@@ -96,7 +96,7 @@ func (b *mutableMesasgeBuilder[H, P]) WithProperty(key string, val string) *muta
 
 // WithProperties creates a new builder with message properties.
 // A key started with '_' is reserved for streaming system, should never used at user of client.
-func (b *mutableMesasgeBuilder[H, P]) WithProperties(kvs map[string]string) *mutableMesasgeBuilder[H, P] {
+func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mutableMesasgeBuilder[H, B] {
 	for key, val := range kvs {
 		b.properties.Set(key, val)
 	}
@@ -106,13 +106,13 @@ func (b *mutableMesasgeBuilder[H, P]) WithProperties(kvs map[string]string) *mut
 // BuildMutable builds a mutable message.
 // Panic if not set payload and message type.
 // should only used at client side.
-func (b *mutableMesasgeBuilder[H, P]) BuildMutable() (MutableMessage, error) {
+func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 	// payload and header must be a pointer
 	if reflect.ValueOf(b.header).IsNil() {
 		panic("message builder not ready for header field")
 	}
-	if reflect.ValueOf(b.payload).IsNil() {
-		panic("message builder not ready for payload field")
+	if reflect.ValueOf(b.body).IsNil() {
+		panic("message builder not ready for body field")
 	}
 
 	// setup header.
@@ -122,9 +122,9 @@ func (b *mutableMesasgeBuilder[H, P]) BuildMutable() (MutableMessage, error) {
 	}
 	b.properties.Set(messageSpecialiedHeader, sp)
 
-	payload, err := proto.Marshal(b.payload)
+	payload, err := proto.Marshal(b.body)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal payload")
+		return nil, errors.Wrap(err, "failed to marshal body")
 	}
 	return &messageImpl{
 		payload:    payload,

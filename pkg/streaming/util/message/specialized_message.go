@@ -7,6 +7,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/messagepb"
 )
 
@@ -35,51 +36,51 @@ var messageTypeMap = map[reflect.Type]MessageType{
 
 // List all specialized message types.
 type (
-	MutableTimeTickMessage  = specializedMutableMessage[*TimeTickMessageHeader]
-	MutableInsertMessage    = specializedMutableMessage[*InsertMessageHeader]
-	MutableDeleteMessage    = specializedMutableMessage[*DeleteMessageHeader]
-	MutableCreateCollection = specializedMutableMessage[*CreateCollectionMessageHeader]
-	MutableDropCollection   = specializedMutableMessage[*DropCollectionMessageHeader]
-	MutableCreatePartition  = specializedMutableMessage[*CreatePartitionMessageHeader]
-	MutableDropPartition    = specializedMutableMessage[*DropPartitionMessageHeader]
+	MutableTimeTickMessageV1         = specializedMutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	MutableInsertMessageV1           = specializedMutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	MutableDeleteMessageV1           = specializedMutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	MutableCreateCollectionMessageV1 = specializedMutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	MutableDropCollectionMessageV1   = specializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	MutableCreatePartitionMessageV1  = specializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	MutableDropPartitionMessageV1    = specializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 
-	ImmutableTimeTickMessage  = specializedImmutableMessage[*TimeTickMessageHeader]
-	ImmutableInsertMessage    = specializedImmutableMessage[*InsertMessageHeader]
-	ImmutableDeleteMessage    = specializedImmutableMessage[*DeleteMessageHeader]
-	ImmutableCreateCollection = specializedImmutableMessage[*CreateCollectionMessageHeader]
-	ImmutableDropCollection   = specializedImmutableMessage[*DropCollectionMessageHeader]
-	ImmutableCreatePartition  = specializedImmutableMessage[*CreatePartitionMessageHeader]
-	ImmutableDropPartition    = specializedImmutableMessage[*DropPartitionMessageHeader]
+	ImmutableTimeTickMessageV1         = specializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	ImmutableInsertMessageV1           = specializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	ImmutableDeleteMessageV1           = specializedImmutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	ImmutableCreateCollectionMessageV1 = specializedImmutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	ImmutableDropCollectionMessageV1   = specializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	ImmutableCreatePartitionMessageV1  = specializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	ImmutableDropPartitionMessageV1    = specializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 )
 
 // List all as functions for specialized messages.
 var (
-	AsMutableTimeTickMessage  = asSpecializedMutableMessage[*TimeTickMessageHeader]
-	AsMutableInsertMessage    = asSpecializedMutableMessage[*InsertMessageHeader]
-	AsMutableDeleteMessage    = asSpecializedMutableMessage[*DeleteMessageHeader]
-	AsMutableCreateCollection = asSpecializedMutableMessage[*CreateCollectionMessageHeader]
-	AsMutableDropCollection   = asSpecializedMutableMessage[*DropCollectionMessageHeader]
-	AsMutableCreatePartition  = asSpecializedMutableMessage[*CreatePartitionMessageHeader]
-	AsMutableDropPartition    = asSpecializedMutableMessage[*DropPartitionMessageHeader]
+	AsMutableTimeTickMessageV1         = asSpecializedMutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	AsMutableInsertMessageV1           = asSpecializedMutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	AsMutableDeleteMessageV1           = asSpecializedMutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	AsMutableCreateCollectionMessageV1 = asSpecializedMutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	AsMutableDropCollectionMessageV1   = asSpecializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	AsMutableCreatePartitionMessageV1  = asSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	AsMutableDropPartitionMessageV1    = asSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 
-	AsImmutableTimeTickMessage  = asSpecializedImmutableMessage[*TimeTickMessageHeader]
-	AsImmutableInsertMessage    = asSpecializedImmutableMessage[*InsertMessageHeader]
-	AsImmutableDeleteMessage    = asSpecializedImmutableMessage[*DeleteMessageHeader]
-	AsImmutableCreateCollection = asSpecializedImmutableMessage[*CreateCollectionMessageHeader]
-	AsImmutableDropCollection   = asSpecializedImmutableMessage[*DropCollectionMessageHeader]
-	AsImmutableCreatePartition  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader]
-	AsImmutableDropPartition    = asSpecializedImmutableMessage[*DropPartitionMessageHeader]
+	AsImmutableTimeTickMessageV1         = asSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	AsImmutableInsertMessageV1           = asSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	AsImmutableDeleteMessageV1           = asSpecializedImmutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	AsImmutableCreateCollectionMessageV1 = asSpecializedImmutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	AsImmutableDropCollectionMessageV1   = asSpecializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	AsImmutableCreatePartitionMessageV1  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	AsImmutableDropPartitionMessageV1    = asSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 )
 
 // asSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
 // Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return specializedMutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
-func asSpecializedMutableMessage[H proto.Message](msg MutableMessage) (specializedMutableMessage[H], error) {
+func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMessage) (specializedMutableMessage[H, B], error) {
 	underlying := msg.(*messageImpl)
 
 	var header H
-	msgType := mustGetMessageTypeFromMessageHeader(header)
+	msgType := mustGetMessageTypeFromHeader(header)
 	if underlying.MessageType() != msgType {
 		// The message type do not match the specialized header.
 		return nil, nil
@@ -101,7 +102,7 @@ func asSpecializedMutableMessage[H proto.Message](msg MutableMessage) (specializ
 	if err := DecodeProto(val, header); err != nil {
 		return nil, errors.Wrap(err, "failed to decode specialized header")
 	}
-	return &specializedMutableMessageImpl[H]{
+	return &specializedMutableMessageImpl[H, B]{
 		header:      header,
 		messageImpl: underlying,
 	}, nil
@@ -111,11 +112,11 @@ func asSpecializedMutableMessage[H proto.Message](msg MutableMessage) (specializ
 // Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return asSpecializedImmutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
-func asSpecializedImmutableMessage[H proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H], error) {
+func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H, B], error) {
 	underlying := msg.(*immutableMessageImpl)
 
 	var header H
-	msgType := mustGetMessageTypeFromMessageHeader(header)
+	msgType := mustGetMessageTypeFromHeader(header)
 	if underlying.MessageType() != msgType {
 		// The message type do not match the specialized header.
 		return nil, nil
@@ -137,14 +138,14 @@ func asSpecializedImmutableMessage[H proto.Message](msg ImmutableMessage) (speci
 	if err := DecodeProto(val, header); err != nil {
 		return nil, errors.Wrap(err, "failed to decode specialized header")
 	}
-	return &specializedImmutableMessageImpl[H]{
+	return &specializedImmutableMessageImpl[H, B]{
 		header:               header,
 		immutableMessageImpl: underlying,
 	}, nil
 }
 
 // mustGetMessageTypeFromMessageHeader returns the message type of the given message header.
-func mustGetMessageTypeFromMessageHeader(msg proto.Message) MessageType {
+func mustGetMessageTypeFromHeader(msg proto.Message) MessageType {
 	t := reflect.TypeOf(msg)
 	mt, ok := messageTypeMap[t]
 	if !ok {
@@ -154,18 +155,23 @@ func mustGetMessageTypeFromMessageHeader(msg proto.Message) MessageType {
 }
 
 // specializedMutableMessageImpl is the specialized mutable message implementation.
-type specializedMutableMessageImpl[H proto.Message] struct {
+type specializedMutableMessageImpl[H proto.Message, B proto.Message] struct {
 	header H
 	*messageImpl
 }
 
 // MessageHeader returns the message header.
-func (m *specializedMutableMessageImpl[H]) MessageHeader() H {
+func (m *specializedMutableMessageImpl[H, B]) Header() H {
 	return m.header
 }
 
+// Body returns the message body.
+func (m *specializedMutableMessageImpl[H, B]) Body() (B, error) {
+	return unmarshalProtoB[B](m.payload)
+}
+
 // OverwriteMessageHeader overwrites the message header.
-func (m *specializedMutableMessageImpl[H]) OverwriteMessageHeader(header H) {
+func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 	m.header = header
 	newHeader, err := EncodeProto(m.header)
 	if err != nil {
@@ -175,12 +181,32 @@ func (m *specializedMutableMessageImpl[H]) OverwriteMessageHeader(header H) {
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.
-type specializedImmutableMessageImpl[H proto.Message] struct {
+type specializedImmutableMessageImpl[H proto.Message, B proto.Message] struct {
 	header H
 	*immutableMessageImpl
 }
 
-// MessageHeader returns the message header.
-func (m *specializedImmutableMessageImpl[H]) MessageHeader() H {
+// Header returns the message header.
+func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 	return m.header
+}
+
+// Body returns the message body.
+func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
+	return unmarshalProtoB[B](m.payload)
+}
+
+func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
+	var nilBody B
+	// Decode the specialized header.
+	// Must be pointer type.
+	t := reflect.TypeOf(nilBody)
+	t.Elem()
+	body := reflect.New(t.Elem()).Interface().(B)
+
+	err := proto.Unmarshal(data, body)
+	if err != nil {
+		return nilBody, err
+	}
+	return body, nil
 }

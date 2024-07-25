@@ -2553,6 +2553,29 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 	})
 
+	t.Run("legacy_guarantee_ts", func(t *testing.T) {
+		st := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+			},
+		}
+
+		skip := st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		st.request.GuaranteeTimestamp = 1 // eventually
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		st.request.GuaranteeTimestamp = 2 // bounded
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+	})
+
 	t.Run("failed", func(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
