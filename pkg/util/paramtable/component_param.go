@@ -696,7 +696,7 @@ like the old password verification when updating the credential`,
 
 	p.UseCollectionIdBasedIndexPath = ParamItem{
 		Key:          "common.storage.useCollectionIdBasedIndexPath",
-		Version:      "2.4.2",
+		Version:      "2.3.17",
 		DefaultValue: "false",
 	}
 	p.UseCollectionIdBasedIndexPath.Init(base.mgr)

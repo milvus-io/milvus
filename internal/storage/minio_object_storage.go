@@ -103,7 +103,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		if c.useIAM {
 			creds = credentials.NewIAM("")
 		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "IQoJb3JpZ2luX2VjEBIaCXVzLWVhc3QtMSJGMEQCIB0FdalRHrGIk6jB0icOweZ1SZlnsww8eoX4Ze/Jl8LsAiBrsuKYK75AJPQywHswG4i7iTqcGSr5WzeNidEUoIWb2iqpAwi7//////////8BEAQaDDI0MDg1MjU4ODU3OCIMFQEJeJLiLC1eFzlAKv0C7AmeOhB/lICGRyjOn6GUfpKTYyteIwxCc0WhlfK1+C6w8HLrlKDMMZmy8B+XIUyD85gxfWRDkGQ0MXh7GBxwZcAk0wLIfNJIWnOC4x143VkfDUsY1Z+Miwc8NjrXxr8XshGx1AEqN567SUsdFWWMtbYYiKk+luAEVR7F4p5XBtCTvPKRK74RUqeW/AdiUkbo+vB/c7qedph12M1B76I592DMlpywpncc3vXA4WPSwfhNgf5i9EuKmAOFmMIaEVk8cMMzGuHXvAWDuBVdeJLEQ1HEAaRZ3B6BjbG6ivjlKCkaxL1Ksddgp1LLIQMF06TGrW8NbWq+9Dpqjw+Ia1w/1PusegxG8fClBrhMFwVCkgMGgbE2MtNKOQW1KpjUhY3MzXnRexAK/S2rVYiDrVPE2rL2luux0rUWtja5vDryjHQyGNSzxw6SY+x4I0PoRJh1MOJCZFDvN7I1keohgf0WrEQbkvej9UbcIWO1ZDvSd/jUL0Ql5xfD9jm/D00qMNKf6rMGOt8BgKxEXpuUAc0l2VpfcyGWsrABoKQtlAcM1731i23K4sd26tkLrIkwkUuDpzTXSyrs13eHZNNuZcpKRbetfnclXWnbebX/iZSsKWuC73B+yCvFXSA17MdYVVh7cANkDpBx8MaokkccVlyL4QTsaCWWTsdZ7wNnsJ59hg5fneCgzRuPzTjgtxOEG9hlrs3o1BvF8toIzmk0pjESF8Dwg8hZZvrZI1KrcgaleaOuqZX28/+dFMAd7PYHk0MEVkIqB46Hev5Hmp5FA8cEh7nWyLkL98jb9o4HokS6BR9oMcUGMA==")
+			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
 		}
 	}
 
