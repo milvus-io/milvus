@@ -83,7 +83,7 @@ func TestHookInterceptor(t *testing.T) {
 		err error
 	)
 
-	hoo = mockHoo
+	hookutil.SetTestHook(mockHoo)
 	res, err = interceptor(ctx, "request", info, func(ctx context.Context, req interface{}) (interface{}, error) {
 		return nil, nil
 	})
@@ -95,7 +95,7 @@ func TestHookInterceptor(t *testing.T) {
 	assert.Equal(t, res, mockHoo.mockRes)
 	assert.Equal(t, err, mockHoo.mockErr)
 
-	hoo = beforeHoo
+	hookutil.SetTestHook(beforeHoo)
 	_, err = interceptor(ctx, r, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 		return nil, nil
 	})
@@ -103,7 +103,7 @@ func TestHookInterceptor(t *testing.T) {
 	assert.Equal(t, err, beforeHoo.err)
 
 	beforeHoo.err = nil
-	hoo = beforeHoo
+	hookutil.SetTestHook(beforeHoo)
 	_, err = interceptor(ctx, r, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 		assert.Equal(t, beforeHoo.ctxValue, ctx.Value(beforeHoo.ctxKey))
 		return nil, nil
@@ -111,14 +111,14 @@ func TestHookInterceptor(t *testing.T) {
 	assert.Equal(t, r.method, beforeHoo.method)
 	assert.Equal(t, err, beforeHoo.err)
 
-	hoo = afterHoo
+	hookutil.SetTestHook(afterHoo)
 	_, err = interceptor(ctx, r, info, func(ctx context.Context, r interface{}) (interface{}, error) {
 		return re, nil
 	})
 	assert.Equal(t, re.method, afterHoo.method)
 	assert.Equal(t, err, afterHoo.err)
 
-	hoo = &hookutil.DefaultHook{}
+	hookutil.SetTestHook(&hookutil.DefaultHook{})
 	res, err = interceptor(ctx, r, info, func(ctx context.Context, r interface{}) (interface{}, error) {
 		return &resp{
 			method: r.(*req).method,
