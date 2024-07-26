@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -55,6 +56,8 @@ import (
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
+	// GetCollectionIDByCache get collection's id by name.
+	GetCollectionIDByCache(ctx context.Context, database, collectionName string) typeutil.UniqueID
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
@@ -93,6 +96,7 @@ type Cache interface {
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
+	IsCollectionTruncating(ctx context.Context, database string, collectionID typeutil.UniqueID) bool
 }
 type collectionBasicInfo struct {
 	collID                typeutil.UniqueID
@@ -110,6 +114,7 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	state                 pb.CollectionState
 }
 
 type databaseInfo struct {
@@ -268,6 +273,7 @@ type MetaCache struct {
 	shardMgr         shardClientMgr
 	sfGlobal         conc.Singleflight[*collectionInfo]
 	sfDB             conc.Singleflight[*databaseInfo]
+	truncatingColl   map[string]map[typeutil.UniqueID]bool
 
 	IDStart int64
 	IDCount int64
@@ -304,6 +310,7 @@ func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordCl
 		queryCoord:       queryCoord,
 		dbInfo:           map[string]*databaseInfo{},
 		collInfo:         map[string]map[string]*collectionInfo{},
+		truncatingColl:   map[string]map[typeutil.UniqueID]bool{},
 		collLeader:       map[string]map[string]*shardLeaders{},
 		dbCollectionInfo: map[string]map[typeutil.UniqueID]string{},
 		credMap:          map[string]*internalpb.CredentialInfo{},
@@ -402,6 +409,13 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
+		state:                 collection.State,
+	}
+	if collection.State == pb.CollectionState_CollectionTruncating {
+		if _, dbOk := m.truncatingColl[database]; !dbOk {
+			m.truncatingColl[database] = map[typeutil.UniqueID]bool{}
+		}
+		m.truncatingColl[database][collection.CollectionID] = true
 	}
 
 	log.Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID))
@@ -449,6 +463,17 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 
 	return collInfo.collID, nil
+}
+
+const InvalidCollectionID = UniqueID(0)
+
+// GetCollectionIDByCache returns the corresponding collection id for provided collection name
+func (m *MetaCache) GetCollectionIDByCache(ctx context.Context, database, collectionName string) UniqueID {
+	collInfo, ok := m.getCollection(database, collectionName, 0)
+	if !ok {
+		return InvalidCollectionID
+	}
+	return collInfo.collID
 }
 
 // GetCollectionName returns the corresponding collection name for provided collection id
@@ -690,7 +715,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 }
 
 // Get the collection information from rootcoord.
-func (m *MetaCache) describeCollection(ctx context.Context, database, collectionName string, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *MetaCache) describeCollection(ctx context.Context, database, collectionName string, collectionID int64) (*rootcoordpb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
@@ -699,7 +724,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	coll, err := m.rootCoord.DescribeCollection(ctx, req)
+	coll, err := m.rootCoord.DescribeCollectionWithState(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +732,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	resp := &milvuspb.DescribeCollectionResponse{
+	resp := &rootcoordpb.DescribeCollectionResponse{
 		Status: coll.Status,
 		Schema: &schemapb.CollectionSchema{
 			Name:               coll.Schema.Name,
@@ -724,6 +749,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		ConsistencyLevel:     coll.ConsistencyLevel,
 		DbName:               coll.GetDbName(),
 		Properties:           coll.Properties,
+		State:                coll.State,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
@@ -820,7 +846,13 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	defer m.mu.Unlock()
 	_, dbOk := m.collInfo[database]
 	if dbOk {
-		delete(m.collInfo[database], collectionName)
+		coll, collOk := m.collInfo[database][collectionName]
+		if collOk {
+			delete(m.collInfo[database], collectionName)
+			if _, dbOk := m.truncatingColl[database]; dbOk {
+				delete(m.truncatingColl[database], coll.collID)
+			}
+		}
 	}
 }
 
@@ -833,6 +865,9 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 			if v.collID == collectionID {
 				delete(m.collInfo[database], k)
 				collNames = append(collNames, k)
+				if _, dbOk := m.truncatingColl[database]; dbOk {
+					delete(m.truncatingColl[database], collectionID)
+				}
 			}
 		}
 	}
@@ -1141,6 +1176,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
+	delete(m.truncatingColl, database)
 	delete(m.dbInfo, database)
 }
 
@@ -1209,4 +1245,13 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	id := m.IDStart + m.IDIndex
 	m.IDIndex++
 	return id, nil
+}
+
+func (m *MetaCache) IsCollectionTruncating(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if _, dbOk := m.truncatingColl[database]; dbOk {
+		if _, collOk := m.truncatingColl[database][collectionID]; collOk {
+			return true
+		}
+	}
+	return false
 }

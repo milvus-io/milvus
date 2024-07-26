@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
 
@@ -105,6 +106,10 @@ type mockTask struct {
 }
 
 func (m *mockTask) CanSkipAllocTimestamp() bool {
+	return false
+}
+
+func (m *mockTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
 	return false
 }
 

@@ -81,6 +81,7 @@ type RootCoordCatalog interface {
 	// List all user role pair in string for the tenant
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
+	UpdateCollectionAndAlias(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error
 
 	Close()
 }

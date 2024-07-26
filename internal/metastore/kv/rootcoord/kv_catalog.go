@@ -1210,6 +1210,45 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 	return userRoles, nil
 }
 
+func (kc *Catalog) UpdateCollectionAndAlias(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error {
+	if len(collections) == 0 && len(aliases) == 0 {
+		log.Ctx(ctx).Debug("there is no collection and alias to update")
+		return nil
+	}
+	kvMap := make(map[string]string, 0)
+	toRemoveKeys := make([]string, 0)
+	for i, alias := range aliases {
+		oldKBefore210 := BuildAliasKey210(alias.Name)
+		oldKeyWithoutDb := BuildAliasKey(alias.Name)
+		toRemoveKeys = append(toRemoveKeys, oldKBefore210, oldKeyWithoutDb)
+		k := BuildAliasKeyWithDB(alias.DbID, alias.Name)
+		aliasInfo := model.MarshalAliasModel(alias)
+		v, err := proto.Marshal(aliasInfo)
+		if err != nil {
+			return fmt.Errorf("failed to marshal alias(%s) info: %s", alias.Name, err.Error())
+		}
+		kvMap[k] = string(v)
+		log.Ctx(ctx).Debug("update an alias, need to remove old format alias",
+			zap.String("key", k), zap.String("value", string(v)),
+			zap.String("oldKBefore210", oldKBefore210), zap.String("oldKeyWithoutDb", oldKeyWithoutDb),
+			zap.Int("total", len(aliases)), zap.Int("no.", i))
+	}
+	for i, collection := range collections {
+		key := BuildCollectionKey(collection.DBID, collection.CollectionID)
+		collInfo := model.MarshalCollectionModel(collection)
+		value, err := proto.Marshal(collInfo)
+		if err != nil {
+			return fmt.Errorf("failed to marshal collection(%s) info: %s", collection.Name, err.Error())
+		}
+		kvMap[key] = string(value)
+		log.Ctx(ctx).Debug("update an collection",
+			zap.String("key", key), zap.String("value", string(value)),
+			zap.Int("total", len(collections)), zap.Int("no.", i))
+	}
+
+	return kc.Snapshot.MultiSaveAndRemove(kvMap, toRemoveKeys, ts)
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }

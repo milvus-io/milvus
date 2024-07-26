@@ -2153,6 +2153,54 @@ func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(string, *milvuspb.Us
 	return _c
 }
 
+// ExchangeCollectionIDs provides a mock function with given fields: ctx, dbName, ts, onlyAvail
+func (_m *IMetaTable) ExchangeCollectionIDs(ctx context.Context, dbName, collectionName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, collectionName, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
+		return rf(ctx, dbName, collectionName, ts)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ExchangeCollectionIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExchangeCollectionIDs'
+type IMetaTable_ExchangeCollectionIDs_Call struct {
+	*mock.Call
+}
+
+// ExchangeCollectionIDs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+//   - ts uint64
+func (_e *IMetaTable_Expecter) ExchangeCollectionIDs(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_ExchangeCollectionIDs_Call {
+	return &IMetaTable_ExchangeCollectionIDs_Call{Call: _e.mock.On("ExchangeCollectionIDs", ctx, dbName, collectionName, ts)}
+}
+
+func (_c *IMetaTable_ExchangeCollectionIDs_Call) Run(run func(ctx context.Context, dbName, collectionName string, ts uint64)) *IMetaTable_ExchangeCollectionIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ExchangeCollectionIDs_Call) Return(_a0 error) *IMetaTable_ExchangeCollectionIDs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ExchangeCollectionIDs_Call) RunAndReturn(run func(context.Context, string, string, uint64) error) *IMetaTable_ExchangeCollectionIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewIMetaTable creates a new instance of IMetaTable. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewIMetaTable(t interface {

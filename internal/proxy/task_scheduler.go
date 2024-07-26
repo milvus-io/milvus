@@ -49,6 +49,7 @@ type taskQueue interface {
 	Enqueue(t task) error
 	setMaxTaskNum(num int64)
 	getMaxTaskNum() int64
+	AnyTaskRelatedWithCollection(database string, collectionID typeutil.UniqueID) bool
 }
 
 // make sure baseTaskQueue implements taskQueue.
@@ -208,6 +209,28 @@ func (queue *baseTaskQueue) getMaxTaskNum() int64 {
 	defer queue.maxTaskNumMtx.RUnlock()
 
 	return queue.maxTaskNum
+}
+
+func (queue *baseTaskQueue) AnyTaskRelatedWithCollection(database string, collectionID typeutil.UniqueID) bool {
+	ctx := context.Background()
+	queue.utLock.RLock()
+	for element := queue.unissuedTasks.Front(); element != nil; element = element.Next() {
+		task := element.Value.(task)
+		if task.RelatedWithCollection(ctx, database, collectionID) {
+			queue.utLock.RUnlock()
+			return true
+		}
+	}
+	queue.utLock.RUnlock()
+	queue.atLock.RLock()
+	for _, task := range queue.activeTasks {
+		if task.RelatedWithCollection(ctx, database, collectionID) {
+			queue.atLock.RUnlock()
+			return true
+		}
+	}
+	queue.atLock.RUnlock()
+	return false
 }
 
 func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {

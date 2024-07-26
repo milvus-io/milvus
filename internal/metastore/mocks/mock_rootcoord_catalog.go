@@ -1662,6 +1662,51 @@ func (_c *RootCoordCatalog_ListUserRole_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// UpdateCollectionAndAlias provides a mock function with given fields: ctx, oldColl, newColl, alterType, ts
+func (_m *RootCoordCatalog) UpdateCollectionAndAlias(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts uint64) error {
+	ret := _m.Called(ctx, collections, aliases, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*model.Collection, []*model.Alias, uint64) error); ok {
+		r0 = rf(ctx, collections, aliases, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_UpdateCollectionAndAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCollectionAndAlias'
+type RootCoordCatalog_UpdateCollectionAndAlias_Call struct {
+	*mock.Call
+}
+
+// UpdateCollectionAndAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collections []*model.Collection
+//   - aliases []*model.Collection
+//   - ts uint64
+func (_e *RootCoordCatalog_Expecter) UpdateCollectionAndAlias(ctx interface{}, collections interface{}, aliases interface{}, ts interface{}) *RootCoordCatalog_UpdateCollectionAndAlias_Call {
+	return &RootCoordCatalog_UpdateCollectionAndAlias_Call{Call: _e.mock.On("UpdateCollectionAndAlias", ctx, collections, aliases, ts)}
+}
+
+func (_c *RootCoordCatalog_UpdateCollectionAndAlias_Call) Run(run func(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts uint64)) *RootCoordCatalog_UpdateCollectionAndAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*model.Collection), args[2].([]*model.Alias), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_UpdateCollectionAndAlias_Call) Return(_a0 error) *RootCoordCatalog_UpdateCollectionAndAlias_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_UpdateCollectionAndAlias_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, metastore.AlterType, uint64) error) *RootCoordCatalog_UpdateCollectionAndAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewRootCoordCatalog creates a new instance of RootCoordCatalog. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewRootCoordCatalog(t interface {

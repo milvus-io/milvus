@@ -214,3 +214,16 @@ func IsBuiltinRole(roleName string) bool {
 	}
 	return false
 }
+
+func IsSameDatabase(dbName1, dbName2 string) bool {
+	if dbName1 == dbName2 {
+		return true
+	}
+	if dbName1 == "" {
+		return dbName2 == DefaultDBName
+	}
+	if dbName2 == "" {
+		return dbName1 == DefaultDBName
+	}
+	return false
+}

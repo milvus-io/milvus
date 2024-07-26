@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -242,6 +243,9 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Info("Failed to get collection id", zap.Error(err))
 		return err
+	}
+	if globalMetaCache.IsCollectionTruncating(ctx, it.req.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", it.req.GetDbName(), collName)
 	}
 	it.upsertMsg.DeleteMsg.CollectionID = collID
 	it.collectionID = collID
@@ -555,4 +559,13 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 
 func (it *upsertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (it *upsertTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(it.req.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, it.req.GetDbName(), it.req.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }

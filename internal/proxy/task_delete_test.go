@@ -303,6 +303,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			DbName:         dbName,
 		}}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -326,6 +327,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			PartitionName:  partitionName,
 		}}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -365,6 +367,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -391,6 +394,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -425,6 +429,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			chMgr: chMgr,
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context

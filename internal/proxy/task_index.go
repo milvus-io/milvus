@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -447,6 +448,9 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, cit.req.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", cit.req.GetDbName(), collName)
+	}
 	cit.collectionID = collID
 
 	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
@@ -496,6 +500,15 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 
 func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (cit *createIndexTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(cit.req.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, cit.req.GetDbName(), cit.req.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }
 
 type alterIndexTask struct {
@@ -567,6 +580,9 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, t.req.GetDbName(), collection) {
+		return fmt.Errorf("collection(%s.%s) is truncating", t.req.GetDbName(), collName)
+	}
 	t.collectionID = collection
 
 	if len(t.req.GetIndexName()) == 0 {
@@ -613,6 +629,15 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 
 func (t *alterIndexTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (t *alterIndexTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(t.req.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.req.GetDbName(), t.req.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }
 
 type describeIndexTask struct {
@@ -926,6 +951,9 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, dit.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", dit.GetDbName(), dit.CollectionName)
+	}
 	dit.collectionID = collID
 
 	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, collID)
@@ -965,6 +993,15 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 
 func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (dit *dropIndexTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(dit.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, dit.GetDbName(), dit.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }
 
 // Deprecated: use describeIndexTask instead

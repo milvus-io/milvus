@@ -35,10 +35,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -152,6 +154,20 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 	}, nil
 }
 
+func (m *MockRootCoordClientInterface) DescribeCollectionWithState(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+	resp, err := m.DescribeCollection(ctx, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &rootcoordpb.DescribeCollectionResponse{
+		Status:       resp.Status,
+		CollectionID: resp.CollectionID,
+		Schema:       resp.Schema,
+		DbName:       resp.DbName,
+		State:        etcdpb.CollectionState_CollectionCreated,
+	}, nil
+}
+
 func (m *MockRootCoordClientInterface) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 	if m.Error {
 		return nil, errors.New("mocked error")
@@ -239,6 +255,25 @@ func TestMetaCache_GetCollection(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{},
 		Name:   "collection1",
 	})
+}
+
+func TestMetaCache_GetCollectionByCache(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &mocks.MockQueryCoordClient{}
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+	assert.NoError(t, err)
+
+	collectionName1 := "collection1"
+	collectionID0 := globalMetaCache.GetCollectionIDByCache(ctx, dbName, collectionName1)
+	assert.Equal(t, typeutil.UniqueID(0), collectionID0)
+	id, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName1)
+	assert.NoError(t, err)
+	assert.Equal(t, typeutil.UniqueID(1), id)
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+	collectionID0 = globalMetaCache.GetCollectionIDByCache(ctx, dbName, collectionName1)
+	assert.Equal(t, typeutil.UniqueID(1), collectionID0)
 }
 
 func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
@@ -1118,4 +1153,48 @@ func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, nodeInfos["channel-1"], 3)
 	assert.Equal(t, called.Load(), int32(2))
+}
+
+func TestMetaCache_TruncateCollection(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status:      merr.Success(),
+		PolicyInfos: []string{"policy1", "policy2", "policy3"},
+	}, nil)
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []typeutil.UniqueID{1, 2},
+		CreatedTimestamps:    []uint64{100, 200},
+		CreatedUtcTimestamps: []uint64{100, 200},
+		PartitionNames:       []string{"par1", "par2"},
+	}, nil)
+	queryCoord := &mocks.MockQueryCoordClient{}
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+	assert.NoError(t, err)
+	rootCoord.EXPECT().DescribeCollectionWithState(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+		return &rootcoordpb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: typeutil.UniqueID(1),
+			Schema: &schemapb.CollectionSchema{
+				AutoID: true,
+				Name:   "collection1",
+			},
+			DbName: dbName,
+			State:  etcdpb.CollectionState_CollectionTruncating,
+		}, nil
+	})
+	collectionID := typeutil.UniqueID(1)
+	collectionName1 := "collection1"
+	isTruncated := globalMetaCache.IsCollectionTruncating(ctx, util.DefaultDBName, collectionID)
+	assert.Equal(t, false, isTruncated)
+	id, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName1)
+	assert.NoError(t, err)
+	assert.Equal(t, id, typeutil.UniqueID(1))
+	isTruncated = globalMetaCache.IsCollectionTruncating(ctx, util.DefaultDBName, typeutil.UniqueID(1))
+	assert.Equal(t, true, isTruncated)
+	globalMetaCache.RemoveCollection(ctx, dbName, collectionName1)
+	isTruncated = globalMetaCache.IsCollectionTruncating(ctx, util.DefaultDBName, collectionID)
+	assert.Equal(t, false, isTruncated)
 }

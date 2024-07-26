@@ -97,6 +97,7 @@ type IMetaTable interface {
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(tenant string) ([]string, error)
 	ListUserRole(tenant string) ([]string, error)
+	ExchangeCollectionIDs(ctx context.Context, dbName, collectionName string, ts Timestamp) error
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -592,6 +593,10 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, col
 }
 
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
+	return mt.getCollectionByNameInternalRaw(ctx, dbName, collectionName, ts, false)
+}
+
+func (mt *MetaTable) getCollectionByNameInternalRaw(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
 		log.Warn("db name is empty", zap.String("collectionName", collectionName), zap.Uint64("ts", ts))
@@ -600,12 +605,12 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	collectionID, ok := mt.aliases.get(dbName, collectionName)
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
+		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
 	}
 
 	collectionID, ok = mt.names.get(dbName, collectionName)
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
+		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
 	}
 
 	if isMaxTs(ts) {
@@ -624,7 +629,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 		return nil, err
 	}
 
-	if coll == nil || !coll.Available() {
+	if coll == nil || (!allowUnavailable && !coll.Available()) {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 	return filterUnavailable(coll), nil
@@ -738,7 +743,6 @@ func (mt *MetaTable) ListCollectionPhysicalChannels() map[typeutil.UniqueID][]st
 func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts); err != nil {
 		return err
@@ -1434,4 +1438,90 @@ func (mt *MetaTable) ListUserRole(tenant string) ([]string, error) {
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListUserRole(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) ExchangeCollectionIDs(ctx context.Context, dbName, collectionName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	log := log.Ctx(ctx).With(
+		zap.String("DBName", dbName),
+		zap.String("collectionName", collectionName),
+	)
+
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty")
+		dbName = util.DefaultDBName
+	} else if _, ok := mt.dbName2Meta[dbName]; !ok {
+		return fmt.Errorf("target database:%s not found", dbName)
+	}
+
+	if collectionName == "" {
+		log.Warn("collection name is empty")
+		return fmt.Errorf("create temp collection, collectionName:%s", collectionName)
+	}
+
+	// old collection should not be an alias
+	if _, ok := mt.aliases.get(dbName, collectionName); ok {
+		log.Warn("unsupported use a alias to create temp collection")
+		return fmt.Errorf("unsupported use an alias to create temp collection, alias:%s", collectionName)
+	}
+
+	// get old collection meta
+	collection, err := mt.getCollectionByNameInternalRaw(ctx, dbName, collectionName, ts, true)
+	if collection != nil {
+		log.Info("collection", zap.Any("coll", collection), zap.Error(err))
+	}
+	if err != nil {
+		log.Warn("get collection fail", zap.Error(err))
+		return err
+	} else if collection.State != pb.CollectionState_CollectionTruncating {
+		log.Warn("get collection fail")
+		return fmt.Errorf("collection's state not created")
+	}
+	tempCollectionName := generateTempCollectionName(collectionName)
+	tempCollection, err := mt.getCollectionByNameInternal(ctx, dbName, tempCollectionName, ts)
+	if err != nil {
+		log.Warn("get collection fail")
+		return err
+	} else if tempCollection.State != pb.CollectionState_CollectionCreated {
+		log.Warn("get collection fail")
+		return fmt.Errorf("collection's state not creating")
+	}
+	aliases := mt.listAliasesByID(collection.CollectionID)
+	aliasModels := make([]*model.Alias, 0)
+	for _, alias := range aliases {
+		aliasModels = append(aliasModels, &model.Alias{
+			Name:         alias,
+			CollectionID: tempCollection.CollectionID,
+			CreatedTime:  ts,
+			State:        pb.AliasState_AliasCreated,
+			DbID:         tempCollection.DBID,
+		})
+	}
+	tempCollection.Name = collectionName
+	tempCollection.Aliases = collection.Aliases
+	tempCollection.State = pb.CollectionState_CollectionCreated
+	collection.Name = tempCollectionName
+	collection.Aliases = []string{}
+	collection.State = pb.CollectionState_CollectionDropping
+	if err := mt.catalog.UpdateCollectionAndAlias(ctx, []*model.Collection{collection, tempCollection}, aliasModels, ts); err != nil {
+		return err
+	}
+	log.Debug("update the metadata of target collection and its' temp", zap.String("collectionName", collectionName))
+	mt.names.insert(dbName, tempCollection.Name, tempCollection.CollectionID)
+	mt.collID2Meta[tempCollection.CollectionID] = tempCollection
+	mt.names.insert(dbName, collection.Name, collection.CollectionID)
+	mt.collID2Meta[collection.CollectionID] = collection
+	for _, alias := range aliases {
+		mt.aliases.insert(dbName, alias, tempCollection.CollectionID)
+	}
+	log.Debug("exchange collection with temp collection finished, after update the metatable cache")
+	return nil
+}
+
+func generateTempCollectionName(collName string) string {
+	return collName + ".tmp"
 }

@@ -97,6 +97,7 @@ type mockMetaTable struct {
 	ListPolicyFunc                   func(tenant string) ([]string, error)
 	ListUserRoleFunc                 func(tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
+	ExchangeCollectionIDsFunc        func(ctx context.Context, dbName, collectionName string, ts Timestamp) error
 }
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
@@ -249,6 +250,10 @@ func (m mockMetaTable) ListPolicy(tenant string) ([]string, error) {
 
 func (m mockMetaTable) ListUserRole(tenant string) ([]string, error) {
 	return m.ListUserRoleFunc(tenant)
+}
+
+func (m mockMetaTable) ExchangeCollectionIDs(ctx context.Context, dbName string, collectionName string, ts Timestamp) error {
+	return m.ExchangeCollectionIDsFunc(ctx, dbName, collectionName, ts)
 }
 
 func newMockMetaTable() *mockMetaTable {

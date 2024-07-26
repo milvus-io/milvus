@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -235,6 +236,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		log.Warn("fail to get collection id", zap.Error(err))
 		return err
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, it.insertMsg.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", it.insertMsg.GetDbName(), collectionName)
+	}
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
@@ -294,4 +298,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 func (it *insertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (it *insertTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(it.insertMsg.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
 }

@@ -4547,6 +4547,7 @@ func TestProxy_Import(t *testing.T) {
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mc := NewMockCache(t)
+		mc.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -4679,6 +4680,7 @@ func TestProxy_GetStatistics(t *testing.T) {
 func TestProxy_GetLoadState(t *testing.T) {
 	originCache := globalMetaCache
 	m := NewMockCache(t)
+	m.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 	m.On("GetCollectionID",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),

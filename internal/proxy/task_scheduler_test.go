@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -675,4 +676,51 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 		err := queue.Enqueue(st)
 		assert.Error(t, err)
 	})
+}
+
+func TestTaskScheduler_Traversal(t *testing.T) {
+	collectionID := UniqueID(0)
+	collectionName := "col-0"
+	channels := []pChan{"mock-chan-0", "mock-chan-1"}
+	cache := NewMockCache(t)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+	cache.On("IsCollectionTruncating",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("int64"),
+	).Return(true)
+	globalMetaCache = cache
+	tsoAllocatorIns := newMockTsoAllocator()
+	factory := newSimpleMockMsgStreamFactory()
+	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns, factory)
+	assert.NoError(t, err)
+
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+	it := &insertTask{
+		ctx: context.Background(),
+		insertMsg: &msgstream.InsertMsg{
+			InsertRequest: msgpb.InsertRequest{
+				Base:           &commonpb.MsgBase{},
+				DbName:         util.DefaultDBName,
+				CollectionName: collectionName,
+			},
+		},
+		chMgr: chMgr,
+	}
+	err = scheduler.dmQueue.Enqueue(it)
+	assert.NoError(t, err)
+	res := scheduler.dmQueue.AnyTaskRelatedWithCollection(util.DefaultDBName, collectionID)
+	assert.Equal(t, true, res)
+	task := scheduler.scheduleDmTask()
+	scheduler.dmQueue.AddActiveTask(task)
+	chMgr.EXPECT().getChannels(mock.Anything).Return(nil, fmt.Errorf("mock err"))
+	insertTask := scheduler.dmQueue.PopActiveTask(task.ID()) // assert no panic
+	insertTask.Execute(context.Background())
+	res = scheduler.dmQueue.AnyTaskRelatedWithCollection(util.DefaultDBName, collectionID)
+	assert.Equal(t, false, res)
 }

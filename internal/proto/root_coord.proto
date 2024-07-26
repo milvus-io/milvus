@@ -8,6 +8,7 @@ import "milvus.proto";
 import "internal.proto";
 import "proxy.proto";
 import "etcd_meta.proto";
+import "schema.proto";
 
 service RootCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
@@ -134,6 +135,9 @@ service RootCoord {
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
     rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
+
+  rpc TruncateCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+  rpc DescribeCollectionWithState(milvus.DescribeCollectionRequest) returns (DescribeCollectionResponse) {}
 }
 
 message AllocTimestampRequest {
@@ -240,3 +244,34 @@ message PartitionInfoOnPChannel {
   int64 partition_id = 1;
 }
 
+message DescribeCollectionResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // The schema param when you created collection.
+  schema.CollectionSchema schema = 2;
+  // The collection id
+  int64 collectionID = 3;
+  // System design related, users should not perceive
+  repeated string virtual_channel_names = 4;
+  // System design related, users should not perceive
+  repeated string physical_channel_names = 5;
+  // Hybrid timestamp in milvus
+  uint64 created_timestamp = 6;
+  // The utc timestamp calculated by created_timestamp
+  uint64 created_utc_timestamp = 7;
+  // The shards number you set.
+  int32 shards_num = 8;
+  // The aliases of this collection
+  repeated string aliases = 9;
+  // The message ID/posititon when collection is created
+  repeated common.KeyDataPair start_positions = 10;
+  // The consistency level that the collection used, modification is not supported now.
+  common.ConsistencyLevel consistency_level = 11;
+  // The collection name
+  string collection_name = 12;
+  repeated common.KeyValuePair properties = 13;
+  string db_name = 14;
+  int64 num_partitions = 15;
+  int64 db_id =16;
+  etcd.CollectionState state = 17;
+}

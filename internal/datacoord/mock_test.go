@@ -720,6 +720,28 @@ func (m *mockRootCoordClient) ListPolicy(ctx context.Context, in *internalpb.Lis
 	return &internalpb.ListPolicyResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
 }
 
+func (m *mockRootCoordClient) TruncateCollection(ctx context.Context, req *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) DescribeCollectionWithState(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+	// return not exist
+	if req.CollectionID == -1 {
+		err := merr.WrapErrCollectionNotFound(req.GetCollectionID())
+		return &rootcoordpb.DescribeCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return &rootcoordpb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Name: "test",
+		},
+		CollectionID:        1314,
+		VirtualChannelNames: []string{"vchan1"},
+	}, nil
+}
+
 type mockHandler struct {
 	meta *meta
 }

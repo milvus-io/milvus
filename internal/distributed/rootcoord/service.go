@@ -533,3 +533,13 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.RenameCollection(ctx, request)
 }
+
+// TruncateCollection drops a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.TruncateCollection(ctx, in)
+}
+
+// DescribeCollectionWithState gets meta info of a collection
+func (s *Server) DescribeCollectionWithState(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*rootcoordpb.DescribeCollectionResponse, error) {
+	return s.rootCoord.DescribeCollectionWithState(ctx, in)
+}

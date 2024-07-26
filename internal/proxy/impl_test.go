@@ -1287,6 +1287,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
@@ -1606,6 +1607,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// get schema failed
 		mc = NewMockCache(t)
+		mc.EXPECT().IsCollectionTruncating(mock.Anything, mock.Anything, mock.Anything).Return(false)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
 		globalMetaCache = mc

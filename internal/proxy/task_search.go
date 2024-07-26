@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -108,6 +109,15 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
 
+func (t *searchTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(t.request.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, t.request.GetDbName(), t.request.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
@@ -121,7 +131,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
-
+	if globalMetaCache.IsCollectionTruncating(ctx, t.request.GetDbName(), collID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", t.request.GetDbName(), collectionName)
+	}
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))

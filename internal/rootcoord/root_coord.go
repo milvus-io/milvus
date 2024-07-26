@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -42,8 +44,10 @@ import (
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -64,6 +68,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -2830,4 +2835,345 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	}
 
 	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
+}
+
+// TruncateCollection drop collection
+func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("TruncateCollection")
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()), zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to truncate collection")
+
+	markTask := &markCollectionTask{
+		baseTask:  newBaseTask(ctx, c),
+		fromState: pb.CollectionState_CollectionCreated,
+		toState:   pb.CollectionState_CollectionTruncating,
+		Req:       in,
+	}
+	if err := c.scheduler.AddTask(markTask); err != nil {
+		log.Info("failed to enqueue request to drop collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	if err := markTask.WaitToFinish(); err != nil {
+		log.Info("failed to drop collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", markTask.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	truncated := false
+	defer func() {
+		if !truncated {
+			markTask := &markCollectionTask{
+				baseTask:  newBaseTask(ctx, c),
+				fromState: pb.CollectionState_CollectionTruncating,
+				toState:   pb.CollectionState_CollectionCreated,
+				Req:       in,
+			}
+			if err := c.scheduler.AddTask(markTask); err != nil {
+				log.Info("failed to enqueue request to drop collection", zap.String("role", typeutil.RootCoordRole),
+					zap.Error(err),
+					zap.String("name", in.GetCollectionName()))
+
+				metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+				return
+			}
+			if err := markTask.WaitToFinish(); err != nil {
+				log.Info("failed to drop collection", zap.String("role", typeutil.RootCoordRole),
+					zap.Error(err),
+					zap.String("name", in.GetCollectionName()),
+					zap.Uint64("ts", markTask.GetTs()))
+
+				metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+				return
+			}
+		}
+	}()
+	schema := schemapb.CollectionSchema{
+		Name:               markTask.collection.Name,
+		Description:        markTask.collection.Description,
+		AutoID:             markTask.collection.AutoID,
+		Fields:             make([]*schemapb.FieldSchema, 0),
+		EnableDynamicField: markTask.collection.EnableDynamicField,
+	}
+	for _, field := range markTask.collection.Fields {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:            field.Name,
+			IsPrimaryKey:    field.IsPrimaryKey,
+			Description:     field.Description,
+			DataType:        field.DataType,
+			TypeParams:      field.TypeParams,
+			AutoID:          field.AutoID,
+			State:           field.State,
+			ElementType:     field.ElementType,
+			DefaultValue:    field.DefaultValue,
+			IsDynamic:       field.IsDynamic,
+			IsPartitionKey:  field.IsPartitionKey,
+			IsClusteringKey: field.IsClusteringKey,
+			Nullable:        field.Nullable,
+		})
+	}
+	marshaledSchema, err := proto.Marshal(&schema)
+	if err != nil {
+		log.Info("failed to marshal schema", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", markTask.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	log.Debug("create a temp collection with the same schema as target collection")
+	createCollectiont := &createCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req: &milvuspb.CreateCollectionRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+			),
+			DbName:           in.DbName,
+			CollectionName:   GenerateTempCollectionName(in.CollectionName),
+			Schema:           marshaledSchema,
+			ShardsNum:        markTask.collection.ShardsNum,
+			ConsistencyLevel: markTask.collection.ConsistencyLevel,
+			Properties:       nil,
+			NumPartitions:    int64(len(markTask.collection.Partitions)),
+		},
+	}
+	if err := c.scheduler.AddTask(createCollectiont); err != nil {
+		log.Info("failed to enqueue request to create collection",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	if err := createCollectiont.WaitToFinish(); err != nil {
+		log.Info("failed to create collection",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", createCollectiont.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	defer func() {
+		t := &dropCollectionTask{
+			baseTask: newBaseTask(ctx, c),
+			Req: &milvuspb.DropCollectionRequest{
+				Base:           in.Base,
+				DbName:         in.DbName,
+				CollectionName: generateTempCollectionName(in.CollectionName),
+			},
+		}
+		if err := c.scheduler.AddTask(t); err != nil {
+			log.Info("failed to enqueue request to drop collection", zap.String("role", typeutil.RootCoordRole),
+				zap.Error(err),
+				zap.String("name", in.GetCollectionName()))
+
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
+			return
+		}
+		if err := t.WaitToFinish(); err != nil {
+			log.Info("failed to drop collection", zap.String("role", typeutil.RootCoordRole),
+				zap.Error(err),
+				zap.String("name", in.GetCollectionName()),
+				zap.Uint64("ts", t.GetTs()))
+
+			metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
+			return
+		}
+	}()
+	log.Debug("create the same indexes for the temp collection")
+	log = log.With(zap.Int64("collectionID", markTask.collection.CollectionID), zap.Int64("tempCollectionID", createCollectiont.collID))
+	indexResponse, err := c.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: markTask.collection.CollectionID, IndexName: "", Timestamp: markTask.GetTs()})
+	if err != nil {
+		log.Info("describe indexes fail", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("truncate collection: %s.%s fail while create indexes for temp collection, clear is needed before you retry", in.DbName, in.CollectionName),
+		}, nil
+	}
+	fieldIDMap := make(map[int64]int64)
+	for _, field := range markTask.collection.Fields {
+		fieldName := field.Name
+		for _, newField := range createCollectiont.schema.Fields {
+			if fieldName == newField.GetName() {
+				fieldIDMap[field.FieldID] = newField.GetFieldID()
+			}
+		}
+	}
+	for _, indexInfo := range indexResponse.IndexInfos {
+		newFieldID, ok := fieldIDMap[indexInfo.FieldID]
+		if !ok {
+			err := fmt.Errorf("new temp collection miss field: %v", indexInfo)
+			return merr.Status(err), nil
+		}
+		collectionsReq := &indexpb.CreateIndexRequest{
+			CollectionID:    createCollectiont.collID,
+			FieldID:         newFieldID,
+			IndexName:       indexInfo.IndexName,
+			TypeParams:      indexInfo.TypeParams,
+			IndexParams:     indexInfo.IndexParams,
+			IsAutoIndex:     indexInfo.IsAutoIndex,
+			UserIndexParams: indexInfo.UserIndexParams,
+		}
+		// need enclose this to step using s.core.broker.CreateIndexesForTemp
+		resp, err := c.dataCoord.CreateIndex(ctx, collectionsReq)
+		if err == nil {
+			status, ok := requestutil.GetStatusFromResponse(resp)
+			if ok {
+				err = merr.Error(status)
+			}
+		}
+		if err != nil {
+			log.Info("create indexes for temp collection fail", zap.Error(err))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("truncate collection: %s.%s fail while create indexes for temp collection, clear is needed before you retry", in.DbName, in.CollectionName),
+			}, nil
+		}
+	}
+
+	log.Debug("load the temp collection")
+	queryResp, err := c.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_ShowCollections},
+		CollectionIDs: []int64{createCollectiont.collID},
+	})
+	if err == nil {
+		err = merr.Error(queryResp.GetStatus())
+	}
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	// not support multiple indexes on one field
+	fieldIndexIDs := make(map[int64]int64)
+	for _, index := range indexResponse.IndexInfos {
+		fieldIndexIDs[index.FieldID] = index.IndexID
+	}
+	loadResp, err := c.queryCoord.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+		Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_LoadCollection},
+		DbID:         0,
+		CollectionID: createCollectiont.collID,
+		Schema:       &schema,
+		FieldIndexID: fieldIndexIDs,
+	})
+	if err == nil {
+		status, ok := requestutil.GetStatusFromResponse(loadResp)
+		if ok {
+			err = merr.Error(status)
+		}
+	}
+	if err != nil {
+		log.Info("load temp collection fail", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("truncate collection: %s.%s fail while load temp collection, clear is needed before you retry", in.DbName, in.CollectionName),
+		}, nil
+	}
+
+	truncateTask := &truncateCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		mt:       markTask,
+		ct:       createCollectiont,
+	}
+	if err := c.scheduler.AddTask(truncateTask); err != nil {
+		log.Info("failed to enqueue request to drop collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	if err := truncateTask.WaitToFinish(); err != nil {
+		log.Info("failed to drop collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", markTask.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+	truncated = true
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("TruncateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("TruncateCollection").Observe(float64(createCollectiont.queueDur.Milliseconds()))
+
+	log.Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.Uint64("ts", createCollectiont.GetTs()))
+	return merr.Success(), nil
+}
+
+// DescribeCollectionWithState return collection info
+func (c *Core) DescribeCollectionWithState(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*rootcoordpb.DescribeCollectionResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.DescribeCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollectionWithState", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("DescribeCollectionWithState")
+
+	ts := getTravelTs(in)
+	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
+		zap.String("dbName", in.GetDbName()),
+		zap.Int64("id", in.GetCollectionID()),
+		zap.Uint64("ts", ts),
+		zap.Bool("allowUnavailable", false))
+
+	t := &describeCollectionTask{
+		baseTask:         newBaseTask(ctx, c),
+		Req:              in,
+		Rsp:              &milvuspb.DescribeCollectionResponse{Status: merr.Success()},
+		allowUnavailable: false,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Info("failed to enqueue request to describe collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollectionWithState", metrics.FailLabel).Inc()
+		return &rootcoordpb.DescribeCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("failed to describe collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollectionWithState", metrics.FailLabel).Inc()
+		return &rootcoordpb.DescribeCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollectionWithState", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollectionWithState").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollectionWithState").Observe(float64(t.queueDur.Milliseconds()))
+
+	return t.RspWithState, nil
+}
+
+const (
+	TempCollectionSuffix = ".tmp"
+)
+
+func IsTempCollection(collectionName string) bool {
+	return strings.HasSuffix(collectionName, TempCollectionSuffix)
+}
+
+func GenerateTempCollectionName(collectionName string) string {
+	return collectionName + TempCollectionSuffix
 }

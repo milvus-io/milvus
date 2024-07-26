@@ -682,3 +682,27 @@ func (c *Client) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDa
 		return client.AlterDatabase(ctx, request)
 	})
 }
+
+// TruncateCollection drop collection
+func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.TruncateCollection(ctx, in)
+	})
+}
+
+// DescribeCollectionWithState return collection info
+func (c *Client) DescribeCollectionWithState(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.DescribeCollectionResponse, error) {
+		return client.DescribeCollectionWithState(ctx, in)
+	})
+}

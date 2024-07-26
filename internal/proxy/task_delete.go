@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -225,6 +226,15 @@ func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, e
 	}, nil
 }
 
+func (dt *deleteTask) RelatedWithCollection(ctx context.Context, database string, collectionID typeutil.UniqueID) bool {
+	if util.IsSameDatabase(dt.req.GetDbName(), database) {
+		if collectionID == globalMetaCache.GetCollectionIDByCache(ctx, dt.req.GetDbName(), dt.req.GetCollectionName()) {
+			return true
+		}
+	}
+	return false
+}
+
 type deleteRunner struct {
 	req    *milvuspb.DeleteRequest
 	result *milvuspb.MutationResult
@@ -277,7 +287,9 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
 	}
-
+	if globalMetaCache.IsCollectionTruncating(ctx, dr.req.GetDbName(), dr.collectionID) {
+		return fmt.Errorf("collection(%s.%s) is truncating", dr.req.GetDbName(), collName)
+	}
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)

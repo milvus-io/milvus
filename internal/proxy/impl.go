@@ -123,6 +123,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	if globalMetaCache != nil {
 		switch msgType {
+		// todo add commonbp.MsgType_Truncating
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
@@ -155,6 +156,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
+	// todo: wait for former pr: 34162
+	// truncate: 1. check task queue; 2. remove collection from global meta cache
 	if msgType == commonpb.MsgType_DropCollection {
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
@@ -6088,6 +6091,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	if globalMetaCache.IsCollectionTruncating(ctx, req.GetDbName(), collectionID) {
+		err := fmt.Errorf("collection(%s.%s) is truncating", req.GetDbName(), req.GetCollectionName())
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -6280,6 +6288,87 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil
+}
+
+// TruncateCollection truncate a collection.
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
+	defer sp.End()
+	method := "TruncateCollection"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.TotalLabel,
+		request.GetDbName(),
+		request.GetCollectionName(),
+	).Inc()
+
+	dct := &truncateCollectionTask{
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		DropCollectionRequest: request, // todo rename to TruncateCollectionRequest
+		rootCoord:             node.rootCoord,
+		chMgr:                 node.chMgr,
+		chTicker:              node.chTicker,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+	)
+
+	log.Info("TruncateCollection received")
+
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn("TruncateCollection failed to enqueue",
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		"TruncateCollection enqueued",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn("TruncateCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTs", dct.BeginTs()),
+			zap.Uint64("EndTs", dct.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		"TruncateCollection done",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+	DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.SuccessLabel,
+		request.GetDbName(),
+		request.GetCollectionName(),
+	).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return dct.result, nil
 }
 
 // DeregisterSubLabel must add the sub-labels here if using other labels for the sub-labels

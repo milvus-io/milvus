@@ -269,3 +269,11 @@ func (m *GrpcRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb
 func (m *GrpcRootCoordClient) Close() error {
 	return nil
 }
+
+func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DescribeCollectionWithState(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeCollectionResponse, error) {
+	return &rootcoordpb.DescribeCollectionResponse{}, m.Err
+}

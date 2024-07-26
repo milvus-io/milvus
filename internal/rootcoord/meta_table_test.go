@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -1998,5 +2000,130 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, mt.names.exist("not_commit"))
 		assert.False(t, mt.aliases.exist("not_commit"))
+	})
+}
+
+func TestMetaTable_ExchangeCollectionIDs(t *testing.T) {
+	testAlias := "testAlias"
+	nonExistColl := "nonExistColl"
+	droppedColl := "droppedColl"
+	normalColl := "normalColl"
+	truncatingColl := "truncatingColl"
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
+		{
+			TenantID:    "",
+			ID:          1,
+			Name:        util.DefaultDBName,
+			State:       pb.DatabaseState_DatabaseCreated,
+			CreatedTime: 0,
+			Properties:  nil,
+		},
+	}, nil)
+	catalog.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, dbID int64, ts Timestamp) ([]*model.Collection, error) {
+			if dbID == util.NonDBID {
+				return []*model.Collection{}, nil
+			}
+			return []*model.Collection{
+				{
+					DBID:         util.DefaultDBID,
+					CollectionID: 1,
+					Name:         droppedColl,
+					State:        pb.CollectionState_CollectionDropping,
+				},
+				{
+					DBID:         util.DefaultDBID,
+					CollectionID: 2,
+					Name:         normalColl,
+					State:        pb.CollectionState_CollectionCreated,
+				},
+				{
+					DBID:         util.DefaultDBID,
+					CollectionID: 3,
+					Name:         truncatingColl,
+					State:        pb.CollectionState_CollectionTruncating,
+				},
+				{
+					DBID:         util.DefaultDBID,
+					CollectionID: 4,
+					Name:         generateTempCollectionName(truncatingColl),
+					State:        pb.CollectionState_CollectionCreating,
+				},
+			}, nil
+		}).Twice()
+	catalog.EXPECT().ListAliases(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, dbID int64, ts Timestamp) ([]*model.Alias, error) {
+			if dbID == util.NonDBID {
+				return []*model.Alias{}, nil
+			}
+			return []*model.Alias{
+				{
+					Name:         testAlias,
+					CollectionID: 3,
+					CreatedTime:  0,
+					State:        0,
+					DbID:         util.DefaultDBID,
+				},
+			}, nil
+		}).Twice()
+	catalog.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(context context.Context, dbId int64, collectionName string, ts uint64) (*model.Collection, error) {
+			switch collectionName {
+			case nonExistColl:
+				return nil, merr.WrapErrCollectionNotFound(collectionName)
+			case droppedColl:
+				return &model.Collection{
+					DBID:         util.DefaultDBID,
+					CollectionID: 1,
+					Name:         droppedColl,
+					State:        pb.CollectionState_CollectionDropping,
+				}, nil
+			case normalColl:
+				return &model.Collection{
+					DBID:         util.DefaultDBID,
+					CollectionID: 2,
+					Name:         normalColl,
+					State:        pb.CollectionState_CollectionCreated,
+				}, nil
+			case truncatingColl:
+				return &model.Collection{
+					DBID:         util.DefaultDBID,
+					CollectionID: 3,
+					Name:         truncatingColl,
+					State:        pb.CollectionState_CollectionTruncating,
+				}, nil
+			case generateTempCollectionName(truncatingColl):
+				return &model.Collection{
+					DBID:         util.DefaultDBID,
+					CollectionID: 4,
+					Name:         generateTempCollectionName(truncatingColl),
+					State:        pb.CollectionState_CollectionCreated,
+				}, nil
+			}
+			return nil, nil
+		}).Times(6)
+	catalog.EXPECT().UpdateCollectionAndAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock err")).Once()
+	catalog.EXPECT().UpdateCollectionAndAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	mt, err := NewMetaTable(context.TODO(), catalog, tso.NewMockAllocator())
+	t.Run("invalid parameters", func(t *testing.T) {
+		assert.NoError(t, err)
+		mt.aliases.insert(util.DefaultDBName, "test", int64(1))
+		err = mt.ExchangeCollectionIDs(context.TODO(), "test", "", 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "default", "", 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", testAlias, 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", nonExistColl, 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", droppedColl, 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", normalColl, 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", truncatingColl, 10000)
+		assert.Error(t, err)
+		err = mt.ExchangeCollectionIDs(context.TODO(), "", truncatingColl, 10000)
+		assert.NoError(t, err)
 	})
 }

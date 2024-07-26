@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
 // describeCollectionTask describe collection request task
@@ -28,6 +29,7 @@ type describeCollectionTask struct {
 	baseTask
 	Req              *milvuspb.DescribeCollectionRequest
 	Rsp              *milvuspb.DescribeCollectionResponse
+	RspWithState     *rootcoordpb.DescribeCollectionResponse
 	allowUnavailable bool
 }
 
@@ -51,5 +53,24 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
+	t.RspWithState = &rootcoordpb.DescribeCollectionResponse{
+		Status:               t.Rsp.Status,
+		Schema:               t.Rsp.Schema,
+		CollectionID:         t.Rsp.CollectionID,
+		VirtualChannelNames:  t.Rsp.VirtualChannelNames,
+		PhysicalChannelNames: t.Rsp.PhysicalChannelNames,
+		CreatedTimestamp:     0,
+		CreatedUtcTimestamp:  0,
+		ShardsNum:            0,
+		Aliases:              nil,
+		StartPositions:       nil,
+		ConsistencyLevel:     0,
+		CollectionName:       "",
+		Properties:           nil,
+		DbName:               "",
+		NumPartitions:        0,
+		DbId:                 0,
+		State:                coll.State,
+	}
 	return nil
 }
