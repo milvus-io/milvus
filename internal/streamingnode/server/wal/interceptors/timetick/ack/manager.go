@@ -31,7 +31,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 	defer ta.mu.Unlock()
 
 	// allocate one from underlying allocator first.
-	ts, err := resource.Resource().TSOAllocator().AllocOne()
+	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, err
 	}
