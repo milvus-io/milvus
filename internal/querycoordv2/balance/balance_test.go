@@ -27,12 +27,17 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type BalanceTestSuite struct {
 	suite.Suite
 	mockScheduler      *task.MockScheduler
 	roundRobinBalancer *RoundRobinBalancer
+}
+
+func (suite *BalanceTestSuite) SetupSuite() {
+	paramtable.Init()
 }
 
 func (suite *BalanceTestSuite) SetupTest() {

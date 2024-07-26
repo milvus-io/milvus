@@ -64,6 +64,7 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// pick the node with the least row count and allocate to it.
@@ -74,6 +75,9 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 			Segment: s,
 		}
 		plans = append(plans, plan)
+		if len(plans) > balanceBatchSize {
+			break
+		}
 		// change node's priority and push back
 		p := ni.getPriority()
 		ni.setPriority(p + int(s.GetNumOfRows()))
