@@ -26,12 +26,12 @@ func newLocalAllocator() *localAllocator {
 
 // localAllocator allocates timestamp locally.
 type localAllocator struct {
-	nextStartID int64 // Allocate timestamp locally.
-	endStartID  int64
+	nextStartID uint64 // Allocate timestamp locally.
+	endStartID  uint64
 }
 
 // AllocateOne allocates a timestamp.
-func (a *localAllocator) allocateOne() (int64, error) {
+func (a *localAllocator) allocateOne() (uint64, error) {
 	if a.nextStartID < a.endStartID {
 		id := a.nextStartID
 		a.nextStartID++
@@ -41,11 +41,11 @@ func (a *localAllocator) allocateOne() (int64, error) {
 }
 
 // update updates the local allocator.
-func (a *localAllocator) update(start int64, count int) {
+func (a *localAllocator) update(start uint64, count int) {
 	// local allocator can be only increasing.
 	if start >= a.endStartID {
 		a.nextStartID = start
-		a.endStartID = start + int64(count)
+		a.endStartID = start + uint64(count)
 	}
 }
 
@@ -69,8 +69,8 @@ func newTSOAllocator(rc types.RootCoordClient) *tsoAllocator {
 	return a
 }
 
-func (ta *tsoAllocator) batchAllocate(count uint32) (int64, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -91,7 +91,7 @@ func (ta *tsoAllocator) batchAllocate(count uint32) (int64, int, error) {
 	if resp == nil {
 		return 0, 0, fmt.Errorf("empty AllocTimestampResponse")
 	}
-	return int64(resp.GetTimestamp()), int(resp.GetCount()), nil
+	return resp.GetTimestamp(), int(resp.GetCount()), nil
 }
 
 // idAllocator allocate timestamp from remote root coordinator.
@@ -109,8 +109,8 @@ func newIDAllocator(rc types.RootCoordClient) *idAllocator {
 	return a
 }
 
-func (ta *idAllocator) batchAllocate(count uint32) (int64, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req := &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -134,5 +134,5 @@ func (ta *idAllocator) batchAllocate(count uint32) (int64, int, error) {
 	if resp.GetID() < 0 {
 		panic("get unexpected negative id")
 	}
-	return resp.GetID(), int(resp.GetCount()), nil
+	return uint64(resp.GetID()), int(resp.GetCount()), nil
 }

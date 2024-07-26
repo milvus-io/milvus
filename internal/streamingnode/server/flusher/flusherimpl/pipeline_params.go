@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -47,7 +48,7 @@ func initPipelineParams() {
 			ChunkManager:       rsc.ChunkManager(),
 			WriteBufferManager: wbMgr,
 			CheckpointUpdater:  cpUpdater,
-			Allocator:          rsc.IDAllocator(),
+			Allocator:          idalloc.NewMAllocator(rsc.IDAllocator()),
 			FlushMsgHandler:    flushMsgHandlerImpl(wbMgr),
 		}
 	})

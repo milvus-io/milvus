@@ -30,7 +30,7 @@ func TestLocalAllocator(t *testing.T) {
 		ts, err := allocator.allocateOne()
 		assert.NoError(t, err)
 		assert.NotZero(t, ts)
-		counter.Add(uint64(ts))
+		counter.Add(ts)
 	}
 	assert.Equal(t, uint64(5050), counter.Load())
 
@@ -65,7 +65,7 @@ func TestRemoteTSOAllocator(t *testing.T) {
 	client := NewMockRootCoordClient(t)
 
 	allocator := newTSOAllocator(client)
-	ts, count, err := allocator.batchAllocate(100)
+	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
 	assert.Equal(t, count, 100)
@@ -78,7 +78,7 @@ func TestRemoteTSOAllocator(t *testing.T) {
 		},
 	)
 	allocator = newTSOAllocator(client)
-	_, _, err = allocator.batchAllocate(100)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
 	client.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Unset()
@@ -92,7 +92,7 @@ func TestRemoteTSOAllocator(t *testing.T) {
 		},
 	)
 	allocator = newTSOAllocator(client)
-	_, _, err = allocator.batchAllocate(100)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }
 
@@ -103,7 +103,7 @@ func TestRemoteIDAllocator(t *testing.T) {
 	client := NewMockRootCoordClient(t)
 
 	allocator := newIDAllocator(client)
-	ts, count, err := allocator.batchAllocate(100)
+	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
 	assert.Equal(t, count, 100)
@@ -116,7 +116,7 @@ func TestRemoteIDAllocator(t *testing.T) {
 		},
 	)
 	allocator = newIDAllocator(client)
-	_, _, err = allocator.batchAllocate(100)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
 	client.EXPECT().AllocID(mock.Anything, mock.Anything).Unset()
@@ -130,6 +130,6 @@ func TestRemoteIDAllocator(t *testing.T) {
 		},
 	)
 	allocator = newIDAllocator(client)
-	_, _, err = allocator.batchAllocate(100)
+	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }

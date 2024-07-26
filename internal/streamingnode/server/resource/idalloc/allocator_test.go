@@ -22,13 +22,13 @@ func TestTimestampAllocator(t *testing.T) {
 	allocator := NewTSOAllocator(client)
 
 	for i := 0; i < 5000; i++ {
-		ts, err := allocator.AllocOne()
+		ts, err := allocator.Allocate(context.Background())
 		assert.NoError(t, err)
 		assert.NotZero(t, ts)
 	}
 
 	for i := 0; i < 100; i++ {
-		ts, err := allocator.AllocOne()
+		ts, err := allocator.Allocate(context.Background())
 		assert.NoError(t, err)
 		assert.NotZero(t, ts)
 		time.Sleep(time.Millisecond * 1)
@@ -47,6 +47,6 @@ func TestTimestampAllocator(t *testing.T) {
 		},
 	)
 	allocator = NewTSOAllocator(client)
-	_, err := allocator.AllocOne()
+	_, err := allocator.Allocate(context.Background())
 	assert.Error(t, err)
 }
