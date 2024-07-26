@@ -35,7 +35,12 @@ service DataCoord {
 
   rpc Flush(FlushRequest) returns (FlushResponse) {}
 
-  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
+  // AllocSegment alloc a new growing segment, add it into segment meta.
+  rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {
+    option deprecated = true;
+  }
 
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
@@ -166,6 +171,18 @@ message SegmentIDRequest {
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
   SegmentLevel level = 7;
+}
+
+message AllocSegmentRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3; // segment id must be allocate from rootcoord idalloc service.
+  string vchannel = 4;
+}
+
+message AllocSegmentResponse {
+  SegmentInfo segment_info = 1;
+  common.Status status = 2;
 }
 
 message AssignSegmentIDRequest {

@@ -33,6 +33,76 @@ func (_m *MockDataCoordClient) EXPECT() *MockDataCoordClient_Expecter {
 	return &MockDataCoordClient_Expecter{mock: &_m.Mock}
 }
 
+// AllocSegment provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) AllocSegment(ctx context.Context, in *datapb.AllocSegmentRequest, opts ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.AllocSegmentResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AllocSegmentRequest, ...grpc.CallOption) (*datapb.AllocSegmentResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AllocSegmentRequest, ...grpc.CallOption) *datapb.AllocSegmentResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.AllocSegmentResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AllocSegmentRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_AllocSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocSegment'
+type MockDataCoordClient_AllocSegment_Call struct {
+	*mock.Call
+}
+
+// AllocSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.AllocSegmentRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) AllocSegment(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_AllocSegment_Call {
+	return &MockDataCoordClient_AllocSegment_Call{Call: _e.mock.On("AllocSegment",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_AllocSegment_Call) Run(run func(ctx context.Context, in *datapb.AllocSegmentRequest, opts ...grpc.CallOption)) *MockDataCoordClient_AllocSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.AllocSegmentRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_AllocSegment_Call) Return(_a0 *datapb.AllocSegmentResponse, _a1 error) *MockDataCoordClient_AllocSegment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_AllocSegment_Call) RunAndReturn(run func(context.Context, *datapb.AllocSegmentRequest, ...grpc.CallOption) (*datapb.AllocSegmentResponse, error)) *MockDataCoordClient_AllocSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterIndex provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) AlterIndex(ctx context.Context, in *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
