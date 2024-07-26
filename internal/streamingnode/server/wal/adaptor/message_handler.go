@@ -2,7 +2,6 @@ package adaptor
 
 import (
 	"context"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -51,7 +50,6 @@ func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 // MsgPackAdaptorHandler is the handler for message pack.
 type MsgPackAdaptorHandler struct {
 	logger         *log.MLogger
-	closeOnce      sync.Once
 	channel        chan *msgstream.MsgPack
 	pendings       []message.ImmutableMessage                   // pendings hold the vOld message which has same time tick.
 	pendingMsgPack *typeutil.MultipartQueue[*msgstream.MsgPack] // pendingMsgPack hold unsent msgPack.
@@ -129,7 +127,5 @@ func (m *MsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableM
 
 // Close closes the handler.
 func (m *MsgPackAdaptorHandler) Close() {
-	m.closeOnce.Do(func() {
-		close(m.channel)
-	})
+	close(m.channel)
 }

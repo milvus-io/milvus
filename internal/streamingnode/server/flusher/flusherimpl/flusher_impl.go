@@ -76,14 +76,14 @@ func NewFlusher() flusher.Flusher {
 func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := resource.Resource().RootCoordClient().GetVChannels(ctx, &rootcoordpb.GetVChannelsRequest{
+	resp, err := resource.Resource().RootCoordClient().GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 		Pchannel: pchannel,
 	})
 	if err != nil {
 		return err
 	}
-	for _, vchannel := range resp.GetVchannels() {
-		f.tasks.Insert(vchannel, wal)
+	for _, collectionInfo := range resp.GetCollections() {
+		f.tasks.Insert(collectionInfo.GetVchannel(), wal)
 	}
 	return nil
 }
@@ -132,6 +132,7 @@ func (f *flusherImpl) Start() {
 						return true
 					}
 					log.Info("build pipeline done", zap.String("vchannel", vchannel))
+					f.tasks.Remove(vchannel)
 					return true
 				})
 			}
@@ -159,6 +160,7 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	if f.fgMgr.HasFlowgraph(vchannel) {
 		return nil
 	}
+	log.Info("start to build pipeline", zap.String("vchannel", vchannel))
 
 	// Get recovery info from datacoord.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)

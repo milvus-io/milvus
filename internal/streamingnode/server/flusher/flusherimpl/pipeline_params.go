@@ -48,7 +48,7 @@ func initPipelineParams() {
 			WriteBufferManager: wbMgr,
 			CheckpointUpdater:  cpUpdater,
 			Allocator:          rsc.IDAllocator(),
-			FlushMsgHandler:    flushMsgHandlerImpl(),
+			FlushMsgHandler:    flushMsgHandlerImpl(wbMgr),
 		}
 	})
 }

@@ -18,6 +18,7 @@ package flusherimpl
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,15 +47,18 @@ type FlusherSuite struct {
 
 	pchannel  string
 	vchannels []string
-	flusher   flusher.Flusher
+
+	wbMgr     *writebuffer.MockBufferManager
+	rootcoord *mocks.MockRootCoordClient
+
+	wal     wal.WAL
+	flusher flusher.Flusher
 }
 
 func (s *FlusherSuite) SetupSuite() {
 	paramtable.Init()
 	tickDuration = 10 * time.Millisecond
-}
 
-func (s *FlusherSuite) SetupTest() {
 	s.pchannel = "by-dev-rootcoord-dml_0"
 	s.vchannels = []string{
 		"by-dev-rootcoord-dml_0_123456v0",
@@ -63,8 +67,6 @@ func (s *FlusherSuite) SetupTest() {
 	}
 
 	rootcoord := mocks.NewMockRootCoordClient(s.T())
-	rootcoord.EXPECT().GetVChannels(mock.Anything, mock.Anything).
-		Return(&rootcoordpb.GetVChannelsResponse{Vchannels: s.vchannels}, nil)
 
 	datacoord := mocks.NewMockDataCoordClient(s.T())
 	datacoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
@@ -88,7 +90,6 @@ func (s *FlusherSuite) SetupTest() {
 		})
 
 	syncMgr := syncmgr.NewMockSyncManager(s.T())
-
 	wbMgr := writebuffer.NewMockBufferManager(s.T())
 	wbMgr.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	wbMgr.EXPECT().RemoveChannel(mock.Anything).Return()
@@ -102,13 +103,11 @@ func (s *FlusherSuite) SetupTest() {
 		resource.OptDataCoordClient(datacoord),
 	)
 
-	s.flusher = NewFlusher()
+	s.wbMgr = wbMgr
+	s.rootcoord = rootcoord
 }
 
-func (s *FlusherSuite) TestFlusher() {
-	s.flusher.Start()
-	defer s.flusher.Stop()
-
+func (s *FlusherSuite) SetupTest() {
 	handlers := make([]wal.MessageHandler, 0, len(s.vchannels))
 	scanner := mock_wal.NewMockScanner(s.T())
 
@@ -120,15 +119,37 @@ func (s *FlusherSuite) TestFlusher() {
 			return scanner, nil
 		})
 
+	once := sync.Once{}
 	scanner.EXPECT().Close().RunAndReturn(func() error {
-		for _, handler := range handlers {
-			handler.Close()
-		}
+		once.Do(func() {
+			for _, handler := range handlers {
+				handler.Close()
+			}
+		})
 		return nil
 	})
 
-	// test register pchannel
-	err := s.flusher.RegisterPChannel(s.pchannel, w)
+	s.wal = w
+	s.flusher = NewFlusher()
+	s.flusher.Start()
+}
+
+func (s *FlusherSuite) TearDownTest() {
+	s.flusher.Stop()
+}
+
+func (s *FlusherSuite) TestFlusher_RegisterPChannel() {
+	collectionsInfo := lo.Map(s.vchannels, func(vchannel string, i int) *rootcoordpb.CollectionInfoOnPChannel {
+		return &rootcoordpb.CollectionInfoOnPChannel{
+			CollectionId: int64(i),
+			Partitions:   []*rootcoordpb.PartitionInfoOnPChannel{{PartitionId: int64(i)}},
+			Vchannel:     vchannel,
+		}
+	})
+	s.rootcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).
+		Return(&rootcoordpb.GetPChannelInfoResponse{Collections: collectionsInfo}, nil)
+
+	err := s.flusher.RegisterPChannel(s.pchannel, s.wal)
 	s.NoError(err)
 
 	s.Eventually(func() bool {
@@ -140,10 +161,11 @@ func (s *FlusherSuite) TestFlusher() {
 	s.flusher.UnregisterPChannel(s.pchannel)
 	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
 	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())
+}
 
-	// test register vchannels
+func (s *FlusherSuite) TestFlusher_RegisterVChannel() {
 	for _, vchannel := range s.vchannels {
-		s.flusher.RegisterVChannel(vchannel, w)
+		s.flusher.RegisterVChannel(vchannel, s.wal)
 	}
 	s.Eventually(func() bool {
 		return lo.EveryBy(s.vchannels, func(vchannel string) bool {

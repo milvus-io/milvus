@@ -164,6 +164,8 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	if err != nil {
 		logger.Warn("open flusher fail", zap.Error(err))
 		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
+		// wal is opened, if register flusher failure, we should close the wal.
+		l.Close()
 		return
 	}
 	// -> (expectedTerm,true)

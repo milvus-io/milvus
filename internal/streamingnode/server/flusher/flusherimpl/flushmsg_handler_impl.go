@@ -21,12 +21,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // TODO: func(vchannel string, msg FlushMsg)
-func flushMsgHandlerImpl() func(vchannel string, segmentIDs []int64) {
-	wbMgr := GetPipelineParams().WriteBufferManager
+func flushMsgHandlerImpl(wbMgr writebuffer.BufferManager) func(vchannel string, segmentIDs []int64) {
 	return func(vchannel string, segmentIDs []int64) {
 		err := wbMgr.SealSegments(context.Background(), vchannel, segmentIDs)
 		if err != nil {
