@@ -109,6 +109,34 @@ TEST(Growing, RemoveDuplicatedRecords) {
     }
 }
 
+TEST(Growing, RealCountWithDuplicateRecords) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    int64_t c = 10;
+    auto offset = 0;
+    auto dataset = DataGen(schema, c);
+    auto pks = dataset.get_col<int64_t>(pk);
+
+    // insert same values twice
+    segment->Insert(offset,
+                    c,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    segment->Insert(offset + c,
+                    c,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // real count is still c not 2c
+    ASSERT_EQ(c, segment->get_real_count());
+}
+
 TEST(Growing, RealCount) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
