@@ -168,6 +168,12 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	})
 }
 
+func (c *Client) AllocSegment(ctx context.Context, in *datapb.AllocSegmentRequest, opts ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.AllocSegmentResponse, error) {
+		return client.AllocSegment(ctx, in)
+	})
+}
+
 // GetSegmentStates requests segment state information
 //
 // ctx is the context to control request deadline and cancellation

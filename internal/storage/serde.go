@@ -388,7 +388,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if v == nil {
 				return 8
 			}
-			return uint64(v.(*schemapb.ScalarField).XXX_Size())
+			return uint64(proto.Size(v.(*schemapb.ScalarField)))
 		},
 	}
 

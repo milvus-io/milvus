@@ -245,6 +245,28 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}, nil
 }
 
+// AllocSegment alloc a new growing segment, add it into segment meta.
+func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
+	}
+	// !!! SegmentId must be allocated from rootCoord id allocation.
+	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
+		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
+	}
+
+	// Alloc new growing segment and return the segment info.
+	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetVchannel())
+	if err != nil {
+		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
+	}
+	clonedSegmentInfo := segmentInfo.Clone()
+	return &datapb.AllocSegmentResponse{
+		SegmentInfo: clonedSegmentInfo.SegmentInfo,
+		Status:      merr.Success(),
+	}, nil
+}
+
 // GetSegmentStates returns segments state
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
