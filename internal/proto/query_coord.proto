@@ -548,6 +548,7 @@ message SegmentInfo {
     repeated int64 node_ids = 15;
     bool enable_index = 16;
     bool is_fake = 17;
+    data.SegmentLevel level = 18;
 }
 
 message CollectionInfo {

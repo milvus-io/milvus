@@ -345,7 +345,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	)
 
 	watchTimeout := paramtable.Get().DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), watchTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	startTimer := func(finishWg *sync.WaitGroup) {
