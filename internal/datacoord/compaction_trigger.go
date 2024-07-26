@@ -839,6 +839,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		for _, index := range indexIDToSegIdxes {
 			curV, err := t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
 			if err != nil {
+				log.Warn("failed to get current index engine version", zap.Error(err))
 				return false
 			}
 			if index.CurrentIndexVersion < curV && len(index.IndexFileKeys) > 0 {

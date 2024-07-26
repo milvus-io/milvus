@@ -204,6 +204,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 
 	curV, err := dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion()
 	if err != nil {
+		log.Warn("failed to get current index engine version", zap.Error(err))
 		return true
 	}
 
