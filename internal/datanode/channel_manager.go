@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -342,8 +343,8 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		finishWaiter sync.WaitGroup
 	)
 
-	watchTimeout := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), watchTimeout)
+	watchTimeout := paramtable.Get().DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	startTimer := func(finishWg *sync.WaitGroup) {
