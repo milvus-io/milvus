@@ -831,6 +831,10 @@ func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID Uniqu
 	return nil, nil
 }
 
+func (s *spySegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
+	return nil, nil
+}
+
 func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
 	return nil, nil
 }
