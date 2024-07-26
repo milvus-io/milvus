@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -106,7 +106,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		fgMsg := FlowGraphMsg{
 			BaseMsg:        flowgraph.NewBaseMsg(true),
 			InsertMessages: make([]*msgstream.InsertMsg, 0),
-			TimeRange: util2.TimeRange{
+			TimeRange: util.TimeRange{
 				TimestampMin: msMsg.TimestampMin(),
 				TimestampMax: msMsg.TimestampMax(),
 			},
@@ -125,7 +125,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	var spans []trace.Span
 	for _, msg := range msMsg.TsMessages() {
-		ctx, sp := util2.StartTracer(msg, "DDNode-Operate")
+		ctx, sp := util.StartTracer(msg, "DDNode-Operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -137,7 +137,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	fgMsg := FlowGraphMsg{
 		InsertMessages: make([]*msgstream.InsertMsg, 0),
-		TimeRange: util2.TimeRange{
+		TimeRange: util.TimeRange{
 			TimestampMin: msMsg.TimestampMin(),
 			TimestampMax: msMsg.TimestampMax(),
 		},
@@ -184,7 +184,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			util2.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			util.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
@@ -218,7 +218,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
-			util2.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).

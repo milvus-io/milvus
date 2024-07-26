@@ -25,7 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -49,7 +50,7 @@ type flusherImpl struct {
 	fgMgr     pipeline.FlowgraphManager
 	syncMgr   syncmgr.SyncManager
 	wbMgr     writebuffer.BufferManager
-	cpUpdater *util2.ChannelCheckpointUpdater
+	cpUpdater *util.ChannelCheckpointUpdater
 
 	tasks    *typeutil.ConcurrentMap[string, wal.WAL]     // unwatched vchannels
 	scanners *typeutil.ConcurrentMap[string, wal.Scanner] // watched scanners
@@ -167,7 +168,7 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	defer cancel()
 	resp, err := resource.Resource().DataCoordClient().
 		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
 
@@ -191,7 +192,6 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	if err != nil {
 		return err
 	}
-	f.scanners.Insert(vchannel, scanner)
 
 	// Build and add pipeline.
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, GetPipelineParams(),
@@ -201,5 +201,6 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	}
 	ds.Start()
 	f.fgMgr.AddFlowgraph(ds)
+	f.scanners.Insert(vchannel, scanner)
 	return nil
 }

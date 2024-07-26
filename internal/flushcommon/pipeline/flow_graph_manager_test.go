@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -61,10 +61,10 @@ func TestFlowGraphManager(t *testing.T) {
 	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
 	dispClient.EXPECT().Deregister(mock.Anything)
 
-	pipelineParams := &util2.PipelineParams{
+	pipelineParams := &util.PipelineParams{
 		Ctx:                context.TODO(),
 		Broker:             mockBroker,
-		CheckpointUpdater:  util2.NewChannelCheckpointUpdater(mockBroker),
+		CheckpointUpdater:  util.NewChannelCheckpointUpdater(mockBroker),
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: wbm,
 		Allocator:          allocator.NewMockAllocator(t),
@@ -78,7 +78,7 @@ func TestFlowGraphManager(t *testing.T) {
 		context.TODO(),
 		pipelineParams,
 		chanWatchInfo,
-		util2.NewTickler(),
+		util.NewTickler(),
 	)
 	assert.NoError(t, err)
 

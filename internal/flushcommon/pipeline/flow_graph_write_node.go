@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -24,7 +24,7 @@ type writeNode struct {
 
 	channelName string
 	wbManager   writebuffer.BufferManager
-	updater     util2.StatsUpdater
+	updater     util.StatsUpdater
 	metacache   metacache.MetaCache
 }
 
@@ -66,7 +66,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	var spans []trace.Span
 	for _, msg := range fgMsg.InsertMessages {
-		ctx, sp := util2.StartTracer(msg, "WriteNode")
+		ctx, sp := util.StartTracer(msg, "WriteNode")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -122,7 +122,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 func newWriteNode(
 	_ context.Context,
 	writeBufferManager writebuffer.BufferManager,
-	updater util2.StatsUpdater,
+	updater util.StatsUpdater,
 	config *nodeConfig,
 ) *writeNode {
 	baseNode := BaseNode{}

@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -36,7 +36,7 @@ import (
 
 type (
 	releaseFunc func(channel string)
-	watchFunc   func(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error)
+	watchFunc   func(ctx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error)
 )
 
 type ChannelManager interface {
@@ -48,7 +48,7 @@ type ChannelManager interface {
 
 type ChannelManagerImpl struct {
 	mu             sync.RWMutex
-	pipelineParams *util2.PipelineParams
+	pipelineParams *util.PipelineParams
 
 	fgManager pipeline.FlowgraphManager
 
@@ -62,7 +62,7 @@ type ChannelManagerImpl struct {
 	closeWaiter sync.WaitGroup
 }
 
-func NewChannelManager(pipelineParams *util2.PipelineParams, fgManager pipeline.FlowgraphManager) *ChannelManagerImpl {
+func NewChannelManager(pipelineParams *util.PipelineParams, fgManager pipeline.FlowgraphManager) *ChannelManagerImpl {
 	cm := ChannelManagerImpl{
 		pipelineParams: pipelineParams,
 		fgManager:      fgManager,
@@ -226,12 +226,12 @@ func (m *ChannelManagerImpl) finishOp(opID int64, channel string) {
 }
 
 type opInfo struct {
-	tickler *util2.Tickler
+	tickler *util.Tickler
 }
 
 type opRunner struct {
 	channel        string
-	pipelineParams *util2.PipelineParams
+	pipelineParams *util.PipelineParams
 	releaseFunc    releaseFunc
 	watchFunc      watchFunc
 
@@ -244,7 +244,7 @@ type opRunner struct {
 	closeWg sync.WaitGroup
 }
 
-func NewOpRunner(channel string, pipelineParams *util2.PipelineParams, releaseF releaseFunc, watchF watchFunc, resultCh chan *opState) *opRunner {
+func NewOpRunner(channel string, pipelineParams *util.PipelineParams, releaseF releaseFunc, watchF watchFunc, resultCh chan *opState) *opRunner {
 	return &opRunner{
 		channel:        channel,
 		pipelineParams: pipelineParams,
@@ -336,7 +336,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		opState.state = datapb.ChannelWatchState_WatchFailure
 		return opState
 	}
-	tickler := util2.NewTickler()
+	tickler := util.NewTickler()
 	opInfo.tickler = tickler
 
 	var (
@@ -480,7 +480,7 @@ type opState struct {
 }
 
 // executeWatch will always return, won't be stuck, either success or fail.
-func executeWatch(ctx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error) {
+func executeWatch(ctx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error) {
 	dataSyncService, err := pipeline.NewDataSyncService(ctx, pipelineParams, info, tickler)
 	if err != nil {
 		return nil, err

@@ -21,14 +21,14 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var (
-	pipelineParams *util2.PipelineParams
+	pipelineParams *util.PipelineParams
 	initOnce       sync.Once
 )
 
@@ -39,9 +39,9 @@ func initPipelineParams() {
 			syncMgr     = rsc.SyncManager()
 			wbMgr       = rsc.BufferManager()
 			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
-			cpUpdater   = util2.NewChannelCheckpointUpdater(coordBroker)
+			cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
 		)
-		pipelineParams = &util2.PipelineParams{
+		pipelineParams = &util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             coordBroker,
 			SyncMgr:            syncMgr,
@@ -54,7 +54,7 @@ func initPipelineParams() {
 	})
 }
 
-func GetPipelineParams() *util2.PipelineParams {
+func GetPipelineParams() *util.PipelineParams {
 	initPipelineParams()
 	return pipelineParams
 }

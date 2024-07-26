@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -61,8 +61,8 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender *util2.TimeTickSender // reference to TimeTickSender
-	compactor      compaction.Executor   // reference to compaction executor
+	timetickSender *util.TimeTickSender // reference to TimeTickSender
+	compactor      compaction.Executor  // reference to compaction executor
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
@@ -131,7 +131,7 @@ func (dsService *DataSyncService) GetMetaCache() metacache.MetaCache {
 	return dsService.metacache
 }
 
-func getMetaCacheWithTickler(initCtx context.Context, params *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
+func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
 	tickler.SetTotal(int32(len(unflushed) + len(flushed)))
 	return initMetaCache(initCtx, storageV2Cache, params.ChunkManager, info, tickler, unflushed, flushed)
 }
@@ -194,7 +194,7 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 	return metacache, nil
 }
 
-func getServiceWithChannel(initCtx context.Context, params *util2.PipelineParams,
+func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache,
 	unflushed, flushed []*datapb.SegmentInfo, input <-chan *msgstream.MsgPack,
 ) (*DataSyncService, error) {
@@ -284,7 +284,7 @@ func getServiceWithChannel(initCtx context.Context, params *util2.PipelineParams
 // NewDataSyncService gets a dataSyncService, but flowgraphs are not running
 // initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
 // NewDataSyncService stops and returns the initCtx.Err()
-func NewDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*DataSyncService, error) {
+func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*DataSyncService, error) {
 	// recover segment checkpoints
 	unflushedSegmentInfos, err := pipelineParams.Broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
 	if err != nil {
@@ -312,7 +312,7 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineP
 	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos, nil)
 }
 
-func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util2.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
+func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, input <-chan *msgstream.MsgPack) (*DataSyncService, error) {
 	// recover segment checkpoints
 	var (
 		err                   error
