@@ -277,6 +277,73 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	suite.EqualValues(2, mutation.rowCountAccChange)
 }
 
+// fix https://github.com/milvus-io/milvus/issues/35003
+func (suite *MetaBasicSuite) TestCompleteCompactionMutationForL2Single() {
+	latestSegments := NewSegmentsInfo()
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		1: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L2,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs:             []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
+			NumOfRows:             2,
+			PartitionStatsVersion: int64(10001),
+		}},
+		2: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           2,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L2,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs:             []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000), getFieldBinlogIDs(0, 31001)},
+			NumOfRows:             2,
+			PartitionStatsVersion: int64(10001),
+		}},
+	} {
+		latestSegments.SetSegment(segID, segment)
+	}
+
+	mockChMgr := mocks.NewChunkManager(suite.T())
+	m := &meta{
+		catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments:     latestSegments,
+		chunkManager: mockChMgr,
+	}
+
+	compactToSeg := &datapb.CompactionSegment{
+		SegmentID:           3,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+		NumOfRows:           2,
+	}
+
+	result := &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{compactToSeg},
+	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+	}
+
+	infos, _, err := m.CompleteCompactionMutation(task, result)
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 1, len(infos))
+	seg1 := m.GetSegment(1)
+	seg2 := m.GetSegment(2)
+	assert.Equal(suite.T(), int64(0), seg1.GetPartitionStatsVersion())
+	assert.Equal(suite.T(), int64(0), seg2.GetPartitionStatsVersion())
+	assert.Equal(suite.T(), datapb.SegmentLevel_L1, seg1.GetLevel())
+	assert.Equal(suite.T(), datapb.SegmentLevel_L1, seg2.GetLevel())
+}
+
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())

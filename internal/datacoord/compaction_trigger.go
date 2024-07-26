@@ -774,11 +774,13 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 
 func isDeltalogTooManySegment(segment *SegmentInfo) bool {
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	log.Debug("isDeltalogTooManySegment",
+	res := deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
+	log.Debug("check whether segment has too many delta log",
 		zap.Int64("collectionID", segment.CollectionID),
 		zap.Int64("segmentID", segment.ID),
-		zap.Int("deltaLogCount", deltaLogCount))
-	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
+		zap.Int("deltaLogCount", deltaLogCount),
+		zap.Bool("result", res))
+	return res
 }
 
 func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
@@ -792,16 +794,15 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	}
 
 	// currently delta log size and delete ratio policy is applied
-	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
+	res := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
 		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
-	if is {
-		log.Info("total delete entities is too much",
-			zap.Int64("segmentID", segment.ID),
-			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
-	}
-	return is
+	log.Debug("check whether segment has too many delete data",
+		zap.Int64("segmentID", segment.ID),
+		zap.Int64("numRows", segment.GetNumOfRows()),
+		zap.Int("deleted rows", totalDeletedRows),
+		zap.Int64("delete log size", totalDeleteLogSize),
+		zap.Bool("result", res))
+	return res
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {

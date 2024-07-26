@@ -233,7 +233,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 			log.Debug("Start to trigger a single compaction by TriggerTypeSingle")
 			outView, reason := view.Trigger()
 			if outView != nil {
-				log.Info("Success to trigger a MixCompaction output view, try to submit",
+				log.Info("Success to trigger a L2SingleCompaction output view, try to submit",
 					zap.String("reason", reason),
 					zap.String("output view", outView.String()))
 				m.SubmitSingleViewToScheduler(ctx, outView)
