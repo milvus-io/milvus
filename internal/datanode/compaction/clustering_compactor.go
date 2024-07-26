@@ -711,8 +711,8 @@ func (t *clusteringCompactionTask) backgroundFlush(ctx context.Context) {
 			if signal.done {
 				t.doneChan <- struct{}{}
 			} else if signal.writer == nil {
-				err = t.flushLargestBuffers(ctx)
 				t.hasSignal.Store(false)
+				err = t.flushLargestBuffers(ctx)
 			} else {
 				future := t.flushPool.Submit(func() (any, error) {
 					err := t.flushBinlog(ctx, t.clusterBuffers[signal.id], signal.writer, signal.pack)
