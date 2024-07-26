@@ -31,7 +31,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -67,9 +66,8 @@ type Timestamp = typeutil.Timestamp
 var _ types.Proxy = (*Proxy)(nil)
 
 var (
-	Params    = paramtable.Get()
-	Extension hook.Extension
-	rateCol   *ratelimitutil.RateCollector
+	Params  = paramtable.Get()
+	rateCol *ratelimitutil.RateCollector
 )
 
 // Proxy of milvus
@@ -154,7 +152,6 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
 	hookutil.InitOnceHook()
-	Extension = hookutil.Extension
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }
@@ -418,7 +415,7 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
-	Extension.Report(map[string]any{
+	hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})
