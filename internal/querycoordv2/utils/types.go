@@ -44,6 +44,7 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 			NodeIds:      make([]int64, 0),
 			SegmentState: commonpb.SegmentState_Sealed,
 			IndexInfos:   make([]*querypb.FieldIndexInfo, 0),
+			Level:        first.Level,
 		}
 		for _, indexInfo := range first.IndexInfo {
 			info.IndexName = indexInfo.IndexName
