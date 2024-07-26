@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/runtime/protoiface"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -167,7 +166,7 @@ func (i *GrpcAccessInfo) ResponseSize() string {
 	switch r := i.resp.(type) {
 	case SizeResponse:
 		size = r.XXX_Size()
-	case protoiface.MessageV1:
+	case proto.Message:
 		size = proto.Size(r)
 	default:
 		return Unknown
