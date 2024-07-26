@@ -32,7 +32,7 @@ func TestInitHook(t *testing.T) {
 	Params := paramtable.Get()
 	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "")
 	initHook()
-	assert.IsType(t, DefaultHook{}, Hoo)
+	assert.IsType(t, DefaultHook{}, GetHook())
 
 	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "/a/b/hook.so")
 	err := initHook()
