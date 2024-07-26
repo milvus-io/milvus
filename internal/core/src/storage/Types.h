@@ -111,7 +111,7 @@ struct StorageConfig {
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
            << ", requestTimeoutMs=" << requestTimeoutMs
-           << ", useCollectionIdIndexPath=" << std::boolalpha << useCollectionIdIndexPath
+           << ", useCollectionIdIndexPath=" << std::boolalpha << useCollectionIdIndexPath;
 
         return ss.str();
     }
