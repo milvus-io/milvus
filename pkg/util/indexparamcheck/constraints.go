@@ -44,6 +44,8 @@ const (
 
 	// Sparse Index Param
 	SparseDropRatioBuild = "drop_ratio_build"
+
+	MaxBitmapCardinalityLimit = 1000
 )
 
 var (
