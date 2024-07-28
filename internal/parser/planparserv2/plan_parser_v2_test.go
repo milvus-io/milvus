@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -602,6 +603,39 @@ func TestCreateSearchPlan_Invalid(t *testing.T) {
 		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil)
 		assert.Error(t, err)
 	})
+}
+
+var listenerCnt int
+
+type errorListenerTest struct {
+	antlr.DefaultErrorListener
+}
+
+func (l *errorListenerTest) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+	listenerCnt += 1
+}
+
+func (l *errorListenerTest) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
+	listenerCnt += 1
+}
+
+func (l *errorListenerTest) Error() error {
+	return nil
+}
+
+func Test_FixErrorListenerNotRemoved(t *testing.T) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	normal := "1 < Int32Field < (Int16Field)"
+	for i := 0; i < 10; i++ {
+		err := handleExprWithErrorListener(schemaHelper, normal, &errorListenerTest{})
+		err1, ok := err.(error)
+		assert.True(t, ok)
+		assert.Error(t, err1)
+	}
+	assert.True(t, listenerCnt <= 10)
 }
 
 func Test_handleExpr(t *testing.T) {
