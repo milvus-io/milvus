@@ -53,7 +53,9 @@ namespace milvus {
 constexpr size_t STRING_PADDING = 1;
 constexpr size_t ARRAY_PADDING = 1;
 
-constexpr size_t BLOCK_SIZE = 32;
+constexpr size_t DEFAULT_PK_VRCOL_BLOCK_SIZE = 1;
+constexpr size_t DEFAULT_MEM_VRCOL_BLOCK_SIZE = 32;
+constexpr size_t DEFAULT_MMAP_VRCOL_BLOCK_SIZE = 256;
 
 class ColumnBase {
  public:
@@ -551,21 +553,27 @@ class VariableColumn : public ColumnBase {
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
     // memory mode ctor
-    VariableColumn(size_t cap, const FieldMeta& field_meta)
-        : ColumnBase(cap, field_meta) {
+    VariableColumn(size_t cap, const FieldMeta& field_meta, size_t block_size)
+        : ColumnBase(cap, field_meta), block_size_(block_size) {
     }
 
     // mmap mode ctor
-    VariableColumn(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta) {
+    VariableColumn(const File& file,
+                   size_t size,
+                   const FieldMeta& field_meta,
+                   size_t block_size)
+        : ColumnBase(file, size, field_meta), block_size_(block_size) {
     }
     // mmap with mmap manager
     VariableColumn(size_t reserve,
                    int dim,
                    const DataType& data_type,
                    storage::MmapChunkManagerPtr mcm,
-                   storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor) {
+                   storage::MmapChunkDescriptorPtr descriptor,
+                   bool nullable,
+                   size_t block_size)
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor, nullable),
+          block_size_(block_size) {
     }
 
     VariableColumn(VariableColumn&& column) noexcept
@@ -615,8 +623,8 @@ class VariableColumn : public ColumnBase {
             PanicInfo(ErrorCode::OutOfRange, "index out of range");
         }
 
-        char* pos = data_ + indices_[start_offset / BLOCK_SIZE];
-        for (size_t j = 0; j < start_offset % BLOCK_SIZE; j++) {
+        char* pos = data_ + indices_[start_offset / block_size_];
+        for (size_t j = 0; j < start_offset % block_size_; j++) {
             uint32_t size;
             size = *reinterpret_cast<uint32_t*>(pos);
             pos += sizeof(uint32_t) + size;
@@ -630,8 +638,8 @@ class VariableColumn : public ColumnBase {
         if (i < 0 || i > num_rows_) {
             PanicInfo(ErrorCode::OutOfRange, "index out of range");
         }
-        size_t batch_id = i / BLOCK_SIZE;
-        size_t offset = i % BLOCK_SIZE;
+        size_t batch_id = i / block_size_;
+        size_t offset = i % block_size_;
 
         // located in batch start location
         char* pos = data_ + indices_[batch_id];
@@ -698,11 +706,11 @@ class VariableColumn : public ColumnBase {
     void
     shrink_indice() {
         std::vector<uint64_t> tmp_indices;
-        tmp_indices.reserve((indices_.size() + BLOCK_SIZE - 1) / BLOCK_SIZE);
+        tmp_indices.reserve((indices_.size() + block_size_ - 1) / block_size_);
 
         for (size_t i = 0; i < indices_.size();) {
             tmp_indices.push_back(indices_[i]);
-            i += BLOCK_SIZE;
+            i += block_size_;
         }
 
         indices_.swap(tmp_indices);
@@ -711,9 +719,8 @@ class VariableColumn : public ColumnBase {
  private:
     // loading states
     std::queue<FieldDataPtr> load_buf_{};
-
-    // raw data index, record indices located 0, interval, 2 * interval, 3 * interval
-    // ... just like page index, interval set to 8192 that matches search engine's batch size
+    // raw data index, record indices located 0, block_size_, 2 * block_size_, 3 * block_size_
+    size_t block_size_;
     std::vector<uint64_t> indices_{};
 };
 
