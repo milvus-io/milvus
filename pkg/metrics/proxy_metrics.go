@@ -263,6 +263,43 @@ var (
 			Help:      "count of bytes sent back to sdk",
 		}, []string{nodeIDLabelName})
 
+	// RestfulFunctionCall records the number of times the restful apis was called.
+	RestfulFunctionCall = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_api_req_count",
+			Help:      "count of operation executed",
+		}, []string{nodeIDLabelName, pathLabelName})
+
+	// RestfulReqLatency records the latency that for all requests.
+	RestfulReqLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_api_req_latency",
+			Help:      "latency of each request",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, pathLabelName})
+
+	// RestfulReceiveBytes record the received bytes of messages in Proxy
+	RestfulReceiveBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_api_receive_bytes_count",
+			Help:      "count of bytes received  from sdk",
+		}, []string{nodeIDLabelName, pathLabelName})
+
+	// RestfulSendBytes record the bytes sent back to client by Proxy
+	RestfulSendBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_api_send_bytes_count",
+			Help:      "count of bytes sent back to sdk",
+		}, []string{nodeIDLabelName, pathLabelName})
+
 	// ProxyReportValue records value about the request
 	ProxyReportValue = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -382,6 +419,12 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyReceiveBytes)
 	registry.MustRegister(ProxyReadReqSendBytes)
+
+	registry.MustRegister(RestfulFunctionCall)
+	registry.MustRegister(RestfulReqLatency)
+
+	registry.MustRegister(RestfulReceiveBytes)
+	registry.MustRegister(RestfulSendBytes)
 
 	registry.MustRegister(ProxyLimiterRate)
 	registry.MustRegister(ProxyHookFunc)
