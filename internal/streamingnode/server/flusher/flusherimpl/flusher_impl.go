@@ -80,7 +80,7 @@ func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 	resp, err := resource.Resource().RootCoordClient().GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 		Pchannel: pchannel,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
 	for _, collectionInfo := range resp.GetCollections() {
