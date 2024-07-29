@@ -8,7 +8,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
@@ -19,8 +18,7 @@ const vChannel = "by-dev-rootcoord-dml_4"
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	etcd, _ := kvfactory.GetEtcdAndPath()
-	streaming.Init(etcd)
+	streaming.Init()
 	defer streaming.Release()
 	m.Run()
 }

@@ -182,19 +182,19 @@ func (_c *MockProducer_IsAvailable_Call) RunAndReturn(run func() bool) *MockProd
 }
 
 // Produce provides a mock function with given fields: ctx, msg
-func (_m *MockProducer) Produce(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+func (_m *MockProducer) Produce(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
 	ret := _m.Called(ctx, msg)
 
-	var r0 message.MessageID
+	var r0 *types.AppendResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) (message.MessageID, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) (*types.AppendResult, error)); ok {
 		return rf(ctx, msg)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) message.MessageID); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) *types.AppendResult); ok {
 		r0 = rf(ctx, msg)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(message.MessageID)
+			r0 = ret.Get(0).(*types.AppendResult)
 		}
 	}
 
@@ -226,12 +226,12 @@ func (_c *MockProducer_Produce_Call) Run(run func(ctx context.Context, msg messa
 	return _c
 }
 
-func (_c *MockProducer_Produce_Call) Return(_a0 message.MessageID, _a1 error) *MockProducer_Produce_Call {
+func (_c *MockProducer_Produce_Call) Return(_a0 *types.AppendResult, _a1 error) *MockProducer_Produce_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockProducer_Produce_Call) RunAndReturn(run func(context.Context, message.MutableMessage) (message.MessageID, error)) *MockProducer_Produce_Call {
+func (_c *MockProducer_Produce_Call) RunAndReturn(run func(context.Context, message.MutableMessage) (*types.AppendResult, error)) *MockProducer_Produce_Call {
 	_c.Call.Return(run)
 	return _c
 }

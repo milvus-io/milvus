@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
-var _ interceptors.AppendInterceptor = (*ddlAppendInterceptor)(nil)
+var _ interceptors.Interceptor = (*ddlAppendInterceptor)(nil)
 
 // ddlAppendInterceptor is an append interceptor.
 type ddlAppendInterceptor struct {

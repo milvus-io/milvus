@@ -62,12 +62,12 @@ func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail,
 }
 
 // popUntilLastAllAcknowledged pops the timestamps until the one that all timestamps before it have been acknowledged.
-func (ta *AckManager) popUntilLastAllAcknowledged() []*AckDetail {
+func (ta *AckManager) popUntilLastAllAcknowledged() sortedDetails {
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 
 	// pop all acknowledged timestamps.
-	details := make([]*AckDetail, 0, 5)
+	details := make(sortedDetails, 0, 5)
 	for ta.notAckHeap.Len() > 0 && ta.notAckHeap.Peek().acknowledged.Load() {
 		ack := ta.notAckHeap.Pop()
 		details = append(details, ack.ackDetail())

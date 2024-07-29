@@ -30,7 +30,7 @@ type BasicMessage interface {
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
-	// Otherwise, it will panic.
+	// Return "" if message is broadcasted.
 	VChannel() string
 
 	// TimeTick returns the time tick of current message.
@@ -47,6 +47,9 @@ type MutableMessage interface {
 	// WithLastConfirmed sets the last confirmed message id of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmed(id MessageID) MutableMessage
+
+	// WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
+	WithLastConfirmedUseMessageID() MutableMessage
 
 	// WithTimeTick sets the time tick of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
