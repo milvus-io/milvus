@@ -147,10 +147,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             pks[i], reserved_offset + i);
         // if pk exist duplicate record, remove last pk under current insert timestamp
         // means last pk is invisibale for current insert timestamp
-        if (exist_pk) {
-            auto remove_timestamp = timestamps_raw[i];
-            deleted_record_.Push({pks[i]}, &remove_timestamp);
-        }
+        // TODO: reopen it
+        // if (exist_pk) {
+        //     auto remove_timestamp = timestamps_raw[i];
+        //     deleted_record_.Push({pks[i]}, &remove_timestamp);
+        // }
     }
 
     // step 5: update small indexes
