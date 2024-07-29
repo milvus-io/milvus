@@ -465,7 +465,7 @@ func (cluster *MiniClusterV2) GetAvailablePort() (int, error) {
 func InitReportExtension() *ReportChanExtension {
 	e := NewReportChanExtension()
 	hookutil.InitOnceHook()
-	hookutil.Extension = e
+	hookutil.SetTestExtension(e)
 	return e
 }
 

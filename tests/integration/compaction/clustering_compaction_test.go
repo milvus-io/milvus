@@ -210,6 +210,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.Equal(segsInfoResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	for _, segInfo := range segsInfoResp.GetInfos() {
+		s.LessOrEqual(segInfo.GetNumOfRows(), int64(1024*1024/128))
 		totalRows += segInfo.GetNumOfRows()
 	}
 

@@ -2,7 +2,6 @@ package indexparamcheck
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -14,8 +13,9 @@ type HYBRIDChecker struct {
 }
 
 func (c *HYBRIDChecker) CheckTrain(params map[string]string) error {
-	if !CheckIntByRange(params, common.BitmapCardinalityLimitKey, 1, math.MaxInt) {
-		return fmt.Errorf("failed to check bitmap cardinality limit, should be larger than 0 and smaller than math.MaxInt")
+	if !CheckIntByRange(params, common.BitmapCardinalityLimitKey, 1, MaxBitmapCardinalityLimit) {
+		return fmt.Errorf("failed to check bitmap cardinality limit, should be larger than 0 and smaller than %d",
+			MaxBitmapCardinalityLimit)
 	}
 	return c.scalarIndexChecker.CheckTrain(params)
 }
