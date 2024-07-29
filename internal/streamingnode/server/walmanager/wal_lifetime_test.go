@@ -7,13 +7,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 func TestWALLifetime(t *testing.T) {
 	channel := "test"
+
+	rootcoord := mocks.NewMockRootCoordClient(t)
+	datacoord := mocks.NewMockDataCoordClient(t)
+
+	flusher := mock_flusher.NewMockFlusher(t)
+	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
+	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return()
+
+	resource.Init(
+		resource.OptFlusher(flusher),
+		resource.OptRootCoordClient(rootcoord),
+		resource.OptDataCoordClient(datacoord),
+	)
+
 	opener := mock_wal.NewMockOpener(t)
 	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
