@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/encoding/prototext"
 )
 
 func TestBackupCodec_Serialize(t *testing.T) {
 	header := &BackupHeader{
-		Version:   BackupHeaderVersionV1,
+		Version:   int32(BackupHeaderVersionV1),
 		Instance:  "/by-dev",
 		MetaPath:  "meta",
 		Entries:   0,
@@ -26,6 +27,6 @@ func TestBackupCodec_Serialize(t *testing.T) {
 	assert.NoError(t, err)
 	gotHeader, gotEntries, err := codec.DeSerialize(file)
 	assert.NoError(t, err)
-	assert.True(t, reflect.DeepEqual(header, gotHeader))
+	assert.Equal(t, prototext.Format(header), prototext.Format(gotHeader))
 	assert.True(t, reflect.DeepEqual(kvs, gotEntries))
 }
