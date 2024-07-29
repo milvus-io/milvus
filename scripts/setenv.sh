@@ -58,8 +58,12 @@ case "${unameOut}" in
       fi
       llvm_prefix="$(brew --prefix llvm@${llvm_version})"
       export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-      export CC="ccache ${llvm_prefix}/bin/clang"
-      export CXX="ccache ${llvm_prefix}/bin/clang++"
+      if [ -z CC ];then
+        export CC="ccache ${llvm_prefix}/bin/clang"
+      fi
+      if [ -z CXX ];then
+        export CXX="ccache ${llvm_prefix}/bin/clang++"
+      fi
       export ASM="${llvm_prefix}/bin/clang"
       export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
       export CXXFLAGS=${CFLAGS}

@@ -31,8 +31,8 @@ concurrency:
 
 jobs:
   mac:
-    name: Code Checker MacOS 12
-    runs-on: macos-12
+    name: Code Checker MacOS 14
+    runs-on: macos-14
     timeout-minutes: 300
     steps:
       - name: Checkout
@@ -76,6 +76,8 @@ jobs:
           CCACHE_COMPRESS: 1
           CCACHE_COMPRESSLEVEL: 5
           CCACHE_MAXSIZE: 2G
+          CXX: clang++
+          CC: clang
         run: |
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
@@ -83,9 +85,8 @@ jobs:
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
           pip3 install conan==1.61.0
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
-          fi
+          conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
+          conan install internal/core --build=missing -s build_type=Release
           make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
