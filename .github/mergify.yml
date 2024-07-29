@@ -139,7 +139,7 @@ pull_request_rules:
     conditions:
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - base~=^2\.2\.\d+$
-     - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
