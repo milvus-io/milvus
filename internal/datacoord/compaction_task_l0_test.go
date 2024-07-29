@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -212,6 +213,7 @@ func (s *L0CompactionTaskSuite) generateTestL0Task(state datapb.CompactionTaskSt
 			Type:          datapb.CompactionType_Level0DeleteCompaction,
 			NodeID:        NullNodeID,
 			State:         state,
+			Channel:       "ch-1",
 			InputSegments: []int64{100, 101},
 		},
 		meta:      s.mockMeta,
@@ -264,6 +266,36 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_failed, t.State)
+	})
+	s.Run("test pipelining saveTaskMeta failed", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+		t.NodeID = 100
+		channel := "ch-1"
+		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
+
+		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything).Return(
+			[]*SegmentInfo{
+				{SegmentInfo: &datapb.SegmentInfo{
+					ID:            200,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+				}, isCompacting: true},
+			},
+		)
+
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Deltalogs:     deltaLogs,
+			}}
+		}).Twice()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+		got := t.Process()
+		s.False(got)
+		s.Equal(datapb.CompactionTaskState_pipelining, t.State)
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
@@ -514,5 +546,193 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		got := t.Process()
 		s.False(got)
 		s.Equal(datapb.CompactionTaskState_executing, t.GetState())
+	})
+
+	s.Run("test timeout", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_timeout)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.Require().False(isCompacting)
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+
+		got := t.Process()
+		s.True(got)
+	})
+
+	s.Run("test metaSaved success", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		t.result = &datapb.CompactionPlanResult{}
+
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil).Once()
+
+		got := t.Process()
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_completed, t.GetState())
+	})
+
+	s.Run("test metaSaved failed", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		t.result = &datapb.CompactionPlanResult{}
+
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(errors.New("mock error")).Once()
+
+		got := t.Process()
+		s.False(got)
+		s.Equal(datapb.CompactionTaskState_meta_saved, t.GetState())
+	})
+
+	s.Run("test complete drop failed", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		t.result = &datapb.CompactionPlanResult{}
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+
+		got := t.Process()
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_completed, t.GetState())
+	})
+
+	s.Run("test complete success", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		t.result = &datapb.CompactionPlanResult{}
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+
+		got := t.Process()
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_completed, t.GetState())
+	})
+
+	s.Run("test process failed success", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+
+		got := t.Process()
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_failed, t.GetState())
+	})
+	s.Run("test process failed failed", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
+		t.NodeID = 100
+		s.Require().True(t.GetNodeID() > 0)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
+			s.ElementsMatch(segIDs, t.GetInputSegments())
+		}).Once()
+
+		got := t.Process()
+		s.True(got)
+		s.Equal(datapb.CompactionTaskState_failed, t.GetState())
+	})
+
+	s.Run("test unkonwn task", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_unknown)
+
+		got := t.Process()
+		s.True(got)
+	})
+}
+
+func (s *L0CompactionTaskSuite) TestSetterGetter() {
+	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+
+	span := t.GetSpan()
+	s.Nil(span)
+	s.NotPanics(t.EndSpan)
+
+	t.SetSpan(trace.SpanFromContext(context.TODO()))
+	s.NotPanics(t.EndSpan)
+
+	rst := t.GetResult()
+	s.Nil(rst)
+	t.SetResult(&datapb.CompactionPlanResult{PlanID: 19530})
+	s.NotNil(t.GetResult())
+
+	label := t.GetLabel()
+	s.Equal("10-ch-1", label)
+
+	t.SetStartTime(100)
+	s.EqualValues(100, t.GetStartTime())
+
+	t.SetTask(nil)
+	t.SetPlan(&datapb.CompactionPlan{PlanID: 19530})
+	s.NotNil(t.GetPlan())
+
+	s.Run("set NodeID", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+		t.SetNodeID(1000)
+		s.EqualValues(1000, t.GetNodeID())
+	})
+}
+
+func (s *L0CompactionTaskSuite) TestCleanLogPath() {
+	s.Run("plan nil", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+		t.CleanLogPath()
+	})
+
+	s.Run("clear path", func() {
+		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+		t.SetPlan(&datapb.CompactionPlan{
+			Channel: "ch-1",
+			Type:    datapb.CompactionType_MixCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:           100,
+					FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(101, 4)},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 5)},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(101, 6)},
+				},
+			},
+			PlanID: 19530,
+		})
+
+		t.SetResult(&datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:           100,
+					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(101, 4)},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 5)},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(101, 6)},
+				},
+			},
+			PlanID: 19530,
+		})
+
+		t.CleanLogPath()
+
+		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetFieldBinlogs())
+		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetField2StatslogPaths())
+		s.Empty(t.GetPlan().GetSegmentBinlogs()[0].GetDeltalogs())
+
+		s.Empty(t.GetResult().GetSegments()[0].GetInsertLogs())
+		s.Empty(t.GetResult().GetSegments()[0].GetField2StatslogPaths())
+		s.Empty(t.GetResult().GetSegments()[0].GetDeltalogs())
 	})
 }
