@@ -850,7 +850,8 @@ trace:
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
   otlp:
-    endpoint:  # example: "127.0.0.1:4318"
+    endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
+    method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
   initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
