@@ -1060,7 +1060,7 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPrimaryKey {
 			return fieldSchema, nil
 		}
