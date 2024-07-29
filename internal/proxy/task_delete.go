@@ -202,26 +202,25 @@ func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, e
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
 	}
-	sliceRequest := msgpb.DeleteRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-			// msgid of delete msg must be set
-			// or it will be seen as duplicated msg in mq
-			commonpbutil.WithMsgID(msgid),
-			commonpbutil.WithTimeStamp(dt.ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:   dt.collectionID,
-		PartitionID:    dt.partitionID,
-		CollectionName: dt.req.GetCollectionName(),
-		PartitionName:  dt.req.GetPartitionName(),
-		PrimaryKeys:    &schemapb.IDs{},
-	}
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			Ctx: ctx,
 		},
-		DeleteRequest: sliceRequest,
+		DeleteRequest: &msgpb.DeleteRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+				// msgid of delete msg must be set
+				// or it will be seen as duplicated msg in mq
+				commonpbutil.WithMsgID(msgid),
+				commonpbutil.WithTimeStamp(dt.ts),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			CollectionID:   dt.collectionID,
+			PartitionID:    dt.partitionID,
+			CollectionName: dt.req.GetCollectionName(),
+			PartitionName:  dt.req.GetPartitionName(),
+			PrimaryKeys:    &schemapb.IDs{},
+		},
 	}, nil
 }
 

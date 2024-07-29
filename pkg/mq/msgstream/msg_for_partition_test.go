@@ -29,7 +29,7 @@ import (
 
 func TestLoadPartitions(t *testing.T) {
 	msg := &LoadPartitionsMsg{
-		LoadPartitionsRequest: milvuspb.LoadPartitionsRequest{
+		LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_LoadPartitions,
 				MsgID:         100,
@@ -74,7 +74,7 @@ func TestLoadPartitions(t *testing.T) {
 
 func TestReleasePartitions(t *testing.T) {
 	msg := &ReleasePartitionsMsg{
-		ReleasePartitionsRequest: milvuspb.ReleasePartitionsRequest{
+		ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_ReleasePartitions,
 				MsgID:         100,

@@ -181,11 +181,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			util.RateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			util.RateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
-				Add(float64(proto.Size(&imsg.InsertRequest)))
+				Add(float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
@@ -215,11 +215,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
-			util.RateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			util.RateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-				Add(float64(proto.Size(&dmsg.DeleteRequest)))
+				Add(float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).

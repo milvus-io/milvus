@@ -50,7 +50,7 @@ pull_request_rules:
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
-      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=cpu-e2e'
@@ -63,7 +63,7 @@ pull_request_rules:
   - name: Test passed for code changed -2.*.*
     conditions:
       - base~=^2(\.\d+){2}$
-      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
@@ -123,7 +123,7 @@ pull_request_rules:
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=UT for Go'
@@ -139,7 +139,7 @@ pull_request_rules:
     conditions:
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - base~=^2\.2\.\d+$
-      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+     - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
@@ -267,7 +267,7 @@ pull_request_rules:
           - base~=^2(\.\d+){1,2}$
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
-      # - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -320,7 +320,7 @@ pull_request_rules:
       - or:
           - *failed_on_ubuntu_20
           - *failed_on_ubuntu_22
-          # - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
+          - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
           - 'status-success!=UT for Cpp'
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'

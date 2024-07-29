@@ -26,7 +26,7 @@ import (
 
 type LoadPartitionsMsg struct {
 	BaseMsg
-	milvuspb.LoadPartitionsRequest
+	*milvuspb.LoadPartitionsRequest
 }
 
 var _ TsMsg = &LoadPartitionsMsg{}
@@ -49,7 +49,7 @@ func (l *LoadPartitionsMsg) SourceID() int64 {
 
 func (l *LoadPartitionsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	loadPartitionsMsg := input.(*LoadPartitionsMsg)
-	loadPartitionsRequest := &loadPartitionsMsg.LoadPartitionsRequest
+	loadPartitionsRequest := loadPartitionsMsg.LoadPartitionsRequest
 	mb, err := proto.Marshal(loadPartitionsRequest)
 	if err != nil {
 		return nil, err
@@ -58,12 +58,12 @@ func (l *LoadPartitionsMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (l *LoadPartitionsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	loadPartitionsRequest := milvuspb.LoadPartitionsRequest{}
+	loadPartitionsRequest := &milvuspb.LoadPartitionsRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &loadPartitionsRequest)
+	err = proto.Unmarshal(in, loadPartitionsRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +75,12 @@ func (l *LoadPartitionsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (l *LoadPartitionsMsg) Size() int {
-	return proto.Size(&l.LoadPartitionsRequest)
+	return proto.Size(l.LoadPartitionsRequest)
 }
 
 type ReleasePartitionsMsg struct {
 	BaseMsg
-	milvuspb.ReleasePartitionsRequest
+	*milvuspb.ReleasePartitionsRequest
 }
 
 var _ TsMsg = &ReleasePartitionsMsg{}
@@ -103,7 +103,7 @@ func (r *ReleasePartitionsMsg) SourceID() int64 {
 
 func (r *ReleasePartitionsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	releasePartitionsMsg := input.(*ReleasePartitionsMsg)
-	releasePartitionsRequest := &releasePartitionsMsg.ReleasePartitionsRequest
+	releasePartitionsRequest := releasePartitionsMsg.ReleasePartitionsRequest
 	mb, err := proto.Marshal(releasePartitionsRequest)
 	if err != nil {
 		return nil, err
@@ -112,12 +112,12 @@ func (r *ReleasePartitionsMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (r *ReleasePartitionsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	releasePartitionsRequest := milvuspb.ReleasePartitionsRequest{}
+	releasePartitionsRequest := &milvuspb.ReleasePartitionsRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &releasePartitionsRequest)
+	err = proto.Unmarshal(in, releasePartitionsRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -128,5 +128,5 @@ func (r *ReleasePartitionsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (r *ReleasePartitionsMsg) Size() int {
-	return proto.Size(&r.ReleasePartitionsRequest)
+	return proto.Size(r.ReleasePartitionsRequest)
 }

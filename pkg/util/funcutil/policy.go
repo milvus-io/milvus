@@ -1,10 +1,10 @@
 package funcutil
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"

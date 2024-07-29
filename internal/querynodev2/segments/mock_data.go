@@ -586,9 +586,12 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				Dim:  dim,
 			}
 		case schemapb.DataType_SparseFloatVector:
-			sparseData := testutils.GenerateSparseFloatVectors(msgLength)
+			contents, dim := testutils.GenerateSparseFloatVectorsData(msgLength)
 			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
-				SparseFloatArray: *sparseData,
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: contents,
+					Dim:      dim,
+				},
 			}
 		default:
 			err := errors.New("data type not supported")
@@ -694,9 +697,12 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 	case schemapb.DataType_BFloat16Vector:
 		dataset = indexcgowrapper.GenBFloat16VecDataset(testutils.GenerateBFloat16Vectors(msgLength, defaultDim))
 	case schemapb.DataType_SparseFloatVector:
-		data := testutils.GenerateSparseFloatVectors(msgLength)
+		contents, dim := testutils.GenerateSparseFloatVectorsData(msgLength)
 		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
-			SparseFloatArray: *data,
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Contents: contents,
+				Dim:      dim,
+			},
 		})
 	}
 
@@ -1110,7 +1116,7 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 
 	return &msgstream.InsertMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:           genCommonMsgBase(commonpb.MsgType_Insert, 0),
 			CollectionName: "test-collection",
 			PartitionName:  "test-partition",

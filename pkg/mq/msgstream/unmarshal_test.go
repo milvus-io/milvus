@@ -34,7 +34,7 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{1},
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,

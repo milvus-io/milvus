@@ -272,7 +272,6 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 }
 
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -351,7 +350,6 @@ func (t *describeDatabaseTask) OnEnqueue() error {
 }
 
 func (t *describeDatabaseTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 

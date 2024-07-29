@@ -239,7 +239,7 @@ func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 }
 
 type FieldInfo struct {
-	datapb.FieldBinlog
+	*datapb.FieldBinlog
 	RowCount int64
 }
 
@@ -426,7 +426,7 @@ func (s *LocalSegment) initializeSegment() error {
 		})
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
-				FieldBinlog: *info.FieldBinlog,
+				FieldBinlog: info.FieldBinlog,
 				RowCount:    loadInfo.GetNumOfRows(),
 			})
 		}
@@ -434,7 +434,7 @@ func (s *LocalSegment) initializeSegment() error {
 
 	for _, binlogs := range fieldBinlogs {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
-			FieldBinlog: *binlogs,
+			FieldBinlog: binlogs,
 			RowCount:    loadInfo.GetNumOfRows(),
 		})
 	}
