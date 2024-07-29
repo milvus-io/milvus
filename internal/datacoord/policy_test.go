@@ -339,16 +339,16 @@ func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 		s.Nil(opSet)
 	})
 	s.Run("test uneven with conservative effect", func() {
-		// as we deem that the node having only one channel more than average as even, so there's no reallocation
-		// for this test case
-		// even distribution should have not results
 		uneven := []*NodeChannelInfo{
 			{100, getChannels(map[string]int64{"ch1": 1, "ch2": 1})},
 			{NodeID: 101},
 		}
 
 		opSet := AvgBalanceChannelPolicy(uneven)
-		s.Nil(opSet)
+		s.Equal(opSet.Len(), 1)
+		for _, op := range opSet.Collect() {
+			s.True(lo.Contains([]string{"ch1", "ch2"}, op.GetChannelNames()[0]))
+		}
 	})
 	s.Run("test uneven with zero", func() {
 		uneven := []*NodeChannelInfo{
@@ -638,5 +638,32 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			return op.NodeID, true
 		})
 		s.ElementsMatch([]int64{3, 1}, nodeIDs)
+	})
+
+	s.Run("assign to reach average", func() {
+		curCluster := []*NodeChannelInfo{
+			{1, getChannels(map[string]int64{"ch-1": 1, "ch-2": 1, "ch-3": 1})},
+			{2, getChannels(map[string]int64{"ch-4": 1, "ch-5": 1, "ch-6": 4, "ch-7": 4, "ch-8": 4})},
+		}
+		unassigned := NewNodeChannelInfo(bufferID,
+			getChannel("new-ch-1", 1),
+			getChannel("new-ch-2", 1),
+			getChannel("new-ch-3", 1),
+		)
+
+		opSet := AvgAssignByCountPolicy(curCluster, unassigned, nil)
+		s.NotNil(opSet)
+
+		s.Equal(3, opSet.GetChannelNumber())
+		s.Equal(2, opSet.Len())
+		for _, op := range opSet.Collect() {
+			if op.Type == Delete {
+				s.Equal(int64(bufferID), op.NodeID)
+			}
+
+			if op.Type == Watch {
+				s.Equal(int64(1), op.NodeID)
+			}
+		}
 	})
 }
