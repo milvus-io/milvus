@@ -1,0 +1,22 @@
+syntax = "proto3";
+package milvus.proto.cmd.tools.migration.backend;
+
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/cmd/tools/migration/backend";
+
+
+
+message BackupHeader {
+    // Version number for backup format
+    int32 version = 1; 
+    // instance name, as rootPath for key prefix
+    string instance = 2;
+    // MetaPath used in keys
+    string meta_path = 3;
+    // Entries record number of key-value in backup
+    int64 entries = 4;
+    // Component is the backup target
+    string component = 5;
+    // Extra property reserved
+    bytes extra = 6;
+}

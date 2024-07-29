@@ -84,7 +84,7 @@ func TestMqMsgStream_ComputeProduceChannelIndexes(t *testing.T) {
 	// not called AsProducer yet
 	insertMsg := &InsertMsg{
 		BaseMsg: generateBaseMsg(),
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,
@@ -137,7 +137,7 @@ func TestMqMsgStream_Produce(t *testing.T) {
 	// Produce before called AsProducer
 	insertMsg := &InsertMsg{
 		BaseMsg: generateBaseMsg(),
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,

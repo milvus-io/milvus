@@ -53,7 +53,7 @@ func (s *InsertBufferSuite) composeInsertMsg(rowCount int, dim int) ([]int64, *m
 	})
 	flatten := lo.Flatten(vectors)
 	return tss, &msgstream.InsertMsg{
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 			RowIDs:     tss,
 			Timestamps: lo.Map(tss, func(id int64, _ int) uint64 { return uint64(id) }),
