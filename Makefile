@@ -19,7 +19,7 @@ INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 PGO_PATH := $(PWD)/configs/pgo
 OS := $(shell uname -s)
-mode = Debug
+mode = Release
 
 use_disk_index = OFF
 ifdef disk_index
