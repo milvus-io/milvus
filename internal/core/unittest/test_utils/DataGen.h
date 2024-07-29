@@ -248,6 +248,7 @@ struct GeneratedData {
     DataGen(SchemaPtr schema,
             int64_t N,
             uint64_t seed,
+            uint64_t pk_offset,
             uint64_t ts_offset,
             int repeat_count,
             int array_len,
@@ -317,14 +318,16 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline GeneratedData DataGen(SchemaPtr schema,
-                             int64_t N,
-                             uint64_t seed = 42,
-                             uint64_t ts_offset = 0,
-                             int repeat_count = 1,
-                             int array_len = 10,
-                             bool random_pk = false,
-                             bool random_val = true) {
+inline GeneratedData
+DataGen(SchemaPtr schema,
+        int64_t N,
+        uint64_t seed = 42,
+        uint64_t pk_offset = 0,
+        uint64_t ts_offset = 0,
+        int repeat_count = 1,
+        int array_len = 10,
+        bool random_pk = false,
+        bool random_val = true) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -425,9 +428,11 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::INT64: {
                 vector<int64_t> data(N);
                 for (int i = 0; i < N; i++) {
-                    if (random_pk && schema->get_primary_field_id()->get() ==
-                                         field_id.get()) {
-                        data[i] = random() % N;
+                    if (schema->get_primary_field_id()->get() ==
+                        field_id.get()) {
+                        data[i] = random_pk
+                                      ? random() % N + pk_offset
+                                      : data[i] = i / repeat_count + pk_offset;
                     } else {
                         data[i] = i / repeat_count;
                     }
