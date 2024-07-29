@@ -190,7 +190,7 @@ static-check: getdeps
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 
-verifiers: build-cpp getdeps cppcheck fmt static-check
+verifiers: build-cpp getdeps fmt static-check # cppcheck skip for now due to clang-format unstable
 
 # Build various components locally.
 binlog:
