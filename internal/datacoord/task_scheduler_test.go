@@ -800,7 +800,9 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+	mockIndexEngineVersionManager := NewMockVersionManager(s.T())
+	mockIndexEngineVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(0), nil)
+	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, mockIndexEngineVersionManager, handler)
 	s.Equal(9, len(scheduler.tasks))
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
 	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
@@ -1285,7 +1287,9 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		cm.EXPECT().RootPath().Return("ut-index")
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+		mockIndexEngineVersionManager := NewMockVersionManager(s.T())
+		mockIndexEngineVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(0), nil)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, mockIndexEngineVersionManager, handler)
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
@@ -1576,7 +1580,10 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+
+	mockIndexEngineVersionManager := NewMockVersionManager(s.T())
+	mockIndexEngineVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(0), nil)
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, mockIndexEngineVersionManager, handler)
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
@@ -1783,11 +1790,11 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			common.PartitionKeyIsolationKey: "false",
 		},
 	}
-	handler_isolation := NewNMockHandler(s.T())
-	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
+	handlerIsolation := NewNMockHandler(s.T())
+	handlerIsolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
 
-	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
-	scheduler_isolation.Start()
+	schedulerIsolation := newTaskScheduler(ctx, &mt, workerManager, cm, mockIndexEngineVersionManager, handlerIsolation)
+	schedulerIsolation.Start()
 
 	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
@@ -1805,8 +1812,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.enqueue(t)
-		waitTaskDoneFunc(scheduler_isolation)
+		schedulerIsolation.enqueue(t)
+		waitTaskDoneFunc(schedulerIsolation)
 		resetMetaFunc()
 	})
 
@@ -1828,8 +1835,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.enqueue(t)
-		waitTaskDoneFunc(scheduler_isolation)
+		schedulerIsolation.enqueue(t)
+		waitTaskDoneFunc(schedulerIsolation)
 		resetMetaFunc()
 	})
 
@@ -1851,9 +1858,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.enqueue(t)
-		waitTaskDoneFunc(scheduler_isolation)
+		schedulerIsolation.enqueue(t)
+		waitTaskDoneFunc(schedulerIsolation)
 		resetMetaFunc()
 	})
-	scheduler_isolation.Stop()
+	schedulerIsolation.Stop()
 }
