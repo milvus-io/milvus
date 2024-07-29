@@ -27,9 +27,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -45,7 +45,7 @@ import (
 
 type LevelZeroCompactionTask struct {
 	io.BinlogIO
-	allocator allocator.Allocator
+	allocator allocator.Interface
 	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
@@ -63,11 +63,11 @@ var _ Compactor = (*LevelZeroCompactionTask)(nil)
 func NewLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	alloc allocator.Allocator,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	return &LevelZeroCompactionTask{
 		ctx:    ctx,
 		cancel: cancel,
@@ -96,6 +96,10 @@ func (t *LevelZeroCompactionTask) GetPlanID() typeutil.UniqueID {
 
 func (t *LevelZeroCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
+}
+
+func (t *LevelZeroCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
 }
 
 func (t *LevelZeroCompactionTask) GetCollection() int64 {
@@ -433,4 +437,8 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 
 	err := conc.AwaitAll(futures...)
 	return bfs, err
+}
+
+func (t *LevelZeroCompactionTask) GetSlotUsage() int64 {
+	return t.plan.GetSlotUsage()
 }

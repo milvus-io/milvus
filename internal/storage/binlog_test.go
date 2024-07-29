@@ -39,7 +39,7 @@ import (
 func TestInsertBinlog(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 
-	e1, err := w.NextInsertEventWriter(false)
+	e1, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
@@ -49,7 +49,7 @@ func TestInsertBinlog(t *testing.T) {
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
 
-	e2, err := w.NextInsertEventWriter(false)
+	e2, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = e2.AddDataToPayload([]int64{7, 8, 9}, nil)
 	assert.NoError(t, err)
@@ -1329,7 +1329,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 
 	w.SetEventTimeStamp(1000, 2000)
 
-	e1, err := w.NextInsertEventWriter(false)
+	e1, err := w.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
@@ -1393,7 +1393,7 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 
 func TestInsertBinlogWriterCloseError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
-	e1, err := insertWriter.NextInsertEventWriter(false)
+	e1, err := insertWriter.NextInsertEventWriter()
 	assert.NoError(t, err)
 
 	sizeTotal := 2000000
@@ -1406,7 +1406,7 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 	err = insertWriter.Finish()
 	assert.NoError(t, err)
 	assert.NotNil(t, insertWriter.buffer)
-	insertEventWriter, err := insertWriter.NextInsertEventWriter(false)
+	insertEventWriter, err := insertWriter.NextInsertEventWriter()
 	assert.Nil(t, insertEventWriter)
 	assert.Error(t, err)
 	insertWriter.Close()

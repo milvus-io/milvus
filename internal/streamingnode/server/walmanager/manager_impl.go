@@ -71,6 +71,7 @@ func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (e
 		m.lifetime.Done()
 		if err != nil {
 			log.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			return
 		}
 		log.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()

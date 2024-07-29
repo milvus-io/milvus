@@ -326,7 +326,6 @@ class ConcurrentVectorImpl : public VectorBase {
             fill_chunk(chunk_id, 0, element_count, source, source_offset);
         }
     }
-
     void
     fill_chunk(ssize_t chunk_id,
                ssize_t chunk_offset,

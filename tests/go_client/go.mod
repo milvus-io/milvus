@@ -14,7 +14,7 @@ require (
 	google.golang.org/grpc v1.64.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240704083609-fcafdb6d5f68 => ../../../milvus/client
+// replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240704083609-fcafdb6d5f68 => ../../../milvus/client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -56,7 +56,7 @@ require (
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.3 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240717062137-3ffb1db01632 // indirect
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

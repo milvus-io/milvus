@@ -195,7 +195,7 @@ func TestInsertEvent(t *testing.T) {
 	}
 
 	t.Run("insert_bool", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Bool, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Bool)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Bool, w,
 			func(w *insertEventWriter) error {
@@ -211,7 +211,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int8", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int8, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Int8)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int8, w,
 			func(w *insertEventWriter) error {
@@ -227,7 +227,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int16", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int16, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Int16)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int16, w,
 			func(w *insertEventWriter) error {
@@ -243,7 +243,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int32, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Int32)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int32, w,
 			func(w *insertEventWriter) error {
@@ -259,7 +259,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int64, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int64, w,
 			func(w *insertEventWriter) error {
@@ -275,7 +275,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Float, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Float)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Float, w,
 			func(w *insertEventWriter) error {
@@ -291,7 +291,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Double, false)
+		w, err := newInsertEventWriter(schemapb.DataType_Double)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Double, w,
 			func(w *insertEventWriter) error {
@@ -307,7 +307,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_binary_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, false, 16)
+		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, WithDim(16))
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
@@ -323,7 +323,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, false, 2)
+		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, WithDim(2))
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
@@ -339,7 +339,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_string", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_String, false)
+		w, err := newInsertEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234", nil)
@@ -1101,7 +1101,7 @@ func TestEventReaderError(t *testing.T) {
 }
 
 func TestEventClose(t *testing.T) {
-	w, err := newInsertEventWriter(schemapb.DataType_String, false)
+	w, err := newInsertEventWriter(schemapb.DataType_String)
 	assert.NoError(t, err)
 	w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 	err = w.AddDataToPayload("1234", nil)

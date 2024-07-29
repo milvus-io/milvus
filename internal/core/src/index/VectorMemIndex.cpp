@@ -50,7 +50,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/space.h"
 #include "storage/Util.h"
-#include "storage/prometheus_client.h"
+#include "monitor/prometheus_client.h"
 
 namespace milvus::index {
 
@@ -259,9 +259,9 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
-            auto new_field_data =
-                milvus::storage::CreateFieldData(DataType::INT8, 1, total_len);
+            // todo: support nullable index
+            auto new_field_data = milvus::storage::CreateFieldData(
+                DataType::INT8, false, 1, total_len);
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name =
                     index_prefix + "/" + GenSlicedFileName(prefix, i);
@@ -358,9 +358,9 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 std::string prefix = item[NAME];
                 int slice_num = item[SLICE_NUM];
                 auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+                // todo: support nullable index
                 auto new_field_data = milvus::storage::CreateFieldData(
-                    DataType::INT8, 1, total_len);
+                    DataType::INT8, false, 1, total_len);
 
                 std::vector<std::string> batch;
                 batch.reserve(slice_num);
@@ -462,8 +462,9 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
         }
         auto total_num_rows = data->num_rows();
         auto col_data = data->GetColumnByName(field_name);
+        // todo: support nullable index
         auto field_data =
-            storage::CreateFieldData(field_type, dim, total_num_rows);
+            storage::CreateFieldData(field_type, false, dim, total_num_rows);
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
@@ -600,6 +601,10 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                                       search_conf[RANGE_FILTER],
                                       GetMetricType());
             }
+            // `range_search_k` is only used as one of the conditions for iterator early termination.
+            // not gurantee to return exactly `range_search_k` results, which may be more or less.
+            // set it to -1 will return all results in the range.
+            search_conf[knowhere::meta::RANGE_SEARCH_K] = topk;
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res = index_.RangeSearch(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
@@ -798,10 +803,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
     }
-    milvus::storage::internal_storage_download_duration.Observe(
+    milvus::monitor::internal_storage_download_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
             .count());
-    milvus::storage::internal_storage_write_disk_duration.Observe(
+    milvus::monitor::internal_storage_write_disk_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             write_disk_duration_sum)
             .count());
@@ -820,7 +825,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
     }
-    milvus::storage::internal_storage_deserialize_duration.Observe(
+    milvus::monitor::internal_storage_deserialize_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());

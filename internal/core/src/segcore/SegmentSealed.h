@@ -47,6 +47,9 @@ class SegmentSealed : public SegmentInternalInterface {
     type() const override {
         return SegmentType::Sealed;
     }
+
+    virtual std::vector<SegOffset>
+    SearchPk(const PkType& pk, Timestamp ts) const = 0;
 };
 
 using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;

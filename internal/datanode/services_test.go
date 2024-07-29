@@ -35,9 +35,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/pipeline"
 	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -171,6 +171,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC.EXPECT().GetPlanID().Return(int64(1))
 		mockC.EXPECT().GetCollection().Return(collection)
 		mockC.EXPECT().GetChannelName().Return(channel)
+		mockC.EXPECT().GetSlotUsage().Return(8)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 1,
@@ -182,6 +183,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC2.EXPECT().GetPlanID().Return(int64(2))
 		mockC2.EXPECT().GetCollection().Return(collection)
 		mockC2.EXPECT().GetChannelName().Return(channel)
+		mockC2.EXPECT().GetSlotUsage().Return(8)
 		mockC2.EXPECT().Complete().Return()
 		mockC2.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 2,
@@ -231,6 +233,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 
 	s.Run("unknown CompactionType", func() {
@@ -245,11 +248,13 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
+			BeginLogID: 100,
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 
 	s.Run("compact_clustering", func() {
@@ -264,11 +269,60 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			Type: datapb.CompactionType_ClusteringCompaction,
+			Type:                 datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:           100,
+			PreAllocatedSegments: &datapb.IDRange{Begin: 100, End: 200},
 		}
 
-		_, err := node.CompactionV2(ctx, req)
+		resp, err := node.CompactionV2(ctx, req)
 		s.NoError(err)
+		s.True(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("beginLogID is invalid", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type:       datapb.CompactionType_ClusteringCompaction,
+			BeginLogID: 0,
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("pre-allocated segmentID range is invalid", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type:                 datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:           100,
+			PreAllocatedSegments: &datapb.IDRange{Begin: 0, End: 0},
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.T().Logf("status=%v", resp)
 	})
 }
 

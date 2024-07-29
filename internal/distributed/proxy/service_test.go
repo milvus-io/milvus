@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1165,8 +1166,8 @@ func TestHttpAuthenticate(t *testing.T) {
 	}
 
 	{
-		proxy.SetMockAPIHook("foo", nil)
-		defer proxy.SetMockAPIHook("", nil)
+		hookutil.SetMockAPIHook("foo", nil)
+		defer hookutil.SetMockAPIHook("", nil)
 		ctx.Request.Header.Set("Authorization", "Bearer 123456")
 		authenticate(ctx)
 		ctxName, _ := ctx.Get(httpserver.ContextUsername)

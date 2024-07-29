@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"reflect"
 	"strconv"
 	"testing"
@@ -52,6 +53,35 @@ func Test_CheckGrpcReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
 	CheckGrpcReady(ctx, errChan)
 	cancel()
+}
+
+func Test_GetValidLocalIPNoValid(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(127, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "", ip)
+}
+
+func Test_GetValidLocalIPIPv4(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "100.1.1.1", ip)
+}
+
+func Test_GetValidLocalIPIPv6(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "[800::]", ip)
+}
+
+func Test_GetValidLocalIPIPv4Priority(t *testing.T) {
+	addrs := make([]net.Addr, 0, 1)
+	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "100.1.1.1", ip)
 }
 
 func Test_GetLocalIP(t *testing.T) {
@@ -191,8 +221,8 @@ func Test_ToPhysicalChannel(t *testing.T) {
 	assert.Equal(t, "abc_", ToPhysicalChannel("abc_"))
 	assert.Equal(t, "abc_123", ToPhysicalChannel("abc_123"))
 	assert.Equal(t, "abc_defgsg", ToPhysicalChannel("abc_defgsg"))
-	assert.Equal(t, "abc_123", ToPhysicalChannel("abc_123_456"))
-	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
+	assert.Equal(t, "abc_123", ToPhysicalChannel("abc_123_456v0"))
+	assert.Equal(t, "abc___defgsg", ToPhysicalChannel("abc___defgsg"))
 	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
 	channel := "by-dev-rootcoord-dml_3_449883080965365748v0"
 	for i := 0; i < 10; i++ {
@@ -815,4 +845,51 @@ func (s *NumRowsWithSchemaSuite) TestErrorCases() {
 
 func TestNumRowsWithSchema(t *testing.T) {
 	suite.Run(t, new(NumRowsWithSchemaSuite))
+}
+
+func TestChannelConvert(t *testing.T) {
+	t.Run("is physical channel", func(t *testing.T) {
+		{
+			channel := "by-dev-replicate-msg"
+			ok := IsPhysicalChannel(channel)
+			assert.True(t, ok)
+		}
+
+		{
+			channel := "by-dev-rootcoord-dml_2"
+			ok := IsPhysicalChannel(channel)
+			assert.True(t, ok)
+		}
+
+		{
+			channel := "by-dev-rootcoord-dml_2_1001v0"
+			ok := IsPhysicalChannel(channel)
+			assert.False(t, ok)
+		}
+	})
+
+	t.Run("to physical channel", func(t *testing.T) {
+		{
+			channel := "by-dev-rootcoord-dml_2_1001v0"
+			physicalChannel := ToPhysicalChannel(channel)
+			assert.Equal(t, "by-dev-rootcoord-dml_2", physicalChannel)
+		}
+
+		{
+			channel := "by-dev-rootcoord-dml_2"
+			physicalChannel := ToPhysicalChannel(channel)
+			assert.Equal(t, "by-dev-rootcoord-dml_2", physicalChannel)
+		}
+
+		{
+			channel := "by-dev-replicate-msg"
+			physicalChannel := ToPhysicalChannel(channel)
+			assert.Equal(t, "by-dev-replicate-msg", physicalChannel)
+		}
+	})
+
+	t.Run("get virtual channel", func(t *testing.T) {
+		channel := GetVirtualChannel("by-dev-rootcoord-dml_2", 1001, 0)
+		assert.Equal(t, "by-dev-rootcoord-dml_2_1001v0", channel)
+	})
 }

@@ -88,3 +88,8 @@ func DeliverFilterVChannel(vchannel string) DeliverFilter {
 		vchannel: vchannel,
 	}
 }
+
+// IsDeliverFilterTimeTick checks if the filter is time tick filter.
+func IsDeliverFilterTimeTick(filter DeliverFilter) bool {
+	return filter.Type() == DeliverFilterTypeTimeTickGT || filter.Type() == DeliverFilterTypeTimeTickGTE
+}

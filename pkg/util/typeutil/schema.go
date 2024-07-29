@@ -28,9 +28,9 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -461,6 +461,10 @@ func IsStringType(dataType schemapb.DataType) bool {
 
 func IsVariableDataType(dataType schemapb.DataType) bool {
 	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
+}
+
+func IsPrimitiveType(dataType schemapb.DataType) bool {
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce

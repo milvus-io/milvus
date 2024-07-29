@@ -75,7 +75,8 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	cdt.result, err = cdt.rootCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
-	if cdt.result != nil && cdt.result.ErrorCode == commonpb.ErrorCode_Success {
+	err = merr.CheckRPCCall(cdt.result, err)
+	if err == nil {
 		SendReplicateMessagePack(ctx, cdt.replicateMsgStream, cdt.CreateDatabaseRequest)
 	}
 	return err
@@ -145,7 +146,8 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ddt.result, err = ddt.rootCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
 
-	if ddt.result != nil && ddt.result.ErrorCode == commonpb.ErrorCode_Success {
+	err = merr.CheckRPCCall(ddt.result, err)
+	if err == nil {
 		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
 		SendReplicateMessagePack(ctx, ddt.replicateMsgStream, ddt.DropDatabaseRequest)
 	}
@@ -212,7 +214,7 @@ func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ctx = AppendUserInfoForRPC(ctx)
 	ldt.result, err = ldt.rootCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
-	return err
+	return merr.CheckRPCCall(ldt.result, err)
 }
 
 func (ldt *listDatabaseTask) PostExecute(ctx context.Context) error {
@@ -264,12 +266,12 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_AlterDatabase
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterDatabase
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	return nil
 }
@@ -285,19 +287,13 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 	}
 
 	ret, err := t.rootCoord.AlterDatabase(ctx, req)
+	err = merr.CheckRPCCall(ret, err)
 	if err != nil {
-		log.Warn("AlterDatabase failed", zap.Error(err))
-		return err
-	}
-
-	if err := merr.CheckRPCCall(t.result, err); err != nil {
-		log.Warn("AlterDatabase failed", zap.Error(err))
 		return err
 	}
 
 	t.result = ret
-
-	return err
+	return nil
 }
 
 func (t *alterDatabaseTask) PostExecute(ctx context.Context) error {
@@ -349,12 +345,12 @@ func (t *describeDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DescribeDatabase
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *describeDatabaseTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterCollection
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	return nil
 }

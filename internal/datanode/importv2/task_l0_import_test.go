@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -165,7 +165,7 @@ func (s *L0ImportSuite) TestL0Import() {
 				Vchannel:    s.channel,
 			},
 		},
-		AutoIDRange: &datapb.AutoIDRange{
+		IDRange: &datapb.IDRange{
 			Begin: 0,
 			End:   int64(s.delCnt),
 		},

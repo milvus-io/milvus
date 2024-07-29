@@ -37,13 +37,17 @@ var _ CompactionTask = (*l0CompactionTask)(nil)
 
 type l0CompactionTask struct {
 	*datapb.CompactionTask
-	plan     *datapb.CompactionPlan
-	result   *datapb.CompactionPlanResult
-	span     trace.Span
-	sessions SessionManager
-	meta     CompactionMeta
+	plan   *datapb.CompactionPlan
+	result *datapb.CompactionPlanResult
+
+	span      trace.Span
+	allocator allocator
+	sessions  SessionManager
+	meta      CompactionMeta
 }
 
+// Note: return True means exit this state machine.
+// ONLY return True for processCompleted or processFailed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
@@ -104,10 +108,11 @@ func (t *l0CompactionTask) processExecuting() bool {
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_executing:
+		// will L0Compaction be timeouted?
 		if t.checkTimeout() {
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
 			if err != nil {
-				log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				log.Warn("l0CompactionTask failed to set task timeout state", zap.Error(err))
 				return false
 			}
 			return t.processTimeout()
@@ -120,12 +125,13 @@ func (t *l0CompactionTask) processExecuting() bool {
 		}
 
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn("l0CompactionTask failed to save task meta_saved state", zap.Error(err))
 			return false
 		}
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
-			log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+			log.Warn("l0CompactionTask failed to set task failed state", zap.Error(err))
 			return false
 		}
 		return t.processFailed()
@@ -228,6 +234,10 @@ func (t *l0CompactionTask) CleanLogPath() {
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	beginLogID, _, err := t.allocator.allocN(1)
+	if err != nil {
+		return nil, err
+	}
 	plan := &datapb.CompactionPlan{
 		PlanID:           t.GetPlanID(),
 		StartTime:        t.GetStartTime(),
@@ -237,6 +247,8 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl:    t.GetCollectionTtl(),
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
+		BeginLogID:       beginLogID,
+		SlotUsage:        Params.DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64(),
 	}
 
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
@@ -275,7 +287,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	for _, segInfo := range sealedSegments {
 		// TODO should allow parallel executing of l0 compaction
 		if segInfo.isCompacting {
-			log.Info("l0 compaction candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
+			log.Warn("l0CompactionTask candidate segment is compacting", zap.Int64("segmentID", segInfo.GetID()))
 			return nil, merr.WrapErrCompactionPlanConflict(fmt.Sprintf("segment %d is compacting", segInfo.GetID()))
 		}
 	}
@@ -292,7 +304,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	})
 
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-	log.Info("Compaction handler refreshed level zero compaction plan",
+	log.Info("l0CompactionTask refreshed level zero compaction plan",
 		zap.Any("target position", t.GetPos()),
 		zap.Any("target segments count", len(sealedSegBinlogs)))
 	return plan, nil
@@ -308,10 +320,13 @@ func (t *l0CompactionTask) processMetaSaved() bool {
 }
 
 func (t *l0CompactionTask) processCompleted() bool {
-	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-		PlanID: t.GetPlanID(),
-	}); err != nil {
-		log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+	if t.GetNodeID() != 0 && t.GetNodeID() != NullNodeID {
+		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+			PlanID: t.GetPlanID(),
+		})
+		if err != nil {
+			log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		}
 	}
 
 	t.resetSegmentCompacting()
@@ -346,11 +361,15 @@ func (t *l0CompactionTask) processFailed() bool {
 
 func (t *l0CompactionTask) checkTimeout() bool {
 	if t.GetTimeoutInSeconds() > 0 {
-		diff := time.Since(time.Unix(t.GetStartTime(), 0)).Seconds()
+		start := time.Unix(t.GetStartTime(), 0)
+		diff := time.Since(start).Seconds()
 		if diff > float64(t.GetTimeoutInSeconds()) {
 			log.Warn("compaction timeout",
+				zap.Int64("taskID", t.GetTriggerID()),
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int64("nodeID", t.GetNodeID()),
 				zap.Int32("timeout in seconds", t.GetTimeoutInSeconds()),
-				zap.Int64("startTime", t.GetStartTime()),
+				zap.Time("startTime", start),
 			)
 			return true
 		}
@@ -382,22 +401,17 @@ func (t *l0CompactionTask) SaveTaskMeta() error {
 
 func (t *l0CompactionTask) saveSegmentMeta() error {
 	result := t.result
-	plan := t.GetPlan()
 	var operators []UpdateOperator
 	for _, seg := range result.GetSegments() {
 		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
 	}
 
-	levelZeroSegments := lo.Filter(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return b.GetLevel() == datapb.SegmentLevel_L0
-	})
-
-	for _, seg := range levelZeroSegments {
-		operators = append(operators, UpdateStatusOperator(seg.GetSegmentID(), commonpb.SegmentState_Dropped), UpdateCompactedOperator(seg.GetSegmentID()))
+	for _, segID := range t.InputSegments {
+		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
-		zap.Int64("planID", plan.GetPlanID()),
+		zap.Int64("planID", t.GetPlanID()),
 	)
 
 	return t.meta.UpdateSegmentsInfo(operators...)

@@ -244,7 +244,7 @@ void
 HybridScalarIndex<T>::BuildInternal(
     const std::vector<FieldDataPtr>& field_datas) {
     auto index = GetInternalIndex();
-    LOG_INFO("build bitmap index with internal index:{}",
+    LOG_INFO("build hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->BuildWithFieldData(field_datas);
 }
@@ -295,8 +295,9 @@ HybridScalarIndex<T>::BuildV2(const Config& config) {
         auto data = rec.ValueUnsafe();
         auto total_num_rows = data->num_rows();
         auto col_data = data->GetColumnByName(field_name);
+        // todo: support nullable index
         auto field_data = storage::CreateFieldData(
-            DataType(GetDType<T>()), 0, total_num_rows);
+            DataType(GetDType<T>()), false, 0, total_num_rows);
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
@@ -406,7 +407,7 @@ HybridScalarIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
-    LOG_INFO("load bitmap index with internal index:{}",
+    LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(binary_set, config);
 
@@ -420,7 +421,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
-               "index file paths is empty when load bitmap index");
+               "index file paths is empty when load hybrid index");
 
     auto index_type_file = GetRemoteIndexTypeFile(index_files.value());
 
@@ -439,7 +440,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
-    LOG_INFO("load bitmap index with internal index:{}",
+    LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(ctx, config);
 

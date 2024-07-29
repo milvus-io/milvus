@@ -41,8 +41,7 @@ class GrowingDataGetter : public DataGetter<T> {
     const segcore::ConcurrentVector<T>* growing_raw_data_;
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId) {
-        growing_raw_data_ =
-            segment.get_insert_record().get_field_data<T>(fieldId);
+        growing_raw_data_ = segment.get_insert_record().get_data<T>(fieldId);
     }
 
     GrowingDataGetter(const GrowingDataGetter<T>& other)
@@ -133,7 +132,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 const index::VectorIndex& index) {
     if (search_info.group_by_field_id_.has_value()) {
         try {
-            auto search_conf = search_info.search_params_;
+            auto search_conf = index.PrepareSearchParams(search_info);
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
                 iterators_val =
                     index.VectorIterators(dataset, search_conf, bitset);

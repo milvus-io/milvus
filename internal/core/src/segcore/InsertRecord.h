@@ -12,6 +12,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -68,6 +69,12 @@ class OffsetMap {
 
     virtual void
     clear() = 0;
+
+    virtual std::pair<std::vector<PkType>, std::vector<Timestamp>>
+    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
+
+    virtual void
+    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
 };
 
 template <typename T>
@@ -94,6 +101,57 @@ class OffsetOrderedMap : public OffsetMap {
         std::unique_lock<std::shared_mutex> lck(mtx_);
 
         map_[std::get<T>(pk)].emplace_back(offset);
+    }
+
+    std::pair<std::vector<PkType>, std::vector<Timestamp>>
+    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        std::vector<PkType> remove_pks;
+        std::vector<Timestamp> remove_timestamps;
+
+        for (auto& [pk, offsets] : map_) {
+            if (offsets.size() > 1) {
+                // find max timestamp offset
+                int64_t max_timestamp_offset = 0;
+                for (auto& offset : offsets) {
+                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
+                        max_timestamp_offset = offset;
+                    }
+                }
+
+                remove_pks.push_back(pk);
+                remove_timestamps.push_back(timestamps[max_timestamp_offset]);
+            }
+        }
+
+        return std::make_pair(remove_pks, remove_timestamps);
+    }
+
+    void
+    remove_duplicate_pks(
+        const ConcurrentVector<Timestamp>& timestamps) override {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+
+        for (auto& [pk, offsets] : map_) {
+            if (offsets.size() > 1) {
+                // find max timestamp offset
+                int64_t max_timestamp_offset = 0;
+                for (auto& offset : offsets) {
+                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
+                        max_timestamp_offset = offset;
+                    }
+                }
+
+                // remove other offsets from pk index
+                offsets.erase(
+                    std::remove_if(offsets.begin(),
+                                   offsets.end(),
+                                   [max_timestamp_offset](int64_t val) {
+                                       return val != max_timestamp_offset;
+                                   }),
+                    offsets.end());
+            }
+        }
     }
 
     void
@@ -219,6 +277,63 @@ class OffsetOrderedArray : public OffsetMap {
             std::make_pair(std::get<T>(pk), static_cast<int32_t>(offset)));
     }
 
+    std::pair<std::vector<PkType>, std::vector<Timestamp>>
+    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
+        std::vector<PkType> remove_pks;
+        std::vector<Timestamp> remove_timestamps;
+
+        // cached pks(key, max_timestamp_offset)
+        std::unordered_map<T, int64_t> pks;
+        std::unordered_set<T> need_removed_pks;
+        for (auto it = array_.begin(); it != array_.end(); ++it) {
+            const T& key = it->first;
+            if (pks.find(key) == pks.end()) {
+                pks.insert({key, it->second});
+            } else {
+                need_removed_pks.insert(key);
+                if (timestamps[it->second] > timestamps[pks[key]]) {
+                    pks[key] = it->second;
+                }
+            }
+        }
+
+        // return max_timestamps that removed pks
+        for (auto& pk : need_removed_pks) {
+            remove_pks.push_back(pk);
+            remove_timestamps.push_back(timestamps[pks[pk]]);
+        }
+        return std::make_pair(remove_pks, remove_timestamps);
+    }
+
+    void
+    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) {
+        // cached pks(key, max_timestamp_offset)
+        std::unordered_map<T, int64_t> pks;
+        std::unordered_set<T> need_removed_pks;
+        for (auto it = array_.begin(); it != array_.end(); ++it) {
+            const T& key = it->first;
+            if (pks.find(key) == pks.end()) {
+                pks.insert({key, it->second});
+            } else {
+                need_removed_pks.insert(key);
+                if (timestamps[it->second] > timestamps[pks[key]]) {
+                    pks[key] = it->second;
+                }
+            }
+        }
+
+        // remove duplicate pks
+        for (auto it = array_.begin(); it != array_.end();) {
+            const T& key = it->first;
+            auto max_offset = pks[key];
+            if (max_offset != it->second) {
+                it = array_.erase(it);
+            } else {
+                it++;
+            }
+        }
+    }
+
     void
     seal() override {
         sort(array_.begin(), array_.end());
@@ -293,6 +408,65 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
+class ThreadSafeValidData {
+ public:
+    explicit ThreadSafeValidData() = default;
+    explicit ThreadSafeValidData(FixedVector<bool> data)
+        : data_(std::move(data)) {
+    }
+
+    void
+    set_data_raw(const std::vector<FieldDataPtr>& datas) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        auto total = 0;
+        for (auto& field_data : datas) {
+            total += field_data->get_num_rows();
+        }
+        if (length_ + total > data_.size()) {
+            data_.reserve(length_ + total);
+        }
+        length_ += total;
+        for (auto& field_data : datas) {
+            auto num_row = field_data->get_num_rows();
+            for (size_t i = 0; i < num_row; i++) {
+                data_.push_back(field_data->is_valid(i));
+            }
+        }
+    }
+
+    void
+    set_data_raw(size_t num_rows,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        if (field_meta.is_nullable()) {
+            if (length_ + num_rows > data_.size()) {
+                data_.reserve(length_ + num_rows);
+            }
+
+            auto src = data->valid_data().data();
+            for (size_t i = 0; i < num_rows; ++i) {
+                data_.push_back(src[i]);
+                // data_[length_ + i] = src[i];
+            }
+            length_ += num_rows;
+        }
+    }
+
+    bool
+    is_valid(size_t offset) {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        Assert(offset < length_);
+        return data_[offset];
+    }
+
+ private:
+    mutable std::shared_mutex mutex_{};
+    FixedVector<bool> data_;
+    // number of actual elements
+    size_t length_{0};
+};
+
 template <bool is_sealed = false>
 struct InsertRecord {
     InsertRecord(
@@ -305,6 +479,9 @@ struct InsertRecord {
         for (auto& field : schema) {
             auto field_id = field.first;
             auto& field_meta = field.second;
+            if (field_meta.is_nullable()) {
+                this->append_valid_data(field_id);
+            }
             if (pk2offset_ == nullptr && pk_field_id.has_value() &&
                 pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
@@ -337,28 +514,28 @@ struct InsertRecord {
             }
             if (field_meta.is_vector()) {
                 if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                    this->append_field_data<FloatVector>(
+                    this->append_data<FloatVector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_BINARY) {
-                    this->append_field_data<BinaryVector>(
+                    this->append_data<BinaryVector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_FLOAT16) {
-                    this->append_field_data<Float16Vector>(
+                    this->append_data<Float16Vector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_BFLOAT16) {
-                    this->append_field_data<BFloat16Vector>(
+                    this->append_data<BFloat16Vector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_SPARSE_FLOAT) {
-                    this->append_field_data<SparseFloatVector>(field_id,
-                                                               size_per_chunk);
+                    this->append_data<SparseFloatVector>(field_id,
+                                                         size_per_chunk);
                     continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
@@ -368,44 +545,43 @@ struct InsertRecord {
             }
             switch (field_meta.get_data_type()) {
                 case DataType::BOOL: {
-                    this->append_field_data<bool>(field_id, size_per_chunk);
+                    this->append_data<bool>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT8: {
-                    this->append_field_data<int8_t>(field_id, size_per_chunk);
+                    this->append_data<int8_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT16: {
-                    this->append_field_data<int16_t>(field_id, size_per_chunk);
+                    this->append_data<int16_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT32: {
-                    this->append_field_data<int32_t>(field_id, size_per_chunk);
+                    this->append_data<int32_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::INT64: {
-                    this->append_field_data<int64_t>(field_id, size_per_chunk);
+                    this->append_data<int64_t>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::FLOAT: {
-                    this->append_field_data<float>(field_id, size_per_chunk);
+                    this->append_data<float>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::DOUBLE: {
-                    this->append_field_data<double>(field_id, size_per_chunk);
+                    this->append_data<double>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::VARCHAR: {
-                    this->append_field_data<std::string>(field_id,
-                                                         size_per_chunk);
+                    this->append_data<std::string>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::JSON: {
-                    this->append_field_data<Json>(field_id, size_per_chunk);
+                    this->append_data<Json>(field_id, size_per_chunk);
                     break;
                 }
                 case DataType::ARRAY: {
-                    this->append_field_data<Array>(field_id, size_per_chunk);
+                    this->append_data<Array>(field_id, size_per_chunk);
                     break;
                 }
                 default: {
@@ -521,6 +697,26 @@ struct InsertRecord {
     }
 
     bool
+    insert_with_check_existence(const PkType& pk, int64_t offset) {
+        std::lock_guard lck(shared_mutex_);
+        auto exist = pk2offset_->contain(pk);
+        pk2offset_->insert(pk, offset);
+        return exist;
+    }
+
+    std::pair<std::vector<PkType>, std::vector<Timestamp>>
+    get_need_removed_pks() {
+        std::lock_guard lck(shared_mutex_);
+        return pk2offset_->get_need_removed_pks(timestamps_);
+    }
+
+    void
+    remove_duplicate_pks() {
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_->remove_duplicate_pks(timestamps_);
+    }
+
+    bool
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
         return pk2offset_->empty();
@@ -532,23 +728,22 @@ struct InsertRecord {
         pk2offset_->seal();
     }
 
-    // get field data without knowing the type
+    // get data without knowing the type
     VectorBase*
-    get_field_data_base(FieldId field_id) const {
-        AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
+    get_data_base(FieldId field_id) const {
+        AssertInfo(data_.find(field_id) != data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
-        AssertInfo(
-            fields_data_.at(field_id) != nullptr,
-            "fields_data_ at i is null" + std::to_string(field_id.get()));
-        return fields_data_.at(field_id).get();
+        AssertInfo(data_.at(field_id) != nullptr,
+                   "data_ at i is null" + std::to_string(field_id.get()));
+        return data_.at(field_id).get();
     }
 
     // get field data in given type, const version
     template <typename Type>
     const ConcurrentVector<Type>*
-    get_field_data(FieldId field_id) const {
-        auto base_ptr = get_field_data_base(field_id);
+    get_data(FieldId field_id) const {
+        auto base_ptr = get_data_base(field_id);
         auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
@@ -557,36 +752,58 @@ struct InsertRecord {
     // get field data in given type, non-const version
     template <typename Type>
     ConcurrentVector<Type>*
-    get_field_data(FieldId field_id) {
-        auto base_ptr = get_field_data_base(field_id);
+    get_data(FieldId field_id) {
+        auto base_ptr = get_data_base(field_id);
         auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
 
+    ThreadSafeValidData*
+    get_valid_data(FieldId field_id) const {
+        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
+                   "Cannot find valid_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(valid_data_.at(field_id) != nullptr,
+                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+        return valid_data_.at(field_id).get();
+    }
+
+    bool
+    is_valid_data_exist(FieldId field_id) {
+        return valid_data_.find(field_id) != valid_data_.end();
+    }
+
     // append a column of scalar or sparse float vector type
     template <typename Type>
     void
-    append_field_data(FieldId field_id, int64_t size_per_chunk) {
+    append_data(FieldId field_id, int64_t size_per_chunk) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        fields_data_.emplace(field_id,
-                             std::make_unique<ConcurrentVector<Type>>(
-                                 size_per_chunk, mmap_descriptor_));
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVector<Type>>(
+                          size_per_chunk, mmap_descriptor_));
+    }
+
+    // append a column of scalar type
+    void
+    append_valid_data(FieldId field_id) {
+        valid_data_.emplace(field_id, std::make_unique<ThreadSafeValidData>());
     }
 
     // append a column of vector type
     template <typename VectorType>
     void
-    append_field_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
+    append_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        fields_data_.emplace(field_id,
-                             std::make_unique<ConcurrentVector<VectorType>>(
-                                 dim, size_per_chunk, mmap_descriptor_));
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVector<VectorType>>(
+                          dim, size_per_chunk, mmap_descriptor_));
     }
 
     void
     drop_field_data(FieldId field_id) {
-        fields_data_.erase(field_id);
+        data_.erase(field_id);
+        valid_data_.erase(field_id);
     }
 
     const ConcurrentVector<Timestamp>&
@@ -606,7 +823,7 @@ struct InsertRecord {
         ack_responder_.clear();
         timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
-        fields_data_.clear();
+        data_.clear();
     }
 
     bool
@@ -628,7 +845,9 @@ struct InsertRecord {
     std::unique_ptr<OffsetMap> pk2offset_;
 
  private:
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
+    std::unordered_map<FieldId, std::unique_ptr<ThreadSafeValidData>>
+        valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };

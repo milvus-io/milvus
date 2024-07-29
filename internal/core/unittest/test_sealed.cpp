@@ -862,9 +862,9 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
-        FieldName("RowID"), RowFieldID, DataType::INT64);
+        FieldName("RowID"), RowFieldID, DataType::INT64, false);
     auto field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
     auto field_data_info = FieldDataInfo{
         RowFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
@@ -872,8 +872,9 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(
-        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    field_data = std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64, false);
+    field_data =
+        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.timestamps_.data(), N);
     field_data_info = FieldDataInfo{
         TimestampFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
@@ -1064,6 +1065,7 @@ TEST(Sealed, OverlapDelete) {
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
+    auto deleted_record1 = pks.size();
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << pks.size() << std::endl;
@@ -1079,10 +1081,10 @@ TEST(Sealed, OverlapDelete) {
     segment->LoadDeletedRecord(overlap_info);
 
     BitsetType bitset(N, false);
-    // NOTE: need to change delete timestamp, so not to hit the cache
-    ASSERT_EQ(segment->get_deleted_count(), pks.size())
+    auto deleted_record2 = pks.size();
+    ASSERT_EQ(segment->get_deleted_count(), deleted_record1 + deleted_record2)
         << "deleted_count=" << segment->get_deleted_count()
-        << " pks_count=" << pks.size() << std::endl;
+        << " pks_count=" << deleted_record1 + deleted_record2 << std::endl;
     segment->mask_with_delete(bitset, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
@@ -1141,7 +1143,8 @@ TEST(Sealed, BF) {
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
     auto vec_data = GenRandomFloatVecs(N, dim);
-    auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
+    auto field_data =
+        storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
     auto field_data_info =
         FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
@@ -1195,7 +1198,8 @@ TEST(Sealed, BF_Overflow) {
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
     auto vec_data = GenMaxFloatVecs(N, dim);
-    auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
+    auto field_data =
+        storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
     auto field_data_info =
         FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
@@ -1231,6 +1235,63 @@ TEST(Sealed, BF_Overflow) {
     }
 }
 
+TEST(Sealed, DeleteDuplicatedRecords) {
+    {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateSealedSegment(schema);
+
+        auto offset = segment->get_deleted_count();
+        ASSERT_EQ(offset, 0);
+
+        int64_t c = 1000;
+        // generate random pk that may have dupicated records
+        auto dataset = DataGen(schema, c, 42, 0, 1, 10, true);
+        auto pks = dataset.get_col<int64_t>(pk);
+        // current insert record: { pk: random(0 - 999) timestamp: (0 - 999) }
+        SealedLoadFieldData(dataset, *segment);
+
+        segment->RemoveDuplicatePkRecords();
+
+        BitsetType bits(c);
+        std::map<int64_t, std::vector<int64_t>> different_pks;
+        for (int i = 0; i < pks.size(); i++) {
+            if (different_pks.find(pks[i]) != different_pks.end()) {
+                different_pks[pks[i]].push_back(i);
+            } else {
+                different_pks[pks[i]] = {i};
+            }
+        }
+
+        for (auto& [k, v] : different_pks) {
+            if (v.size() > 1) {
+                for (int i = 0; i < v.size() - 1; i++) {
+                    bits.set(v[i]);
+                }
+            }
+        }
+
+        ASSERT_EQ(segment->get_deleted_count(), c - different_pks.size())
+            << "deleted_count=" << segment->get_deleted_count()
+            << "duplicate_pks " << c - different_pks.size() << std::endl;
+
+        BitsetType bitset(c);
+        std::cout << "start to search delete" << std::endl;
+        segment->mask_with_delete(bitset, c, 1003);
+
+        for (int i = 0; i < bitset.size(); i++) {
+            ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;
+        }
+
+        for (auto& [k, v] : different_pks) {
+            //std::cout << "k:" << k << "v:" << join(v, ",") << std::endl;
+            auto res = segment->SearchPk(k, Timestamp(1003));
+            ASSERT_EQ(res.size(), 1);
+        }
+    }
+}
+
 TEST(Sealed, DeleteCount) {
     {
         auto schema = std::make_shared<Schema>();
@@ -1238,14 +1299,17 @@ TEST(Sealed, DeleteCount) {
         schema->set_primary_field_id(pk);
         auto segment = CreateSealedSegment(schema);
 
-        int64_t c = 10;
         auto offset = segment->get_deleted_count();
         ASSERT_EQ(offset, 0);
+        int64_t c = 10;
+        auto dataset = DataGen(schema, c);
+        auto pks = dataset.get_col<int64_t>(pk);
+        SealedLoadFieldData(dataset, *segment);
 
         Timestamp begin_ts = 100;
         auto tss = GenTss(c, begin_ts);
-        auto pks = GenPKs(c, 0);
-        auto status = segment->Delete(offset, c, pks.get(), tss.data());
+        auto delete_pks = GenPKs(c, 0);
+        auto status = segment->Delete(offset, c, delete_pks.get(), tss.data());
         ASSERT_TRUE(status.ok());
 
         // shouldn't be filtered for empty segment.
@@ -1813,7 +1877,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
 
     //test for int64
     std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data = storage::CreateFieldData(DataType::INT64, 1, 10);
+    auto pk_field_data =
+        storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     segment->LoadPrimitiveSkipIndex(
         pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
@@ -1854,7 +1919,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
 
     //test for int32
     std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int32_field_data = storage::CreateFieldData(DataType::INT32, 1, 10);
+    auto int32_field_data =
+        storage::CreateFieldData(DataType::INT32, false, 1, 10);
     int32_field_data->FillFieldData(int32s.data(), N);
     segment->LoadPrimitiveSkipIndex(
         i32_fid, 0, DataType::INT32, int32_field_data->Data(), N);
@@ -1864,7 +1930,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
 
     //test for int16
     std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int16_field_data = storage::CreateFieldData(DataType::INT16, 1, 10);
+    auto int16_field_data =
+        storage::CreateFieldData(DataType::INT16, false, 1, 10);
     int16_field_data->FillFieldData(int16s.data(), N);
     segment->LoadPrimitiveSkipIndex(
         i16_fid, 0, DataType::INT16, int16_field_data->Data(), N);
@@ -1874,7 +1941,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
 
     //test for int8
     std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int8_field_data = storage::CreateFieldData(DataType::INT8, 1, 10);
+    auto int8_field_data =
+        storage::CreateFieldData(DataType::INT8, false, 1, 10);
     int8_field_data->FillFieldData(int8s.data(), N);
     segment->LoadPrimitiveSkipIndex(
         i8_fid, 0, DataType::INT8, int8_field_data->Data(), N);
@@ -1885,7 +1953,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     // test for float
     std::vector<float> floats = {
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto float_field_data = storage::CreateFieldData(DataType::FLOAT, 1, 10);
+    auto float_field_data =
+        storage::CreateFieldData(DataType::FLOAT, false, 1, 10);
     float_field_data->FillFieldData(floats.data(), N);
     segment->LoadPrimitiveSkipIndex(
         float_fid, 0, DataType::FLOAT, float_field_data->Data(), N);
@@ -1896,7 +1965,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     // test for double
     std::vector<double> doubles = {
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto double_field_data = storage::CreateFieldData(DataType::DOUBLE, 1, 10);
+    auto double_field_data =
+        storage::CreateFieldData(DataType::DOUBLE, false, 1, 10);
     double_field_data->FillFieldData(doubles.data(), N);
     segment->LoadPrimitiveSkipIndex(
         double_fid, 0, DataType::DOUBLE, double_field_data->Data(), N);
@@ -1919,7 +1989,8 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
 
     //test for int64
     std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data = storage::CreateFieldData(DataType::INT64, 1, 10);
+    auto pk_field_data =
+        storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     segment->LoadPrimitiveSkipIndex(
         pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
@@ -1954,7 +2025,8 @@ TEST(Sealed, SkipIndexSkipStringRange) {
 
     //test for string
     std::vector<std::string> strings = {"e", "f", "g", "g", "j"};
-    auto string_field_data = storage::CreateFieldData(DataType::VARCHAR, 1, N);
+    auto string_field_data =
+        storage::CreateFieldData(DataType::VARCHAR, false, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
     auto string_field_data_info = FieldDataInfo{
         string_fid.get(), N, std::vector<FieldDataPtr>{string_field_data}};
@@ -2130,4 +2202,174 @@ TEST(Sealed, QueryAllFields) {
               dataset_size);
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
+
+    EXPECT_EQ(bool_result->valid_data_size(), 0);
+    EXPECT_EQ(int8_result->valid_data_size(), 0);
+    EXPECT_EQ(int16_result->valid_data_size(), 0);
+    EXPECT_EQ(int32_result->valid_data_size(), 0);
+    EXPECT_EQ(int64_result->valid_data_size(), 0);
+    EXPECT_EQ(float_result->valid_data_size(), 0);
+    EXPECT_EQ(double_result->valid_data_size(), 0);
+    EXPECT_EQ(varchar_result->valid_data_size(), 0);
+    EXPECT_EQ(json_result->valid_data_size(), 0);
+    EXPECT_EQ(int_array_result->valid_data_size(), 0);
+    EXPECT_EQ(long_array_result->valid_data_size(), 0);
+    EXPECT_EQ(bool_array_result->valid_data_size(), 0);
+    EXPECT_EQ(string_array_result->valid_data_size(), 0);
+    EXPECT_EQ(double_array_result->valid_data_size(), 0);
+    EXPECT_EQ(float_array_result->valid_data_size(), 0);
+}
+
+TEST(Sealed, QueryAllNullableFields) {
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto bool_field = schema->AddDebugField("bool", DataType::BOOL, true);
+    auto int8_field = schema->AddDebugField("int8", DataType::INT8, true);
+    auto int16_field = schema->AddDebugField("int16", DataType::INT16, true);
+    auto int32_field = schema->AddDebugField("int32", DataType::INT32, true);
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64, false);
+    auto float_field = schema->AddDebugField("float", DataType::FLOAT, true);
+    auto double_field = schema->AddDebugField("double", DataType::DOUBLE, true);
+    auto varchar_field =
+        schema->AddDebugField("varchar", DataType::VARCHAR, true);
+    auto json_field = schema->AddDebugField("json", DataType::JSON, true);
+    auto int_array_field = schema->AddDebugField(
+        "int_array", DataType::ARRAY, DataType::INT8, true);
+    auto long_array_field = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    auto bool_array_field = schema->AddDebugField(
+        "bool_array", DataType::ARRAY, DataType::BOOL, true);
+    auto string_array_field = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR, true);
+    auto double_array_field = schema->AddDebugField(
+        "double_array", DataType::ARRAY, DataType::DOUBLE, true);
+    auto float_array_field = schema->AddDebugField(
+        "float_array", DataType::ARRAY, DataType::FLOAT, true);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"},
+        {"metric_type", metric_type},
+        {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_sealed = CreateSealedSegment(schema, metaPtr);
+    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+
+    int64_t dataset_size = 1000;
+    int64_t dim = 128;
+    auto dataset = DataGen(schema, dataset_size);
+    SealedLoadFieldData(dataset, *segment);
+
+    auto bool_values = dataset.get_col<bool>(bool_field);
+    auto int8_values = dataset.get_col<int8_t>(int8_field);
+    auto int16_values = dataset.get_col<int16_t>(int16_field);
+    auto int32_values = dataset.get_col<int32_t>(int32_field);
+    auto int64_values = dataset.get_col<int64_t>(int64_field);
+    auto float_values = dataset.get_col<float>(float_field);
+    auto double_values = dataset.get_col<double>(double_field);
+    auto varchar_values = dataset.get_col<std::string>(varchar_field);
+    auto json_values = dataset.get_col<std::string>(json_field);
+    auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
+    auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
+    auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
+    auto string_array_values = dataset.get_col<ScalarArray>(string_array_field);
+    auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
+    auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
+    auto vector_values = dataset.get_col<float>(vec);
+
+    auto bool_valid_values = dataset.get_col_valid(bool_field);
+    auto int8_valid_values = dataset.get_col_valid(int8_field);
+    auto int16_valid_values = dataset.get_col_valid(int16_field);
+    auto int32_valid_values = dataset.get_col_valid(int32_field);
+    auto float_valid_values = dataset.get_col_valid(float_field);
+    auto double_valid_values = dataset.get_col_valid(double_field);
+    auto varchar_valid_values = dataset.get_col_valid(varchar_field);
+    auto json_valid_values = dataset.get_col_valid(json_field);
+    auto int_array_valid_values = dataset.get_col_valid(int_array_field);
+    auto long_array_valid_values = dataset.get_col_valid(long_array_field);
+    auto bool_array_valid_values = dataset.get_col_valid(bool_array_field);
+    auto string_array_valid_values = dataset.get_col_valid(string_array_field);
+    auto double_array_valid_values = dataset.get_col_valid(double_array_field);
+    auto float_array_valid_values = dataset.get_col_valid(float_array_field);
+
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto bool_result =
+        segment->bulk_subscript(bool_field, ids_ds->GetIds(), dataset_size);
+    auto int8_result =
+        segment->bulk_subscript(int8_field, ids_ds->GetIds(), dataset_size);
+    auto int16_result =
+        segment->bulk_subscript(int16_field, ids_ds->GetIds(), dataset_size);
+    auto int32_result =
+        segment->bulk_subscript(int32_field, ids_ds->GetIds(), dataset_size);
+    auto int64_result =
+        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
+    auto float_result =
+        segment->bulk_subscript(float_field, ids_ds->GetIds(), dataset_size);
+    auto double_result =
+        segment->bulk_subscript(double_field, ids_ds->GetIds(), dataset_size);
+    auto varchar_result =
+        segment->bulk_subscript(varchar_field, ids_ds->GetIds(), dataset_size);
+    auto json_result =
+        segment->bulk_subscript(json_field, ids_ds->GetIds(), dataset_size);
+    auto int_array_result = segment->bulk_subscript(
+        int_array_field, ids_ds->GetIds(), dataset_size);
+    auto long_array_result = segment->bulk_subscript(
+        long_array_field, ids_ds->GetIds(), dataset_size);
+    auto bool_array_result = segment->bulk_subscript(
+        bool_array_field, ids_ds->GetIds(), dataset_size);
+    auto string_array_result = segment->bulk_subscript(
+        string_array_field, ids_ds->GetIds(), dataset_size);
+    auto double_array_result = segment->bulk_subscript(
+        double_array_field, ids_ds->GetIds(), dataset_size);
+    auto float_array_result = segment->bulk_subscript(
+        float_array_field, ids_ds->GetIds(), dataset_size);
+    auto vec_result =
+        segment->bulk_subscript(vec, ids_ds->GetIds(), dataset_size);
+
+    EXPECT_EQ(bool_result->scalars().bool_data().data_size(), dataset_size);
+    EXPECT_EQ(int8_result->scalars().int_data().data_size(), dataset_size);
+    EXPECT_EQ(int16_result->scalars().int_data().data_size(), dataset_size);
+    EXPECT_EQ(int32_result->scalars().int_data().data_size(), dataset_size);
+    EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
+    EXPECT_EQ(float_result->scalars().float_data().data_size(), dataset_size);
+    EXPECT_EQ(double_result->scalars().double_data().data_size(), dataset_size);
+    EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
+    EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
+              dataset_size * dim);
+    EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(long_array_result->scalars().array_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(bool_array_result->scalars().array_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(string_array_result->scalars().array_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(double_array_result->scalars().array_data().data_size(),
+              dataset_size);
+    EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
+              dataset_size);
+
+    EXPECT_EQ(bool_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(int8_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(int16_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(int32_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(float_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(double_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(json_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(string_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(double_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(float_array_result->valid_data_size(), dataset_size);
 }

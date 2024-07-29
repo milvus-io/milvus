@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -42,7 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//go:generate mockery --name=IMetaTable --outpkg=mockrootcoord --filename=meta_table.go --with-expecter
+//go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
 type IMetaTable interface {
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
@@ -61,6 +63,7 @@ type IMetaTable interface {
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
 	GetCollectionVirtualChannels(colID int64) []string
+	GetPChannelInfo(pchannel string) *rootcoordpb.GetPChannelInfoResponse
 	AddPartition(ctx context.Context, partition *model.Partition) error
 	ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
 	RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
@@ -831,6 +834,32 @@ func (mt *MetaTable) GetCollectionVirtualChannels(colID int64) []string {
 		}
 	}
 	return nil
+}
+
+// GetPChannelInfo returns infos on pchannel.
+func (mt *MetaTable) GetPChannelInfo(pchannel string) *rootcoordpb.GetPChannelInfoResponse {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resp := &rootcoordpb.GetPChannelInfoResponse{
+		Status:      merr.Success(),
+		Collections: make([]*rootcoordpb.CollectionInfoOnPChannel, 0),
+	}
+	for _, collInfo := range mt.collID2Meta {
+		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx >= 0 {
+			partitions := make([]*rootcoordpb.PartitionInfoOnPChannel, 0, len(collInfo.Partitions))
+			for _, part := range collInfo.Partitions {
+				partitions = append(partitions, &rootcoordpb.PartitionInfoOnPChannel{
+					PartitionId: part.PartitionID,
+				})
+			}
+			resp.Collections = append(resp.Collections, &rootcoordpb.CollectionInfoOnPChannel{
+				CollectionId: collInfo.CollectionID,
+				Partitions:   partitions,
+				Vchannel:     collInfo.VirtualChannelNames[idx],
+			})
+		}
+	}
+	return resp
 }
 
 func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {

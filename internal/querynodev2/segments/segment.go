@@ -36,10 +36,10 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -950,6 +950,18 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID())); err != nil {
+		return err
+	}
+
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.RemoveDuplicatePkRecords(s.ptr)
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(ctx, &status, "RemoveDuplicatePkRecords failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.Type().String())); err != nil {
 		return err
 	}
 

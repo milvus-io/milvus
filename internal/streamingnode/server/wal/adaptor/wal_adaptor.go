@@ -100,7 +100,7 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 	_ = w.appendExecutionPool.Submit(func() (struct{}, error) {
 		defer w.lifetime.Done()
 
-		msgID, err := w.inner.Append(ctx, msg)
+		msgID, err := w.Append(ctx, msg)
 		cb(msgID, err)
 		return struct{}{}, nil
 	})

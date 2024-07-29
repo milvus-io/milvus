@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -383,13 +384,16 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
-// GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
+func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
+	// collection id => l0 delta entry count
+	collectionL0RowCounts := make(map[UniqueID]int64)
+
 	segments := m.segments.GetSegments()
 	var total int64
 	for _, segment := range segments {
@@ -417,6 +421,10 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
+
+			if segment.GetLevel() == datapb.SegmentLevel_L0 {
+				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
+			}
 		}
 	}
 
@@ -429,7 +437,13 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			}
 		}
 	}
-	return total, collectionBinlogSize, partitionBinlogSize
+
+	info.TotalBinlogSize = total
+	info.CollectionBinlogSize = collectionBinlogSize
+	info.PartitionsBinlogSize = partitionBinlogSize
+	info.CollectionL0RowCount = collectionL0RowCounts
+
+	return info
 }
 
 // GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.

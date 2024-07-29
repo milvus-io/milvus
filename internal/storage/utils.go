@@ -28,9 +28,9 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -1302,4 +1302,22 @@ func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, 
 		totalSize += size
 	}
 	return totalSize, nil
+}
+
+type NullableInt struct {
+	Value *int
+}
+
+// NewNullableInt creates a new NullableInt instance
+func NewNullableInt(value int) *NullableInt {
+	return &NullableInt{Value: &value}
+}
+
+func (ni NullableInt) GetValue() int {
+	return *ni.Value
+}
+
+// IsNull checks if the NullableInt is null
+func (ni NullableInt) IsNull() bool {
+	return ni.Value == nil
 }

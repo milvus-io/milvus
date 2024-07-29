@@ -8,14 +8,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-var hoo hook.Hook
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -24,10 +21,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 }
 
 func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error) {
-	if hoo == nil {
-		hookutil.InitOnceHook()
-		hoo = hookutil.Hoo
-	}
+	hoo := hookutil.GetHook()
 	var (
 		newCtx   context.Context
 		isMock   bool
@@ -79,15 +73,4 @@ func getCurrentUser(ctx context.Context) string {
 		log.Warn("fail to get current user", zap.Error(err))
 	}
 	return username
-}
-
-func SetMockAPIHook(apiUser string, mockErr error) {
-	if apiUser == "" && mockErr == nil {
-		hoo = &hookutil.DefaultHook{}
-		return
-	}
-	hoo = &hookutil.MockAPIHook{
-		MockErr: mockErr,
-		User:    apiUser,
-	}
 }

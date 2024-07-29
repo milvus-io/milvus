@@ -48,23 +48,7 @@ void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
-    if (del_barrier == 0) {
-        return;
-    }
-    auto bitmap_holder = get_deleted_bitmap(
-        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
-    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
-        return;
-    }
-    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(
-        delete_bitset.size() == bitset.size(),
-        fmt::format(
-            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
-            delete_bitset.size(),
-            bitset.size()));
-    bitset |= delete_bitset;
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -73,11 +57,11 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     if (indexing_record_.SyncDataWithIndex(fieldId)) {
         VectorBase* vec_data_base =
             dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
-                insert_record_.get_field_data_base(fieldId));
+                insert_record_.get_data_base(fieldId));
         if (!vec_data_base) {
             vec_data_base =
                 dynamic_cast<segcore::ConcurrentVector<SparseFloatVector>*>(
-                    insert_record_.get_field_data_base(fieldId));
+                    insert_record_.get_data_base(fieldId));
         }
         if (vec_data_base && vec_data_base->num_chunk() > 0 &&
             chunk_mutex_.try_lock()) {
@@ -121,11 +105,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
+            if (field_meta.is_nullable()) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -159,12 +149,31 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     ParsePksFromFieldData(
         pks, insert_record_proto->fields_data(field_id_to_offset[field_id]));
     for (int i = 0; i < num_rows; ++i) {
-        insert_record_.insert_pk(pks[i], reserved_offset + i);
+        auto exist_pk = insert_record_.insert_with_check_existence(
+            pks[i], reserved_offset + i);
+        // if pk exist duplicate record, remove last pk under current insert timestamp
+        // means last pk is invisibale for current insert timestamp
+        if (exist_pk) {
+            auto remove_timestamp = timestamps_raw[i];
+            deleted_record_.Push({pks[i]}, &remove_timestamp);
+        }
     }
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+}
+
+void
+SegmentGrowingImpl::RemoveDuplicatePkRecords() {
+    std::unique_lock lck(mutex_);
+    //Assert(!insert_record_.timestamps_.empty());
+    // firstly find that need removed records and mark them as deleted
+    auto removed_pks = insert_record_.get_need_removed_pks();
+    deleted_record_.Push(removed_pks.first, removed_pks.second.data());
+
+    // then remove duplicated pks in pk index
+    insert_record_.remove_duplicate_pks();
 }
 
 void
@@ -227,8 +236,12 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
+            if (insert_record_.is_valid_data_exist(field_id)) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    field_data);
+            }
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
@@ -315,7 +328,7 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_field_data_base(field_id)->set_data_raw(
+            insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -391,7 +404,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     }
 
     // step 2: fill delete record
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.Push(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -412,12 +425,12 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    deleted_record_.Push(pks, timestamps);
 }
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_field_data_base(field_id);
+    auto vec = get_insert_record().get_data_base(field_id);
     return vec->get_span_base(chunk_id);
 }
 
@@ -454,7 +467,7 @@ std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    auto vec_ptr = insert_record_.get_field_data_base(field_id);
+    auto vec_ptr = insert_record_.get_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
         auto result = CreateVectorDataArray(count, field_meta);
@@ -511,6 +524,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
     auto result = CreateScalarDataArray(count, field_meta);
+    if (field_meta.is_nullable()) {
+        auto valid_data_ptr = insert_record_.get_valid_data(field_id);
+        auto res = result->mutable_valid_data()->mutable_data();
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            res[i] = valid_data_ptr->is_valid(offset);
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             bulk_subscript_impl<bool>(vec_ptr,

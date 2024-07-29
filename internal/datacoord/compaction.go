@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -163,7 +164,6 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 		if t.GetTriggerID() == triggerID {
 			cnt += 1
 		}
-		// if t.GetPlanID()
 	}
 	c.queueGuard.RUnlock()
 	c.executingGuard.RLock()
@@ -549,12 +549,20 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {
+		// Conflict is normal
+		if errors.Is(err, merr.ErrCompactionPlanConflict) {
+			log.RatedInfo(60, "Failed to create compaction task, compaction plan conflict", zap.Error(err))
+		} else {
+			log.Warn("Failed to create compaction task, unable to create compaction task", zap.Error(err))
+		}
 		return err
 	}
+
 	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
+		log.Warn("Failed to enqueue compaction task, unable to save task meta", zap.Error(err))
 		return err
 	}
 	c.submitTask(t)
@@ -569,18 +577,21 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	case datapb.CompactionType_MixCompaction:
 		task = &mixCompactionTask{
 			CompactionTask: t,
+			allocator:      c.allocator,
 			meta:           c.meta,
 			sessions:       c.sessions,
 		}
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = &l0CompactionTask{
 			CompactionTask: t,
+			allocator:      c.allocator,
 			meta:           c.meta,
 			sessions:       c.sessions,
 		}
 	case datapb.CompactionType_ClusteringCompaction:
 		task = &clusteringCompactionTask{
 			CompactionTask:   t,
+			allocator:        c.allocator,
 			meta:             c.meta,
 			sessions:         c.sessions,
 			handler:          c.handler,
@@ -606,10 +617,10 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 	}
 
 	for _, t := range tasks {
-		nodeID := c.pickAnyNode(slots)
+		nodeID, useSlot := c.pickAnyNode(slots, t)
 		if nodeID == NullNodeID {
-			log.Info("cannot find datanode for compaction task",
-				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()))
+			log.Info("compactionHandler cannot find datanode for compaction task",
+				zap.Int64("planID", t.GetPlanID()), zap.String("type", t.GetType().String()), zap.String("vchannel", t.GetChannel()))
 			continue
 		}
 		err := t.SetNodeID(nodeID)
@@ -617,6 +628,8 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 			log.Info("compactionHandler assignNodeID failed",
 				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Error(err))
 		} else {
+			// update the input nodeSlots
+			slots[nodeID] = slots[nodeID] - useSlot
 			log.Info("compactionHandler assignNodeID success",
 				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()), zap.Any("nodeID", nodeID))
 			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Executing).Dec()
@@ -663,18 +676,27 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	return nil
 }
 
-func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64) int64 {
-	var (
-		nodeID   int64 = NullNodeID
-		maxSlots int64 = -1
-	)
+func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
+	nodeID = NullNodeID
+	var maxSlots int64 = -1
+
+	switch task.GetType() {
+	case datapb.CompactionType_ClusteringCompaction:
+		useSlot = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+	case datapb.CompactionType_MixCompaction:
+		useSlot = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	case datapb.CompactionType_Level0DeleteCompaction:
+		useSlot = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	}
+
 	for id, slots := range nodeSlots {
-		if slots > 0 && slots > maxSlots {
+		if slots >= useSlot && slots > maxSlots {
 			nodeID = id
 			maxSlots = slots
 		}
 	}
-	return nodeID
+
+	return nodeID, useSlot
 }
 
 func (c *compactionPlanHandler) pickShardNode(nodeSlots map[int64]int64, t CompactionTask) int64 {

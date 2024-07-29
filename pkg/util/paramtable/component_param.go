@@ -82,23 +82,25 @@ type ComponentParam struct {
 	StreamingCoordCfg streamingCoordConfig
 	StreamingNodeCfg  streamingNodeConfig
 
-	RootCoordGrpcServerCfg  GrpcServerConfig
-	ProxyGrpcServerCfg      GrpcServerConfig
-	QueryCoordGrpcServerCfg GrpcServerConfig
-	QueryNodeGrpcServerCfg  GrpcServerConfig
-	DataCoordGrpcServerCfg  GrpcServerConfig
-	DataNodeGrpcServerCfg   GrpcServerConfig
-	IndexNodeGrpcServerCfg  GrpcServerConfig
+	RootCoordGrpcServerCfg     GrpcServerConfig
+	ProxyGrpcServerCfg         GrpcServerConfig
+	QueryCoordGrpcServerCfg    GrpcServerConfig
+	QueryNodeGrpcServerCfg     GrpcServerConfig
+	DataCoordGrpcServerCfg     GrpcServerConfig
+	DataNodeGrpcServerCfg      GrpcServerConfig
+	IndexNodeGrpcServerCfg     GrpcServerConfig
+	StreamingNodeGrpcServerCfg GrpcServerConfig
 
-	RootCoordGrpcClientCfg  GrpcClientConfig
-	ProxyGrpcClientCfg      GrpcClientConfig
-	QueryCoordGrpcClientCfg GrpcClientConfig
-	QueryNodeGrpcClientCfg  GrpcClientConfig
-	DataCoordGrpcClientCfg  GrpcClientConfig
-	DataNodeGrpcClientCfg   GrpcClientConfig
-	IndexNodeGrpcClientCfg  GrpcClientConfig
-
-	IntegrationTestCfg integrationTestConfig
+	RootCoordGrpcClientCfg      GrpcClientConfig
+	ProxyGrpcClientCfg          GrpcClientConfig
+	QueryCoordGrpcClientCfg     GrpcClientConfig
+	QueryNodeGrpcClientCfg      GrpcClientConfig
+	DataCoordGrpcClientCfg      GrpcClientConfig
+	DataNodeGrpcClientCfg       GrpcClientConfig
+	IndexNodeGrpcClientCfg      GrpcClientConfig
+	StreamingCoordGrpcClientCfg GrpcClientConfig
+	StreamingNodeGrpcClientCfg  GrpcClientConfig
+	IntegrationTestCfg          integrationTestConfig
 
 	RuntimeConfig runtimeConfig
 }
@@ -128,6 +130,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.IndexNodeCfg.init(bt)
+	p.StreamingCoordCfg.init(bt)
+	p.StreamingNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -143,6 +147,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
 	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
+	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
 	p.ProxyGrpcClientCfg.Init("proxy", bt)
@@ -151,6 +156,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
 	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
+	p.StreamingCoordGrpcClientCfg.Init("streamingCoord", bt)
+	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
 }
@@ -229,6 +236,7 @@ type commonConfig struct {
 
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
+	DefaultRootPassword  ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -262,6 +270,12 @@ type commonConfig struct {
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
+
+	GCEnabled                           ParamItem `refreshable:"false"`
+	GCHelperEnabled                     ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
+	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
+	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -615,6 +629,15 @@ like the old password verification when updating the credential`,
 	}
 	p.SuperUsers.Init(base.mgr)
 
+	p.DefaultRootPassword = ParamItem{
+		Key:          "common.security.defaultRootPassword",
+		Version:      "2.4.7",
+		Doc:          "default password for root user",
+		DefaultValue: "Milvus",
+		Export:       true,
+	}
+	p.DefaultRootPassword.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -790,6 +813,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on partition key field",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.UsePartitionKeyAsClusteringKey.Init(base.mgr)
 
@@ -798,6 +822,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on vector field",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.UseVectorAsClusteringKey.Init(base.mgr)
 
@@ -806,8 +831,48 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, enable vector clustering key and vector clustering compaction",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.EnableVectorClusteringKey.Init(base.mgr)
+
+	p.GCEnabled = ParamItem{
+		Key:          "common.gcenabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCEnabled.Init(base.mgr)
+
+	p.GCHelperEnabled = ParamItem{
+		Key:          "common.gchelper.enabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCHelperEnabled.Init(base.mgr)
+
+	p.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "common.overloadedMemoryThresholdPercentage",
+		Version:      "2.4.7",
+		DefaultValue: "90",
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	p.OverloadedMemoryThresholdPercentage.Init(base.mgr)
+
+	p.MaximumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.maximumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "200",
+	}
+	p.MaximumGOGCConfig.Init(base.mgr)
+
+	p.MinimumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.minimumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "30",
+	}
+	p.MinimumGOGCConfig.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1335,7 +1400,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "0",
-		Doc:          "Size of log of write cache, in B. (Close write cache if size was 0",
+		Doc:          "Size of log of write cache, in byte. (Close write cache if size was 0)",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
@@ -1344,7 +1409,8 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheFlushInterval",
 		Version:      "2.4.0",
 		DefaultValue: "3",
-		Doc:          "time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)",
+		Doc:          "time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)",
+		Export:       true,
 	}
 	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
@@ -1599,8 +1665,9 @@ type queryCoordConfig struct {
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval  ParamItem `refreshable:"false"`
+	CollectionObserverInterval        ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval         ParamItem `refreshable:"false"`
+	CollectionBalanceSegmentBatchSize ParamItem `refreshable true`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1853,7 +1920,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.BalanceCheckInterval = ParamItem{
 		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
-		DefaultValue: "10000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -2102,7 +2169,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.4.4",
 		DefaultValue: "200",
 		Doc:          "the interval of collection observer",
-		Export:       false,
+		Export:       true,
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
 
@@ -2111,9 +2178,18 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.4.4",
 		DefaultValue: "100",
 		Doc:          "the interval of check executed flag to force to pull dist",
-		Export:       false,
+		Export:       true,
 	}
 	p.CheckExecutedFlagInterval.Init(base.mgr)
+
+	p.CollectionBalanceSegmentBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
+		Version:      "2.4.7",
+		DefaultValue: "5",
+		Doc:          "the max balance task number for collection at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2432,7 +2508,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.FixedFileSizeForMmapManager.Init(base.mgr)
 
 	p.MaxMmapDiskPercentageForMmapManager = ParamItem{
-		Key:          "querynode.mmap.maxDiskUsagePercentageForMmapAlloc",
+		Key:          "queryNode.mmap.maxDiskUsagePercentageForMmapAlloc",
 		Version:      "2.4.6",
 		DefaultValue: "20",
 		Doc:          "disk percentage used in mmap chunk manager",
@@ -2810,7 +2886,7 @@ user-task-polling:
 		Key:          "queryNode.enableSegmentPrune",
 		Version:      "2.3.4",
 		DefaultValue: "false",
-		Doc:          "use partition prune function on shard delegator",
+		Doc:          "use partition stats to prune data in search/query on shard delegator",
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
@@ -2871,6 +2947,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
@@ -2958,6 +3035,10 @@ type dataCoordConfig struct {
 	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
+	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
+	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3106,6 +3187,16 @@ the number of binlog file reaches to max value.`,
 		Export: true,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
+
+	p.GrowingSegmentsMemSizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
+		Version:      "2.4.6",
+		DefaultValue: "4096",
+		Doc: `The size threshold in MB, if the total size of growing segments of each shard 
+exceeds this threshold, the largest growing segment will be sealed.`,
+		Export: true,
+	}
+	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
@@ -3270,6 +3361,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "The time interval for regularly syncing segments",
 		DefaultValue: "300", // 5 * 60 seconds
+		Export:       true,
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
 
@@ -3340,6 +3432,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
 		Version:      "2.4.6",
 		DefaultValue: "600",
+		Doc:          "clustering compaction trigger interval in seconds",
+		Export:       true,
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
@@ -3347,6 +3441,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
 		Version:      "2.4.6",
 		DefaultValue: "10",
+		Export:       true,
 	}
 	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
 
@@ -3354,6 +3449,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.clustering.gcInterval",
 		Version:      "2.4.6",
 		DefaultValue: "600",
+		Export:       true,
 	}
 	p.ClusteringCompactionGCInterval.Init(base.mgr)
 
@@ -3362,6 +3458,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction",
 		DefaultValue: "3600",
+		Export:       true,
 	}
 	p.ClusteringCompactionMinInterval.Init(base.mgr)
 
@@ -3370,6 +3467,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "If a collection haven't been clustering compacted for longer than maxInterval, force compact",
 		DefaultValue: "86400",
+		Export:       true,
 	}
 	p.ClusteringCompactionMaxInterval.Init(base.mgr)
 
@@ -3378,6 +3476,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute clustering compaction",
 		DefaultValue: "512m",
+		Export:       true,
 	}
 	p.ClusteringCompactionNewDataSizeThreshold.Init(base.mgr)
 
@@ -3393,6 +3492,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "If clustering compaction job is finished for a long time, gc it",
 		DefaultValue: "259200",
+		Export:       true,
 	}
 	p.ClusteringCompactionDropTolerance.Init(base.mgr)
 
@@ -3716,6 +3816,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.ClusteringCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.clusteringCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of clustering compaction job.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionSlotUsage.Init(base.mgr)
+
+	p.MixCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.mixCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of mix compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MixCompactionSlotUsage.Init(base.mgr)
+
+	p.L0DeleteCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of l0 compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4095,7 +4225,7 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap = ParamItem{
 		Key:          "dataNode.slot.slotCap",
 		Version:      "2.4.2",
-		DefaultValue: "2",
+		DefaultValue: "16",
 		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
 		Export:       true,
 	}
@@ -4104,7 +4234,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
-		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
+		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -4115,7 +4245,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.workPoolSize",
 		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
-		DefaultValue: "1",
+		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

@@ -225,15 +225,17 @@ build-3rdparty:
 
 generated-proto-without-cpp: download-milvus-proto
 	@echo "Generate proto ..."
-	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
-	@(env bash $(PWD)/scripts/generate_proto.sh)
+	@mkdir -p ${INSTALL_PATH}
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && GOBIN=${INSTALL_PATH} go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)
+	@which protoc-gen-go-grpc 1>/dev/null || (echo "Installing protoc-gen-go-grpc" && GOBIN=${INSTALL_PATH} go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0)
+	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
 generated-proto: download-milvus-proto build-3rdparty
 	@echo "Generate proto ..."
-	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
-	@(env bash $(PWD)/scripts/generate_proto.sh)
+	@mkdir -p ${INSTALL_PATH}
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && GOBIN=${INSTALL_PATH} go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)
+	@which protoc-gen-go-grpc 1>/dev/null || (echo "Installing protoc-gen-go-grpc" && GOBIN=${INSTALL_PATH} go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0)
+	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
 build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
@@ -381,7 +383,7 @@ clean:
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
-	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+	@. $(PWD)/scripts/setenv.sh && mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-pgo=$(PGO_PATH)/default.pgo -ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
 
@@ -476,6 +478,7 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=Manager --dir=internal/datacoord --filename=mock_segment_manager.go --output=internal/datacoord  --structname=MockManager --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage

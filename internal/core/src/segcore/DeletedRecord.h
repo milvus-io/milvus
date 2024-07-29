@@ -17,106 +17,84 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <folly/ConcurrentSkipList.h>
 
 #include "AckResponder.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "segcore/Record.h"
+#include "segcore/InsertRecord.h"
 #include "ConcurrentVector.h"
 
 namespace milvus::segcore {
 
-struct DeletedRecord {
-    struct TmpBitmap {
-        // Just for query
-        int64_t del_barrier = 0;
-        BitsetTypePtr bitmap_ptr;
+struct Comparator {
+    bool
+    operator()(const std::pair<Timestamp, std::set<int64_t>>& left,
+               const std::pair<Timestamp, std::set<int64_t>>& right) const {
+        return left.first < right.first;
+    }
+};
 
-        std::shared_ptr<TmpBitmap>
-        clone(int64_t capacity);
-    };
-    static constexpr int64_t deprecated_size_per_chunk = 32 * 1024;
-    DeletedRecord()
-        : lru_(std::make_shared<TmpBitmap>()),
-          timestamps_(deprecated_size_per_chunk),
-          pks_(deprecated_size_per_chunk) {
-        lru_->bitmap_ptr = std::make_shared<BitsetType>();
+using TSkipList =
+    folly::ConcurrentSkipList<std::pair<Timestamp, std::set<int64_t>>,
+                              Comparator>;
+
+template <bool is_sealed = false>
+class DeletedRecord {
+ public:
+    DeletedRecord(InsertRecord<is_sealed>* insert_record)
+        : insert_record_(insert_record),
+          deleted_pairs_(TSkipList::createInstance()) {
     }
 
-    auto
-    get_lru_entry() {
-        std::shared_lock lck(shared_mutex_);
-        return lru_;
-    }
-
-    std::shared_ptr<TmpBitmap>
-    clone_lru_entry(int64_t insert_barrier,
-                    int64_t del_barrier,
-                    int64_t& old_del_barrier,
-                    bool& hit_cache) {
-        std::shared_lock lck(shared_mutex_);
-        auto res = lru_->clone(insert_barrier);
-        old_del_barrier = lru_->del_barrier;
-
-        if (lru_->bitmap_ptr->size() == insert_barrier &&
-            lru_->del_barrier == del_barrier) {
-            hit_cache = true;
-        } else {
-            res->del_barrier = del_barrier;
-        }
-
-        return res;
-    }
+    DeletedRecord(DeletedRecord<is_sealed>&& delete_record) = delete;
+    DeletedRecord<is_sealed>&
+    operator=(DeletedRecord<is_sealed>&& delete_record) = delete;
 
     void
-    insert_lru_entry(std::shared_ptr<TmpBitmap> new_entry, bool force = false) {
-        std::lock_guard lck(shared_mutex_);
-        if (new_entry->del_barrier <= lru_->del_barrier) {
-            if (!force ||
-                new_entry->bitmap_ptr->size() <= lru_->bitmap_ptr->size()) {
-                // DO NOTHING
-                return;
+    Push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        int64_t removed_num = 0;
+        int64_t mem_add = 0;
+        for (size_t i = 0; i < pks.size(); ++i) {
+            auto offsets = insert_record_->search_pk(pks[i], timestamps[i]);
+            for (auto offset : offsets) {
+                int64_t insert_row_offset = offset.get();
+                // Assert(insert_record->timestamps_.size() >= insert_row_offset);
+                if (insert_record_->timestamps_[insert_row_offset] <
+                    timestamps[i]) {
+                    InsertIntoInnerPairs(timestamps[i], {insert_row_offset});
+                    removed_num++;
+                    mem_add += sizeof(Timestamp) + sizeof(int64_t);
+                }
             }
         }
-        lru_ = std::move(new_entry);
+        n_.fetch_add(removed_num);
+        mem_size_.fetch_add(mem_add);
     }
 
     void
-    push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
-        std::lock_guard lck(buffer_mutex_);
-
-        auto size = pks.size();
-        ssize_t divide_point = 0;
-        auto n = n_.load();
-        // Truncate the overlapping prefix
-        if (n > 0) {
-            auto last = timestamps_[n - 1];
-            divide_point =
-                std::lower_bound(timestamps, timestamps + size, last + 1) -
-                timestamps;
-        }
-
-        // All these delete records have been applied
-        if (divide_point == size) {
+    Query(BitsetType& bitset, int64_t insert_barrier, Timestamp timestamp) {
+        Assert(bitset.size() == insert_barrier);
+        // TODO: add cache to bitset
+        if (deleted_pairs_.size() == 0) {
             return;
         }
+        auto end = deleted_pairs_.lower_bound(
+            std::make_pair(timestamp, std::set<int64_t>{}));
+        for (auto it = deleted_pairs_.begin(); it != end; it++) {
+            for (auto& v : it->second) {
+                bitset.set(v);
+            }
+        }
 
-        size -= divide_point;
-        pks_.set_data_raw(n, pks.data() + divide_point, size);
-        timestamps_.set_data_raw(n, timestamps + divide_point, size);
-        n_ += size;
-        mem_size_ += sizeof(Timestamp) * size +
-                     CalcPksSize(pks.data() + divide_point, size);
-    }
-
-    const ConcurrentVector<Timestamp>&
-    timestamps() const {
-        return timestamps_;
-    }
-
-    const ConcurrentVector<PkType>&
-    pks() const {
-        return pks_;
+        // handle the case where end points to an element with the same timestamp
+        if (end != deleted_pairs_.end() && end->first == timestamp) {
+            for (auto& v : end->second) {
+                bitset.set(v);
+            }
+        }
     }
 
     int64_t
@@ -130,26 +108,24 @@ struct DeletedRecord {
     }
 
  private:
-    std::shared_ptr<TmpBitmap> lru_;
-    std::shared_mutex shared_mutex_;
+    void
+    InsertIntoInnerPairs(Timestamp ts, std::set<int64_t> offsets) {
+        auto it = deleted_pairs_.find(std::make_pair(ts, std::set<int64_t>{}));
+        if (it == deleted_pairs_.end()) {
+            deleted_pairs_.insert(std::make_pair(ts, offsets));
+        } else {
+            for (auto& val : offsets) {
+                it->second.insert(val);
+            }
+        }
+    }
 
-    std::shared_mutex buffer_mutex_;
+ private:
+    std::shared_mutex mutex_;
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
-    ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<PkType> pks_;
+    InsertRecord<is_sealed>* insert_record_;
+    TSkipList::Accessor deleted_pairs_;
 };
-
-inline auto
-DeletedRecord::TmpBitmap::clone(int64_t capacity)
-    -> std::shared_ptr<TmpBitmap> {
-    auto res = std::make_shared<TmpBitmap>();
-    res->del_barrier = this->del_barrier;
-    //    res->bitmap_ptr = std::make_shared<BitsetType>();
-    //    *(res->bitmap_ptr) = *(this->bitmap_ptr);
-    res->bitmap_ptr = std::make_shared<BitsetType>(this->bitmap_ptr->clone());
-    res->bitmap_ptr->resize(capacity, false);
-    return res;
-}
 
 }  // namespace milvus::segcore

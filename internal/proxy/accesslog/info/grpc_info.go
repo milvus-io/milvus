@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
+	"google.golang.org/protobuf/proto"
 )
 
 type GrpcAccessInfo struct {
@@ -161,12 +162,17 @@ type SizeResponse interface {
 }
 
 func (i *GrpcAccessInfo) ResponseSize() string {
-	message, ok := i.resp.(SizeResponse)
-	if !ok {
+	var size int
+	switch r := i.resp.(type) {
+	case SizeResponse:
+		size = r.XXX_Size()
+	case proto.Message:
+		size = proto.Size(r)
+	default:
 		return Unknown
 	}
 
-	return fmt.Sprint(message.XXX_Size())
+	return fmt.Sprint(size)
 }
 
 type BaseResponse interface {

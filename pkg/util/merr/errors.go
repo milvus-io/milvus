@@ -207,6 +207,9 @@ var (
 	ErrBuildCompactionRequestFail                 = newMilvusError("fail to build CompactionRequest", 2312, true)
 	ErrGetCompactionPlanResultFail                = newMilvusError("fail to get compaction plan", 2313, true)
 	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
+	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
+
+	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

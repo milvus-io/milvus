@@ -35,7 +35,12 @@ service DataCoord {
 
   rpc Flush(FlushRequest) returns (FlushResponse) {}
 
-  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
+  // AllocSegment alloc a new growing segment, add it into segment meta.
+  rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {
+    option deprecated = true;
+  }
 
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
@@ -166,6 +171,18 @@ message SegmentIDRequest {
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
   SegmentLevel level = 7;
+}
+
+message AllocSegmentRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3; // segment id must be allocate from rootcoord idalloc service.
+  string vchannel = 4;
+}
+
+message AllocSegmentResponse {
+  SegmentInfo segment_info = 1;
+  common.Status status = 2;
 }
 
 message AssignSegmentIDRequest {
@@ -560,6 +577,9 @@ message CompactionPlan {
   string analyze_result_path = 14;
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
+  int64 begin_logID = 17;
+  IDRange pre_allocated_segments = 18; // only for clustering compaction
+  int64 slot_usage = 19;
 }
 
 message CompactionSegment {
@@ -723,7 +743,7 @@ message PreImportRequest {
   repeated common.KeyValuePair options = 9;
 }
 
-message autoIDRange {
+message IDRange {
   int64 begin = 1;
   int64 end = 2;
 }
@@ -745,7 +765,7 @@ message ImportRequest {
   repeated internal.ImportFile files = 8;
   repeated common.KeyValuePair options = 9;
   uint64 ts = 10;
-  autoIDRange autoID_range = 11;
+  IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
 }
 

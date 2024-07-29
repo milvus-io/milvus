@@ -22,7 +22,7 @@
 #include "stdio.h"
 #include <fcntl.h>
 #include "log/Log.h"
-#include "storage/prometheus_client.h"
+#include "monitor/prometheus_client.h"
 
 namespace milvus::storage {
 namespace {
@@ -69,9 +69,9 @@ MmapBlock::Init() {
     offset_.store(0);
     close(fd);
 
-    milvus::storage::internal_mmap_allocated_space_bytes_file.Observe(
+    milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
         file_size_);
-    milvus::storage::internal_mmap_in_used_space_bytes_file.Increment(
+    milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
         file_size_);
     is_valid_ = true;
     allocated_size_.fetch_add(file_size_);
@@ -96,7 +96,7 @@ MmapBlock::Close() {
         }
     }
     allocated_size_.fetch_sub(file_size_);
-    milvus::storage::internal_mmap_in_used_space_bytes_file.Decrement(
+    milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
         file_size_);
     is_valid_ = false;
 }

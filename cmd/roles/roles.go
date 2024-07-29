@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -30,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
@@ -47,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/expr"
+	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -129,14 +132,15 @@ func runComponent[T component](ctx context.Context,
 
 // MilvusRoles decides which components are brought up with Milvus.
 type MilvusRoles struct {
-	EnableRootCoord  bool `env:"ENABLE_ROOT_COORD"`
-	EnableProxy      bool `env:"ENABLE_PROXY"`
-	EnableQueryCoord bool `env:"ENABLE_QUERY_COORD"`
-	EnableQueryNode  bool `env:"ENABLE_QUERY_NODE"`
-	EnableDataCoord  bool `env:"ENABLE_DATA_COORD"`
-	EnableDataNode   bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
-	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
+	EnableRootCoord     bool `env:"ENABLE_ROOT_COORD"`
+	EnableProxy         bool `env:"ENABLE_PROXY"`
+	EnableQueryCoord    bool `env:"ENABLE_QUERY_COORD"`
+	EnableQueryNode     bool `env:"ENABLE_QUERY_NODE"`
+	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
+	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
+	EnableIndexCoord    bool `env:"ENABLE_INDEX_COORD"`
+	EnableIndexNode     bool `env:"ENABLE_INDEX_NODE"`
+	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
 
 	Local    bool
 	Alias    string
@@ -206,6 +210,11 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool, wg *sync
 	return runComponent(ctx, localMsg, wg, components.NewDataCoord, metrics.RegisterDataCoord)
 }
 
+func (mr *MilvusRoles) runStreamingNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewStreamingNode, metrics.RegisterStreamingNode)
+}
+
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	return runComponent(ctx, localMsg, wg, components.NewDataNode, metrics.RegisterDataNode)
@@ -249,6 +258,18 @@ func (mr *MilvusRoles) setupLogger() {
 	}
 
 	logutil.SetupLogger(&logConfig)
+	params.Watch(params.LogCfg.Level.Key, config.NewHandler("log.level", func(event *config.Event) {
+		if !event.HasUpdated || event.EventType == config.DeleteType {
+			return
+		}
+		logLevel, err := zapcore.ParseLevel(event.Value)
+		if err != nil {
+			log.Warn("failed to parse log level", zap.Error(err))
+			return
+		}
+		log.SetLevel(logLevel)
+		log.Info("log level changed", zap.String("level", event.Value))
+	}))
 }
 
 // Register serves prometheus http service
@@ -352,15 +373,28 @@ func (mr *MilvusRoles) Run() {
 
 	expr.Init()
 	expr.Register("param", paramtable.Get())
+	mr.setupLogger()
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
+
+	if paramtable.Get().CommonCfg.GCEnabled.GetAsBool() {
+		if paramtable.Get().CommonCfg.GCHelperEnabled.GetAsBool() {
+			action := func(GOGC uint32) {
+				debug.SetGCPercent(int(GOGC))
+			}
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+		} else {
+			action := func(uint32) {}
+			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
+		}
+	}
 
 	var wg sync.WaitGroup
 	local := mr.Local
 
 	componentMap := make(map[string]component)
 	var rootCoord, queryCoord, indexCoord, dataCoord component
-	var proxy, dataNode, indexNode, queryNode component
+	var proxy, dataNode, indexNode, queryNode, streamingNode component
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 		componentMap[typeutil.RootCoordRole] = rootCoord
@@ -400,6 +434,11 @@ func (mr *MilvusRoles) Run() {
 		componentMap[typeutil.ProxyRole] = proxy
 	}
 
+	if mr.EnableStreamingNode {
+		streamingNode = mr.runStreamingNode(ctx, local, &wg)
+		componentMap[typeutil.StreamingNodeRole] = streamingNode
+	}
+
 	wg.Wait()
 
 	http.RegisterStopComponent(func(role string) error {
@@ -423,7 +462,6 @@ func (mr *MilvusRoles) Run() {
 		return nil
 	})
 
-	mr.setupLogger()
 	tracer.Init()
 	paramtable.Get().WatchKeyPrefix("trace", config.NewHandler("tracing handler", func(e *config.Event) {
 		params := paramtable.Get()
@@ -467,7 +505,7 @@ func (mr *MilvusRoles) Run() {
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{queryNode, indexNode, dataNode}
+	nodes := []component{queryNode, indexNode, dataNode, streamingNode}
 	for idx, node := range nodes {
 		if node != nil {
 			log.Info("stop node", zap.Int("idx", idx), zap.Any("node", node))

@@ -168,6 +168,17 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "test_scalar_clustering",
+		Description: "schema for test scalar clustering compaction",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "field1", IsPrimaryKey: true, IsClusteringKey: true, Description: "field no.1", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "field2", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+}
+
 type mockDataNodeClient struct {
 	id                  int64
 	state               commonpb.StateCode
@@ -536,6 +547,10 @@ func (m *mockRootCoordClient) DescribeSegment(ctx context.Context, req *milvuspb
 }
 
 func (m *mockRootCoordClient) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) GetPChannelInfo(ctx context.Context, req *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 

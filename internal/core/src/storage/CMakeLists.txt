@@ -44,7 +44,6 @@ set(STORAGE_FILES
     InsertData.cpp
     Event.cpp
     ThreadPool.cpp
-    prometheus_client.cpp
     storage_c.cpp
     ChunkManager.cpp
     MinioChunkManager.cpp
@@ -71,6 +70,7 @@ if (DEFINED AZURE_BUILD_DIR)
             blob-chunk-manager
             milvus_common
             milvus-storage
+            milvus_monitor
             pthread
             ${CONAN_LIBS}
             )
@@ -78,6 +78,7 @@ else ()
     target_link_libraries(milvus_storage PUBLIC
             milvus_common
             milvus-storage
+            milvus_monitor
             pthread
             ${CONAN_LIBS}
             )

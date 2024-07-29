@@ -221,7 +221,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		Files:           importFiles,
 		Options:         job.GetOptions(),
 		Ts:              ts,
-		AutoIDRange:     &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
+		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
 	}, nil
 }
@@ -284,7 +284,8 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 	}
 
 	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
-	totalUsage, collectionsUsage, _ := meta.GetCollectionBinlogSize()
+	quotaInfo := meta.GetQuotaInfo()
+	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
 
 	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)

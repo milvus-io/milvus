@@ -19,6 +19,15 @@ type AssignmentDiscoverWatcher interface {
 	// The callback will be called when the discovery is changed.
 	// The final error will be returned when the watcher is closed or broken.
 	AssignmentDiscover(ctx context.Context, cb func(*VersionedStreamingNodeAssignments) error) error
+
+	AssignmentRebalanceTrigger
+}
+
+// AssignmentRebalanceTrigger is the interface for triggering the re-balance of the pchannel.
+type AssignmentRebalanceTrigger interface {
+	// ReportStreamingError is used to report the streaming error.
+	// Trigger a re-balance of the pchannel.
+	ReportAssignmentError(ctx context.Context, pchannel PChannelInfo, err error) error
 }
 
 // VersionedStreamingNodeAssignments is the relation between server and channels with version.

@@ -95,21 +95,13 @@ service RootCoord {
      */
     rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
     rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
-
-//    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
     rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
-//    rpc DescribeSegments(DescribeSegmentsRequest) returns (DescribeSegmentsResponse) {}
-
-//    rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
-//    rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
-//    rpc DropIndex(milvus.DropIndexRequest) returns (common.Status) {}
-//    rpc GetIndexState(milvus.GetIndexStateRequest) returns (milvus.GetIndexStateResponse) {}
+    rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
 
     rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
     rpc InvalidateCollectionMetaCache(proxy.InvalidateCollMetaCacheRequest) returns (common.Status) {}
-//    rpc SegmentFlushCompleted(data.SegmentFlushCompletedMsg) returns (common.Status) {}
 
     rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -227,3 +219,24 @@ message AlterDatabaseRequest {
   string db_id = 3;
   repeated common.KeyValuePair properties = 4;
 }
+
+message GetPChannelInfoRequest {
+  common.MsgBase base = 1;
+  string pchannel = 2;
+}
+
+message GetPChannelInfoResponse {
+  common.Status status = 1;
+  repeated CollectionInfoOnPChannel collections = 2;
+}
+
+message CollectionInfoOnPChannel {
+  int64 collection_id = 1;
+  repeated PartitionInfoOnPChannel partitions = 2;
+  string vchannel = 3;
+}
+
+message PartitionInfoOnPChannel {
+  int64 partition_id = 1;
+}
+
