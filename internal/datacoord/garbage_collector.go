@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -58,6 +59,9 @@ type GcOption struct {
 // garbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type garbageCollector struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	option  GcOption
 	meta    *meta
 	handler Handler
@@ -65,7 +69,6 @@ type garbageCollector struct {
 	startOnce  sync.Once
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
-	closeCh    chan struct{}
 	cmdCh      chan gcCmd
 	pauseUntil atomic.Time
 }
@@ -77,6 +80,7 @@ type gcCmd struct {
 
 // newGarbageCollector create garbage collector with meta and option
 func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
+	ctx, cancel := context.WithCancel(context.Background())
 	log.Info("GC with option",
 		zap.Bool("enabled", opt.enabled),
 		zap.Duration("interval", opt.checkInterval),
@@ -85,10 +89,11 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		zap.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeLogPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	return &garbageCollector{
+		ctx:     ctx,
+		cancel:  cancel,
 		meta:    meta,
 		handler: handler,
 		option:  opt,
-		closeCh: make(chan struct{}),
 		cmdCh:   make(chan gcCmd),
 	}
 }
@@ -114,6 +119,8 @@ func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Durati
 	}
 	done := make(chan struct{})
 	select {
+	case <-gc.ctx.Done():
+		return errors.New("garbage collector already closed")
 	case gc.cmdCh <- gcCmd{
 		cmdType:  datapb.GcCommand_Pause,
 		duration: pauseDuration,
@@ -133,6 +140,8 @@ func (gc *garbageCollector) Resume(ctx context.Context) error {
 	}
 	done := make(chan struct{})
 	select {
+	case <-gc.ctx.Done():
+		return errors.New("garbage collector already closed")
 	case gc.cmdCh <- gcCmd{
 		cmdType: datapb.GcCommand_Resume,
 		done:    done,
@@ -181,7 +190,7 @@ func (gc *garbageCollector) work() {
 				log.Info("garbage collection resumed")
 			}
 			close(cmd.done)
-		case <-gc.closeCh:
+		case <-gc.ctx.Done():
 			log.Warn("garbage collector quit")
 			return
 		}
@@ -190,7 +199,7 @@ func (gc *garbageCollector) work() {
 
 func (gc *garbageCollector) close() {
 	gc.stopOnce.Do(func() {
-		close(gc.closeCh)
+		gc.cancel()
 		gc.wg.Wait()
 	})
 }
@@ -198,9 +207,6 @@ func (gc *garbageCollector) close() {
 // scan load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) scan() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	var (
 		total   = 0
 		valid   = 0
@@ -228,13 +234,18 @@ func (gc *garbageCollector) scan() {
 	var removedKeys []string
 
 	for idx, prefix := range prefixes {
+		if gc.ctx.Err() != nil {
+			// garbage collector stopped
+			return
+		}
 		startTs := time.Now()
-		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
+		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(gc.ctx, prefix, true)
 		if err != nil {
 			log.Error("failed to list files with prefix",
 				zap.String("prefix", prefix),
 				zap.Error(err),
 			)
+			continue
 		}
 		cost := time.Since(startTs)
 		segmentMap, filesMap := getMetaMap()
@@ -243,6 +254,11 @@ func (gc *garbageCollector) scan() {
 			Observe(float64(cost.Milliseconds()))
 		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", cost), zap.Int("keys", len(infoKeys)))
 		for i, infoKey := range infoKeys {
+			if gc.ctx.Err() != nil {
+				// garbage collector stopped
+				return
+			}
+
 			total++
 			_, has := filesMap[infoKey]
 			if has {
@@ -269,7 +285,7 @@ func (gc *garbageCollector) scan() {
 			if time.Since(modTimes[i]) > gc.option.missingTolerance {
 				// ignore error since it could be cleaned up next time
 				removedKeys = append(removedKeys, infoKey)
-				err = gc.option.cli.Remove(ctx, infoKey)
+				err = gc.option.cli.Remove(gc.ctx, infoKey)
 				if err != nil {
 					missing++
 					log.Error("failed to remove object",
@@ -369,6 +385,11 @@ func (gc *garbageCollector) clearEtcd() {
 
 	log.Info("start to GC segments", zap.Int("drop_num", len(dropIDs)))
 	for _, segmentID := range dropIDs {
+		if gc.ctx.Err() != nil {
+			// process stopped
+			return
+		}
+
 		segment, ok := drops[segmentID]
 		if !ok {
 			log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
@@ -394,7 +415,7 @@ func (gc *garbageCollector) clearEtcd() {
 			}
 		}
 		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
-			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
+			!gc.meta.catalog.ChannelExists(gc.ctx, segInsertChannel) {
 			log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
 			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
 				log.Info("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
@@ -425,7 +446,7 @@ func getLogs(sinfo *SegmentInfo) []*datapb.Binlog {
 }
 
 func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(gc.ctx)
 	defer cancel()
 	var w sync.WaitGroup
 	w.Add(len(logs))
@@ -492,18 +513,20 @@ func (gc *garbageCollector) recycleUnusedSegIndexes() {
 // recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
 func (gc *garbageCollector) recycleUnusedIndexFiles() {
 	log.Info("start recycleUnusedIndexFiles")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	startTs := time.Now()
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
 	// list dir first
-	keys, _, err := gc.option.cli.ListWithPrefix(ctx, prefix, false)
+	keys, _, err := gc.option.cli.ListWithPrefix(gc.ctx, prefix, false)
 	if err != nil {
 		log.Warn("garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
 		return
 	}
 	log.Info("recycleUnusedIndexFiles, finish list object", zap.Duration("time spent", time.Since(startTs)), zap.Int("build ids", len(keys)))
 	for _, key := range keys {
+		if gc.ctx.Err() != nil {
+			// garbage collector stopped
+			return
+		}
 		log.Debug("indexFiles keys", zap.String("key", key))
 		buildID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
@@ -522,7 +545,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 			// buildID no longer exists in meta, remove all index files
 			log.Info("garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files",
 				zap.Int64("buildID", buildID))
-			err = gc.option.cli.RemoveWithPrefix(ctx, key)
+			err = gc.option.cli.RemoveWithPrefix(gc.ctx, key)
 			if err != nil {
 				log.Warn("garbageCollector recycleUnusedIndexFiles remove index files failed",
 					zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
@@ -538,7 +561,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				segIdx.PartitionID, segIdx.SegmentID, fileID)
 			filesMap[filepath] = struct{}{}
 		}
-		files, _, err := gc.option.cli.ListWithPrefix(ctx, key, true)
+		files, _, err := gc.option.cli.ListWithPrefix(gc.ctx, key, true)
 		if err != nil {
 			log.Warn("garbageCollector recycleUnusedIndexFiles list files failed",
 				zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
@@ -548,8 +571,12 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 			zap.Int("chunkManager files num", len(files)))
 		deletedFilesNum := 0
 		for _, file := range files {
+			if gc.ctx.Err() != nil {
+				// garbage collector stopped
+				return
+			}
 			if _, ok := filesMap[file]; !ok {
-				if err = gc.option.cli.Remove(ctx, file); err != nil {
+				if err = gc.option.cli.Remove(gc.ctx, file); err != nil {
 					log.Warn("garbageCollector recycleUnusedIndexFiles remove file failed",
 						zap.Int64("buildID", buildID), zap.String("file", file), zap.Error(err))
 					continue
