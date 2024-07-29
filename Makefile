@@ -77,9 +77,6 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
-test:
-	@echo $(INSTALL_PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC_OUTPUT)
-
 milvus: build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
