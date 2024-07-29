@@ -29,7 +29,7 @@ TEST(CApiTest, StreamReduce) {
 
     //2. insert data into segments
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto dataset_1 = DataGen(schema, N, 55, 0, 1, 10, true);
+    auto dataset_1 = DataGen(schema, N, 55, 0, 0, 1, 10, true);
     int64_t offset_1;
     PreInsert(segment_1, N, &offset_1);
     auto insert_data_1 = serialize(dataset_1.raw_);
@@ -42,7 +42,7 @@ TEST(CApiTest, StreamReduce) {
                             insert_data_1.size());
     ASSERT_EQ(ins_res_1.error_code, Success);
 
-    auto dataset_2 = DataGen(schema, N, 66, 0, 1, 10, true);
+    auto dataset_2 = DataGen(schema, N, 66, 0, 0, 1, 10, true);
     int64_t offset_2;
     PreInsert(segment_2, N, &offset_2);
     auto insert_data_2 = serialize(dataset_2.raw_);
