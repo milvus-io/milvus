@@ -93,11 +93,10 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			}
 		}
 	}
+
 	// finish reading
-	for _, d := range insertData.Data {
-		if d.RowNum() == 0 {
-			return nil, io.EOF
-		}
+	if insertData.GetRowNum() == 0 {
+		return nil, io.EOF
 	}
 
 	return insertData, nil
