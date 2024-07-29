@@ -29,6 +29,8 @@ API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
 
+INSTALL_PATH="$1"
+
 PROGRAM=$(basename "$0")
 GOPATH=$(go env GOPATH)
 
@@ -37,7 +39,10 @@ if [ -z $GOPATH ]; then
     exit 1
 fi
 
-export PATH=${GOPATH}/bin:$PATH
+export PATH=${INSTALL_PATH}:${GOPATH}/bin:$PATH
+
+echo "using protoc-gen-go: $(which protoc-gen-go)"
+echo "using protoc-gen-go-grpc: $(which protoc-gen-go-grpc)"
 
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
@@ -63,22 +68,26 @@ mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
 
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto || { echo 'generate root_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto || { echo 'generate internal.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto|| { echo 'generate proxy.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto|| { echo 'generate data_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto|| { echo 'generate query_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./streamingpb streaming.proto|| { echo 'generate streamingpb.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./etcdpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./indexcgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./cgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./rootcoordpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./rootcoordpb root_coord.proto || { echo 'generate root_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./internalpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./internalpb internal.proto || { echo 'generate internal.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./proxypb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./proxypb proxy.proto|| { echo 'generate proxy.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./indexpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexpb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./datapb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./datapb data_coord.proto|| { echo 'generate data_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./querypb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./querypb query_coord.proto|| { echo 'generate query_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./planpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./segcorepb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./clusteringpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto|| { echo 'generate streamingpb.proto failed'; exit 1; }
+
+
+${protoc_opt} --proto_path=$ROOT_DIR/pkg/eventlog/ --go_out=paths=source_relative:../../pkg/eventlog/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../pkg/eventlog/ event_log.proto || { echo 'generate event_log.proto failed'; exit 1; }
+${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend --go_out=paths=source_relative:../../cmd/tools/migration/backend/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../cmd/tools/migration/backend backup_header.proto || { echo 'generate backup_header.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
-  --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
+  --go_out=paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb schema.proto|| { echo 'generate schema.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb common.proto|| { echo 'generate common.proto failed'; exit 1; }
@@ -93,6 +102,6 @@ popd
 pushd $ROOT_DIR/pkg/streaming/util/message/messagepb
 
 # streaming node message protobuf
-${PROTOC_BIN} --proto_path=. --go_out=plugins=grpc,paths=source_relative:. message.proto
+${protoc_opt} --go_out=paths=source_relative:./ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./ message.proto
 
 popd

@@ -1,12 +1,12 @@
 package funcutil
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/golang/protobuf/descriptor"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -15,34 +15,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
-func GetVersion(m proto.GeneratedMessage) (string, error) {
-	md, _ := descriptor.MessageDescriptorProto(m)
-	if md == nil {
-		log.Error("MessageDescriptorProto result is nil")
-		return "", fmt.Errorf("MessageDescriptorProto result is nil")
+func GetVersion(m interface{}) (string, error) {
+	pbMsg, ok := m.(proto.Message)
+	if !ok {
+		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		log.RatedInfo(60, "GetVersion failed", zap.Error(err))
+		return "", err
 	}
-	extObj, err := proto.GetExtension(md.Options, milvuspb.E_MilvusExtObj)
-	if err != nil {
+	if !proto.HasExtension(pbMsg.ProtoReflect().Descriptor().Options(), milvuspb.E_MilvusExtObj) {
+		err := errors.New("Extension not found")
 		log.Error("GetExtension fail", zap.Error(err))
 		return "", err
 	}
+	extObj := proto.GetExtension(pbMsg.ProtoReflect().Descriptor().Options(), milvuspb.E_MilvusExtObj)
 	version := extObj.(*milvuspb.MilvusExt).Version
 	log.Debug("GetVersion success", zap.String("version", version))
 	return version, nil
 }
 
-func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error) {
-	_, md := descriptor.MessageDescriptorProto(m)
-	if md == nil {
-		log.RatedInfo(60, "MessageDescriptorProto result is nil")
-		return commonpb.PrivilegeExt{}, fmt.Errorf("MessageDescriptorProto result is nil")
-	}
-
-	extObj, err := proto.GetExtension(md.Options, commonpb.E_PrivilegeExtObj)
-	if err != nil {
-		log.RatedInfo(60, "GetExtension fail", zap.Error(err))
+func GetPrivilegeExtObj(m interface{}) (commonpb.PrivilegeExt, error) {
+	pbMsg, ok := m.(proto.Message)
+	if !ok {
+		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		log.RatedInfo(60, "GetPrivilegeExtObj failed", zap.Error(err))
 		return commonpb.PrivilegeExt{}, err
 	}
+
+	if !proto.HasExtension(pbMsg.ProtoReflect().Descriptor().Options(), commonpb.E_PrivilegeExtObj) {
+		err := errors.New("Extension not found")
+		log.RatedWarn(60, "GetPrivilegeExtObj failed", zap.Error(err))
+		return commonpb.PrivilegeExt{}, err
+	}
+	extObj := proto.GetExtension(pbMsg.ProtoReflect().Descriptor().Options(), commonpb.E_PrivilegeExtObj)
+
 	privilegeExt := extObj.(*commonpb.PrivilegeExt)
 	log.RatedDebug(60, "GetPrivilegeExtObj success", zap.String("resource_type", privilegeExt.ObjectType.String()), zap.String("resource_privilege", privilegeExt.ObjectPrivilege.String()))
 	return commonpb.PrivilegeExt{
@@ -54,13 +59,20 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 }
 
 // GetObjectName get object name from the grpc message according to the field index. The field is a string.
-func GetObjectName(m proto.GeneratedMessage, index int32) string {
+func GetObjectName(m interface{}, index int32) string {
 	if index <= 0 {
 		return util.AnyWord
 	}
-	msg := proto.MessageReflect(proto.MessageV1(m))
-	msgDesc := msg.Descriptor()
-	value := msg.Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
+
+	pbMsg, ok := m.(proto.Message)
+	if !ok {
+		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		log.RatedInfo(60, "GetObjectName fail", zap.Error(err))
+		return util.AnyWord
+	}
+
+	msgDesc := pbMsg.ProtoReflect().Descriptor()
+	value := pbMsg.ProtoReflect().Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
 	user, ok := value.Interface().(protoreflect.Message)
 	if ok {
 		userDesc := user.Descriptor()
@@ -73,13 +85,20 @@ func GetObjectName(m proto.GeneratedMessage, index int32) string {
 }
 
 // GetObjectNames get object names from the grpc message according to the field index. The field is an array.
-func GetObjectNames(m proto.GeneratedMessage, index int32) []string {
+func GetObjectNames(m interface{}, index int32) []string {
 	if index <= 0 {
 		return []string{}
 	}
-	msg := proto.MessageReflect(proto.MessageV1(m))
-	msgDesc := msg.Descriptor()
-	value := msg.Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
+
+	pbMsg, ok := m.(proto.Message)
+	if !ok {
+		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		log.RatedInfo(60, "GetObjectNames fail", zap.Error(err))
+		return []string{}
+	}
+
+	msgDesc := pbMsg.ProtoReflect().Descriptor()
+	value := pbMsg.ProtoReflect().Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
 	names, ok := value.Interface().(protoreflect.List)
 	if !ok {
 		return []string{}

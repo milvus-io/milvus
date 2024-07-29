@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )

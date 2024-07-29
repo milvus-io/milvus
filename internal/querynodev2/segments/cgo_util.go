@@ -31,8 +31,8 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/log"
