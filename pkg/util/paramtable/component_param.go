@@ -874,6 +874,7 @@ type traceConfig struct {
 	SampleFraction     ParamItem `refreshable:"false"`
 	JaegerURL          ParamItem `refreshable:"false"`
 	OtlpEndpoint       ParamItem `refreshable:"false"`
+	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
@@ -911,10 +912,19 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.OtlpEndpoint = ParamItem{
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
-		Doc:     "example: \"127.0.0.1:4318\"",
+		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
 		Export:  true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
+
+	t.OtlpMethod = ParamItem{
+		Key:          "trace.otlp.method",
+		Version:      "2.4.7",
+		DefaultValue: "",
+		Doc:          `otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default`,
+		Export:       true,
+	}
+	t.OtlpMethod.Init(base.mgr)
 
 	t.OtlpSecure = ParamItem{
 		Key:          "trace.otlp.secure",

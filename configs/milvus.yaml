@@ -846,7 +846,8 @@ trace:
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
   otlp:
-    endpoint:  # example: "127.0.0.1:4318"
+    endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
+    method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
