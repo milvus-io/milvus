@@ -765,6 +765,11 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
+size_t
+SegmentSealedImpl::get_delete_record_mem() const {
+    return deleted_record_.mem_size();
+}
+
 void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,

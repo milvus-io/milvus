@@ -266,6 +266,9 @@ class SegmentInternalInterface : public SegmentInterface {
                   const BitsetView& bitset,
                   SearchResult& output) const = 0;
 
+    virtual size_t
+    get_delete_record_mem() const = 0;
+
     virtual void
     mask_with_delete(BitsetType& bitset,
                      int64_t ins_barrier,

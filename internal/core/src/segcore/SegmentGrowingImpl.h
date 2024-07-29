@@ -265,6 +265,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     GetFieldDataType(FieldId fieldId) const override;
 
  public:
+    size_t
+    get_delete_record_mem() const override;
+
     void
     mask_with_delete(BitsetType& bitset,
                      int64_t ins_barrier,

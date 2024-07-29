@@ -52,6 +52,60 @@ class DeletedRecord {
     DeletedRecord<is_sealed>&
     operator=(DeletedRecord<is_sealed>&& delete_record) = delete;
 
+    // for push delete record in growing segment, can cache max removed offsets
+    // to avoid add duplicate offsets.
+    void
+    PushGrowing(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        int64_t removed_num = 0;
+        int64_t mem_add = 0;
+        for (size_t i = 0; i < pks.size(); ++i) {
+            auto delete_pk = pks[i];
+            auto delete_timestamp = timestamps[i];
+            auto offsets =
+                insert_record_->search_pk(delete_pk, delete_timestamp);
+            auto max_removed_offset =
+                insert_record_->get_max_removed_offset(delete_pk);
+            int64_t new_max_removed_offset = -1;
+            bool has_duplicate_pk_timestamps = false;
+            for (auto it = offsets.rbegin(); it != offsets.rend(); ++it) {
+                int64_t row_offset = (*it).get();
+                if (row_offset <= max_removed_offset) {
+                    break;
+                }
+                auto row_timestamp = insert_record_->timestamps_[row_offset];
+                // Assert(insert_record->timestamps_.size() >= row_offset);
+                if (row_timestamp < delete_timestamp) {
+                    InsertIntoInnerPairs(delete_timestamp, {row_offset});
+                    if (new_max_removed_offset < row_offset) {
+                        new_max_removed_offset = row_offset;
+                    }
+                    removed_num++;
+                    mem_add += sizeof(Timestamp) + sizeof(int64_t);
+                } else if (row_timestamp == delete_timestamp) {
+                    // if insert record have multi same (pk, timestamp) pairs,
+                    // need to remove the next pairs, just keep first
+                    if (!has_duplicate_pk_timestamps) {
+                        has_duplicate_pk_timestamps = true;
+                    } else {
+                        InsertIntoInnerPairs(delete_timestamp, {row_offset});
+                        if (new_max_removed_offset < row_offset) {
+                            new_max_removed_offset = row_offset;
+                        }
+                        removed_num++;
+                        mem_add += sizeof(Timestamp) + sizeof(int64_t);
+                    }
+                }
+            }
+            if (new_max_removed_offset != -1) {
+                insert_record_->set_max_removed_offset(delete_pk,
+                                                       new_max_removed_offset);
+            }
+        }
+        n_.fetch_add(removed_num);
+        mem_size_.fetch_add(mem_add);
+    }
+
     void
     Push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
         std::unique_lock<std::shared_mutex> lck(mutex_);

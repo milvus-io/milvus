@@ -271,6 +271,9 @@ class SegmentSealedImpl : public SegmentSealed {
                   const BitsetView& bitset,
                   SearchResult& output) const override;
 
+    size_t
+    get_delete_record_mem() const override;
+
     void
     mask_with_delete(BitsetType& bitset,
                      int64_t ins_barrier,
