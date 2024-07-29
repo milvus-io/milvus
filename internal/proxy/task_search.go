@@ -7,10 +7,10 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -367,6 +367,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
+			// isolatioin has tighter constraint, check first
+			mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+			if mvErr != nil {
+				return mvErr
+			}
 			partitionIDs, err2 := t.tryParsePartitionIDsFromPlan(plan)
 			if err2 != nil {
 				return err2
@@ -374,10 +379,6 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if len(partitionIDs) > 0 {
 				internalSubReq.PartitionIDs = partitionIDs
 				t.partitionIDsSet.Upsert(partitionIDs...)
-				mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
-				if mvErr != nil {
-					return mvErr
-				}
 			}
 		} else {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
@@ -427,16 +428,17 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.Offset = offset
 
 	if t.partitionKeyMode {
+		// isolatioin has tighter constraint, check first
+		mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+		if mvErr != nil {
+			return mvErr
+		}
 		partitionIDs, err2 := t.tryParsePartitionIDsFromPlan(plan)
 		if err2 != nil {
 			return err2
 		}
 		if len(partitionIDs) > 0 {
 			t.SearchRequest.PartitionIDs = partitionIDs
-			mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
-			if mvErr != nil {
-				return mvErr
-			}
 		}
 	}
 

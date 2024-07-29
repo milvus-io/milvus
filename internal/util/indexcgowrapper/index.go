@@ -15,8 +15,9 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -59,7 +60,8 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	for key, value := range typeParams {
 		protoTypeParams.Params = append(protoTypeParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	typeParamsStr := proto.MarshalTextString(protoTypeParams)
+	// typeParamsStr := proto.MarshalTextString(protoTypeParams)
+	typeParamsStr, _ := prototext.Marshal(protoTypeParams)
 
 	protoIndexParams := &indexcgopb.IndexParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
@@ -67,10 +69,11 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	for key, value := range indexParams {
 		protoIndexParams.Params = append(protoIndexParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	indexParamsStr := proto.MarshalTextString(protoIndexParams)
+	// indexParamsStr := proto.MarshalTextString(protoIndexParams)
+	indexParamsStr, _ := prototext.Marshal(protoIndexParams)
 
-	typeParamsPointer := C.CString(typeParamsStr)
-	indexParamsPointer := C.CString(indexParamsStr)
+	typeParamsPointer := C.CString(string(typeParamsStr))
+	indexParamsPointer := C.CString(string(indexParamsStr))
 	defer C.free(unsafe.Pointer(typeParamsPointer))
 	defer C.free(unsafe.Pointer(indexParamsPointer))
 

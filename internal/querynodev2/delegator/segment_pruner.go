@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -43,6 +43,9 @@ func PruneSegments(ctx context.Context,
 ) {
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
 	defer span.End()
+	if partitionStats == nil {
+		return
+	}
 	// 1. select collection, partitions and expr
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
@@ -113,17 +116,21 @@ func PruneSegments(ctx context.Context,
 		targetSegmentIDs := make([]int64, 0, 32)
 		if len(partitionIDs) > 0 {
 			for _, partID := range partitionIDs {
-				partStats := partitionStats[partID]
-				for segID, segStat := range partStats.SegmentStats {
-					targetSegmentIDs = append(targetSegmentIDs, segID)
-					targetSegmentStats = append(targetSegmentStats, segStat)
+				partStats, exist := partitionStats[partID]
+				if exist && partStats != nil {
+					for segID, segStat := range partStats.SegmentStats {
+						targetSegmentIDs = append(targetSegmentIDs, segID)
+						targetSegmentStats = append(targetSegmentStats, segStat)
+					}
 				}
 			}
 		} else {
 			for _, partStats := range partitionStats {
-				for segID, segStat := range partStats.SegmentStats {
-					targetSegmentIDs = append(targetSegmentIDs, segID)
-					targetSegmentStats = append(targetSegmentStats, segStat)
+				if partStats != nil {
+					for segID, segStat := range partStats.SegmentStats {
+						targetSegmentIDs = append(targetSegmentIDs, segID)
+						targetSegmentStats = append(targetSegmentStats, segStat)
+					}
 				}
 			}
 		}
