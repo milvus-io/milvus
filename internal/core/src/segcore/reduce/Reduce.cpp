@@ -99,13 +99,13 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
         for (auto j = 0; j < topK; ++j) {
             auto index = i * topK + j;
             if (offsets[index] != INVALID_SEG_OFFSET) {
-                AssertInfo(0 <= offsets[index] &&
-                               offsets[index] < segment_row_count,
-                           fmt::format("invalid offset {}, segment {} with "
-                                       "rows num {}, data or index corruption",
-                                       offsets[index],
-                                       segment->get_segment_id(),
-                                       segment_row_count));
+                AssertInfo(
+                    0 <= offsets[index] && offsets[index] < segment_row_count,
+                    fmt::format("invalid offset {}, segment {} with "
+                                "rows num {}, data or index corruption",
+                                offsets[index],
+                                segment->get_segment_id(),
+                                segment_row_count));
                 real_topks[i]++;
                 offsets[valid_index] = offsets[index];
                 distances[valid_index] = distances[index];
@@ -167,9 +167,12 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
         for (auto offset : final_search_records_[seg_res_idx][j]) {
-            search_result->primary_keys_[index] = search_result->primary_keys_[offset];
-            search_result->distances_[index] = search_result->distances_[offset];
-            search_result->seg_offsets_[index] = search_result->seg_offsets_[offset];
+            search_result->primary_keys_[index] =
+                search_result->primary_keys_[offset];
+            search_result->distances_[index] =
+                search_result->distances_[offset];
+            search_result->seg_offsets_[index] =
+                search_result->seg_offsets_[offset];
             index++;
             real_topks[j]++;
         }

@@ -122,8 +122,12 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
-        column = std::make_shared<Column>(
-            data_size, dim, data_type, mcm_, descriptor,field_data->IsNullable());
+        column = std::make_shared<Column>(data_size,
+                                          dim,
+                                          data_type,
+                                          mcm_,
+                                          descriptor,
+                                          field_data->IsNullable());
     }
     column->AppendBatch(field_data);
     return column;
