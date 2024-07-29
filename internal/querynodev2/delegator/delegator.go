@@ -114,7 +114,6 @@ type shardDelegator struct {
 	pkOracle       pkoracle.PkOracle
 	level0Mut      sync.RWMutex
 	// stream delete buffer
-	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory
