@@ -5,13 +5,14 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 type Row = map[storage.FieldID]any
@@ -43,8 +44,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	csvReader.Comma = sep
 
 	header, err := csvReader.Read()
-	fmt.Printf("csv header: %v\n", strings.Join(header, "|"))
-	fmt.Printf("length: %v\n", len(header))
+	log.Info("csv header parsed", zap.Strings("header", header))
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read csv header, error: %v", err))
 	}
