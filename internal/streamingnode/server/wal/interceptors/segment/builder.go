@@ -17,7 +17,7 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 
 type interceptorBuilder struct{}
 
-func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.BasicInterceptor {
+func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	assignManager := syncutil.NewFuture[*manager.PChannelSegmentAllocManager]()
 	ctx, cancel := context.WithCancel(context.Background())
 	segmentInterceptor := &segmentInterceptor{

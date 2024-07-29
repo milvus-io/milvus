@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
@@ -34,15 +35,23 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		close(done)
 	}()
 	upstream <- immutableMsg
-	newMsg, ok, err := h.Handle(ctx, upstream, nil)
-	assert.Equal(t, newMsg, immutableMsg)
-	assert.False(t, ok)
-	assert.NoError(t, err)
+	resp := h.Handle(wal.HandleParam{
+		Ctx:      ctx,
+		Upstream: upstream,
+		Message:  nil,
+	})
+	assert.Equal(t, resp.Incoming, immutableMsg)
+	assert.False(t, resp.MessageHandled)
+	assert.NoError(t, resp.Error)
 
-	newMsg, ok, err = h.Handle(ctx, upstream, newMsg)
-	assert.NoError(t, err)
-	assert.Nil(t, newMsg)
-	assert.True(t, ok)
+	resp = h.Handle(wal.HandleParam{
+		Ctx:      ctx,
+		Upstream: upstream,
+		Message:  resp.Incoming,
+	})
+	assert.NoError(t, resp.Error)
+	assert.Nil(t, resp.Incoming)
+	assert.True(t, resp.MessageHandled)
 	h.Close()
 
 	<-done
@@ -60,16 +69,24 @@ func TestDefaultHandler(t *testing.T) {
 	upstream := make(chan message.ImmutableMessage, 1)
 	msg := mock_message.NewMockImmutableMessage(t)
 	upstream <- msg
-	newMsg, ok, err := h.Handle(context.Background(), upstream, nil)
-	assert.NotNil(t, newMsg)
-	assert.NoError(t, err)
-	assert.False(t, ok)
-	assert.Equal(t, newMsg, msg)
+	resp := h.Handle(wal.HandleParam{
+		Ctx:      context.Background(),
+		Upstream: upstream,
+		Message:  nil,
+	})
+	assert.NotNil(t, resp.Incoming)
+	assert.NoError(t, resp.Error)
+	assert.False(t, resp.MessageHandled)
+	assert.Equal(t, resp.Incoming, msg)
 
-	newMsg, ok, err = h.Handle(context.Background(), upstream, newMsg)
-	assert.NoError(t, err)
-	assert.Nil(t, newMsg)
-	assert.True(t, ok)
+	resp = h.Handle(wal.HandleParam{
+		Ctx:      context.Background(),
+		Upstream: upstream,
+		Message:  resp.Incoming,
+	})
+	assert.NoError(t, resp.Error)
+	assert.Nil(t, resp.Incoming)
+	assert.True(t, resp.MessageHandled)
 
 	h.Close()
 	<-done

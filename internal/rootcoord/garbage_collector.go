@@ -259,7 +259,7 @@ func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Con
 		msgs = append(msgs, msg)
 	}
 	resp := streaming.WAL().Append(ctx, msgs...)
-	if err := resp.IsAnyError(); err != nil {
+	if err := resp.UnwrapFirstError(); err != nil {
 		return 0, err
 	}
 	// TODO: sheep, return resp.MaxTimeTick(), nil

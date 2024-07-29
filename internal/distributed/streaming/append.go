@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -18,8 +19,8 @@ func newAppendResponseN(n int) AppendResponses {
 
 // AppendResponse is the response of one append operation.
 type AppendResponse struct {
-	MessageID message.MessageID
-	Error     error
+	AppendResult *types.AppendResult
+	Error        error
 }
 
 // AppendResponses is the response of append operation.
@@ -27,14 +28,25 @@ type AppendResponses struct {
 	Responses []AppendResponse
 }
 
-// IsAnyError returns the first error in the responses.
-func (a AppendResponses) IsAnyError() error {
+// UnwrapFirstError returns the first error in the responses.
+func (a AppendResponses) UnwrapFirstError() error {
 	for _, r := range a.Responses {
 		if r.Error != nil {
 			return r.Error
 		}
 	}
 	return nil
+}
+
+// MaxTimeTick returns the max time tick in the responses.
+func (a AppendResponses) MaxTimeTick() uint64 {
+	maxTimeTick := uint64(0)
+	for _, r := range a.Responses {
+		if r.AppendResult.TimeTick > maxTimeTick {
+			maxTimeTick = r.AppendResult.TimeTick
+		}
+	}
+	return maxTimeTick
 }
 
 // fillAllError fills all the responses with the same error.
@@ -122,10 +134,10 @@ func (w *walAccesserImpl) appendToPChannel(ctx context.Context, pchannel string,
 	// TODO: only the partition-key with high partition will generate many message in one time on the same pchannel,
 	// we should optimize the message-format, make it into one; but not the goroutine count.
 	if len(msgs) == 1 {
-		msgID, err := p.Produce(ctx, msgs[0])
+		produceResult, err := p.Produce(ctx, msgs[0])
 		resp.fillResponseAtIdx(AppendResponse{
-			MessageID: msgID,
-			Error:     err,
+			AppendResult: produceResult,
+			Error:        err,
 		}, 0)
 		return resp
 	}
@@ -144,8 +156,8 @@ func (w *walAccesserImpl) appendToPChannel(ctx context.Context, pchannel string,
 
 			mu.Lock()
 			resp.fillResponseAtIdx(AppendResponse{
-				MessageID: msgID,
-				Error:     err,
+				AppendResult: msgID,
+				Error:        err,
 			}, i)
 			mu.Unlock()
 			return struct{}{}, nil

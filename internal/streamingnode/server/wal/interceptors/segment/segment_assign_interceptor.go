@@ -17,7 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ interceptors.AppendInterceptor = (*segmentInterceptor)(nil)
+var _ interceptors.InterceptorWithReady = (*segmentInterceptor)(nil)
 
 // segmentInterceptor is the implementation of segment assignment interceptor.
 type segmentInterceptor struct {
@@ -161,9 +161,12 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 
 // Close closes the segment interceptor.
 func (impl *segmentInterceptor) Close() {
-	// unregister the pchannels
-	resource.Resource().SegmentSealedInspector().UnregisterPChannelManager(impl.assignManager.Get())
-	impl.assignManager.Get().Close(context.Background())
+	assignManager := impl.assignManager.Get()
+	if assignManager != nil {
+		// unregister the pchannels
+		resource.Resource().SegmentSealedInspector().UnregisterPChannelManager(assignManager)
+		assignManager.Close(context.Background())
+	}
 }
 
 // recoverPChannelManager recovers PChannel Assignment Manager.
@@ -185,6 +188,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.Interc
 			select {
 			case <-impl.ctx.Done():
 				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.ctx.Err()))
+				impl.assignManager.Set(nil)
 				return
 			case <-ch:
 				continue

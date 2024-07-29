@@ -15,6 +15,7 @@ const (
 	DeliverFilterTypeTimeTickGT  deliverFilterType = 1
 	DeliverFilterTypeTimeTickGTE deliverFilterType = 2
 	DeliverFilterTypeVChannel    deliverFilterType = 3
+	DeliverFilterTypeMessageType deliverFilterType = 4
 )
 
 type (
@@ -99,6 +100,21 @@ func DeliverFilterVChannel(vchannel string) DeliverFilter {
 	}
 }
 
+// DeliverFilterMessageType delivers messages filtered by message type.
+func DeliverFilterMessageType(messageType ...message.MessageType) DeliverFilter {
+	messageTypes := make([]messagespb.MessageType, 0, len(messageType))
+	for _, mt := range messageType {
+		messageTypes = append(messageTypes, messagespb.MessageType(mt))
+	}
+	return &streamingpb.DeliverFilter{
+		Filter: &streamingpb.DeliverFilter_MessageType{
+			MessageType: &streamingpb.DeliverFilterMessageType{
+				MessageTypes: messageTypes,
+			},
+		},
+	}
+}
+
 // IsDeliverFilterTimeTick checks if the filter is time tick filter.
 func IsDeliverFilterTimeTick(filter DeliverFilter) bool {
 	switch filter.GetFilter().(type) {
@@ -126,6 +142,15 @@ func GetFilterFunc(filters []DeliverFilter) (func(message.ImmutableMessage) bool
 		case *streamingpb.DeliverFilter_Vchannel:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
 				return im.VChannel() == filter.GetVchannel().Vchannel
+			})
+		case *streamingpb.DeliverFilter_MessageType:
+			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
+				for _, mt := range filter.GetMessageType().MessageTypes {
+					if im.MessageType() == message.MessageType(mt) {
+						return true
+					}
+				}
+				return false
 			})
 		default:
 			panic("unimplemented")
