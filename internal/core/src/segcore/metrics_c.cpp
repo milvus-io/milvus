@@ -11,6 +11,8 @@
 
 #include <string>
 
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
 #include "knowhere/prometheus_client.h"
 #include "segcore/metrics_c.h"
 
@@ -19,6 +21,7 @@ GetKnowhereMetrics() {
     auto str = knowhere::prometheusClient->GetMetrics();
     auto len = str.length();
     char* res = (char*)malloc(len + 1);
+    AssertInfo(res != nullptr, "memmory allocation for res failed!");
     memcpy(res, str.data(), len);
     res[len] = '\0';
     return res;

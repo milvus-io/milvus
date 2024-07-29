@@ -33,4 +33,5 @@ func Test_HybridIndexChecker(t *testing.T) {
 	assert.Error(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}))
 	assert.Error(t, c.CheckTrain(map[string]string{}))
 	assert.Error(t, c.CheckTrain(map[string]string{"bitmap_cardinality_limit": "0"}))
+	assert.Error(t, c.CheckTrain(map[string]string{"bitmap_cardinality_limit": "2000"}))
 }

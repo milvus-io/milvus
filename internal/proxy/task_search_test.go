@@ -23,12 +23,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -2756,30 +2756,50 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
-	task := s.getSearchTask()
-	task.enableMaterializedView = true
-	task.request.Dsl = testVarCharField + " == \"a\""
-	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
-	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
-	err := task.PreExecute(s.ctx)
-	s.NoError(err)
-	s.NotZero(len(task.queryInfos))
-	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.request.Dsl = testVarCharField + " == \"a\""
+		task.IsAdvanced = isAdvanced
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+		err := task.PreExecute(s.ctx)
+		s.NoError(err)
+		s.NotZero(len(task.queryInfos))
+		s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	}
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalid() {
-	task := s.getSearchTask()
-	task.enableMaterializedView = true
-	task.request.Dsl = testVarCharField + " in [\"a\", \"b\"]"
-	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
-	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
-	s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.IsAdvanced = isAdvanced
+		task.request.Dsl = testVarCharField + " in [\"a\", \"b\"]"
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
+	}
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalidOr() {
+	isAdanceds := []bool{true, false}
+	for _, isAdvanced := range isAdanceds {
+		task := s.getSearchTask()
+		task.enableMaterializedView = true
+		task.IsAdvanced = isAdvanced
+		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\""
+		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+		schemaInfo := newSchemaInfo(schema)
+		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support OR")
+	}
 }
 
 func TestMaterializedView(t *testing.T) {

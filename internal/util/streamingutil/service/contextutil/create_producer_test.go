@@ -31,7 +31,7 @@ func TestWithCreateProducer(t *testing.T) {
 	assert.Equal(t, req.Pchannel.Term, req2.Pchannel.Term)
 
 	// panic case.
-	assert.Panics(t, func() { WithCreateProducer(context.Background(), nil) })
+	assert.NotPanics(t, func() { WithCreateProducer(context.Background(), nil) })
 }
 
 func TestGetCreateProducer(t *testing.T) {

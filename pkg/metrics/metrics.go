@@ -110,6 +110,7 @@ const (
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
 	loadTypeName             = "load_type"
+	pathLabelName            = "path"
 
 	// entities label
 	LoadedLabel         = "loaded"

@@ -1,6 +1,6 @@
 package message
 
-import "github.com/golang/protobuf/proto"
+import "google.golang.org/protobuf/proto"
 
 var (
 	_ BasicMessage     = (*messageImpl)(nil)
