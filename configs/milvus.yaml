@@ -278,7 +278,7 @@ queryCoord:
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
   growingRowCountWeight: 4 # the memory weight of growing segment row count
-  delegatorMemoryOverloadFactor: 0.3 # the factor of delegator overloaded memory
+  delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
