@@ -568,6 +568,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestDelegatorPreserveMemory() {
 			segmentPlans, _ = suite.getCollectionBalancePlans(balancer, c.collectionID)
 			suite.Len(segmentPlans, 1)
 			suite.Equal(segmentPlans[0].To, int64(2))
+			suite.Len(channelPlans, 0)
 		})
 	}
 }
