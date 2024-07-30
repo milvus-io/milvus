@@ -55,6 +55,7 @@ func sortKeyValuePairs(pairs []*commonpb.KeyValuePair) {
 		return pairs[i].Key > pairs[j].Key
 	})
 }
+
 func TestGetIndexStateTask_Execute(t *testing.T) {
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -617,8 +618,10 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
-		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+		})
 	})
 
 	t.Run("create index on Arithmetic field", func(t *testing.T) {
@@ -659,8 +662,10 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
-		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+		})
 	})
 
 	// Compatible with the old version <= 2.3.0
@@ -886,8 +891,10 @@ func Test_parseIndexParams(t *testing.T) {
 		err = cit.parseIndexParams()
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
-		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+		})
 	})
 
 	t.Run("create auto index on numeric field", func(t *testing.T) {
@@ -914,8 +921,10 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
-		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+		})
 	})
 
 	t.Run("create auto index on varchar field", func(t *testing.T) {
@@ -942,8 +951,10 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
-		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)}})
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+		})
 	})
 
 	t.Run("create auto index on json field", func(t *testing.T) {

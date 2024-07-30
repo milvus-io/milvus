@@ -29,7 +29,7 @@ import (
 
 func TestCreateDatabase(t *testing.T) {
 	var msg TsMsg = &CreateDatabaseMsg{
-		CreateDatabaseRequest: milvuspb.CreateDatabaseRequest{
+		CreateDatabaseRequest: &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_CreateDatabase,
 				MsgID:         100,
@@ -66,7 +66,7 @@ func TestCreateDatabase(t *testing.T) {
 
 func TestDropDatabase(t *testing.T) {
 	var msg TsMsg = &DropDatabaseMsg{
-		DropDatabaseRequest: milvuspb.DropDatabaseRequest{
+		DropDatabaseRequest: &milvuspb.DropDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_DropDatabase,
 				MsgID:         100,

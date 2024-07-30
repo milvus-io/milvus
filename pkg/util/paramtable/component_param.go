@@ -1635,7 +1635,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
-	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1677,7 +1677,7 @@ type queryCoordConfig struct {
 
 	CollectionObserverInterval        ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval         ParamItem `refreshable:"false"`
-	CollectionBalanceSegmentBatchSize ParamItem `refreshable true`
+	CollectionBalanceSegmentBatchSize ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3136,7 +3136,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.sealProportionJitter",
 		Version:      "2.4.6",
 		DefaultValue: "0.1",
-		Doc:          "segment seal proportion jitter ratio, default value 0.1(10%), if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%",
+		Doc:          "segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%",
 		Export:       true,
 	}
 	p.SegmentSealProportionJitter.Init(base.mgr)

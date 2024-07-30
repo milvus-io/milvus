@@ -35,21 +35,20 @@ import (
 func generateMsgPack() msgstream.MsgPack {
 	msgPack := msgstream.MsgPack{}
 
-	timeTickResult := msgpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: math.MaxUint64,
-			SourceID:  0,
-		},
-	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: uint64(time.Now().Unix()),
 			EndTimestamp:   uint64(time.Now().Unix() + 1),
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: timeTickResult,
+		TimeTickMsg: &msgpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     0,
+				Timestamp: math.MaxUint64,
+				SourceID:  0,
+			},
+		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
@@ -64,7 +63,7 @@ func generateInsertMsgPack() msgstream.MsgPack {
 			EndTimestamp:   uint64(time.Now().Unix() + 1),
 			HashValues:     []uint32{0},
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 		},
 	}

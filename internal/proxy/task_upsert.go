@@ -321,7 +321,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -335,7 +335,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			},
 		},
 		DeleteMsg: &msgstream.DeleteMsg{
-			DeleteRequest: msgpb.DeleteRequest{
+			DeleteRequest: &msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -463,7 +463,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 			if err != nil {
 				errors.Wrap(err, "failed to allocate MsgID for delete of upsert")
 			}
-			sliceRequest := msgpb.DeleteRequest{
+			sliceRequest := &msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithTimeStamp(ts),

@@ -171,9 +171,8 @@ func (cit *createIndexTask) parseIndexParams() error {
 					return Params.AutoIndexConfig.ScalarIntIndexType.GetValue()
 				} else if typeutil.IsFloatingType(dataType) {
 					return Params.AutoIndexConfig.ScalarFloatIndexType.GetValue()
-				} else {
-					return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
 				}
+				return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
 			}
 
 			indexType, err := func() (string, error) {
@@ -182,17 +181,14 @@ func (cit *createIndexTask) parseIndexParams() error {
 					return getPrimitiveIndexType(dataType), nil
 				} else if typeutil.IsArrayType(dataType) {
 					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
-				} else {
-					return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 				}
+				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()
-
 			if err != nil {
 				return merr.WrapErrParameterInvalid("supported field", err.Error())
 			}
 
 			indexParamsMap[common.IndexTypeKey] = indexType
-
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
@@ -440,7 +436,6 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 }
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
-
 	collName := cit.req.GetCollectionName()
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, cit.req.GetDbName(), collName)
@@ -554,7 +549,6 @@ func (t *alterIndexTask) OnEnqueue() error {
 }
 
 func (t *alterIndexTask) PreExecute(ctx context.Context) error {
-
 	for _, param := range t.req.GetExtraParams() {
 		if !indexparams.IsConfigableIndexParam(param.GetKey()) {
 			return merr.WrapErrParameterInvalidMsg("%s is not configable index param", param.GetKey())
@@ -666,7 +660,6 @@ func (dit *describeIndexTask) OnEnqueue() error {
 }
 
 func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -791,7 +784,6 @@ func (dit *getIndexStatisticsTask) OnEnqueue() error {
 }
 
 func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -909,7 +901,6 @@ func (dit *dropIndexTask) OnEnqueue() error {
 }
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
-
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1020,7 +1011,6 @@ func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 }
 
 func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
@@ -1110,7 +1100,6 @@ func (gist *getIndexStateTask) OnEnqueue() error {
 }
 
 func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
 	}
