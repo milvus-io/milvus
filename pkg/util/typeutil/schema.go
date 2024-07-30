@@ -463,6 +463,10 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
 }
 
+func IsPrimitiveType(dataType schemapb.DataType) bool {
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType)
+}
+
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce
 // this shall preallocate the space for field data internal slice prevent slice growing cost.
 func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemapb.FieldData {

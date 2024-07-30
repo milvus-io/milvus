@@ -160,17 +160,36 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool() || specifyIndexType == AutoIndexName || !exist {
-			if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
-			} else if typeutil.IsStringType(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
-			} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
-				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
-			} else {
-				return merr.WrapErrParameterInvalid("supported field",
-					fmt.Sprintf("create auto index on %s field is not supported", cit.fieldSchema.DataType.String()))
+		autoIndexEnable := Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
+
+		if autoIndexEnable || !exist || specifyIndexType == AutoIndexName {
+			getPrimitiveIndexType := func(dataType schemapb.DataType) string {
+				if typeutil.IsBoolType(dataType) {
+					return Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
+				} else if typeutil.IsArithmetic(dataType) {
+					return Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
+				} else {
+					return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
+				}
 			}
+
+			indexType, err := func() (string, error) {
+				dataType := cit.fieldSchema.DataType
+				if typeutil.IsPrimitiveType(dataType) {
+					return getPrimitiveIndexType(dataType), nil
+				} else if typeutil.IsArrayType(dataType) {
+					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
+				} else {
+					return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
+				}
+			}()
+
+			if err != nil {
+				return merr.WrapErrParameterInvalid("supported field", err.Error())
+			}
+
+			indexParamsMap[common.IndexTypeKey] = indexType
+
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
