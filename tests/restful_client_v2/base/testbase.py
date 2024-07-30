@@ -6,7 +6,7 @@ import uuid
 from pymilvus import connections, db
 from utils.util_log import test_log as logger
 from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
-                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
+                        DatabaseClient, UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
 from utils.utils import get_data_by_payload
 
 
@@ -29,6 +29,7 @@ class Base:
     partition_client = None
     index_client = None
     alias_client = None
+    database_client = None
     user_client = None
     role_client = None
     import_job_client = None
@@ -72,6 +73,8 @@ class TestBase(Base):
         self.index_client.update_uuid(_uuid)
         self.alias_client = AliasClient(self.endpoint, self.api_key)
         self.alias_client.update_uuid(_uuid)
+        self.database_client = DatabaseClient(self.endpoint, self.api_key)
+        self.database_client.update_uuid(_uuid)
         self.user_client = UserClient(self.endpoint, self.api_key)
         self.user_client.update_uuid(_uuid)
         self.role_client = RoleClient(self.endpoint, self.api_key)

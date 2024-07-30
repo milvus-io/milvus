@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -49,6 +50,12 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
+	router.POST(DatabaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listDatabases))))
+	router.POST(DatabaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.describeDatabase))))
+	router.POST(DatabaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.createDatabase))))
+	router.POST(DatabaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabasePropertiesReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.alterDatabase)))))
+	router.POST(DatabaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.dropDatabase))))
+
 	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listCollections)))))
 	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasCollection)))))
 	// todo review the return data
@@ -301,6 +308,84 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
 		})
 		return nil, merr.ErrDatabaseNotFound
 	}
+}
+
+func (h *HandlersV2) listDatabases(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, anyReq, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListDatabases(reqCtx, &milvuspb.ListDatabasesRequest{})
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListDatabasesResponse).DbNames))
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) describeDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, anyReq, false, false, "/milvus.proto.milvus.MilvusService/DescribeDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DescribeDatabase(reqCtx, &milvuspb.DescribeDatabaseRequest{
+			DbName: dbName,
+		})
+	})
+	if err == nil {
+		data := make(map[string]string, 0)
+		for _, pair := range resp.(*milvuspb.DescribeDatabaseResponse).Properties {
+			data[pair.Key] = pair.Value
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: data})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) createDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, anyReq, false, false, "/milvus.proto.milvus.MilvusService/createDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreateDatabase(reqCtx, &milvuspb.CreateDatabaseRequest{
+			DbName: dbName,
+		})
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) alterDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req, _ := anyReq.(*DatabasePropertiesReq)
+	properties := make([]*commonpb.KeyValuePair, 0)
+	for k, v := range req.Properties {
+		properties = append(properties, &commonpb.KeyValuePair{
+			Key:   k,
+			Value: v,
+		})
+	}
+	resp, err := wrapperProxy(ctx, c, anyReq, false, false, "/milvus.proto.milvus.MilvusService/alterDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterDatabase(reqCtx, &milvuspb.AlterDatabaseRequest{
+			DbName:     dbName,
+			Properties: properties,
+		})
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropDatabase(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	if dbName == util.DefaultDBName {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: can not drop default database",
+		})
+		return nil, fmt.Errorf("can not drop default database")
+	}
+	resp, err := wrapperProxy(ctx, c, anyReq, false, false, "/milvus.proto.milvus.MilvusService/dropDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropDatabase(reqCtx, &milvuspb.DropDatabaseRequest{
+			DbName: dbName,
+		})
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

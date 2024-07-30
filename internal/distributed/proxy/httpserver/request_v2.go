@@ -15,6 +15,13 @@ type DatabaseReq struct {
 
 func (req *DatabaseReq) GetDbName() string { return req.DbName }
 
+type DatabasePropertiesReq struct {
+	DbName     string            `json:"dbName"`
+	Properties map[string]string `json:"properties" binding:"required"`
+}
+
+func (req *DatabasePropertiesReq) GetDbName() string { return req.DbName }
+
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`

@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -29,6 +30,8 @@ import (
 const (
 	DefaultPartitionName = "_default"
 )
+
+var TestcaseSuccessCode = merr.Code(nil)
 
 type rawTestCase struct {
 	path    string
@@ -129,7 +132,7 @@ func TestHTTPWrapper(t *testing.T) {
 			w := httptest.NewRecorder()
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				returnBody := &ReturnErrMsg{}
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
@@ -148,7 +151,7 @@ func TestHTTPWrapper(t *testing.T) {
 				w := httptest.NewRecorder()
 				ginHandler.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusOK, w.Code)
-				if testcase.errCode != 0 {
+				if testcase.errCode != TestcaseSuccessCode {
 					returnBody := &ReturnErrMsg{}
 					err := json.Unmarshal(w.Body.Bytes(), returnBody)
 					assert.Nil(t, err)
@@ -260,7 +263,7 @@ func TestGrpcWrapper(t *testing.T) {
 			w := httptest.NewRecorder()
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				returnBody := &ReturnErrMsg{}
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
@@ -278,7 +281,7 @@ func TestGrpcWrapper(t *testing.T) {
 			w := httptest.NewRecorder()
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				returnBody := &ReturnErrMsg{}
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
@@ -419,7 +422,7 @@ func TestDatabaseWrapper(t *testing.T) {
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				returnBody := &ReturnErrMsg{}
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
@@ -457,7 +460,7 @@ func TestDatabaseWrapper(t *testing.T) {
 			ginHandler.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				returnBody := &ReturnErrMsg{}
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
@@ -657,7 +660,7 @@ func TestCreateCollection(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 		})
@@ -953,7 +956,7 @@ func TestMethodGet(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
@@ -975,6 +978,7 @@ var commonErrorStatus = &commonpb.Status{
 func TestMethodDelete(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().DeleteCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -983,6 +987,11 @@ func TestMethodDelete(t *testing.T) {
 	mp.EXPECT().DropAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path:    versionalV2(DatabaseCategory, DropAction),
+		errMsg:  "invalid parameter, error: can not drop default database",
+		errCode: 1100, // ErrParameterInvalid
+	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, DropAction),
 	})
@@ -1013,17 +1022,48 @@ func TestMethodDelete(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
 		})
 	}
+	dropDatabasePath := versionalV2(DatabaseCategory, DropAction)
+	t.Run(dropDatabasePath, func(t *testing.T) {
+		bodyReader := bytes.NewReader([]byte(`{"dbName": "test"}`))
+		req := httptest.NewRequest(http.MethodPost, dropDatabasePath, bodyReader)
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, TestcaseSuccessCode, returnBody.Code)
+		fmt.Println(w.Body.String())
+	})
 }
 
 func TestMethodPost(t *testing.T) {
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
+		&milvuspb.ListDatabasesResponse{
+			Status:  commonSuccessStatus,
+			DbNames: []string{util.DefaultDBName},
+		}, nil).Once()
+	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeDatabaseResponse{
+			Status: commonSuccessStatus,
+			DbName: util.DefaultDBName,
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DatabaseMaxCollectionsKey,
+					Value: "100",
+				},
+			},
+		}, nil).Once()
+	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
@@ -1064,6 +1104,18 @@ func TestMethodPost(t *testing.T) {
 	}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(DatabaseCategory, ListAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(DatabaseCategory, DescribeAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(DatabaseCategory, CreateAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(DatabaseCategory, AlterAction),
+	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, CreateAction),
 	})
@@ -1133,6 +1185,7 @@ func TestMethodPost(t *testing.T) {
 	for _, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{` +
+				`"properties": {"database.max.collections": "100"},` +
 				`"collectionName": "` + DefaultCollectionName + `", "newCollectionName": "test", "newDbName": "",` +
 				`"partitionName": "` + DefaultPartitionName + `", "partitionNames": ["` + DefaultPartitionName + `"],` +
 				`"schema": {"fields": [{"fieldName": "book_id", "dataType": "Int64", "elementTypeParams": {}}, {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}]},` +
@@ -1151,7 +1204,7 @@ func TestMethodPost(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
@@ -1270,7 +1323,7 @@ func TestDML(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
@@ -1312,7 +1365,7 @@ func TestAllowInt64(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
@@ -1521,7 +1574,7 @@ func TestSearchV2(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
 			assert.Equal(t, testcase.errCode, returnBody.Code)
-			if testcase.errCode != 0 {
+			if testcase.errCode != TestcaseSuccessCode {
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())

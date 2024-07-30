@@ -9,6 +9,7 @@ import (
 // v2
 const (
 	// --- category ---
+	DatabaseCategory   = "/databases/"
 	CollectionCategory = "/collections/"
 	EntityCategory     = "/entities/"
 	PartitionCategory  = "/partitions/"

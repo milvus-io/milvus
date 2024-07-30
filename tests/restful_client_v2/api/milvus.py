@@ -829,6 +829,68 @@ class AliasClient(Requests):
         return res
 
 
+class DatabaseClient(Requests):
+
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+        self.db_name = None
+        self.headers = self.update_headers()
+
+    @classmethod
+    def update_headers(cls):
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {cls.api_key}',
+            'RequestId': cls.uuid
+        }
+        return headers
+
+    def list_databases(self):
+        url = f'{self.endpoint}/v2/vectordb/databases/list'
+        response = self.post(url, headers=self.update_headers())
+        res = response.json()
+        return res
+
+    def describe_database(self, db_name):
+        url = f'{self.endpoint}/v2/vectordb/databases/describe'
+        data = {
+            "dbName": db_name
+        }
+        response = self.post(url, headers=self.update_headers(), data=data)
+        res = response.json()
+        return res
+
+    def alter_database(self, db_name, properties):
+        url = f'{self.endpoint}/v2/vectordb/databases/alter'
+        data = {
+            "dbName": db_name,
+            "properties": properties
+        }
+        response = self.post(url, headers=self.update_headers(), data=data)
+        res = response.json()
+        return res
+
+    def drop_database(self, db_name):
+        url = f'{self.endpoint}/v2/vectordb/databases/drop'
+        data = {
+            "dbName": db_name
+        }
+        response = self.post(url, headers=self.update_headers(), data=data)
+        res = response.json()
+        return res
+
+    def create_database(self, db_name):
+        url = f'{self.endpoint}/v2/vectordb/databases/create'
+        data = {
+            "dbName": db_name
+        }
+        response = self.post(url, headers=self.update_headers(), data=data)
+        res = response.json()
+        return res
+
+
 class ImportJobClient(Requests):
 
     def __init__(self, endpoint, token):
