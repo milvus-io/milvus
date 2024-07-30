@@ -371,7 +371,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation empty",
 			expr:                "",
-			expectedErrorString: "partition key not found in expr when validating partition key isolation",
+			expectedErrorString: "partition key not found in expr or the expr is invalid when validating partition key isolation",
 		},
 		{
 			name:                "partition key isolation not equal",
@@ -412,6 +412,11 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 			name:                "partition key isolation equal greator or equal",
 			expr:                "key_field >= 10",
 			expectedErrorString: "partition key isolation does not support GreaterEqual",
+		},
+		{
+			name:                "partition key isolation binary range",
+			expr:                "1 < key_field < 10",
+			expectedErrorString: "partition key isolation does not support BinaryRange",
 		},
 		{
 			name:                "partition key isolation NOT equal",
@@ -456,12 +461,12 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation other field equal",
 			expr:                "varChar_field == 'a'",
-			expectedErrorString: "partition key not found in expr when validating partition key isolation",
+			expectedErrorString: "partition key not found in expr or the expr is invalid when validating partition key isolation",
 		},
 		{
 			name:                "partition key isolation other field equal AND",
 			expr:                "varChar_field == 'a' && int64_field == 1",
-			expectedErrorString: "partition key not found in expr when validating partition key isolation",
+			expectedErrorString: "partition key not found in expr or the expr is invalid when validating partition key isolation",
 		},
 		{
 			name:                "partition key isolation complex OR",
