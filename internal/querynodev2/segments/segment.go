@@ -953,18 +953,6 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 		return err
 	}
 
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.RemoveDuplicatePkRecords(s.ptr)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "RemoveDuplicatePkRecords failed",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.Type().String())); err != nil {
-		return err
-	}
-
 	log.Info("load mutil field done",
 		zap.Int64("row count", rowCount),
 		zap.Int64("segmentID", s.ID()))

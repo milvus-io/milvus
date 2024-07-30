@@ -327,19 +327,6 @@ LoadFieldData(CSegmentInterface c_segment,
 }
 
 CStatus
-RemoveDuplicatePkRecords(CSegmentInterface c_segment) {
-    try {
-        auto segment =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        segment->RemoveDuplicatePkRecords();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
 LoadFieldDataV2(CSegmentInterface c_segment,
                 CLoadFieldDataInfo c_load_field_data_info) {
     try {
