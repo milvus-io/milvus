@@ -269,6 +269,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 	s.Run("test pipelining saveTaskMeta failed", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 		t.NodeID = 100
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
