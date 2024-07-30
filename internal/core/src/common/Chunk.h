@@ -13,6 +13,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/Span.h"
+#include "knowhere/sparse_utils.h"
 #include "simdjson/common_defs.h"
 #include "sys/mman.h"
 namespace milvus {
@@ -98,14 +99,39 @@ class ArrayChunk : public Chunk {
 
 class SparseFloatVectorChunk : public Chunk {
  public:
-    SparseFloatVectorChunk(int32_t row_nums,
-                           char* data,
-                           size_t size,
-                           std::vector<uint64_t>& offsets)
-        : Chunk(row_nums, data, size), offsets_(offsets) {
+    SparseFloatVectorChunk(int32_t row_nums, char* data, size_t size)
+        : Chunk(row_nums, data, size) {
+        vec_.resize(row_nums);
+        auto null_bitmap_bytes_num = (row_nums + 7) / 8;
+        auto offsets_ptr =
+            reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
+        for (int i = 0; i < row_nums; i++) {
+            int vec_size = 0;
+            if (i == row_nums - 1) {
+                vec_size = size - offsets_ptr[i];
+            } else {
+                vec_size = offsets_ptr[i + 1] - offsets_ptr[i];
+            }
+
+            vec_[i] = {
+                vec_size / knowhere::sparse::SparseRow<float>::element_size(),
+                (uint8_t*)(data + offsets_ptr[i]),
+                false};
+        }
+    }
+
+    const char*
+    Data() const {
+        return static_cast<const char*>(static_cast<const void*>(vec_.data()));
+    }
+
+    // only for test
+    std::vector<knowhere::sparse::SparseRow<float>>&
+    Vec() {
+        return vec_;
     }
 
  private:
-    std::vector<uint64_t>& offsets_;
+    std::vector<knowhere::sparse::SparseRow<float>> vec_;
 };
 }  // namespace milvus

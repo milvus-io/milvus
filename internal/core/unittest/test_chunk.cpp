@@ -135,7 +135,7 @@ TEST(chunk, test_sparse_float) {
     auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
         n_rows, kTestSparseDim, kTestSparseVectorDensity);
     auto field_data = milvus::storage::CreateFieldData(
-        storage::DataType::VECTOR_SPARSE_FLOAT, kTestSparseDim, n_rows);
+        storage::DataType::VECTOR_SPARSE_FLOAT, false, kTestSparseDim, n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;
@@ -158,8 +158,18 @@ TEST(chunk, test_sparse_float) {
 
     FieldMeta field_meta(FieldName("a"),
                          milvus::FieldId(1),
-                         DataType::ARRAY,
-                         DataType::STRING,
+                         DataType::VECTOR_SPARSE_FLOAT,
+                         kTestSparseDim,
+                         "IP",
                          false);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, kTestSparseDim, rb_reader);
+    auto vec = std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Vec();
+    for (size_t i = 0; i < n_rows; ++i) {
+        auto v1 = vec[i];
+        auto v2 = vecs[i];
+        EXPECT_EQ(v1.size(), v2.size());
+        for (size_t j = 0; j < v1.size(); ++j) {
+            EXPECT_EQ(v1[j].val, v2[j].val);
+        }
+    }
 }

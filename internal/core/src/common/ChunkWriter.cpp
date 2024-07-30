@@ -211,11 +211,60 @@ ArrayChunkWriter::finish() {
     return std::make_shared<ArrayChunk>(row_nums_, data, size, element_type_);
 }
 
+void
+SparseFloatVectorChunkWriter::write(
+    std::shared_ptr<arrow::RecordBatchReader> data) {
+    auto size = 0;
+    std::vector<std::string_view> strs;
+    std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    for (auto batch : *data) {
+        auto data = batch.ValueOrDie()->column(0);
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        for (int i = 0; i < array->length(); i++) {
+            auto str = array->GetView(i);
+            strs.push_back(str);
+            size += str.size();
+        }
+        auto null_bitmap_n = (data->length() + 7) / 8;
+        null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+        size += null_bitmap_n;
+        row_nums_ += array->length();
+    }
+    size += sizeof(uint64_t) * row_nums_;
+    if (file_) {
+        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    } else {
+        target_ = std::make_shared<MemChunkTarget>(size);
+    }
+
+    // chunk layout: null bitmap, offset1, offset2, ..., offsetn, str1, str2, ..., strn
+    // write null bitmaps
+    for (auto [data, size] : null_bitmaps) {
+        if (data == nullptr) {
+            std::vector<uint8_t> null_bitmap(size, 0xff);
+            target_->write(null_bitmap.data(), size);
+        } else {
+            target_->write(data, size);
+        }
+    }
+
+    // write data
+    offsets_pos_ = target_->tell();
+    target_->skip(sizeof(uint64_t) * row_nums_);
+
+    for (auto str : strs) {
+        offsets_.push_back(target_->tell());
+        target_->write(str.data(), str.size());
+    }
+}
+
 std::shared_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
+    // seek back to write offsets
+    target_->seek(offsets_pos_);
+    target_->write(offsets_.data(), offsets_.size() * sizeof(uint64_t));
     auto [data, size] = target_->get();
-    return std::make_shared<SparseFloatVectorChunk>(
-        row_nums_, data, size, offsets_);
+    return std::make_shared<SparseFloatVectorChunk>(row_nums_, data, size);
 }
 
 std::shared_ptr<Chunk>
@@ -285,6 +334,10 @@ create_chunk(const FieldMeta& field_meta,
         case milvus::DataType::ARRAY: {
             w = std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type());
+            break;
+        }
+        case milvus::DataType::VECTOR_SPARSE_FLOAT: {
+            w = std::make_shared<SparseFloatVectorChunkWriter>();
             break;
         }
         default:

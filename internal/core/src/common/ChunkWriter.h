@@ -155,7 +155,7 @@ class StringChunkWriter : public ChunkWriterBase {
     std::shared_ptr<Chunk>
     finish() override;
 
- private:
+ protected:
     std::vector<int64_t> offsets_;
     size_t offsets_pos_ = 0;
 };
@@ -199,14 +199,18 @@ class ArrayChunkWriter : public ChunkWriterBase {
     size_t offsets_pos_;
 };
 
-class SparseFloatVectorChunkWriter : public StringChunkWriter {
+class SparseFloatVectorChunkWriter : public ChunkWriterBase {
  public:
-    using StringChunkWriter::StringChunkWriter;
+    using ChunkWriterBase::ChunkWriterBase;
+
+    void
+    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
 
     std::shared_ptr<Chunk>
     finish() override;
 
  private:
+    uint64_t offsets_pos_ = 0;
     std::vector<uint64_t> offsets_;
 };
 
