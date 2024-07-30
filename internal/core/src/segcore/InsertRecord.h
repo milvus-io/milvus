@@ -68,12 +68,6 @@ class OffsetMap {
 
     virtual void
     clear() = 0;
-
-    virtual std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
-
-    virtual void
-    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
 };
 
 template <typename T>
@@ -100,57 +94,6 @@ class OffsetOrderedMap : public OffsetMap {
         std::unique_lock<std::shared_mutex> lck(mtx_);
 
         map_[std::get<T>(pk)].emplace_back(offset);
-    }
-
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        std::shared_lock<std::shared_mutex> lck(mtx_);
-        std::vector<PkType> remove_pks;
-        std::vector<Timestamp> remove_timestamps;
-
-        for (auto& [pk, offsets] : map_) {
-            if (offsets.size() > 1) {
-                // find max timestamp offset
-                int64_t max_timestamp_offset = 0;
-                for (auto& offset : offsets) {
-                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
-                        max_timestamp_offset = offset;
-                    }
-                }
-
-                remove_pks.push_back(pk);
-                remove_timestamps.push_back(timestamps[max_timestamp_offset]);
-            }
-        }
-
-        return std::make_pair(remove_pks, remove_timestamps);
-    }
-
-    void
-    remove_duplicate_pks(
-        const ConcurrentVector<Timestamp>& timestamps) override {
-        std::unique_lock<std::shared_mutex> lck(mtx_);
-
-        for (auto& [pk, offsets] : map_) {
-            if (offsets.size() > 1) {
-                // find max timestamp offset
-                int64_t max_timestamp_offset = 0;
-                for (auto& offset : offsets) {
-                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
-                        max_timestamp_offset = offset;
-                    }
-                }
-
-                // remove other offsets from pk index
-                offsets.erase(
-                    std::remove_if(offsets.begin(),
-                                   offsets.end(),
-                                   [max_timestamp_offset](int64_t val) {
-                                       return val != max_timestamp_offset;
-                                   }),
-                    offsets.end());
-            }
-        }
     }
 
     void
@@ -274,63 +217,6 @@ class OffsetOrderedArray : public OffsetMap {
         }
         array_.push_back(
             std::make_pair(std::get<T>(pk), static_cast<int32_t>(offset)));
-    }
-
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        std::vector<PkType> remove_pks;
-        std::vector<Timestamp> remove_timestamps;
-
-        // cached pks(key, max_timestamp_offset)
-        std::unordered_map<T, int64_t> pks;
-        std::unordered_set<T> need_removed_pks;
-        for (auto it = array_.begin(); it != array_.end(); ++it) {
-            const T& key = it->first;
-            if (pks.find(key) == pks.end()) {
-                pks.insert({key, it->second});
-            } else {
-                need_removed_pks.insert(key);
-                if (timestamps[it->second] > timestamps[pks[key]]) {
-                    pks[key] = it->second;
-                }
-            }
-        }
-
-        // return max_timestamps that removed pks
-        for (auto& pk : need_removed_pks) {
-            remove_pks.push_back(pk);
-            remove_timestamps.push_back(timestamps[pks[pk]]);
-        }
-        return std::make_pair(remove_pks, remove_timestamps);
-    }
-
-    void
-    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        // cached pks(key, max_timestamp_offset)
-        std::unordered_map<T, int64_t> pks;
-        std::unordered_set<T> need_removed_pks;
-        for (auto it = array_.begin(); it != array_.end(); ++it) {
-            const T& key = it->first;
-            if (pks.find(key) == pks.end()) {
-                pks.insert({key, it->second});
-            } else {
-                need_removed_pks.insert(key);
-                if (timestamps[it->second] > timestamps[pks[key]]) {
-                    pks[key] = it->second;
-                }
-            }
-        }
-
-        // remove duplicate pks
-        for (auto it = array_.begin(); it != array_.end();) {
-            const T& key = it->first;
-            auto max_offset = pks[key];
-            if (max_offset != it->second) {
-                it = array_.erase(it);
-            } else {
-                it++;
-            }
-        }
     }
 
     void
@@ -632,26 +518,6 @@ struct InsertRecord {
     insert_pk(const PkType& pk, int64_t offset) {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->insert(pk, offset);
-    }
-
-    bool
-    insert_with_check_existence(const PkType& pk, int64_t offset) {
-        std::lock_guard lck(shared_mutex_);
-        auto exist = pk2offset_->contain(pk);
-        pk2offset_->insert(pk, offset);
-        return exist;
-    }
-
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks() {
-        std::lock_guard lck(shared_mutex_);
-        return pk2offset_->get_need_removed_pks(timestamps_);
-    }
-
-    void
-    remove_duplicate_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_->remove_duplicate_pks(timestamps_);
     }
 
     bool

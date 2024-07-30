@@ -67,9 +67,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     LoadFieldDataV2(const LoadFieldDataInfo& info) override;
 
-    void
-    RemoveDuplicatePkRecords() override;
-
     std::string
     debug() const override;
 
@@ -89,7 +86,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_;
     }
 
-    const DeletedRecord<false>&
+    const DeletedRecord&
     get_deleted_record() const {
         return deleted_record_;
     }
@@ -131,11 +128,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     try_remove_chunks(FieldId fieldId);
-
-    std::vector<SegOffset>
-    SearchPk(const PkType& pk, Timestamp ts) const {
-        return insert_record_.search_pk(pk, ts);
-    }
 
  public:
     size_t
@@ -229,7 +221,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
-          deleted_record_(&insert_record_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id) {
         if (mmap_descriptor_ != nullptr) {
@@ -338,11 +329,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         Assert(plan);
     }
 
-    void
-    check_retrieve(const query::RetrievePlan* plan) const override {
-        Assert(plan);
-    }
-
     const ConcurrentVector<Timestamp>&
     get_timestamps() const override {
         return insert_record_.timestamps_;
@@ -363,7 +349,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable std::shared_mutex chunk_mutex_;
 
     // deleted pks
-    mutable DeletedRecord<false> deleted_record_;
+    mutable DeletedRecord deleted_record_;
 
     int64_t id_;
 
