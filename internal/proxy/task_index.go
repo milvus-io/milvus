@@ -163,33 +163,29 @@ func (cit *createIndexTask) parseIndexParams() error {
 		autoIndexEnable := Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
 
 		if autoIndexEnable || !exist || specifyIndexType == AutoIndexName {
-			getPrimitiveIndexType := func(dataType schemapb.DataType) string {
-				if typeutil.IsBoolType(dataType) {
-					return Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
-				} else if typeutil.IsArithmetic(dataType) {
-					return Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
-				} else {
-					return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
+			getPrimitiveIndexType := func(dataType schemapb.DataType) (string, error) {
+				if typeutil.IsArithmetic(dataType) {
+					return Params.AutoIndexConfig.ScalarNumericIndexType.GetValue(), nil
+				} else if typeutil.IsStringType(dataType) {
+					return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue(), nil
+				} else if typeutil.IsBoolType(dataType) {
+					return Params.AutoIndexConfig.ScalarBoolIndexType.GetValue(), nil
 				}
+				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}
 
 			indexType, err := func() (string, error) {
 				dataType := cit.fieldSchema.DataType
-				if typeutil.IsPrimitiveType(dataType) {
-					return getPrimitiveIndexType(dataType), nil
-				} else if typeutil.IsArrayType(dataType) {
-					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
-				} else {
-					return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
+				if typeutil.IsArrayType(dataType) {
+					return getPrimitiveIndexType(cit.fieldSchema.ElementType)
 				}
+				return getPrimitiveIndexType(dataType)
 			}()
-
 			if err != nil {
 				return merr.WrapErrParameterInvalid("supported field", err.Error())
 			}
 
 			indexParamsMap[common.IndexTypeKey] = indexType
-
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
