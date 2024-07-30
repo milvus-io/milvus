@@ -75,7 +75,7 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		DataNodeTtMsg: msgpb.DataNodeTtMsg{
+		DataNodeTtMsg: &msgpb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   msgType,
 				Timestamp: t,

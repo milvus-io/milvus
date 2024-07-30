@@ -693,7 +693,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 600, dim)
 		assert.Equal(t, 6, len(floatVecs.Contents))
-		assert.Equal(t, schemapb.SparseFloatArray{
+		assert.EqualExportedValues(t, &schemapb.SparseFloatArray{
 			// merged dim should be max of all dims
 			Dim: 600,
 			Contents: [][]byte{
@@ -704,7 +704,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 				typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 				typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
 			},
-		}, floatVecs.SparseFloatArray)
+		}, &floatVecs.SparseFloatArray)
 
 		ifloatVecs, valids, dim, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
@@ -747,10 +747,10 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, actualDim, dim)
 		assert.Equal(t, 3, len(floatVecs.Contents))
-		assert.Equal(t, schemapb.SparseFloatArray{
+		assert.EqualExportedValues(t, &schemapb.SparseFloatArray{
 			Dim:      int64(dim),
 			Contents: rows,
-		}, floatVecs.SparseFloatArray)
+		}, &floatVecs.SparseFloatArray)
 
 		ifloatVecs, valids, dim, err := r.GetDataFromPayload()
 		assert.Nil(t, valids)

@@ -2515,7 +2515,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),

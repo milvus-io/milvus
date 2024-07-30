@@ -236,8 +236,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     double total_cost =
         std::chrono::duration<double, std::micro>(vector_end - scalar_start)
             .count();
-    double scalar_ratio =
-        total_cost > 0.0 ? scalar_cost / total_cost : 0.0;
+    double scalar_ratio = total_cost > 0.0 ? scalar_cost / total_cost : 0.0;
     monitor::internal_core_search_latency_scalar_proportion.Observe(
         scalar_ratio);
 }

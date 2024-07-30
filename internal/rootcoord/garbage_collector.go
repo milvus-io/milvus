@@ -176,7 +176,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropCollectionRequest: msgpb.DropCollectionRequest{
+		DropCollectionRequest: &msgpb.DropCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 				commonpbutil.WithTimeStamp(ts),
@@ -208,7 +208,7 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropPartitionRequest: msgpb.DropPartitionRequest{
+		DropPartitionRequest: &msgpb.DropPartitionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
 				commonpbutil.WithTimeStamp(ts),

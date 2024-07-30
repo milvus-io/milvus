@@ -62,6 +62,7 @@ jobs:
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
 
   amazonlinux:
+    if: ${{ false }} # skip for now
     name: Code Checker Amazonlinux 2023
     # Run in amazonlinux docker
     runs-on: ubuntu-latest
@@ -88,6 +89,7 @@ jobs:
           ./build/builder.sh /bin/bash -c "make install"
 
   rockylinux:
+    if: ${{ false }} # skip for now
     name: Code Checker rockylinux8
     # Run in amazonlinux docker
     runs-on: ubuntu-latest

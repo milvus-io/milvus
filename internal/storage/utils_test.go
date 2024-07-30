@@ -658,7 +658,7 @@ func genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim int) 
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -696,7 +696,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1066,7 +1066,7 @@ func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1109,7 +1109,7 @@ func TestRowBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1188,7 +1188,7 @@ func TestColumnBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -1232,7 +1232,7 @@ func TestColumnBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 			HashValues:     nil,
 			MsgPosition:    nil,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,

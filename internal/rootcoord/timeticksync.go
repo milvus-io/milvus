@@ -327,20 +327,20 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 	}()
 
 	msgPack := msgstream.MsgPack{}
-	timeTickResult := msgpb.TimeTickMsg{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
-			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(t.sourceID),
-		),
-	}
+
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: timeTickResult,
+		TimeTickMsg: &msgpb.TimeTickMsg{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
+				commonpbutil.WithTimeStamp(ts),
+				commonpbutil.WithSourceID(t.sourceID),
+			),
+		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	if err := t.dmlChannels.broadcast(chanNames, &msgPack); err != nil {

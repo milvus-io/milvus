@@ -64,8 +64,8 @@ initTelemetry(const TraceConfig& cfg) {
             opts.url = cfg.otlpEndpoint;
             exporter = otlp::OtlpHttpExporterFactory::Create(opts);
             LOG_INFO("init otlp http exporter, endpoint: {}", opts.url);
-        } else if (cfg.otlpMethod == "grpc" || 
-            cfg.otlpMethod == "") { // legacy configuration
+        } else if (cfg.otlpMethod == "grpc" ||
+                   cfg.otlpMethod == "") {  // legacy configuration
             auto opts = otlp::OtlpGrpcExporterOptions{};
             opts.endpoint = cfg.otlpEndpoint;
             opts.use_ssl_credentials = cfg.oltpSecure;
