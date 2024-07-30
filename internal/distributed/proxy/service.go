@@ -66,6 +66,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -172,8 +173,31 @@ func (s *Server) registerHTTPServer() {
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
-	ginHandler.Use(accesslog.AccessLogMiddleware)
+	ginHandler.Use(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		metrics.RestfulFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Inc()
+		if c.Request.ContentLength >= 0 {
+			metrics.RestfulReceiveBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+			).Add(float64(c.Request.ContentLength))
+		}
+		start := time.Now()
 
+		// Process request
+		c.Next()
+
+		latency := time.Now().Sub(start)
+		metrics.RestfulReqLatency.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Observe(float64(latency.Milliseconds()))
+		metrics.RestfulSendBytes.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+		).Add(float64(c.Writer.Size()))
+	})
+
+	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
 		Formatter: func(param gin.LogFormatterParams) string {
