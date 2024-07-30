@@ -174,7 +174,6 @@ get_default_schema_config_nullable() {
     return conf.c_str();
 }
 
-
 CStatus
 CSearch(CSegmentInterface c_segment,
         CSearchPlan c_plan,

@@ -91,7 +91,7 @@ func TestRepackInsertData(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: hash,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Insert,
 				MsgID:    0,
@@ -201,7 +201,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: hash,
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Insert,
 				MsgID:    0,

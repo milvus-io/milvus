@@ -413,7 +413,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		CreateCollectionRequest: msgpb.CreateCollectionRequest{
+		CreateCollectionRequest: &msgpb.CreateCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
 				commonpbutil.WithTimeStamp(ts),

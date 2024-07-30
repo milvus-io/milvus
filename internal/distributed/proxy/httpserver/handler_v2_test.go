@@ -1359,10 +1359,10 @@ func TestSearchV2(t *testing.T) {
 	bfloat16VectorField.Name = "bfloat16Vector"
 	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	sparseFloatVectorField.Name = "sparseFloatVector"
-	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
-	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
-	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
-	collSchema.Fields = append(collSchema.Fields, &sparseFloatVectorField)
+	collSchema.Fields = append(collSchema.Fields, binaryVectorField)
+	collSchema.Fields = append(collSchema.Fields, float16VectorField)
+	collSchema.Fields = append(collSchema.Fields, bfloat16VectorField)
+	collSchema.Fields = append(collSchema.Fields, sparseFloatVectorField)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,

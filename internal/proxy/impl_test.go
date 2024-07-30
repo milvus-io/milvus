@@ -1421,14 +1421,13 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 
 		{
-			timeTickResult := msgpb.TimeTickMsg{}
 			timeTickMsg := &msgstream.TimeTickMsg{
 				BaseMsg: msgstream.BaseMsg{
 					BeginTimestamp: 1,
 					EndTimestamp:   10,
 					HashValues:     []uint32{0},
 				},
-				TimeTickMsg: timeTickResult,
+				TimeTickMsg: &msgpb.TimeTickMsg{},
 			}
 			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
 			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
@@ -1441,20 +1440,19 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 
 		{
-			timeTickResult := msgpb.TimeTickMsg{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType(-1)),
-					commonpbutil.WithTimeStamp(10),
-					commonpbutil.WithSourceID(-1),
-				),
-			}
 			timeTickMsg := &msgstream.TimeTickMsg{
 				BaseMsg: msgstream.BaseMsg{
 					BeginTimestamp: 1,
 					EndTimestamp:   10,
 					HashValues:     []uint32{0},
 				},
-				TimeTickMsg: timeTickResult,
+				TimeTickMsg: &msgpb.TimeTickMsg{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType(-1)),
+						commonpbutil.WithTimeStamp(10),
+						commonpbutil.WithSourceID(-1),
+					),
+				},
 			}
 			msgBytes, _ := timeTickMsg.Marshal(timeTickMsg)
 			resp, err := node.ReplicateMessage(context.TODO(), &milvuspb.ReplicateMessageRequest{
@@ -1512,7 +1510,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 					MsgID:       []byte("mock message id 2"),
 				},
 			},
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     10001,

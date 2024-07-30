@@ -206,7 +206,7 @@ struct GroupByMap {
     }
     bool
     Push(const T& t) {
-        if (group_map_.size() >= group_capacity_ && group_map_[t] == 0){
+        if (group_map_.size() >= group_capacity_ && group_map_[t] == 0) {
             return false;
         }
         if (group_map_[t] >= group_size_) {
