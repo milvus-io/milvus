@@ -391,12 +391,9 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 	}
 
 	// get pkfield id
-	pkField := int64(-1)
-	for _, field := range schema.Fields {
-		if field.IsPrimaryKey {
-			pkField = field.FieldID
-			break
-		}
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
 	}
 
 	// filter stats binlog files which is pk field stats log
@@ -404,7 +401,7 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 	logType := storage.DefaultStatsType
 
 	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField {
+		if binlog.FieldID != pkField.GetFieldID() {
 			continue
 		}
 	Loop:
