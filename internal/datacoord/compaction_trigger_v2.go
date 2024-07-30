@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -291,10 +292,20 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 }
 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
-	taskID, _, err := m.allocator.allocN(2)
+	// use timestamp as task id because partition stats will use this task id as version id
+	// and will parse the physical timestamp in clustering compaction trigger policy
+	taskID, err := m.allocator.allocTimestamp(ctx)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate timestamp fail", zap.String("view", view.String()))
 		return
+	}
+	var analyzeTaskID int64 = 0
+	if typeutil.IsVectorType(view.(*ClusteringSegmentsView).clusteringKeyField.DataType) {
+		analyzeTaskID, _, err = m.allocator.allocN(1)
+		if err != nil {
+			log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+			return
+		}
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
@@ -303,7 +314,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
 	task := &datapb.CompactionTask{
-		PlanID:             taskID,
+		PlanID:             int64(taskID),
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().UnixMilli(),
@@ -319,7 +330,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		MaxSegmentRows:     maxSegmentRows,
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
-		AnalyzeTaskID:      taskID + 1,
+		AnalyzeTaskID:      analyzeTaskID,
 		LastStateStartTime: time.Now().UnixMilli(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
@@ -331,7 +342,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 			zap.Error(err))
 	}
 	log.Info("Finish to submit a clustering compaction task",
-		zap.Int64("taskID", taskID),
+		zap.Int64("taskID", int64(taskID)),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 		zap.Int64("MaxSegmentRows", task.MaxSegmentRows),

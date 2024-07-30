@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -21,7 +22,7 @@ type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
 	mockAlloc       *NMockAllocator
-	handler         Handler
+	handler         *NMockHandler
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
 	meta            *meta
@@ -49,9 +50,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
-	s.triggerManager.handler = handler
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
@@ -99,9 +98,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
-	s.triggerManager.handler = handler
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
 	segments, found := collSegs[1]
@@ -139,4 +136,100 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToSchedulerVector() {
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(1, nil)
+	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(1100, 1, nil)
+	enqueueTasks := make([]*datapb.CompactionTask, 0)
+	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+		enqueueTasks = append(enqueueTasks, task)
+		return nil
+	})
+	ctx := context.TODO()
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, &ClusteringSegmentsView{
+		label: &CompactionGroupLabel{
+			CollectionID: 100,
+			PartitionID:  101,
+			Channel:      "ch1",
+		},
+		clusteringKeyField: &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		},
+		segments: []*SegmentView{
+			{
+				ID:        100012,
+				MaxRowNum: 10000,
+			},
+		},
+	})
+	s.Equal(1, len(enqueueTasks))
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToSchedulerAbnormal() {
+	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(1, errors.New("mock error")).Once()
+	enqueueTasks := make([]*datapb.CompactionTask, 0)
+	ctx := context.TODO()
+	view := &ClusteringSegmentsView{
+		label: &CompactionGroupLabel{
+			CollectionID: 100,
+			PartitionID:  101,
+			Channel:      "ch1",
+		},
+		clusteringKeyField: &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		},
+		segments: []*SegmentView{
+			{
+				ID:        100012,
+				MaxRowNum: 10000,
+			},
+		},
+	}
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, view)
+	s.Equal(0, len(enqueueTasks))
+
+	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(1, nil)
+	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(1100, 1, errors.New("mock error")).Once()
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, view)
+	s.Equal(0, len(enqueueTasks))
+
+	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(1100, 1, nil)
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, errors.New("mock error")).Once()
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, view)
+	s.Equal(0, len(enqueueTasks))
+
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).Return(errors.New("mock error")).Once()
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, view)
+	s.Equal(0, len(enqueueTasks))
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToSchedulerScalar() {
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(1, nil)
+	enqueueTasks := make([]*datapb.CompactionTask, 0)
+	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+		enqueueTasks = append(enqueueTasks, task)
+		return nil
+	})
+	ctx := context.TODO()
+	s.triggerManager.SubmitClusteringViewToScheduler(ctx, &ClusteringSegmentsView{
+		label: &CompactionGroupLabel{
+			CollectionID: 100,
+			PartitionID:  101,
+			Channel:      "ch1",
+		},
+		clusteringKeyField: &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		},
+		segments: []*SegmentView{
+			{
+				ID:        100012,
+				MaxRowNum: 10000,
+			},
+		},
+	})
+	s.Equal(1, len(enqueueTasks))
 }
