@@ -39,7 +39,8 @@ TEST(chunk, test_int64_field) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(FieldName("a"), milvus::FieldId(1), DataType::INT64);
+    FieldMeta field_meta(
+        FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto span =
         std::dynamic_pointer_cast<FixedWidthChunk<int64_t>>(chunk)->Span();
@@ -75,7 +76,8 @@ TEST(chunk, test_variable_field) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(FieldName("a"), milvus::FieldId(1), DataType::STRING);
+    FieldMeta field_meta(
+        FieldName("a"), milvus::FieldId(1), DataType::STRING, false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews();
     for (size_t i = 0; i < data.size(); ++i) {
@@ -113,8 +115,11 @@ TEST(chunk, test_array) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::ARRAY, DataType::STRING);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::ARRAY,
+                         DataType::STRING,
+                         false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto span = std::dynamic_pointer_cast<ArrayChunk>(chunk)->Span();
     EXPECT_EQ(span.row_count(), 1);
@@ -151,7 +156,10 @@ TEST(chunk, test_sparse_float) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::ARRAY, DataType::STRING);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::ARRAY,
+                         DataType::STRING,
+                         false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
 }
