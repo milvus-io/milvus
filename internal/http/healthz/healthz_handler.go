@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -52,6 +53,10 @@ type HealthResponse struct {
 
 type HealthHandler struct {
 	indicators []Indicator
+
+	// unregister role when call stop by restful api
+	unregisterLock    sync.RWMutex
+	unregisteredRoles map[string]struct{}
 }
 
 var _ http.Handler = (*HealthHandler)(nil)
@@ -60,6 +65,16 @@ var defaultHandler = HealthHandler{}
 
 func Register(indicator Indicator) {
 	defaultHandler.indicators = append(defaultHandler.indicators, indicator)
+}
+
+func UnRegister(role string) {
+	defaultHandler.unregisterLock.Lock()
+	defer defaultHandler.unregisterLock.Unlock()
+
+	if defaultHandler.unregisteredRoles == nil {
+		defaultHandler.unregisteredRoles = make(map[string]struct{})
+	}
+	defaultHandler.unregisteredRoles[role] = struct{}{}
 }
 
 func Handler() *HealthHandler {
@@ -72,6 +87,12 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx := context.Background()
 	for _, in := range handler.indicators {
+		handler.unregisterLock.RLock()
+		_, unregistered := handler.unregisteredRoles[in.GetName()]
+		handler.unregisterLock.RUnlock()
+		if unregistered {
+			continue
+		}
 		code := in.Health(ctx)
 		resp.Detail = append(resp.Detail, &IndicatorState{
 			Name: in.GetName(),
