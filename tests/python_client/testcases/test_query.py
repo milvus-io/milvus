@@ -3005,7 +3005,7 @@ class TestQueryCount(TestcaseBase):
         # query count
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 1}]}
+                           check_items={exp_res: [{count: tmp_nb}]}
                            )
 
         # delete and verify count
