@@ -399,6 +399,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // Don't allow raw data and index exist at the same time
         //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
         //                   "field data can't be loaded when indexing exists");
+        auto get_block_size = [&]() -> size_t {
+            return schema_->get_primary_field_id() == field_id
+                       ? DEFAULT_PK_VRCOL_BLOCK_SIZE
+                       : DEFAULT_MEM_VRCOL_BLOCK_SIZE;
+        };
 
         std::shared_ptr<ColumnBase> column{};
         if (IsVariableDataType(data_type)) {
@@ -408,7 +413,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::VARCHAR: {
                     auto var_column =
                         std::make_shared<VariableColumn<std::string>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -423,7 +428,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::JSON: {
                     auto var_column =
                         std::make_shared<VariableColumn<milvus::Json>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -572,7 +577,10 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::STRING:
             case milvus::DataType::VARCHAR: {
                 auto var_column = std::make_shared<VariableColumn<std::string>>(
-                    file, total_written, field_meta);
+                    file,
+                    total_written,
+                    field_meta,
+                    DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -580,7 +588,10 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<VariableColumn<milvus::Json>>(
-                        file, total_written, field_meta);
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
