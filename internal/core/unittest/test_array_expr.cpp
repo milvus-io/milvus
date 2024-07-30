@@ -701,7 +701,7 @@ TEST(Expr, TestArrayEqual) {
     std::vector<ScalarArray> long_array_col;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
-        auto raw_data = DataGen(schema, N, iter, 0, 0, 1, 3);
+        auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
         auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
         long_array_col.insert(long_array_col.end(),
                               new_long_array_col.begin(),
