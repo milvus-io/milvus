@@ -58,7 +58,7 @@ class ChunkWriter : public ChunkWriterBase {
             row_nums += batch->num_rows();
             auto data = batch->column(0);
             auto array = std::dynamic_pointer_cast<ArrowType>(data);
-            auto null_bitmap_n = data->null_bitmap()->size();
+            auto null_bitmap_n = (data->length() + 7) / 8;
             size += null_bitmap_n + array->length() * dim_ * sizeof(T);
         }
 
@@ -73,7 +73,7 @@ class ChunkWriter : public ChunkWriterBase {
         for (auto batch : batch_vec) {
             auto data = batch->column(0);
             auto null_bitmap = data->null_bitmap_data();
-            auto null_bitmap_n = data->null_bitmap()->size();
+            auto null_bitmap_n = (data->length() + 7) / 8;
             if (null_bitmap) {
                 target_->write(null_bitmap, null_bitmap_n);
             } else {
@@ -114,7 +114,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         auto data = batch->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
         size += array->length() * dim_;
-        size += data->null_bitmap()->size();
+        size += (data->length() + 7) / 8;
     }
     row_nums_ = row_nums;
     if (file_) {
@@ -126,7 +126,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
     for (auto batch : batch_vec) {
         auto data = batch->column(0);
         auto null_bitmap = data->null_bitmap_data();
-        auto null_bitmap_n = data->null_bitmap()->size();
+        auto null_bitmap_n = (data->length() + 7) / 8;
         if (null_bitmap) {
             target_->write(null_bitmap, null_bitmap_n);
         } else {
