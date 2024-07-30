@@ -1595,7 +1595,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
-	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1638,7 +1638,7 @@ type queryCoordConfig struct {
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
-	CollectionBalanceSegmentBatchSize  ParamItem `refreshable true`
+	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
