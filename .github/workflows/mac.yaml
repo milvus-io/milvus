@@ -71,11 +71,8 @@ jobs:
           restore-keys: macos-conan-
       - name: Code Check
         env:
-          CCACHE_DIR: /var/tmp/ccache
-          CCACHE_COMPILERCHECK: content
-          CCACHE_COMPRESS: 1
-          CCACHE_COMPRESSLEVEL: 5
-          CCACHE_MAXSIZE: 2G
+          CC: gcc-12
+          CXX: g++-12
         run: |
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
@@ -83,9 +80,6 @@ jobs:
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
           pip3 install conan==1.61.0
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
-          fi
           make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
