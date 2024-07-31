@@ -80,7 +80,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.IPItem = ParamItem{
 		Key:     p.Domain + ".ip",
 		Version: "2.3.3",
-		Doc:     "TCP port of " + p.Domain + ". If not specified, use the first unicastable address",
+		Doc:     "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
 		Export:  true,
 	}
 	p.IPItem.Init(base.mgr)
@@ -90,7 +90,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".port",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
-		Doc:          "TCP/IP address of " + p.Domain,
+		Doc:          "TCP port of " + p.Domain,
 		Export:       true,
 	}
 	p.Port.Init(base.mgr)
@@ -276,7 +276,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
-		Doc: "The maximum size of each RPC request that the clients on " + domain + " can receive, unit: byte",,
+		Doc:    "The maximum size of each RPC request that the clients on " + domain + " can receive, unit: byte",
 		Export: true,
 	}
 	p.ClientMaxRecvSize.Init(base.mgr)
