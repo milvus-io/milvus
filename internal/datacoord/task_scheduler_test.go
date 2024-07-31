@@ -1349,7 +1349,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 					},
 				},
 			}, nil
-		}).Twice()
+		}).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
 		// retry --> init
@@ -1366,7 +1366,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 					{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
 				},
 			},
-		}, nil).Twice()
+		}, nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Once()
 
 		// inProgress --> Finished
@@ -1595,6 +1595,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		mt.indexMeta.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
 		mt.indexMeta.segmentIndexes[segID][indexID].IndexState = commonpb.IndexState_Unissued
 		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
+		mt.collections[collID].Schema.Fields[0].DataType = schemapb.DataType_FloatVector
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
 		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
 	}
@@ -1681,7 +1682,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
@@ -1698,6 +1699,33 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 
+	s.Run("enqueue returns empty when vector type is not dense vector", func() {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		for _, dataType := range []schemapb.DataType{
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_SparseFloatVector,
+		} {
+			mt.collections[collID].Schema.Fields[0].DataType = dataType
+			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
+					return merr.Success(), nil
+				}).Once()
+			t := &indexBuildTask{
+				taskID: buildID,
+				nodeID: nodeID,
+				taskInfo: &indexpb.IndexTaskInfo{
+					BuildID:    buildID,
+					State:      commonpb.IndexState_Unissued,
+					FailReason: "",
+				},
+			}
+			scheduler.enqueue(t)
+			waitTaskDoneFunc(scheduler)
+			resetMetaFunc()
+		}
+	})
+
 	s.Run("enqueue returns empty optional field when the data type is not STRING or VARCHAR or Integer", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
@@ -1710,7 +1738,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			mt.collections[collID].Schema.Fields[1].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
@@ -1733,7 +1761,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{

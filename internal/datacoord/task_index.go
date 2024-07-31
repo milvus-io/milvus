@@ -107,38 +107,6 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
 		return true
 	}
-	// vector index build needs information of optional scalar fields data
-	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
-	partitionKeyIsolation := false
-	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
-		collInfo, err := dependency.handler.GetCollection(ctx, segIndex.CollectionID)
-		if err != nil || collInfo == nil {
-			log.Ctx(ctx).Warn("get collection failed", zap.Int64("collID", segIndex.CollectionID), zap.Error(err))
-			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return true
-		}
-		colSchema := collInfo.Schema
-		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
-		if partitionKeyField == nil || err != nil {
-			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("taskID", it.taskID), zap.Error(err))
-		} else {
-			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
-				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-					FieldID:   partitionKeyField.FieldID,
-					FieldName: partitionKeyField.Name,
-					FieldType: int32(partitionKeyField.DataType),
-					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-				})
-				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collInfo.Properties)
-				if isoErr != nil {
-					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
-				}
-				if iso {
-					partitionKeyIsolation = true
-				}
-			}
-		}
-	}
 
 	typeParams := dependency.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 
@@ -200,6 +168,37 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		log.Ctx(ctx).Warn("failed to get dim from field type params",
 			zap.String("field type", field.GetDataType().String()), zap.Error(err))
 		// don't return, maybe field is scalar field or sparseFloatVector
+	}
+
+	// vector index build needs information of optional scalar fields data
+	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
+	partitionKeyIsolation := false
+	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) && typeutil.IsDenseFloatVectorType(field.DataType) {
+		if collectionInfo == nil {
+			log.Ctx(ctx).Warn("get collection failed", zap.Int64("collID", segIndex.CollectionID), zap.Error(err))
+			it.SetState(indexpb.JobState_JobStateInit, err.Error())
+			return true
+		}
+		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(schema)
+		if partitionKeyField == nil || err != nil {
+			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("taskID", it.taskID), zap.Error(err))
+		} else {
+			if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+					FieldID:   partitionKeyField.FieldID,
+					FieldName: partitionKeyField.Name,
+					FieldType: int32(partitionKeyField.DataType),
+					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+				})
+				iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+				if isoErr != nil {
+					log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
+				}
+				if iso {
+					partitionKeyIsolation = true
+				}
+			}
+		}
 	}
 
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
