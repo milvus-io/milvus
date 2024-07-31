@@ -51,17 +51,20 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	nodeID := C.int(paramtable.GetNodeID())
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
@@ -80,16 +83,19 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}

@@ -188,7 +188,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		// Process request
 		c.Next()
 
-		latency := time.Now().Sub(start)
+		latency := time.Since(start)
 		metrics.RestfulReqLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
 		).Observe(float64(latency.Milliseconds()))

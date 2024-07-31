@@ -293,15 +293,23 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
 	taskID, _, err := m.allocator.allocN(2)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()),
+			zap.Error(err))
 		return
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()),
+			zap.Error(err))
 		return
 	}
-	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
+
+	_, totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view)
+	if err != nil {
+		log.Warn("Failed to calculate cluster compaction config fail", zap.String("view", view.String()), zap.Error(err))
+		return
+	}
+
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,

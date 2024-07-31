@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "Tracer.h"
+#include <opentelemetry/exporters/otlp/otlp_http_exporter_factory.h>
+#include <opentelemetry/exporters/otlp/otlp_http_exporter_options.h>
 #include "log/Log.h"
 
 #include <iomanip>
@@ -57,11 +59,22 @@ initTelemetry(const TraceConfig& cfg) {
         exporter = jaeger::JaegerExporterFactory::Create(opts);
         LOG_INFO("init jaeger exporter, endpoint: {}", opts.endpoint);
     } else if (cfg.exporter == "otlp") {
-        auto opts = otlp::OtlpGrpcExporterOptions{};
-        opts.endpoint = cfg.otlpEndpoint;
-        opts.use_ssl_credentials = cfg.oltpSecure;
-        exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
-        LOG_INFO("init otlp exporter, endpoint: {}", opts.endpoint);
+        if (cfg.otlpMethod == "http") {
+            auto opts = otlp::OtlpHttpExporterOptions{};
+            opts.url = cfg.otlpEndpoint;
+            exporter = otlp::OtlpHttpExporterFactory::Create(opts);
+            LOG_INFO("init otlp http exporter, endpoint: {}", opts.url);
+        } else if (cfg.otlpMethod == "grpc" ||
+                   cfg.otlpMethod == "") {  // legacy configuration
+            auto opts = otlp::OtlpGrpcExporterOptions{};
+            opts.endpoint = cfg.otlpEndpoint;
+            opts.use_ssl_credentials = cfg.oltpSecure;
+            exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
+            LOG_INFO("init otlp grpc exporter, endpoint: {}", opts.endpoint);
+        } else {
+            LOG_INFO("unknown otlp exporter method: {}", cfg.otlpMethod);
+            enable_trace = false;
+        }
     } else {
         LOG_INFO("Empty Trace");
         enable_trace = false;

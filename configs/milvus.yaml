@@ -478,8 +478,8 @@ dataCoord:
       # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
       # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
       # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
-      preferSegmentSize: 512m       
-      maxSegmentSize: 1024m
+      preferSegmentSizeRatio: 0.8
+      maxSegmentSizeRatio: 1
       
       # vector clustering related
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
@@ -846,7 +846,8 @@ trace:
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
   otlp:
-    endpoint:  # example: "127.0.0.1:4318"
+    endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
+    method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
