@@ -18,4 +18,6 @@ set(MONITOR_SRC
 
 add_library(milvus_monitor SHARED ${MONITOR_SRC})
 
+target_link_libraries(milvus_monitor PUBLIC ${CONAN_LIBS})
+
 install(TARGETS milvus_monitor DESTINATION "${CMAKE_INSTALL_LIBDIR}")
