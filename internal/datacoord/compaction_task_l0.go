@@ -137,6 +137,51 @@ func (t *l0CompactionTask) processExecuting() bool {
 	return false
 }
 
+func (t *l0CompactionTask) processMetaSaved() bool {
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	if err != nil {
+		log.Warn("l0CompactionTask unable to processMetaSaved", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return false
+	}
+	return t.processCompleted()
+}
+
+func (t *l0CompactionTask) processCompleted() bool {
+	if t.hasAssignedWorker() {
+		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+			PlanID: t.GetPlanID(),
+		})
+		if err != nil {
+			log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		}
+	}
+
+	t.resetSegmentCompacting()
+	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
+	log.Info("l0CompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
+	return true
+}
+
+func (t *l0CompactionTask) processTimeout() bool {
+	t.resetSegmentCompacting()
+	return true
+}
+
+func (t *l0CompactionTask) processFailed() bool {
+	if t.hasAssignedWorker() {
+		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+			PlanID: t.GetPlanID(),
+		})
+		if err != nil {
+			log.Warn("l0CompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		}
+	}
+
+	t.resetSegmentCompacting()
+	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
+	return true
+}
+
 func (t *l0CompactionTask) GetSpan() trace.Span {
 	return t.span
 }
@@ -153,8 +198,54 @@ func (t *l0CompactionTask) SetSpan(span trace.Span) {
 	t.span = span
 }
 
+func (t *l0CompactionTask) EndSpan() {
+	if t.span != nil {
+		t.span.End()
+	}
+}
+
 func (t *l0CompactionTask) SetPlan(plan *datapb.CompactionPlan) {
 	t.plan = plan
+}
+
+func (t *l0CompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
+func (t *l0CompactionTask) SetStartTime(startTime int64) {
+	t.StartTime = startTime
+}
+
+func (t *l0CompactionTask) GetLabel() string {
+	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
+}
+
+func (t *l0CompactionTask) NeedReAssignNodeID() bool {
+	return t.GetState() == datapb.CompactionTaskState_pipelining && (!t.hasAssignedWorker())
+}
+
+func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
+	t.result = result
+}
+
+func (t *l0CompactionTask) CleanLogPath() {
+	if t.plan == nil {
+		return
+	}
+	if t.plan.GetSegmentBinlogs() != nil {
+		for _, binlogs := range t.plan.GetSegmentBinlogs() {
+			binlogs.FieldBinlogs = nil
+			binlogs.Field2StatslogPaths = nil
+			binlogs.Deltalogs = nil
+		}
+	}
+	if t.result.GetSegments() != nil {
+		for _, segment := range t.result.GetSegments() {
+			segment.InsertLogs = nil
+			segment.Deltalogs = nil
+			segment.Field2StatslogPaths = nil
+		}
+	}
 }
 
 func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask {
@@ -183,52 +274,6 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 		opt(taskClone)
 	}
 	return taskClone
-}
-
-func (t *l0CompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
-func (t *l0CompactionTask) GetLabel() string {
-	return fmt.Sprintf("%d-%s", t.PartitionID, t.GetChannel())
-}
-
-func (t *l0CompactionTask) GetPlan() *datapb.CompactionPlan {
-	return t.plan
-}
-
-func (t *l0CompactionTask) SetStartTime(startTime int64) {
-	t.StartTime = startTime
-}
-
-func (t *l0CompactionTask) NeedReAssignNodeID() bool {
-	return t.GetState() == datapb.CompactionTaskState_pipelining && (t.GetNodeID() == 0 || t.GetNodeID() == NullNodeID)
-}
-
-func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
-}
-
-func (t *l0CompactionTask) CleanLogPath() {
-	if t.plan == nil {
-		return
-	}
-	if t.plan.GetSegmentBinlogs() != nil {
-		for _, binlogs := range t.plan.GetSegmentBinlogs() {
-			binlogs.FieldBinlogs = nil
-			binlogs.Field2StatslogPaths = nil
-			binlogs.Deltalogs = nil
-		}
-	}
-	if t.result.GetSegments() != nil {
-		for _, segment := range t.result.GetSegments() {
-			segment.InsertLogs = nil
-			segment.Deltalogs = nil
-			segment.Field2StatslogPaths = nil
-		}
-	}
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
@@ -303,53 +348,12 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	return plan, nil
 }
 
-func (t *l0CompactionTask) processMetaSaved() bool {
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
-	if err != nil {
-		log.Warn("l0CompactionTask unable to processMetaSaved", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
-		return false
-	}
-	return t.processCompleted()
-}
-
-func (t *l0CompactionTask) processCompleted() bool {
-	if t.GetNodeID() != 0 && t.GetNodeID() != NullNodeID {
-		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-			PlanID: t.GetPlanID(),
-		})
-		if err != nil {
-			log.Warn("l0CompactionTask unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
-		}
-	}
-
-	t.resetSegmentCompacting()
-	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-	log.Info("l0CompactionTask processCompleted done", zap.Int64("planID", t.GetPlanID()))
-	return true
-}
-
 func (t *l0CompactionTask) resetSegmentCompacting() {
 	t.meta.SetSegmentsCompacting(t.GetInputSegments(), false)
 }
 
-func (t *l0CompactionTask) processTimeout() bool {
-	t.resetSegmentCompacting()
-	return true
-}
-
-func (t *l0CompactionTask) processFailed() bool {
-	if t.GetNodeID() != 0 && t.GetNodeID() != NullNodeID {
-		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-			PlanID: t.GetPlanID(),
-		})
-		if err != nil {
-			log.Warn("l0CompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
-		}
-	}
-
-	t.resetSegmentCompacting()
-	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
-	return true
+func (t *l0CompactionTask) hasAssignedWorker() bool {
+	return t.GetNodeID() != 0 && t.GetNodeID() != NullNodeID
 }
 
 func (t *l0CompactionTask) checkTimeout() bool {
@@ -370,6 +374,14 @@ func (t *l0CompactionTask) checkTimeout() bool {
 	return false
 }
 
+func (t *l0CompactionTask) SetNodeID(id UniqueID) error {
+	return t.updateAndSaveTaskMeta(setNodeID(id))
+}
+
+func (t *l0CompactionTask) SaveTaskMeta() error {
+	return t.saveTaskMeta(t.CompactionTask)
+}
+
 func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
 	task := t.ShadowClone(opts...)
 	err := t.saveTaskMeta(task)
@@ -380,16 +392,8 @@ func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) erro
 	return nil
 }
 
-func (t *l0CompactionTask) SetNodeID(id UniqueID) error {
-	return t.updateAndSaveTaskMeta(setNodeID(id))
-}
-
 func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(task)
-}
-
-func (t *l0CompactionTask) SaveTaskMeta() error {
-	return t.saveTaskMeta(t.CompactionTask)
 }
 
 func (t *l0CompactionTask) saveSegmentMeta() error {
