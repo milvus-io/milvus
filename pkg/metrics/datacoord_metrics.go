@@ -308,6 +308,18 @@ var (
 			Name:      "import_tasks",
 			Help:      "the import tasks grouping by type and state",
 		}, []string{"task_type", "import_state"})
+
+	DataCoordTaskExecuteLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_execute_max_latency",
+			Help:      "latency of task execute operation",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			taskTypeLabel,
+			statusLabelName,
+		})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -335,6 +347,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTasks)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
+	registry.MustRegister(DataCoordTaskExecuteLatency)
 }
 
 func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {
