@@ -598,6 +598,8 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+  storage:
+    useCollectionIdBasedIndexPath: false
   ttMsgEnabled: true # Whether the instance disable sending ts messages
   bloomFilterSize: 100000
   maxBloomFalsePositive: 0.05
