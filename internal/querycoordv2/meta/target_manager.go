@@ -690,3 +690,22 @@ func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 
 	return nil
 }
+
+// if segment isn't l0 segment, and exist in current/next target, then it can be moved
+func (mgr *TargetManager) CanSegmentBeMoved(segment *Segment) bool {
+	if segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+
+	current := mgr.current.getCollectionTarget(segment.CollectionID)
+	if current != nil && current.segments[segment.GetID()] != nil {
+		return true
+	}
+
+	next := mgr.next.getCollectionTarget(segment.CollectionID)
+	if next != nil && next.segments[segment.GetID()] != nil {
+		return true
+	}
+
+	return false
+}
