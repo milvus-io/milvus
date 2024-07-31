@@ -259,7 +259,7 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.True(ok)
 	view2 := &meta.LeaderView{
 		ID:           3,
-		CollectionID: 13,
+		CollectionID: 103,
 		Channel:      "103-dmc0",
 		Segments:     make(map[int64]*querypb.SegmentDist),
 	}
@@ -384,9 +384,9 @@ func (suite *CollectionObserverSuite) loadAll() {
 		suite.load(collection)
 	}
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[0])
-	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[0])
+	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[0], suite.targetObserver.checkDistributionReady)
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[2])
-	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[2])
+	suite.targetMgr.UpdateCollectionNextTarget(suite.collections[2], suite.targetObserver.checkDistributionReady)
 }
 
 func (suite *CollectionObserverSuite) load(collection int64) {
@@ -441,7 +441,7 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
-	suite.targetMgr.UpdateCollectionNextTarget(collection)
+	suite.targetMgr.UpdateCollectionNextTarget(collection, suite.targetObserver.checkDistributionReady)
 
 	suite.ob.LoadCollection(context.Background(), collection)
 }

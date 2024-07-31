@@ -433,9 +433,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -629,9 +629,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -752,9 +752,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
 		balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
-		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.ForceUpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
-		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.ForceUpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 	}
 
 	// 2. set up target for distribution for multi collections
@@ -895,9 +895,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -1015,9 +1015,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			for replicaID, nodes := range c.replicaWithNodes {
 				balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(replicaID, c.collectionID, nodes))
 			}
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.ForceUpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.segmentDist {

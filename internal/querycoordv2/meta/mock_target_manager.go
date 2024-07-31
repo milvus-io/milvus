@@ -3,6 +3,8 @@
 package meta
 
 import (
+	context "context"
+
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
@@ -919,13 +921,20 @@ func (_c *MockTargetManager_UpdateCollectionCurrentTarget_Call) RunAndReturn(run
 	return _c
 }
 
-// UpdateCollectionNextTarget provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) UpdateCollectionNextTarget(collectionID int64) error {
-	ret := _m.Called(collectionID)
+// UpdateCollectionNextTarget provides a mock function with given fields: collectionID, checkFunc
+func (_m *MockTargetManager) UpdateCollectionNextTarget(collectionID int64, checkFunc ...func(context.Context, int64) bool) error {
+	_va := make([]interface{}, len(checkFunc))
+	for _i := range checkFunc {
+		_va[_i] = checkFunc[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, collectionID)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64) error); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, ...func(context.Context, int64) bool) error); ok {
+		r0 = rf(collectionID, checkFunc...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -940,13 +949,21 @@ type MockTargetManager_UpdateCollectionNextTarget_Call struct {
 
 // UpdateCollectionNextTarget is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockTargetManager_Expecter) UpdateCollectionNextTarget(collectionID interface{}) *MockTargetManager_UpdateCollectionNextTarget_Call {
-	return &MockTargetManager_UpdateCollectionNextTarget_Call{Call: _e.mock.On("UpdateCollectionNextTarget", collectionID)}
+//   - checkFunc ...func(context.Context , int64) bool
+func (_e *MockTargetManager_Expecter) UpdateCollectionNextTarget(collectionID interface{}, checkFunc ...interface{}) *MockTargetManager_UpdateCollectionNextTarget_Call {
+	return &MockTargetManager_UpdateCollectionNextTarget_Call{Call: _e.mock.On("UpdateCollectionNextTarget",
+		append([]interface{}{collectionID}, checkFunc...)...)}
 }
 
-func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Run(run func(collectionID int64)) *MockTargetManager_UpdateCollectionNextTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Run(run func(collectionID int64, checkFunc ...func(context.Context, int64) bool)) *MockTargetManager_UpdateCollectionNextTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		variadicArgs := make([]func(context.Context, int64) bool, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(func(context.Context, int64) bool)
+			}
+		}
+		run(args[0].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -956,7 +973,7 @@ func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) Return(_a0 error) *
 	return _c
 }
 
-func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) RunAndReturn(run func(int64) error) *MockTargetManager_UpdateCollectionNextTarget_Call {
+func (_c *MockTargetManager_UpdateCollectionNextTarget_Call) RunAndReturn(run func(int64, ...func(context.Context, int64) bool) error) *MockTargetManager_UpdateCollectionNextTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -159,7 +159,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	// test skip sync l0 segment
 	segments = []*datapb.SegmentInfo{
 		{
-			ID:            1,
+			ID:            1111,
 			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 			Level:         datapb.SegmentLevel_L0,

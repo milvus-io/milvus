@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -155,17 +157,20 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			err := ob.updateNextTarget(req.CollectionID)
 			ob.keylocks.Unlock(req.CollectionID)
 			if err != nil {
-				log.Warn("failed to manually update next target", zap.Error(err))
 				close(req.ReadyNotifier)
+				if errors.Is(err, merr.ErrCollectionTargetNotChanged) {
+					req.Notifier <- nil
+				} else {
+					req.Notifier <- err
+					log.Warn("failed to manually update next target", zap.Error(err))
+				}
 			} else {
 				ob.mut.Lock()
 				ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
 				ob.mut.Unlock()
+				req.Notifier <- nil
 			}
-
 			log.Info("manually trigger update target done")
-			req.Notifier <- err
-			log.Info("notify manually trigger update target done")
 		}
 	}
 }
@@ -280,10 +285,14 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 		With(zap.Int64("collectionID", collectionID))
 
 	log.RatedInfo(10, "observer trigger update next target")
-	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
+	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID, ob.checkDistributionReady)
 	if err != nil {
-		log.Warn("failed to update next target for collection",
-			zap.Error(err))
+		if errors.Is(err, merr.ErrCollectionTargetNotChanged) {
+			ob.notifyCurrentTargetReady(collectionID)
+			return err
+		}
+
+		log.Warn("failed to update next target for collection", zap.Error(err))
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
@@ -295,12 +304,44 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
+	log := log.Ctx(ctx).WithRateGroup(fmt.Sprintf("qcv2.TargetObserver-%d", collectionID), 10, 60).With(
+		zap.Int64("collectionID", collectionID),
+	)
+
+	if !ob.checkDistributionReady(ctx, collectionID) {
+		return false
+	}
+
+	replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
+	actions := make([]*querypb.SyncAction, 0, 1)
+	for _, replica := range replicas {
+		leaders := ob.distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
+		for ch, leaderID := range leaders {
+			actions = actions[:0]
+			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
+			if leaderView == nil {
+				log.RatedInfo(10, "leader view not ready",
+					zap.Int64("nodeID", leaderID),
+					zap.String("channel", ch),
+				)
+				continue
+			}
+			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
+			if updateVersionAction != nil {
+				actions = append(actions, updateVersionAction)
+			}
+			if !ob.sync(ctx, replica, leaderView, actions) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (ob *TargetObserver) checkDistributionReady(ctx context.Context, collectionID int64) bool {
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
-	log := log.Ctx(ctx).WithRateGroup(
-		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
-		10,
-		60,
-	).With(
+	log := log.Ctx(ctx).WithRateGroup(fmt.Sprintf("qcv2.TargetObserver-%d", collectionID), 10, 60).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int32("replicaNum", replicaNum),
 	)
@@ -338,30 +379,6 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 				zap.Int64("segmentID", segment.GetID()),
 			)
 			return false
-		}
-	}
-
-	replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
-	actions := make([]*querypb.SyncAction, 0, 1)
-	for _, replica := range replicas {
-		leaders := ob.distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
-		for ch, leaderID := range leaders {
-			actions = actions[:0]
-			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
-			if leaderView == nil {
-				log.RatedInfo(10, "leader view not ready",
-					zap.Int64("nodeID", leaderID),
-					zap.String("channel", ch),
-				)
-				continue
-			}
-			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
-			if updateVersionAction != nil {
-				actions = append(actions, updateVersionAction)
-			}
-			if !ob.sync(ctx, replica, leaderView, actions) {
-				return false
-			}
 		}
 	}
 
@@ -492,15 +509,19 @@ func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
 	log.RatedInfo(10, "observer trigger update current target", zap.Int64("collectionID", collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
-		ob.mut.Lock()
-		defer ob.mut.Unlock()
-		notifiers := ob.readyNotifiers[collectionID]
-		for _, notifier := range notifiers {
-			close(notifier)
-		}
-		// Reuse the capacity of notifiers slice
-		if notifiers != nil {
-			ob.readyNotifiers[collectionID] = notifiers[:0]
-		}
+		ob.notifyCurrentTargetReady(collectionID)
+	}
+}
+
+func (ob *TargetObserver) notifyCurrentTargetReady(collectionID int64) {
+	ob.mut.Lock()
+	defer ob.mut.Unlock()
+	notifiers := ob.readyNotifiers[collectionID]
+	for _, notifier := range notifiers {
+		close(notifier)
+	}
+	// Reuse the capacity of notifiers slice
+	if notifiers != nil {
+		ob.readyNotifiers[collectionID] = notifiers[:0]
 	}
 }

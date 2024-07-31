@@ -50,9 +50,11 @@ const (
 	NextTargetFirst
 )
 
+type NextTargetCondition = func(ctx context.Context, collectionID int64) bool
+
 type TargetManagerInterface interface {
 	UpdateCollectionCurrentTarget(collectionID int64) bool
-	UpdateCollectionNextTarget(collectionID int64) error
+	UpdateCollectionNextTarget(collectionID int64, checkFunc ...NextTargetCondition) error
 	PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
 	PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
 	RemoveCollection(collectionID int64)
@@ -127,16 +129,22 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 	return true
 }
 
+// ignore whether target content changed, just update next target by force
+// only use for tests
+func (mgr *TargetManager) ForceUpdateCollectionNextTarget(collectionID int64) error {
+	return mgr.UpdateCollectionNextTarget(collectionID, func(ctx context.Context, collectionID int64) bool { return false })
+}
+
 // UpdateCollectionNextTarget updates the next target with new target pulled from DataCoord,
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
-func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
+func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64, checkFunc ...NextTargetCondition) error {
 	mgr.rwMutex.Lock()
 	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
-	allocatedTarget := NewCollectionTarget(nil, nil, partitionIDs)
+	nextTarget := NewCollectionTarget(nil, nil, partitionIDs)
 	mgr.rwMutex.Unlock()
 
 	log := log.With(zap.Int64("collectionID", collectionID),
@@ -151,15 +159,33 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		log.Debug("skip empty next targets for collection")
 		return nil
 	}
-	allocatedTarget.segments = segments
-	allocatedTarget.dmChannels = channels
+	nextTarget.segments = segments
+	nextTarget.dmChannels = channels
 
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
-	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
+	// check if new target has same content with current target
+	currentTarget := mgr.current.getCollectionTarget(collectionID)
+	if currentTarget != nil && currentTarget.Equal(nextTarget) {
+		allMatch := true
+		for _, fn := range checkFunc {
+			if !fn(context.TODO(), collectionID) {
+				allMatch = false
+			}
+		}
+
+		// if target doesn't change and match all check conditions, skip update next target
+		if allMatch {
+			log.Info("next target has same data with current target, skip it")
+			return merr.WrapErrCollectionTargetNotChanged(collectionID)
+		}
+
+	}
+
+	mgr.next.updateCollectionTarget(collectionID, nextTarget)
 	log.Debug("finish to update next targets for collection",
-		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
+		zap.Int64s("segments", nextTarget.GetAllSegmentIDs()),
+		zap.Strings("channels", nextTarget.GetAllDmChannelNames()))
 
 	return nil
 }
