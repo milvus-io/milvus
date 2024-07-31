@@ -355,6 +355,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 }
 
+// fix: https://github.com/milvus-io/milvus/issues/35110
+func (s *ClusteringCompactionTaskSuite) TestCompleteTask() {
+	task := s.generateBasicTask()
+	task.completeTask()
+	partitionStats := s.meta.GetPartitionStatsMeta().GetPartitionStats(task.GetCollectionID(), task.GetPartitionID(), task.GetChannel(), task.GetPlanID())
+	s.True(partitionStats.GetCommitTime() > time.Now().Add(-2*time.Second).Unix())
+}
+
 const (
 	Int64Field    = "int64Field"
 	FloatVecField = "floatVecField"
