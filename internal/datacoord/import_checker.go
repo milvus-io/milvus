@@ -218,7 +218,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	groups := RegroupImportFiles(job, lacks)
+	groups := RegroupImportFiles(c.meta, job, lacks)
 	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))

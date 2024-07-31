@@ -226,13 +226,13 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}, nil
 }
 
-func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*datapb.ImportFileStats {
+func RegroupImportFiles(meta *meta, job ImportJob, files []*datapb.ImportFileStats) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
 		return nil
 	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	segmentMaxSize := int(GetSegmentMaxSize(job.GetCollectionID(), job.GetSchema(), meta))
 	if isL0Import {
 		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}
