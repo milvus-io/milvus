@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <cstddef>
@@ -63,7 +64,12 @@ class MmapChunkTarget : public ChunkTarget {
 class MemChunkTarget : public ChunkTarget {
  public:
     MemChunkTarget(size_t cap) : cap_(cap) {
-        data_ = new char[cap];
+        data_ = reinterpret_cast<char*>(mmap(nullptr,
+                                             cap,
+                                             PROT_READ | PROT_WRITE,
+                                             MAP_PRIVATE | MAP_ANON,
+                                             -1,
+                                             0));
     }
 
     void
