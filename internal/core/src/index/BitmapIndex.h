@@ -160,7 +160,7 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
 
     void
-    ChooseIndexBuildMode();
+    ChooseIndexLoadMode(int64_t index_length);
 
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);

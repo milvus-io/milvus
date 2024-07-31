@@ -183,13 +183,19 @@ template <typename T>
 void
 BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
+    using GetType = std::conditional_t<std::is_same_v<T, int8_t> ||
+                                           std::is_same_v<T, int16_t> ||
+                                           std::is_same_v<T, int32_t>,
+                                       int32_t,
+                                       T>;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
             auto array =
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+
             for (size_t j = 0; j < array->length(); ++j) {
-                auto val = array->template get_data<T>(j);
+                auto val = static_cast<T>(array->template get_data<GetType>(j));
                 data_[val].add(offset);
             }
             offset++;
@@ -350,10 +356,12 @@ BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
 
 template <typename T>
 void
-BitmapIndex<T>::ChooseIndexBuildMode() {
-    if (data_.size() <= DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND) {
+BitmapIndex<T>::ChooseIndexLoadMode(int64_t index_length) {
+    if (index_length <= DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND) {
+        LOG_DEBUG("load bitmap index with bitset mode");
         build_mode_ = BitmapIndexBuildMode::BITSET;
     } else {
+        LOG_DEBUG("load bitmap index with raw roaring mode");
         build_mode_ = BitmapIndexBuildMode::ROARING;
     }
 }
@@ -362,6 +370,7 @@ template <typename T>
 void
 BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
                                      size_t index_length) {
+    ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         T key;
         memcpy(&key, data_ptr, sizeof(T));
@@ -371,11 +380,10 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
         value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
         data_ptr += value.getSizeInBytes();
 
-        ChooseIndexBuildMode();
-
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
             bitsets_[key] = ConvertRoaringToBitset(value);
-            data_.erase(key);
+        } else {
+            data_[key] = value;
         }
     }
 }
@@ -384,6 +392,7 @@ template <>
 void
 BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
                                                size_t index_length) {
+    ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         size_t key_size;
         memcpy(&key_size, data_ptr, sizeof(size_t));
@@ -396,7 +405,11 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
         value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
         data_ptr += value.getSizeInBytes();
 
-        bitsets_[key] = ConvertRoaringToBitset(value);
+        if (build_mode_ == BitmapIndexBuildMode::BITSET) {
+            bitsets_[key] = ConvertRoaringToBitset(value);
+        } else {
+            data_[key] = value;
+        }
     }
 }
 
