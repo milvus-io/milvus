@@ -191,8 +191,8 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
-  ip:  # if not specified, use the first unicastable address
-  port: 53100
+  ip:  # TCP port of rootCoord. If not specified, use the first unicastable address
+  port: 53100 # TCP/IP address of rootCoord
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -248,8 +248,8 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
-  ip:  # if not specified, use the first unicastable address
-  port: 19530
+  ip:  # TCP port of proxy. If not specified, use the first unicastable address
+  port: 19530 # TCP/IP address of proxy
   internalPort: 19529
   grpc:
     serverMaxSendSize: 268435456
@@ -307,8 +307,8 @@ queryCoord:
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
-  ip:  # if not specified, use the first unicastable address
-  port: 19531
+  ip:  # TCP port of queryCoord. If not specified, use the first unicastable address
+  port: 19531 # TCP/IP address of queryCoord
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -389,8 +389,8 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return batch size of stream query
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
-  ip:  # if not specified, use the first unicastable address
-  port: 21123
+  ip:  # TCP port of queryNode. If not specified, use the first unicastable address
+  port: 21123 # TCP/IP address of queryNode
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -411,8 +411,8 @@ indexNode:
     buildParallel: 1
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
-  ip:  # if not specified, use the first unicastable address
-  port: 21121
+  ip:  # TCP port of indexNode. If not specified, use the first unicastable address
+  port: 21121 # TCP/IP address of indexNode
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -514,8 +514,8 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
-  ip:  # if not specified, use the first unicastable address
-  port: 13333
+  ip:  # TCP port of dataCoord. If not specified, use the first unicastable address
+  port: 13333 # TCP/IP address of dataCoord
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -568,8 +568,8 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
-  ip:  # if not specified, use the first unicastable address
-  port: 21124
+  ip:  # TCP port of dataNode. If not specified, use the first unicastable address
+  port: 21124 # TCP/IP address of dataNode
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 268435456
@@ -611,10 +611,10 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 common:
-  defaultPartitionName: _default # default partition name for a collection
-  defaultIndexName: _default_idx # default index name
+  defaultPartitionName: _default # Name of the default partition when a collection is created
+  defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
-  indexSliceSize: 16 # MB
+  indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
@@ -655,7 +655,10 @@ common:
   storage:
     scheme: s3
     enablev2: false
-  ttMsgEnabled: true # Whether the instance disable sending ts messages
+  # Whether to disable the internal time messaging mechanism for the system. 
+  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+  # This helps Milvus-CDC synchronize incremental data
+  ttMsgEnabled: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
