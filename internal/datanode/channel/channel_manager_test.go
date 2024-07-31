@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -72,6 +73,7 @@ func (s *OpRunnerSuite) SetupTest() {
 
 	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
+		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
 		CheckpointUpdater:  util2.NewChannelCheckpointUpdater(mockedBroker),
 		WriteBufferManager: wbManager,
 		Broker:             mockedBroker,
@@ -157,6 +159,7 @@ func (s *ChannelManagerSuite) SetupTest() {
 
 	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
+		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
 		WriteBufferManager: wbManager,
 		Broker:             mockedBroker,
 		MsgStreamFactory:   factory,

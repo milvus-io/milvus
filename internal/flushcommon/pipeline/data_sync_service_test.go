@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -248,6 +249,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 		Ctx:                context.TODO(),
 		Broker:             broker.NewMockBroker(t),
 		ChunkManager:       chunkManager,
+		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: writebuffer.NewMockBufferManager(t),
 		Allocator:          allocator.NewMockAllocator(t),

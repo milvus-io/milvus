@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -64,6 +65,7 @@ func TestFlowGraphManager(t *testing.T) {
 	pipelineParams := &util.PipelineParams{
 		Ctx:                context.TODO(),
 		Broker:             mockBroker,
+		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
 		CheckpointUpdater:  util.NewChannelCheckpointUpdater(mockBroker),
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: wbm,

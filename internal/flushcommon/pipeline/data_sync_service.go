@@ -202,13 +202,17 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
 	)
+	serverID := paramtable.GetNodeID()
+	if params.Session != nil {
+		serverID = params.Session.ServerID
+	}
 
 	config := &nodeConfig{
 		msFactory:    params.MsgStreamFactory,
 		collectionID: collectionID,
 		vChannelName: channelName,
 		metacache:    metacache,
-		serverID:     paramtable.GetNodeID(),
+		serverID:     serverID,
 	}
 
 	err := params.WriteBufferManager.Register(channelName, metacache, storageV2Cache,
