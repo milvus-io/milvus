@@ -92,8 +92,8 @@ class MilvusCDCPerformanceTest:
                         self.latest_query_ts = latest_insert_ts
                         self.sync_count = latest_insert_count
                         self.latencies.append(latency)
-                    logger.debug(f"query latest_insert_ts: {latest_insert_ts}, results: {results} query cost time: {tt} seconds")
-                    logger.debug(f"Synced {latest_insert_count}/{self.latest_insert_status['latest_count']} entities, latency: {latency:.2f} seconds")
+                    # logger.debug(f"query latest_insert_ts: {latest_insert_ts}, results: {results} query cost time: {tt} seconds")
+                    # logger.debug(f"Synced {latest_insert_count}/{self.latest_insert_status['latest_count']} entities, latency: {latency:.2f} seconds")
             time.sleep(0.01)  # Query interval
 
     def measure_performance(self, duration, batch_size, concurrency):
