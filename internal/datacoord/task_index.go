@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -39,6 +40,10 @@ type indexBuildTask struct {
 	nodeID   int64
 	taskInfo *indexpb.IndexTaskInfo
 
+	queueTime time.Time
+	startTime time.Time
+	endTime   time.Time
+
 	req *indexpb.CreateJobRequest
 }
 
@@ -54,6 +59,34 @@ func (it *indexBuildTask) GetNodeID() int64 {
 
 func (it *indexBuildTask) ResetNodeID() {
 	it.nodeID = 0
+}
+
+func (it *indexBuildTask) SetQueueTime(t time.Time) {
+	it.queueTime = t
+}
+
+func (it *indexBuildTask) GetQueueTime() time.Time {
+	return it.queueTime
+}
+
+func (it *indexBuildTask) SetStartTime(t time.Time) {
+	it.startTime = t
+}
+
+func (it *indexBuildTask) GetStartTime() time.Time {
+	return it.startTime
+}
+
+func (it *indexBuildTask) SetEndTime(t time.Time) {
+	it.endTime = t
+}
+
+func (it *indexBuildTask) GetEndTime() time.Time {
+	return it.endTime
+}
+
+func (it *indexBuildTask) GetTaskType() string {
+	return indexpb.JobType_JobTypeIndexJob.String()
 }
 
 func (it *indexBuildTask) CheckTaskHealthy(mt *meta) bool {
