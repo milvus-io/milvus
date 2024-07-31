@@ -66,6 +66,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool(),
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
+		if withFilter && channelNum > 1 {
+			params[common.ChannelNumKey] = channelNum
+		}
 		err := queryHook.Run(params)
 		if err != nil {
 			log.Warn("failed to execute queryHook", zap.Error(err))
