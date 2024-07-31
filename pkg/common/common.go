@@ -109,6 +109,7 @@ const (
 	SegmentNumKey   = "segment_num"
 	WithFilterKey   = "with_filter"
 	DataTypeKey     = "data_type"
+	ChannelNumKey   = "channel_num"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
 
