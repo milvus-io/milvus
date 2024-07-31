@@ -516,7 +516,7 @@ func ValidatePartitionKeyIsolation(expr *planpb.Expr) error {
 		return err
 	}
 	if !foundPartitionKey {
-		return errors.New("partition key not found in expr when validating partition key isolation")
+		return errors.New("partition key not found in expr or the expr is invalid when validating partition key isolation")
 	}
 	return nil
 }
@@ -531,6 +531,8 @@ func validatePartitionKeyIsolationFromExpr(expr *planpb.Expr) (bool, error) {
 		return validatePartitionKeyIsolationFromTermExpr(expr.TermExpr)
 	case *planpb.Expr_UnaryRangeExpr:
 		return validatePartitionKeyIsolationFromRangeExpr(expr.UnaryRangeExpr)
+	case *planpb.Expr_BinaryRangeExpr:
+		return validatePartitionKeyIsolationFromBinaryRangeExpr(expr.BinaryRangeExpr)
 	}
 	return false, nil
 }
@@ -598,6 +600,13 @@ func validatePartitionKeyIsolationFromRangeExpr(expr *planpb.UnaryRangeExpr) (bo
 			return true, nil
 		}
 		return true, errors.Newf("partition key isolation does not support %s", expr.GetOp().String())
+	}
+	return false, nil
+}
+
+func validatePartitionKeyIsolationFromBinaryRangeExpr(expr *planpb.BinaryRangeExpr) (bool, error) {
+	if expr.GetColumnInfo().GetIsPartitionKey() {
+		return true, errors.New("partition key isolation does not support BinaryRange")
 	}
 	return false, nil
 }
