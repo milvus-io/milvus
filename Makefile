@@ -60,6 +60,14 @@ INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 GOTESTSUM_VERSION := 1.11.0
 GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
+# protoc-gen-go
+PROTOC_GEN_GO_VERSION := 1.33.0
+PROTOC_GEN_GO_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go --version 2>/dev/null)
+INSTALL_PROTOC_GEN_GO := $(findstring $(PROTOC_GEN_GO_VERSION),$(PROTOC_GEN_GO_OUTPUT))
+# protoc-gen-go-grpc
+PROTOC_GEN_GO_GRPC_VERSION := 1.3.0
+PROTOC_GEN_GO_GRPC_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go-grpc  --version 2>/dev/null)
+INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
 
@@ -103,6 +111,19 @@ getdeps:
 		echo "Install gotestsum v$(GOTESTSUM_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install -ldflags="-X 'gotest.tools/gotestsum/cmd.version=$(GOTESTSUM_VERSION)'" gotest.tools/gotestsum@v$(GOTESTSUM_VERSION); \
 	else \
 		echo "gotestsum v$(GOTESTSUM_VERSION) already installed";\
+	fi
+
+get-proto-deps:
+	@mkdir -p $(INSTALL_PATH) # make sure directory exists
+	@if [ -z "$(INSTALL_PROTOC_GEN_GO)" ]; then \
+		echo "install protoc-gen-go $(PROTOC_GEN_GO_VERSION) to $(INSTALL_PATH)" && GOBIN=$(INSTALL_PATH) go install google.golang.org/protobuf/cmd/protoc-gen-go@v$(PROTOC_GEN_GO_VERSION); \
+	else \
+		echo "protoc-gen-go@v$(PROTOC_GEN_GO_VERSION) already installed";\
+	fi
+	@if [ -z "$(INSTALL_PROTOC_GEN_GO_GRPC)" ]; then \
+		echo "install protoc-gen-go-grpc $(PROTOC_GEN_GO_GRPC_VERSION) to $(INSTALL_PATH)" && GOBIN=$(INSTALL_PATH) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRPC_VERSION); \
+	else \
+		echo "protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRPC_VERSION) already installed";\
 	fi
 
 tools/bin/revive: tools/check/go.mod
@@ -161,13 +182,13 @@ lint-fix: getdeps
 static-check: getdeps
 	@echo "Running $@ check"
 	@echo "Start check core packages"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
 	@echo "Start check pkg package"
-	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
 	@echo "Start check client package"
-	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
-	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 
@@ -223,18 +244,12 @@ build-3rdparty:
 	@echo "Build 3rdparty ..."
 	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal})
 
-generated-proto-without-cpp: download-milvus-proto
+generated-proto-without-cpp: download-milvus-proto get-proto-deps
 	@echo "Generate proto ..."
-	@mkdir -p ${INSTALL_PATH}
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && GOBIN=${INSTALL_PATH} go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)
-	@which protoc-gen-go-grpc 1>/dev/null || (echo "Installing protoc-gen-go-grpc" && GOBIN=${INSTALL_PATH} go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0)
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-generated-proto: download-milvus-proto build-3rdparty
+generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
-	@mkdir -p ${INSTALL_PATH}
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && GOBIN=${INSTALL_PATH} go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)
-	@which protoc-gen-go-grpc 1>/dev/null || (echo "Installing protoc-gen-go-grpc" && GOBIN=${INSTALL_PATH} go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0)
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
 build-cpp: generated-proto

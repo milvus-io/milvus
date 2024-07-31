@@ -1282,7 +1282,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 }
 
 func getUserInfoMetaString(username string) string {
-	validInfo := internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
+	validInfo := &internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
 	validBytes, _ := json.Marshal(validInfo)
 	return string(validBytes)
 }

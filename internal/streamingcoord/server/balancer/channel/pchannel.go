@@ -1,10 +1,11 @@
 package channel
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"google.golang.org/protobuf/proto"
 )
 
 // newPChannelMeta creates a new PChannelMeta.

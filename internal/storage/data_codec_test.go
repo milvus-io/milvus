@@ -505,7 +505,7 @@ func TestInsertCodec(t *testing.T) {
 		0, 255, 0, 255, 0, 255, 0, 255,
 	}, resultData.Data[BFloat16VectorField].(*BFloat16VectorFieldData).Data)
 
-	assert.Equal(t, schemapb.SparseFloatArray{
+	assert.EqualExportedValues(t, &schemapb.SparseFloatArray{
 		// merged dim should be max of all dims
 		Dim: 600,
 		Contents: [][]byte{
@@ -516,7 +516,7 @@ func TestInsertCodec(t *testing.T) {
 			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
 			typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
 		},
-	}, resultData.Data[SparseFloatVectorField].(*SparseFloatVectorFieldData).SparseFloatArray)
+	}, &resultData.Data[SparseFloatVectorField].(*SparseFloatVectorFieldData).SparseFloatArray)
 
 	int32ArrayList := [][]int32{{1, 2, 3}, {4, 5, 6}, {3, 2, 1}, {6, 5, 4}}
 	resultArrayList := [][]int32{}

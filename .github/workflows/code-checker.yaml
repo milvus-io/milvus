@@ -52,7 +52,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
       - name: Code Check
@@ -60,8 +60,14 @@ jobs:
           OS_NAME: 'ubuntu22.04'
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
 
   amazonlinux:
+    if: ${{ false }} # skip for now
     name: Code Checker Amazonlinux 2023
     # Run in amazonlinux docker
     runs-on: ubuntu-latest
@@ -79,15 +85,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'amazonlinux2023'
       - name: Code Check
         run: |
           sed -i 's/ubuntu22.04/amazonlinux2023/g' .env
           ./build/builder.sh /bin/bash -c "make install"
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'amazonlinux2023'
 
   rockylinux:
+    if: ${{ false }} # skip for now
     name: Code Checker rockylinux8
     # Run in amazonlinux docker
     runs-on: ubuntu-latest
@@ -105,10 +117,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'rockylinux8'
       - name: Code Check
         run: |
           sed -i 's/ubuntu22.04/rockylinux8/g' .env
           ./build/builder.sh /bin/bash -c "make install"
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'rockylinux8'

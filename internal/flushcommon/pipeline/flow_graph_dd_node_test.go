@@ -148,7 +148,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
-					DropCollectionRequest: msgpb.DropCollectionRequest{
+					DropCollectionRequest: &msgpb.DropCollectionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 						CollectionID: test.msgCollID,
 					},
@@ -201,7 +201,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				}
 
 				var dropPartMsg msgstream.TsMsg = &msgstream.DropPartitionMsg{
-					DropPartitionRequest: msgpb.DropPartitionRequest{
+					DropPartitionRequest: &msgpb.DropPartitionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 						CollectionID: test.msgCollID,
 						PartitionID:  test.msgPartID,
@@ -263,7 +263,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 						EndTimestamp: test.MsgEndTs,
 						HashValues:   []uint32{0},
 					},
-					DeleteRequest: msgpb.DeleteRequest{
+					DeleteRequest: &msgpb.DeleteRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 						ShardName:    "by-dev-rootcoord-dml-mock-0",
 						CollectionID: test.inMsgCollID,
@@ -597,7 +597,7 @@ func getInsertMsg(segmentID typeutil.UniqueID, ts typeutil.Timestamp) *msgstream
 func getInsertMsgWithChannel(segmentID typeutil.UniqueID, ts typeutil.Timestamp, vChannelName string) *msgstream.InsertMsg {
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{EndTimestamp: ts},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 			SegmentID:    segmentID,
 			CollectionID: 1,

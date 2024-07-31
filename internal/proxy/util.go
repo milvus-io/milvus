@@ -1533,52 +1533,52 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 	case *milvuspb.CreateDatabaseRequest:
 		tsMsg = &msgstream.CreateDatabaseMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			CreateDatabaseRequest: *r,
+			CreateDatabaseRequest: r,
 		}
 	case *milvuspb.DropDatabaseRequest:
 		tsMsg = &msgstream.DropDatabaseMsg{
 			BaseMsg:             getBaseMsg(ctx, ts),
-			DropDatabaseRequest: *r,
+			DropDatabaseRequest: r,
 		}
 	case *milvuspb.FlushRequest:
 		tsMsg = &msgstream.FlushMsg{
 			BaseMsg:      getBaseMsg(ctx, ts),
-			FlushRequest: *r,
+			FlushRequest: r,
 		}
 	case *milvuspb.LoadCollectionRequest:
 		tsMsg = &msgstream.LoadCollectionMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadCollectionRequest: *r,
+			LoadCollectionRequest: r,
 		}
 	case *milvuspb.ReleaseCollectionRequest:
 		tsMsg = &msgstream.ReleaseCollectionMsg{
 			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleaseCollectionRequest: *r,
+			ReleaseCollectionRequest: r,
 		}
 	case *milvuspb.CreateIndexRequest:
 		tsMsg = &msgstream.CreateIndexMsg{
 			BaseMsg:            getBaseMsg(ctx, ts),
-			CreateIndexRequest: *r,
+			CreateIndexRequest: r,
 		}
 	case *milvuspb.DropIndexRequest:
 		tsMsg = &msgstream.DropIndexMsg{
 			BaseMsg:          getBaseMsg(ctx, ts),
-			DropIndexRequest: *r,
+			DropIndexRequest: r,
 		}
 	case *milvuspb.LoadPartitionsRequest:
 		tsMsg = &msgstream.LoadPartitionsMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadPartitionsRequest: *r,
+			LoadPartitionsRequest: r,
 		}
 	case *milvuspb.ReleasePartitionsRequest:
 		tsMsg = &msgstream.ReleasePartitionsMsg{
 			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleasePartitionsRequest: *r,
+			ReleasePartitionsRequest: r,
 		}
 	case *milvuspb.AlterIndexRequest:
 		tsMsg = &msgstream.AlterIndexMsg{
 			BaseMsg:           getBaseMsg(ctx, ts),
-			AlterIndexRequest: *r,
+			AlterIndexRequest: r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))

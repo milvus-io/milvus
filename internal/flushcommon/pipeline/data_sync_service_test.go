@@ -466,7 +466,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 			EndTimestamp:   tsoutil.GetCurrentTime(),
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: msgpb.TimeTickMsg{
+		TimeTickMsg: &msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     typeutil.UniqueID(0),

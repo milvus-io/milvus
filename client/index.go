@@ -126,9 +126,17 @@ func (c *Client) ListIndexes(ctx context.Context, opt ListIndexOption, callOptio
 	return indexes, err
 }
 
-func (c *Client) DescribeIndex(ctx context.Context, opt DescribeIndexOption, callOptions ...grpc.CallOption) (index.Index, error) {
+type IndexDescription struct {
+	index.Index
+	State            index.IndexState
+	PendingIndexRows int64
+	TotalRows        int64
+	IndexedRows      int64
+}
+
+func (c *Client) DescribeIndex(ctx context.Context, opt DescribeIndexOption, callOptions ...grpc.CallOption) (IndexDescription, error) {
 	req := opt.Request()
-	var idx index.Index
+	var idx IndexDescription
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DescribeIndex(ctx, req, callOptions...)
@@ -141,7 +149,13 @@ func (c *Client) DescribeIndex(ctx context.Context, opt DescribeIndexOption, cal
 		}
 		for _, idxDef := range resp.GetIndexDescriptions() {
 			if idxDef.GetIndexName() == req.GetIndexName() {
-				idx = index.NewGenericIndex(idxDef.GetIndexName(), entity.KvPairsMap(idxDef.GetParams()))
+				idx = IndexDescription{
+					Index:            index.NewGenericIndex(idxDef.GetIndexName(), entity.KvPairsMap(idxDef.GetParams())),
+					State:            index.IndexState(idxDef.GetState()),
+					PendingIndexRows: idxDef.GetPendingIndexRows(),
+					IndexedRows:      idxDef.GetIndexedRows(),
+					TotalRows:        idxDef.GetTotalRows(),
+				}
 			}
 		}
 		return nil

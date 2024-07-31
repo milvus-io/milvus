@@ -318,16 +318,15 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline GeneratedData
-DataGen(SchemaPtr schema,
-        int64_t N,
-        uint64_t seed = 42,
-        uint64_t pk_offset = 0,
-        uint64_t ts_offset = 0,
-        int repeat_count = 1,
-        int array_len = 10,
-        bool random_pk = false,
-        bool random_val = true) {
+inline GeneratedData DataGen(SchemaPtr schema,
+                             int64_t N,
+                             uint64_t seed = 42,
+                             uint64_t pk_offset = 0,
+                             uint64_t ts_offset = 0,
+                             int repeat_count = 1,
+                             int array_len = 10,
+                             bool random_pk = false,
+                             bool random_val = true) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
