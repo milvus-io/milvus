@@ -403,7 +403,7 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
-				duration := time.Since(time.UnixMilli(task.StartTime)).Seconds()
+				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
 				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(task)

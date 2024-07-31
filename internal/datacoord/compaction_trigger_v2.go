@@ -263,7 +263,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		TriggerID:        taskID, // inner trigger, use task id as trigger id
 		PlanID:           taskID,
 		Type:             datapb.CompactionType_Level0DeleteCompaction,
-		StartTime:        time.Now().UnixMilli(),
+		StartTime:        time.Now().Unix(),
 		InputSegments:    levelZeroSegs,
 		State:            datapb.CompactionTaskState_pipelining,
 		Channel:          view.GetGroupLabel().Channel,
@@ -314,7 +314,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().UnixMilli(),
+		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_ClusteringCompaction,
@@ -328,7 +328,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
 		AnalyzeTaskID:      taskID + 1,
-		LastStateStartTime: time.Now().UnixMilli(),
+		LastStateStartTime: time.Now().Unix(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
@@ -366,7 +366,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		PlanID:             taskID,
 		TriggerID:          view.(*MixSegmentView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().UnixMilli(),
+		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
@@ -376,7 +376,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		Schema:             collection.Schema,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().UnixMilli(),
+		LastStateStartTime: time.Now().Unix(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
