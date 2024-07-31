@@ -292,7 +292,7 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	defer cluster.ptmu.Unlock()
 	cluster.qnid.Inc()
 	id := cluster.qnid.Load()
-	oid := paramtable.GetNodeID()
+	// oid := paramtable.GetNodeID()
 	log.Info(fmt.Sprintf("adding extra datanode with id:%d", id))
 	paramtable.SetNodeID(id)
 	node, err := grpcdatanode.NewServer(context.TODO(), cluster.factory)
@@ -303,7 +303,7 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	if err != nil {
 		return nil
 	}
-	paramtable.SetNodeID(oid)
+	// paramtable.SetNodeID(oid)
 
 	req := &milvuspb.GetComponentStatesRequest{}
 	resp, err := node.GetComponentStates(context.TODO(), req)
