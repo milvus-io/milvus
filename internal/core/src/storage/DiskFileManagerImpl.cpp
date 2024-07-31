@@ -491,10 +491,9 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
             if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
                 dim = std::max(
                     dim,
-                    (uint32_t)(
-                        std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
-                            field_data)
-                            ->Dim()));
+                    (uint32_t)(std::dynamic_pointer_cast<
+                                   FieldData<SparseFloatVector>>(field_data)
+                                   ->Dim()));
                 auto sparse_rows =
                     static_cast<const knowhere::sparse::SparseRow<float>*>(
                         field_data->Data());
