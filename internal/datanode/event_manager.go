@@ -56,7 +56,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	err := node.checkWatchedList()
 	if err != nil {
 		log.Warn("StartWatchChannels failed", zap.Error(err))
-		return
+		panic(err)
 	}
 	for {
 		select {
