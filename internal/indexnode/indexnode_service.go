@@ -97,12 +97,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	var task task
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		task = newIndexBuildTaskV2(taskCtx, taskCancel, req, i)
-	} else {
-		task = newIndexBuildTask(taskCtx, taskCancel, req, cm, i)
-	}
+	task := newIndexBuildTask(taskCtx, taskCancel, req, cm, i)
 	ret := merr.Success()
 	if err := i.sched.TaskQueue.Enqueue(task); err != nil {
 		log.Warn("IndexNode failed to schedule",
@@ -327,12 +322,7 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 			metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
-		var task task
-		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-			task = newIndexBuildTaskV2(taskCtx, taskCancel, indexRequest, i)
-		} else {
-			task = newIndexBuildTask(taskCtx, taskCancel, indexRequest, cm, i)
-		}
+		task := newIndexBuildTask(taskCtx, taskCancel, indexRequest, cm, i)
 		ret := merr.Success()
 		if err := i.sched.TaskQueue.Enqueue(task); err != nil {
 			log.Warn("IndexNode failed to schedule",

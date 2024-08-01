@@ -55,8 +55,6 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 )
 
-require github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70
-
 require (
 	github.com/bits-and-blooms/bitset v1.10.0
 	github.com/cenkalti/backoff/v4 v4.2.1

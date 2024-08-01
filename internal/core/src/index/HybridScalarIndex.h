@@ -28,7 +28,6 @@
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus {
 namespace index {
@@ -46,10 +45,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    explicit HybridScalarIndex(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
-
     ~HybridScalarIndex() override = default;
 
     BinarySet
@@ -60,9 +55,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -84,9 +76,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     Build(const Config& config = {}) override;
-
-    void
-    BuildV2(const Config& config = {}) override;
 
     const TargetBitmap
     In(size_t n, const T* values) override {
@@ -133,9 +122,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     BinarySet
     Upload(const Config& config = {}) override;
 
-    BinarySet
-    UploadV2(const Config& config = {}) override;
-
  private:
     ScalarIndexType
     SelectBuildTypeForPrimitiveType(
@@ -173,7 +159,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
     std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
-    std::shared_ptr<milvus_storage::Space> space_{nullptr};
 };
 
 }  // namespace index

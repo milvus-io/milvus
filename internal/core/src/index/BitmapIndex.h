@@ -25,7 +25,6 @@
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus {
 namespace index {
@@ -46,10 +45,6 @@ class BitmapIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    explicit BitmapIndex(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
-
     ~BitmapIndex() override = default;
 
     BinarySet
@@ -60,9 +55,6 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -82,9 +74,6 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
-
-    void
-    BuildV2(const Config& config = {}) override;
 
     const TargetBitmap
     In(size_t n, const T* values) override;
@@ -111,9 +100,6 @@ class BitmapIndex : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
-
-    BinarySet
-    UploadV2(const Config& config = {}) override;
 
     const bool
     HasRawData() const override {
@@ -195,7 +181,6 @@ class BitmapIndex : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 }  // namespace index
