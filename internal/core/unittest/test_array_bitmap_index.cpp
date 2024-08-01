@@ -194,8 +194,8 @@ class ArrayBitmapIndexTest : public testing::Test {
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("{}/{}/{}/{}/{}/{}",
-                                    "test_array_bitmap",
+        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
+                                    "/tmp/test_array_bitmap",
                                     collection_id,
                                     partition_id,
                                     segment_id,
