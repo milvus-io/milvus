@@ -79,21 +79,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
     void
-    SetExprCacheOffsets(std::vector<int64_t>&& offsets) {
-        expr_cached_pk_id_offsets_ = std::move(offsets);
-    }
-
-    void
-    AddExprCacheOffset(int64_t offset) {
-        expr_cached_pk_id_offsets_.push_back(offset);
-    }
-
-    const std::vector<int64_t>&
-    GetExprCacheOffsets() {
-        return expr_cached_pk_id_offsets_;
-    }
-
-    void
     SetExprUsePkIndex(bool use_pk_index) {
         expr_use_pk_index_ = use_pk_index;
     }
@@ -104,28 +89,10 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
     void
-    ExecuteExprNodeInternal(
-        const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-        const milvus::segcore::SegmentInternalInterface* segment,
-        int64_t active_count,
-        BitsetType& result,
-        bool& cache_offset_getted,
-        std::vector<int64_t>& cache_offset);
-
-    void
     ExecuteExprNode(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
                     const milvus::segcore::SegmentInternalInterface* segment,
                     int64_t active_count,
-                    BitsetType& result) {
-        bool get_cache_offset;
-        std::vector<int64_t> cache_offsets;
-        ExecuteExprNodeInternal(plannode,
-                                segment,
-                                active_count,
-                                result,
-                                get_cache_offset,
-                                cache_offsets);
-    }
+                    BitsetType& result);
 
  private:
     template <typename VectorType>
@@ -140,6 +107,5 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     SearchResultOpt search_result_opt_;
     RetrieveResultOpt retrieve_result_opt_;
     bool expr_use_pk_index_ = false;
-    std::vector<int64_t> expr_cached_pk_id_offsets_;
 };
 }  // namespace milvus::query
