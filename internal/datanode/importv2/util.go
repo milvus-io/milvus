@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -52,10 +51,6 @@ func NewSyncTask(ctx context.Context,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 ) (syncmgr.Task, error) {
-	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
-	}
-
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{

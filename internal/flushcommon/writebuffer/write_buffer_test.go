@@ -22,13 +22,12 @@ import (
 
 type WriteBufferSuite struct {
 	suite.Suite
-	collID       int64
-	channelName  string
-	collSchema   *schemapb.CollectionSchema
-	wb           *writeBufferBase
-	syncMgr      *syncmgr.MockSyncManager
-	metacache    *metacache.MockMetaCache
-	storageCache *metacache.StorageV2Cache
+	collID      int64
+	channelName string
+	collSchema  *schemapb.CollectionSchema
+	wb          *writeBufferBase
+	syncMgr     *syncmgr.MockSyncManager
+	metacache   *metacache.MockMetaCache
 }
 
 func (s *WriteBufferSuite) SetupSuite() {
@@ -47,14 +46,12 @@ func (s *WriteBufferSuite) SetupSuite() {
 }
 
 func (s *WriteBufferSuite) SetupTest() {
-	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
-	s.Require().NoError(err)
-	s.storageCache = storageCache
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
 	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
-	s.wb, err = newWriteBufferBase(s.channelName, s.metacache, storageCache, s.syncMgr, &writeBufferOption{
+	var err error
+	s.wb, err = newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},
@@ -66,7 +63,7 @@ func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default BFPkOracle", func() {
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "false")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr)
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr)
 		s.NoError(err)
 		_, ok := wb.(*bfWriteBuffer)
 		s.True(ok)
@@ -75,7 +72,7 @@ func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default L0Delta policy", func() {
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "true")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
 		s.NoError(err)
 		_, ok := wb.(*l0WriteBuffer)
 		s.True(ok)
@@ -83,18 +80,18 @@ func (s *WriteBufferSuite) TestDefaultOption() {
 }
 
 func (s *WriteBufferSuite) TestWriteBufferType() {
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	_, ok := wb.(*bfWriteBuffer)
 	s.True(ok)
 
-	wb, err = NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
+	wb, err = NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
 	s.NoError(err)
 	_, ok = wb.(*l0WriteBuffer)
 	s.True(ok)
 
-	_, err = NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(""))
+	_, err = NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(""))
 	s.Error(err)
 }
 
@@ -114,7 +111,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, true)
 
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	err = wb.SealSegments(context.Background(), []int64{segmentID})
@@ -265,7 +262,7 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 }
 
 func (s *WriteBufferSuite) TestSyncSegmentsError() {
-	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},
@@ -298,7 +295,7 @@ func (s *WriteBufferSuite) TestSyncSegmentsError() {
 }
 
 func (s *WriteBufferSuite) TestEvictBuffer() {
-	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},
@@ -367,7 +364,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 }
 
 func (s *WriteBufferSuite) TestDropPartitions() {
-	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},

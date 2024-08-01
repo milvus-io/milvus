@@ -18,7 +18,6 @@
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
 #include "index/StringIndex.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -34,13 +33,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
     InvertedIndexTantivy() = default;
-
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx)
-        : InvertedIndexTantivy(ctx, nullptr) {
-    }
-
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
-                                  std::shared_ptr<milvus_storage::Space> space);
+    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx);
 
     ~InvertedIndexTantivy();
 
@@ -55,9 +48,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     /*
      * deprecated.
@@ -77,9 +67,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     void
     Build(const Config& config = {}) override;
-
-    void
-    BuildV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -101,9 +88,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
-
-    BinarySet
-    UploadV2(const Config& config = {}) override;
 
     /*
      * deprecated, only used in small chunk index.
@@ -196,6 +180,5 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 }  // namespace milvus::index

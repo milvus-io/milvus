@@ -222,13 +222,9 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			status = C.AppendIndexV3(li.cLoadIndexInfo)
-		} else {
-			traceCtx := ParseCTraceContext(ctx)
-			status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
-			runtime.KeepAlive(traceCtx)
-		}
+		traceCtx := ParseCTraceContext(ctx)
+		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
+		runtime.KeepAlive(traceCtx)
 		return nil, nil
 	}).Await()
 
@@ -265,13 +261,9 @@ func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) 
 	}
 
 	_, _ = GetLoadPool().Submit(func() (any, error) {
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			status = C.AppendIndexV3(li.cLoadIndexInfo)
-		} else {
-			traceCtx := ParseCTraceContext(ctx)
-			status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
-			runtime.KeepAlive(traceCtx)
-		}
+		traceCtx := ParseCTraceContext(ctx)
+		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
+		runtime.KeepAlive(traceCtx)
 		return nil, nil
 	}).Await()
 

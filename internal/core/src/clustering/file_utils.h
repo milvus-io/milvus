@@ -25,7 +25,6 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
-#include "storage/space.h"
 
 namespace milvus::clustering {
 

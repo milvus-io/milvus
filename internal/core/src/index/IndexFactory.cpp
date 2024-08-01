@@ -78,51 +78,6 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #endif
 }
 
-template <typename T>
-ScalarIndexPtr<T>
-IndexFactory::CreatePrimitiveScalarIndex(
-    const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space) {
-    if (index_type == INVERTED_INDEX_TYPE) {
-        return std::make_unique<InvertedIndexTantivy<T>>(file_manager_context,
-                                                         space);
-    }
-    if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<T>>(file_manager_context, space);
-    }
-    if (index_type == HYBRID_INDEX_TYPE) {
-        return std::make_unique<HybridScalarIndex<T>>(file_manager_context,
-                                                      space);
-    }
-    return CreateScalarIndexSort<T>(file_manager_context, space);
-}
-
-template <>
-ScalarIndexPtr<std::string>
-IndexFactory::CreatePrimitiveScalarIndex<std::string>(
-    const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space) {
-#if defined(__linux__) || defined(__APPLE__)
-    if (index_type == INVERTED_INDEX_TYPE) {
-        return std::make_unique<InvertedIndexTantivy<std::string>>(
-            file_manager_context, space);
-    }
-    if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<std::string>>(file_manager_context,
-                                                          space);
-    }
-    if (index_type == HYBRID_INDEX_TYPE) {
-        return std::make_unique<HybridScalarIndex<std::string>>(
-            file_manager_context, space);
-    }
-    return CreateStringIndexMarisa(file_manager_context, space);
-#else
-    PanicInfo(Unsupported, "unsupported platform");
-#endif
-}
-
 IndexBasePtr
 IndexFactory::CreateIndex(
     const CreateIndexInfo& create_index_info,
@@ -132,19 +87,6 @@ IndexFactory::CreateIndex(
     }
 
     return CreateScalarIndex(create_index_info, file_manager_context);
-}
-
-IndexBasePtr
-IndexFactory::CreateIndex(
-    const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space) {
-    if (IsVectorDataType(create_index_info.field_type)) {
-        return CreateVectorIndex(
-            create_index_info, file_manager_context, space);
-    }
-
-    return CreateScalarIndex(create_index_info, file_manager_context, space);
 }
 
 IndexBasePtr
@@ -298,92 +240,6 @@ IndexFactory::CreateVectorIndex(
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorMemIndex<bfloat16>>(
                     index_type, metric_type, version, file_manager_context);
-            }
-            default:
-                PanicInfo(
-                    DataTypeInvalid,
-                    fmt::format("invalid data type to build mem index: {}",
-                                data_type));
-        }
-    }
-}
-
-IndexBasePtr
-IndexFactory::CreateVectorIndex(
-    const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space) {
-    auto data_type = create_index_info.field_type;
-    auto index_type = create_index_info.index_type;
-    auto metric_type = create_index_info.metric_type;
-    auto version = create_index_info.index_engine_version;
-
-    if (knowhere::UseDiskLoad(index_type, version)) {
-        switch (data_type) {
-            case DataType::VECTOR_FLOAT: {
-                return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type,
-                    metric_type,
-                    version,
-                    space,
-                    file_manager_context);
-            }
-            case DataType::VECTOR_FLOAT16: {
-                return std::make_unique<VectorDiskAnnIndex<float16>>(
-                    index_type,
-                    metric_type,
-                    version,
-                    space,
-                    file_manager_context);
-            }
-            case DataType::VECTOR_BFLOAT16: {
-                return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
-                    index_type,
-                    metric_type,
-                    version,
-                    space,
-                    file_manager_context);
-            }
-            case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorDiskAnnIndex<bin1>>(
-                    index_type,
-                    metric_type,
-                    version,
-                    space,
-                    file_manager_context);
-            }
-            case DataType::VECTOR_SPARSE_FLOAT: {
-                return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type,
-                    metric_type,
-                    version,
-                    space,
-                    file_manager_context);
-            }
-            default:
-                PanicInfo(
-                    DataTypeInvalid,
-                    fmt::format("invalid data type to build disk index: {}",
-                                data_type));
-        }
-    } else {  // create mem index
-        switch (data_type) {
-            case DataType::VECTOR_FLOAT:
-            case DataType::VECTOR_SPARSE_FLOAT: {
-                return std::make_unique<VectorMemIndex<float>>(
-                    create_index_info, file_manager_context, space);
-            }
-            case DataType::VECTOR_BINARY: {
-                return std::make_unique<VectorMemIndex<bin1>>(
-                    create_index_info, file_manager_context, space);
-            }
-            case DataType::VECTOR_FLOAT16: {
-                return std::make_unique<VectorMemIndex<float16>>(
-                    create_index_info, file_manager_context, space);
-            }
-            case DataType::VECTOR_BFLOAT16: {
-                return std::make_unique<VectorMemIndex<bfloat16>>(
-                    create_index_info, file_manager_context, space);
             }
             default:
                 PanicInfo(

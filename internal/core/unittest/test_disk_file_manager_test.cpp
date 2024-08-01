@@ -36,9 +36,6 @@
 #include "storage/InsertData.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
-#include "storage/options.h"
-#include "storage/schema.h"
-#include "storage/space.h"
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -285,62 +282,6 @@ PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     return path;
 }
 
-auto
-PrepareInsertDataSpace(const int64_t opt_field_data_range)
-    -> std::pair<std::string, std::shared_ptr<milvus_storage::Space>> {
-    std::string path = kOptFieldPath + "space/" + std::to_string(kOptFieldId);
-    arrow::FieldVector arrow_fields{
-        arrow::field("pk", arrow::int64()),
-        arrow::field("ts", arrow::int64()),
-        arrow::field(kOptFieldName, arrow::int64()),
-        arrow::field("vec", arrow::fixed_size_binary(1))};
-    auto arrow_schema = std::make_shared<arrow::Schema>(arrow_fields);
-    milvus_storage::SchemaOptions schema_options = {
-        .primary_column = "pk", .version_column = "ts", .vector_column = "vec"};
-    auto schema =
-        std::make_shared<milvus_storage::Schema>(arrow_schema, schema_options);
-    boost::filesystem::remove_all(path);
-    boost::filesystem::create_directories(path);
-    EXPECT_TRUE(schema->Validate().ok());
-    auto opt_space = milvus_storage::Space::Open(
-        "file://" + boost::filesystem::canonical(path).string(),
-        milvus_storage::Options{schema});
-    EXPECT_TRUE(opt_space.has_value());
-    auto space = std::move(opt_space.value());
-    const auto data = PrepareRawFieldData<int64_t>(opt_field_data_range);
-    arrow::Int64Builder pk_builder;
-    arrow::Int64Builder ts_builder;
-    arrow::NumericBuilder<arrow::Int64Type> scalar_builder;
-    arrow::FixedSizeBinaryBuilder vec_builder(arrow::fixed_size_binary(1));
-    const uint8_t kByteZero = 0;
-    for (size_t i = 0; i < kEntityCnt; ++i) {
-        EXPECT_TRUE(pk_builder.Append(i).ok());
-        EXPECT_TRUE(ts_builder.Append(i).ok());
-        EXPECT_TRUE(vec_builder.Append(&kByteZero).ok());
-    }
-    for (size_t i = 0; i < kEntityCnt; ++i) {
-        EXPECT_TRUE(scalar_builder.Append(data[i]).ok());
-    }
-    std::shared_ptr<arrow::Array> pk_array;
-    EXPECT_TRUE(pk_builder.Finish(&pk_array).ok());
-    std::shared_ptr<arrow::Array> ts_array;
-    EXPECT_TRUE(ts_builder.Finish(&ts_array).ok());
-    std::shared_ptr<arrow::Array> scalar_array;
-    EXPECT_TRUE(scalar_builder.Finish(&scalar_array).ok());
-    std::shared_ptr<arrow::Array> vec_array;
-    EXPECT_TRUE(vec_builder.Finish(&vec_array).ok());
-    auto batch =
-        arrow::RecordBatch::Make(arrow_schema,
-                                 kEntityCnt,
-                                 {pk_array, ts_array, scalar_array, vec_array});
-    milvus_storage::WriteOption write_opt = {kEntityCnt};
-    space->Write(*arrow::RecordBatchReader::Make({batch}, arrow_schema)
-                      .ValueOrDie()
-                      .get(),
-                 write_opt);
-    return {path, std::move(space)};
-}
-
 template <DataType DT>
 auto
 PrepareOptionalField(const std::shared_ptr<DiskFileManagerImpl>& file_manager,
@@ -400,47 +341,24 @@ CheckOptFieldCorrectness(
 }
 }  // namespace
 
-TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskFieldEmpty) {
-    auto file_manager = CreateFileManager(cm_);
-    {
-        const auto& [insert_file_space_path, space] =
-            PrepareInsertDataSpace(kOptFieldDataRange);
-        OptFieldT opt_fields;
-        EXPECT_TRUE(file_manager->CacheOptFieldToDisk(opt_fields).empty());
-        EXPECT_TRUE(
-            file_manager->CacheOptFieldToDisk(space, opt_fields).empty());
-    }
-
-    {
-        auto opt_fileds =
-            PrepareOptionalField<DataType::INT64>(file_manager, "");
-        auto res = file_manager->CacheOptFieldToDisk(nullptr, opt_fileds);
-        EXPECT_TRUE(res.empty());
-    }
-}
-
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
     auto file_manager = CreateFileManager(cm_);
     const auto insert_file_path =
         PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
-    const auto& [insert_file_space_path, space] =
-        PrepareInsertDataSpace(kOptFieldDataRange);
     OptFieldT opt_fields =
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
     opt_fields[kOptFieldId + 1] = {
-        kOptFieldName + "second", DataType::INT64, {insert_file_space_path}};
+        kOptFieldName + "second", DataType::INT64, {insert_file_path}};
     EXPECT_THROW(file_manager->CacheOptFieldToDisk(opt_fields), SegcoreError);
-    EXPECT_THROW(file_manager->CacheOptFieldToDisk(space, opt_fields),
-                 SegcoreError);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
     auto file_manager = CreateFileManager(cm_);
-    const auto& [insert_file_path, space] =
-        PrepareInsertDataSpace(kOptFieldDataRange);
+    const auto insert_file_path =
+        PrepareInsertData<DataType::INT64, int64_t>(kOptFieldDataRange);
     auto opt_fileds =
         PrepareOptionalField<DataType::INT64>(file_manager, insert_file_path);
-    auto res = file_manager->CacheOptFieldToDisk(space, opt_fileds);
+    auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
     ASSERT_FALSE(res.empty());
     CheckOptFieldCorrectness(res);
 }
@@ -475,14 +393,6 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
         auto opt_fileds = PrepareOptionalField<DataType::INT64>(
             file_manager, insert_file_path);
         auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
-        ASSERT_TRUE(res.empty());
-    }
-
-    {
-        const auto& [insert_file_path, space] = PrepareInsertDataSpace(1);
-        auto opt_fileds = PrepareOptionalField<DataType::INT64>(
-            file_manager, insert_file_path);
-        auto res = file_manager->CacheOptFieldToDisk(space, opt_fileds);
         ASSERT_TRUE(res.empty());
     }
 }

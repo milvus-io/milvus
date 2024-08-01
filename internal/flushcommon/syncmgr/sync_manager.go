@@ -99,7 +99,6 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithChunkManager(mgr.chunkManager)
-	case *SyncTaskV2:
 	}
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...)

@@ -23,7 +23,6 @@
 #include <map>
 #include <memory>
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -32,10 +31,6 @@ class StringIndexMarisa : public StringIndex {
     explicit StringIndexMarisa(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
-
-    explicit StringIndexMarisa(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
 
     int64_t
     Size() override;
@@ -48,9 +43,6 @@ class StringIndexMarisa : public StringIndex {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -70,9 +62,6 @@ class StringIndexMarisa : public StringIndex {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override;
-
-    void
-    BuildV2(const Config& Config = {}) override;
 
     const TargetBitmap
     In(size_t n, const std::string* values) override;
@@ -97,9 +86,6 @@ class StringIndexMarisa : public StringIndex {
 
     BinarySet
     Upload(const Config& config = {}) override;
-
-    BinarySet
-    UploadV2(const Config& config = {});
 
     const bool
     HasRawData() const override {
@@ -131,7 +117,6 @@ class StringIndexMarisa : public StringIndex {
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;
@@ -141,11 +126,5 @@ CreateStringIndexMarisa(
     const storage::FileManagerContext& file_manager_context =
         storage::FileManagerContext()) {
     return std::make_unique<StringIndexMarisa>(file_manager_context);
-}
-
-inline StringIndexPtr
-CreateStringIndexMarisa(const storage::FileManagerContext& file_manager_context,
-                        std::shared_ptr<milvus_storage::Space> space) {
-    return std::make_unique<StringIndexMarisa>(file_manager_context, space);
 }
 }  // namespace milvus::index

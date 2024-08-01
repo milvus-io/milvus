@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -100,7 +99,7 @@ func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) 
 	return result
 }
 
-func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
+func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
 	option := defaultWBOption(metacache)
 	for _, opt := range opts {
 		opt(option)
@@ -108,9 +107,9 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cach
 
 	switch option.deletePolicy {
 	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
+		return NewBFWriteBuffer(channel, metacache, syncMgr, option)
 	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
+		return NewL0WriteBuffer(channel, metacache, syncMgr, option)
 	default:
 		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
 	}
@@ -140,34 +139,23 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
-	storagev2Cache *metacache.StorageV2Cache
-
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
 }
 
-func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
+func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
 	flushTs := atomic.NewUint64(nonFlushTS)
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
 
 	var serializer syncmgr.Serializer
 	var err error
-	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		serializer, err = syncmgr.NewStorageV2Serializer(
-			storageV2Cache,
-			option.idAllocator,
-			metacache,
-			option.metaWriter,
-		)
-	} else {
-		serializer, err = syncmgr.NewStorageSerializer(
-			option.idAllocator,
-			metacache,
-			option.metaWriter,
-		)
-	}
+	serializer, err = syncmgr.NewStorageSerializer(
+		option.idAllocator,
+		metacache,
+		option.metaWriter,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +189,6 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		syncCheckpoint:   newCheckpointCandiates(),
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
-		storagev2Cache:   storageV2Cache,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -659,8 +646,6 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		}
 		switch t := syncTask.(type) {
 		case *syncmgr.SyncTask:
-			t.WithDrop()
-		case *syncmgr.SyncTaskV2:
 			t.WithDrop()
 		}
 

@@ -23,7 +23,6 @@
 #include "index/ScalarIndex.h"
 #include "index/Utils.h"
 #include "storage/Util.h"
-#include "storage/space.h"
 
 namespace milvus {
 namespace index {
@@ -37,23 +36,6 @@ HybridScalarIndex<T>::HybridScalarIndex(
     if (file_manager_context.Valid()) {
         mem_file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-        AssertInfo(mem_file_manager_ != nullptr, "create file manager failed!");
-    }
-    field_type_ = file_manager_context.fieldDataMeta.field_schema.data_type();
-    internal_index_type_ = ScalarIndexType::NONE;
-}
-
-template <typename T>
-HybridScalarIndex<T>::HybridScalarIndex(
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space)
-    : is_built_(false),
-      bitmap_index_cardinality_limit_(DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND),
-      file_manager_context_(file_manager_context),
-      space_(space) {
-    if (file_manager_context.Valid()) {
-        mem_file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
-            file_manager_context, space);
         AssertInfo(mem_file_manager_ != nullptr, "create file manager failed!");
     }
     field_type_ = file_manager_context.fieldDataMeta.field_schema.data_type();
@@ -275,39 +257,6 @@ HybridScalarIndex<T>::Build(const Config& config) {
 }
 
 template <typename T>
-void
-HybridScalarIndex<T>::BuildV2(const Config& config) {
-    if (is_built_) {
-        return;
-    }
-    bitmap_index_cardinality_limit_ =
-        GetBitmapCardinalityLimitFromConfig(config);
-    LOG_INFO("config bitmap cardinality limit to {}",
-             bitmap_index_cardinality_limit_);
-
-    auto field_name = mem_file_manager_->GetIndexMeta().field_name;
-    auto reader = space_->ScanData();
-    std::vector<FieldDataPtr> field_datas;
-    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
-        if (!rec.ok()) {
-            PanicInfo(DataFormatBroken, "failed to read data");
-        }
-        auto data = rec.ValueUnsafe();
-        auto total_num_rows = data->num_rows();
-        auto col_data = data->GetColumnByName(field_name);
-        // todo: support nullable index
-        auto field_data = storage::CreateFieldData(
-            DataType(GetDType<T>()), false, 0, total_num_rows);
-        field_data->FillFieldData(col_data);
-        field_datas.push_back(field_data);
-    }
-
-    SelectIndexBuildType(field_datas);
-    BuildInternal(field_datas);
-    is_built_ = true;
-}
-
-template <typename T>
 BinarySet
 HybridScalarIndex<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built yet");
@@ -357,33 +306,12 @@ HybridScalarIndex<T>::Upload(const Config& config) {
 }
 
 template <typename T>
-BinarySet
-HybridScalarIndex<T>::UploadV2(const Config& config) {
-    auto internal_index = GetInternalIndex();
-    auto index_ret = internal_index->Upload(config);
-
-    auto index_type_ret = SerializeIndexType();
-
-    for (auto& [key, value] : index_type_ret.binary_map_) {
-        index_ret.Append(key, value);
-    }
-
-    return index_ret;
-}
-
-template <typename T>
 void
 HybridScalarIndex<T>::DeserializeIndexType(const BinarySet& binary_set) {
     uint8_t index_type;
     auto index_type_buffer = binary_set.GetByName(INDEX_TYPE);
     memcpy(&index_type, index_type_buffer->data.get(), index_type_buffer->size);
     internal_index_type_ = static_cast<ScalarIndexType>(index_type);
-}
-
-template <typename T>
-void
-HybridScalarIndex<T>::LoadV2(const Config& config) {
-    PanicInfo(Unsupported, "HybridScalarIndex LoadV2 not implemented");
 }
 
 template <typename T>
