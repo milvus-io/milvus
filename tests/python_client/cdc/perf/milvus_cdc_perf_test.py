@@ -4,7 +4,10 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema
 from loguru import logger
-
+import socket
+import dns.resolver
+from urllib.parse import urlparse
+import itertools
 
 class MilvusCDCPerformanceTest:
     def __init__(self, source_uri, source_token, target_uri, target_token):
@@ -21,7 +24,10 @@ class MilvusCDCPerformanceTest:
         self.latencies = []
         self.latest_insert_status = {"latest_ts": 0, "latest_count": 0}
         self.init_collection()
-
+        self.source_pod_ips = self.get_pod_ips(source_uri)
+        self.target_pod_ips = self.get_pod_ips(target_uri)
+        self.source_ip_cycle = itertools.cycle(self.source_pod_ips)
+        self.target_ip_cycle = itertools.cycle(self.target_pod_ips)
     def init_collection(self):
         connections.connect(alias="default", uri=self.source_uri, token=self.source_token)
         fields = [
@@ -40,7 +46,21 @@ class MilvusCDCPerformanceTest:
         collection.load()
         connections.disconnect(alias="default")
         return collection
+    def get_pod_ips(self, uri):
+        parsed_uri = urlparse(uri)
+        hostname = parsed_uri.hostname
+        try:
+            answers = dns.resolver.resolve(hostname, 'A')
+            return [str(rdata) for rdata in answers]
+        except dns.resolver.NXDOMAIN:
+            logger.warning(f"Could not resolve {hostname}. Using the original IP.")
+            return [socket.gethostbyname(hostname)]
 
+    def get_next_source_ip(self):
+        return next(self.source_ip_cycle)
+
+    def get_next_target_ip(self):
+        return next(self.target_ip_cycle)
     def setup_collection(self, alias):
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
@@ -60,9 +80,11 @@ class MilvusCDCPerformanceTest:
 
     def continuous_insert(self, duration, batch_size, thread_id):
         alias = f"source_{thread_id}"
-        connections.connect(alias, uri=self.source_uri, token=self.source_token)
+        pod_ip = self.get_next_source_ip()
+        parsed_uri = urlparse(self.source_uri)
+        uri = parsed_uri._replace(netloc=f"{pod_ip}:{parsed_uri.port}").geturl()
+        connections.connect(alias, uri=uri, token=self.source_token)
         collection = self.setup_collection(alias)
-
         end_time = time.time() + duration
         local_insert_count = 0
         while time.time() < end_time:
