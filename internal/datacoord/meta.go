@@ -148,7 +148,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return nil, err
 	}
 
-	psm, err := newPartitionStatsMeta(ctx, catalog)
+	psm, err := newPartitionStatsMeta(ctx, catalog, chunkManager)
 	if err != nil {
 		return nil, err
 	}
