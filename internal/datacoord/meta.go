@@ -787,6 +787,10 @@ func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) Upda
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
+		if segment.LastLevel == segment.Level && segment.Level == level {
+			log.Debug("segment already is this level", zap.Int64("segID", segmentID), zap.String("level", level.String()))
+			return true
+		}
 		segment.LastLevel = segment.Level
 		segment.Level = level
 		return true
