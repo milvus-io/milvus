@@ -182,3 +182,7 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 		}
 	})
 }
+
+func (s *ClusteringCompactionPolicySuite) TestGetExpectedSegmentSize() {
+
+}
