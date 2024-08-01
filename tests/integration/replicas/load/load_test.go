@@ -355,6 +355,87 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	s.releaseCollection(newDbName, collectionName)
 }
 
+func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
+	ctx := context.Background()
+
+	// prepare resource groups
+	rgNum := 3
+	rgs := make([]string, 0)
+	for i := 0; i < rgNum; i++ {
+		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
+		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+			ResourceGroup: rgs[i],
+			Config: &rgpb.ResourceGroupConfig{
+				Requests: &rgpb.ResourceGroupLimit{
+					NodeNum: 1,
+				},
+				Limits: &rgpb.ResourceGroupLimit{
+					NodeNum: 1,
+				},
+
+				TransferFrom: []*rgpb.ResourceGroupTransfer{
+					{
+						ResourceGroup: meta.DefaultResourceGroupName,
+					},
+				},
+				TransferTo: []*rgpb.ResourceGroupTransfer{
+					{
+						ResourceGroup: meta.DefaultResourceGroupName,
+					},
+				},
+			},
+		})
+	}
+
+	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+	s.Len(resp.GetResourceGroups(), rgNum+1)
+
+	for i := 1; i < rgNum; i++ {
+		s.Cluster.AddQueryNode()
+	}
+
+	s.Eventually(func() bool {
+		matchCounter := 0
+		for _, rg := range rgs {
+			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+				ResourceGroup: rg,
+			})
+			s.NoError(err)
+			s.True(merr.Ok(resp.GetStatus()))
+			if len(resp1.ResourceGroup.Nodes) == 1 {
+				matchCounter += 1
+			}
+		}
+		return matchCounter == rgNum
+	}, 30*time.Second, time.Second)
+
+	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
+		DBName:           dbName,
+		Dim:              dim,
+		CollectionName:   collectionName,
+		ChannelNum:       1,
+		SegmentNum:       3,
+		RowNumPerSegment: 2000,
+	})
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "3")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, strings.Join(rgs, ","))
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+
+	// load collection without specified replica and rgs
+	s.loadCollection(collectionName, dbName, 0, nil)
+	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp2.Status))
+	s.Len(resp2.GetReplicas(), 3)
+	s.releaseCollection(dbName, collectionName)
+}
+
 func TestReplicas(t *testing.T) {
 	suite.Run(t, new(LoadTestSuite))
 }

@@ -313,6 +313,9 @@ func ParseAsStings(v string) []string {
 }
 
 func getAsStrings(v string) []string {
+	if len(v) == 0 {
+		return []string{}
+	}
 	return getAndConvert(v, func(value string) ([]string, error) {
 		return strings.Split(value, ","), nil
 	}, []string{})

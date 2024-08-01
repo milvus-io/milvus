@@ -103,7 +103,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
 
 		params.Save("common.security.superUsers", "")
-		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
+		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())
 
 		assert.Equal(t, false, Params.PreCreatedTopicEnabled.GetAsBool())
 
@@ -340,6 +340,9 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
+
+		assert.Equal(t, 0, Params.ClusterLevelLoadReplicaNumber.GetAsInt())
+		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
