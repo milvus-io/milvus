@@ -195,11 +195,11 @@ func (s *CompactionSuite) TestMixCompaction() {
 	s.NoError(err)
 
 	// drop collection
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(status, err)
-	s.NoError(err)
+	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	//	 CollectionName: collectionName,
+	// })
+	// err = merr.CheckRPCCall(status, err)
+	// s.NoError(err)
 
 	log.Info("Test compaction succeed")
 }

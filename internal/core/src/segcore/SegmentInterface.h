@@ -116,9 +116,6 @@ class SegmentInterface {
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
 
     virtual void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) = 0;
-
-    virtual void
     RemoveDuplicatePkRecords() = 0;
 
     virtual int64_t

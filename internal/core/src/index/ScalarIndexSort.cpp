@@ -45,73 +45,6 @@ ScalarIndexSort<T>::ScalarIndexSort(
 }
 
 template <typename T>
-inline ScalarIndexSort<T>::ScalarIndexSort(
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space)
-    : is_built_(false), data_(), space_(space) {
-    if (file_manager_context.Valid()) {
-        file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
-            file_manager_context, space);
-        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
-    }
-}
-
-template <typename T>
-inline void
-ScalarIndexSort<T>::BuildV2(const Config& config) {
-    if (is_built_) {
-        return;
-    }
-    auto field_name = file_manager_->GetIndexMeta().field_name;
-    auto reader = space_->ScanData();
-    std::vector<FieldDataPtr> field_datas;
-    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
-        if (!rec.ok()) {
-            PanicInfo(DataFormatBroken, "failed to read data");
-        }
-        auto data = rec.ValueUnsafe();
-        auto total_num_rows = data->num_rows();
-        auto col_data = data->GetColumnByName(field_name);
-        auto nullable =
-            col_data->type()->id() == arrow::Type::NA ? true : false;
-        // will support build scalar index when nullable in the future just skip it
-        // now, not support to build index in nullable field_data
-        // todo: support nullable index
-        AssertInfo(!nullable,
-                   "not support to build index in nullable field_data");
-        auto field_data = storage::CreateFieldData(
-            DataType(GetDType<T>()), nullable, 0, total_num_rows);
-        field_data->FillFieldData(col_data);
-        field_datas.push_back(field_data);
-    }
-    int64_t total_num_rows = 0;
-    for (const auto& data : field_datas) {
-        total_num_rows += data->get_num_rows();
-    }
-    if (total_num_rows == 0) {
-        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
-    }
-
-    data_.reserve(total_num_rows);
-    int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
-            auto value = reinterpret_cast<const T*>(data->RawValue(i));
-            data_.emplace_back(IndexStructure(*value, offset));
-            offset++;
-        }
-    }
-
-    std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows);
-    for (size_t i = 0; i < total_num_rows; ++i) {
-        idx_to_offsets_[data_[i].idx_] = i;
-    }
-    is_built_ = true;
-}
-
-template <typename T>
 void
 ScalarIndexSort<T>::Build(const Config& config) {
     if (is_built_)
@@ -216,21 +149,6 @@ ScalarIndexSort<T>::Upload(const Config& config) {
 }
 
 template <typename T>
-BinarySet
-ScalarIndexSort<T>::UploadV2(const Config& config) {
-    auto binary_set = Serialize(config);
-    file_manager_->AddFileV2(binary_set);
-
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
-}
-
-template <typename T>
 void
 ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
@@ -264,47 +182,6 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index");
     auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-    AssembleIndexDatas(index_datas);
-    BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
-    }
-
-    LoadWithoutAssemble(binary_set, config);
-}
-
-template <typename T>
-void
-ScalarIndexSort<T>::LoadV2(const Config& config) {
-    auto blobs = space_->StatisticsBlobs();
-    std::vector<std::string> index_files;
-    auto prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
-    for (auto& b : blobs) {
-        if (b.name.rfind(prefix, 0) == 0) {
-            index_files.push_back(b.name);
-        }
-    }
-    std::map<std::string, FieldDataPtr> index_datas{};
-    for (auto& file_name : index_files) {
-        auto res = space_->GetBlobByteSize(file_name);
-        if (!res.ok()) {
-            PanicInfo(S3Error, "unable to read index blob");
-        }
-        auto index_blob_data =
-            std::shared_ptr<uint8_t[]>(new uint8_t[res.value()]);
-        auto status = space_->ReadBlob(file_name, index_blob_data.get());
-        if (!status.ok()) {
-            PanicInfo(S3Error, "unable to read index blob");
-        }
-        auto raw_index_blob =
-            storage::DeserializeFileData(index_blob_data, res.value());
-        auto key = file_name.substr(file_name.find_last_of('/') + 1);
-        index_datas[key] = raw_index_blob->GetFieldData();
-    }
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {

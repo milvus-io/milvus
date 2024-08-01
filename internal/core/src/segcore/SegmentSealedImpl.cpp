@@ -282,59 +282,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
-    // TODO(SPARSE): support storage v2
-    // NOTE: lock only when data is ready to avoid starvation
-    // only one field for now, parallel load field data in golang
-    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
-
-    for (auto& [id, info] : load_info.field_infos) {
-        AssertInfo(info.row_count > 0, "The row count of field data is 0");
-
-        auto field_id = FieldId(id);
-        auto insert_files = info.insert_files;
-        auto field_data_info =
-            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-
-        LOG_INFO("segment {} loads field {} with num_rows {}",
-                 this->get_segment_id(),
-                 field_id.get(),
-                 num_rows);
-
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-        field_data_info.channel->set_capacity(parallel_degree * 2);
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        // auto load_future = pool.Submit(
-        //     LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-
-        auto res = milvus_storage::Space::Open(
-            load_info.url,
-            milvus_storage::Options{nullptr, load_info.storage_version});
-        AssertInfo(res.ok(),
-                   fmt::format("init space failed: {}, error: {}",
-                               load_info.url,
-                               res.status().ToString()));
-        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
-        auto load_future = pool.Submit(
-            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_INFO("segment {} submits load field {} task to thread pool",
-                 this->get_segment_id(),
-                 field_id.get());
-        if (load_info.mmap_dir_path.empty() ||
-            SystemProperty::Instance().IsSystem(field_id)) {
-            LoadFieldData(field_id, field_data_info);
-        } else {
-            MapFieldData(field_id, field_data_info);
-        }
-        LOG_INFO("segment {} loads field {} done",
-                 this->get_segment_id(),
-                 field_id.get());
-    }
-}
-
-void
 SegmentSealedImpl::RemoveDuplicatePkRecords() {
     std::unique_lock lck(mutex_);
     if (!is_pk_index_valid_) {

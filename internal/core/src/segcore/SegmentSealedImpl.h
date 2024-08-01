@@ -50,8 +50,6 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
-    void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
     // erase duplicate records when sealed segment loaded done
     void
     RemoveDuplicatePkRecords() override;

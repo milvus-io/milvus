@@ -103,10 +103,6 @@ LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
 
 CStatus
-LoadFieldDataV2(CSegmentInterface c_segment,
-                CLoadFieldDataInfo load_field_data_info);
-
-CStatus
 RemoveDuplicatePkRecords(CSegmentInterface c_segment);
 
 CStatus

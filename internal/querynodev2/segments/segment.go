@@ -29,12 +29,10 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"io"
 	"runtime"
 	"strings"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -44,8 +42,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
-	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -55,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	typeutil_internal "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -259,7 +254,6 @@ type LocalSegment struct {
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
-	space              *milvus_storage.Space
 }
 
 func NewSegment(ctx context.Context,
@@ -328,76 +322,6 @@ func NewSegment(ctx context.Context,
 		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
 		insertCount: atomic.NewInt64(0),
-	}
-
-	if err := segment.initializeSegment(); err != nil {
-		return nil, err
-	}
-	return segment, nil
-}
-
-func NewSegmentV2(
-	ctx context.Context,
-	collection *Collection,
-	segmentType SegmentType,
-	version int64,
-	loadInfo *querypb.SegmentLoadInfo,
-) (Segment, error) {
-	/*
-		CSegmentInterface
-		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
-	*/
-	if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
-		return NewL0Segment(collection, segmentType, version, loadInfo)
-	}
-	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
-	if err != nil {
-		return nil, err
-	}
-	var segmentPtr C.CSegmentInterface
-	var status C.CStatus
-	var locker *state.LoadStateLock
-	switch segmentType {
-	case SegmentTypeSealed:
-		status = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(loadInfo.GetSegmentID()), &segmentPtr)
-		locker = state.NewLoadStateLock(state.LoadStateOnlyMeta)
-	case SegmentTypeGrowing:
-		status = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(loadInfo.GetSegmentID()), &segmentPtr)
-		locker = state.NewLoadStateLock(state.LoadStateDataLoaded)
-	default:
-		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
-	}
-
-	if err := HandleCStatus(ctx, &status, "NewSegmentFailed"); err != nil {
-		return nil, err
-	}
-
-	log.Info("create segment",
-		zap.Int64("collectionID", loadInfo.GetCollectionID()),
-		zap.Int64("partitionID", loadInfo.GetPartitionID()),
-		zap.Int64("segmentID", loadInfo.GetSegmentID()),
-		zap.String("segmentType", segmentType.String()))
-
-	url, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), loadInfo.GetSegmentID())
-	if err != nil {
-		return nil, err
-	}
-	space, err := milvus_storage.Open(url, options.NewSpaceOptionBuilder().SetVersion(loadInfo.GetStorageVersion()).Build())
-	if err != nil {
-		return nil, err
-	}
-
-	segment := &LocalSegment{
-		baseSegment:        base,
-		ptrLock:            locker,
-		ptr:                segmentPtr,
-		lastDeltaTimestamp: atomic.NewUint64(0),
-		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
-		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
-		space:              space,
-		memSize:            atomic.NewInt64(-1),
-		rowNum:             atomic.NewInt64(-1),
-		insertCount:        atomic.NewInt64(0),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -932,18 +856,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
-			if err != nil {
-				return nil, err
-			}
-
-			loadFieldDataInfo.appendURI(uri)
-			loadFieldDataInfo.appendStorageVersion(s.space.GetCurrentVersion())
-			status = C.LoadFieldDataV2(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
-		} else {
-			status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
-		}
+		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "LoadMultiFieldData failed",
@@ -1019,18 +932,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
 		log.Info("submitted loadFieldData task to load pool")
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
-			if err != nil {
-				return nil, err
-			}
-
-			loadFieldDataInfo.appendURI(uri)
-			loadFieldDataInfo.appendStorageVersion(s.space.GetCurrentVersion())
-			status = C.LoadFieldDataV2(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
-		} else {
-			status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
-		}
+		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "LoadFieldData failed",
@@ -1043,95 +945,6 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 
 	log.Info("load field done")
 
-	return nil
-}
-
-func (s *LocalSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	deleteReader, err := s.space.ScanDelete()
-	if err != nil {
-		return err
-	}
-	if !deleteReader.Schema().HasField(common.TimeStampFieldName) {
-		return fmt.Errorf("can not read timestamp field in space")
-	}
-	pkFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return err
-	}
-	ids := &schemapb.IDs{}
-	var pkint64s []int64
-	var pkstrings []string
-	var tss []int64
-	for deleteReader.Next() {
-		rec := deleteReader.Record()
-		indices := rec.Schema().FieldIndices(common.TimeStampFieldName)
-		tss = append(tss, rec.Column(indices[0]).(*array.Int64).Int64Values()...)
-		indices = rec.Schema().FieldIndices(pkFieldSchema.Name)
-		switch pkFieldSchema.DataType {
-		case schemapb.DataType_Int64:
-			pkint64s = append(pkint64s, rec.Column(indices[0]).(*array.Int64).Int64Values()...)
-		case schemapb.DataType_VarChar:
-			columnData := rec.Column(indices[0]).(*array.String)
-			for i := 0; i < columnData.Len(); i++ {
-				pkstrings = append(pkstrings, columnData.Value(i))
-			}
-		default:
-			return fmt.Errorf("unknown data type %v", pkFieldSchema.DataType)
-		}
-	}
-	if err := deleteReader.Err(); err != nil && err != io.EOF {
-		return err
-	}
-
-	switch pkFieldSchema.DataType {
-	case schemapb.DataType_Int64:
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: pkint64s,
-			},
-		}
-	case schemapb.DataType_VarChar:
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: pkstrings,
-			},
-		}
-	default:
-		return fmt.Errorf("unknown data type %v", pkFieldSchema.DataType)
-	}
-
-	idsBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return err
-	}
-
-	if len(tss) == 0 {
-		return nil
-	}
-
-	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:        unsafe.Pointer(&tss[0]),
-		primary_keys:      (*C.uint8_t)(unsafe.Pointer(&idsBlob[0])),
-		primary_keys_size: C.uint64_t(len(idsBlob)),
-		row_count:         C.int64_t(len(tss)),
-	}
-	/*
-		CStatus
-		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
-	*/
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.LoadDeletedRecord(s.ptr, loadInfo)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "LoadDeletedRecord failed"); err != nil {
-		return err
-	}
-
-	log.Info("load deleted record done",
-		zap.Int("rowNum", len(tss)),
-		zap.String("segmentType", s.Type().String()))
 	return nil
 }
 
@@ -1331,13 +1144,6 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
 	}
 
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
-		if err != nil {
-			return err
-		}
-		indexInfoProto.Uri = uri
-	}
 	newLoadIndexInfoSpan := tr.RecordSpan()
 
 	// 2.
