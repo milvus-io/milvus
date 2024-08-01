@@ -265,10 +265,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 			StatsRequest: st.req,
 		},
 	})
-	if err == nil {
-		err = merr.Error(resp)
-	}
-	if err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Ctx(ctx).Warn("assign stats task failed", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateRetry, err.Error())
@@ -286,10 +283,8 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 		TaskIDs:   []int64{st.GetTaskID()},
 		JobType:   indexpb.JobType_JobTypeStatsJob,
 	})
-	if err == nil {
-		err = merr.Error(resp.GetStatus())
-	}
-	if err != nil {
+
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Ctx(ctx).Warn("query stats task result failed", zap.Int64("taskID", st.GetTaskID()),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateRetry, err.Error())
@@ -323,10 +318,7 @@ func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNod
 		JobType:   indexpb.JobType_JobTypeStatsJob,
 	})
 
-	if err == nil {
-		err = merr.Error(resp)
-	}
-	if err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Ctx(ctx).Warn("notify worker drop the stats task failed", zap.Int64("taskID", st.GetTaskID()),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))
 		return false
