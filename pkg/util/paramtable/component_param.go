@@ -882,18 +882,20 @@ type gpuConfig struct {
 
 func (t *gpuConfig) init(base *BaseTable) {
 	t.InitSize = ParamItem{
-		Key:     "gpu.initMemSize",
-		Version: "2.3.4",
-		Doc:     `Gpu Memory Pool init size`,
-		Export:  true,
+		Key:          "gpu.initMemSize",
+		Version:      "2.3.4",
+		Doc:          `Gpu Memory Pool init size`,
+		Export:       true,
+		DefaultValue: "2048",
 	}
 	t.InitSize.Init(base.mgr)
 
 	t.MaxSize = ParamItem{
-		Key:     "gpu.maxMemSize",
-		Version: "2.3.4",
-		Doc:     `Gpu Memory Pool Max size`,
-		Export:  true,
+		Key:          "gpu.maxMemSize",
+		Version:      "2.3.4",
+		Doc:          `Gpu Memory Pool Max size`,
+		Export:       true,
+		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
 }
