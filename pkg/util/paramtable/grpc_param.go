@@ -80,7 +80,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.IPItem = ParamItem{
 		Key:     p.Domain + ".ip",
 		Version: "2.3.3",
-		Doc:     "if not specified, use the first unicastable address",
+		Doc:     "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
 		Export:  true,
 	}
 	p.IPItem.Init(base.mgr)
@@ -90,6 +90,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".port",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
+		Doc:          "TCP port of " + p.Domain,
 		Export:       true,
 	}
 	p.Port.Init(base.mgr)
@@ -171,6 +172,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the " + domain + " can send, unit: byte",
 		Export: true,
 	}
 	p.ServerMaxSendSize.Init(base.mgr)
@@ -193,6 +195,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the " + domain + " can receive, unit: byte",
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
@@ -250,6 +253,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the clients on " + domain + " can send, unit: byte",
 		Export: true,
 	}
 	p.ClientMaxSendSize.Init(base.mgr)
@@ -272,6 +276,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "The maximum size of each RPC request that the clients on " + domain + " can receive, unit: byte",
 		Export: true,
 	}
 	p.ClientMaxRecvSize.Init(base.mgr)
