@@ -38,7 +38,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 
 	// create new timestampAck for ack process.
 	// add ts to heap wait for ack.
-	tsWithAck := newAcker(uint64(ts), ta.lastConfirmedMessageID)
+	tsWithAck := newAcker(ts, ta.lastConfirmedMessageID)
 	ta.notAckHeap.Push(tsWithAck)
 	return tsWithAck, nil
 }
