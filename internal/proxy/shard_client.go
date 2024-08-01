@@ -6,11 +6,13 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
@@ -32,6 +34,10 @@ type shardClient struct {
 	client   types.QueryNodeClient
 	isClosed bool
 	refCnt   int
+	clients  []types.QueryNodeClient
+	idx      atomic.Int64
+	poolSize int
+	pooling  bool
 }
 
 func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, error) {
@@ -39,6 +45,10 @@ func (n *shardClient) getClient(ctx context.Context) (types.QueryNodeClient, err
 	defer n.RUnlock()
 	if n.isClosed {
 		return nil, errClosed
+	}
+	if n.pooling {
+		idx := n.idx.Inc()
+		return n.clients[int(idx)%n.poolSize], nil
 	}
 	return n.client, nil
 }
@@ -94,6 +104,31 @@ func newShardClient(info *nodeInfo, client types.QueryNodeClient) *shardClient {
 		refCnt: 1,
 	}
 	return ret
+}
+
+func newPoolingShardClient(info *nodeInfo, creator queryNodeCreatorFunc) (*shardClient, error) {
+	num := paramtable.Get().ProxyCfg.QueryNodePoolingSize.GetAsInt()
+	if num <= 0 {
+		num = 1
+	}
+	clients := make([]types.QueryNodeClient, 0, num)
+	for i := 0; i < num; i++ {
+		client, err := creator(context.Background(), info.address, info.nodeID)
+		if err != nil {
+			return nil, err
+		}
+		clients = append(clients, client)
+	}
+	return &shardClient{
+		info: nodeInfo{
+			nodeID:  info.nodeID,
+			address: info.address,
+		},
+		refCnt:   1,
+		pooling:  true,
+		clients:  clients,
+		poolSize: num,
+	}, nil
 }
 
 type shardClientMgr interface {
@@ -182,11 +217,10 @@ func (c *shardClientMgrImpl) UpdateShardLeaders(oldLeaders map[string][]nodeInfo
 			if c.clientCreator == nil {
 				return fmt.Errorf("clientCreator function is nil")
 			}
-			shardClient, err := c.clientCreator(context.Background(), node.address, node.nodeID)
+			client, err := newPoolingShardClient(node, c.clientCreator)
 			if err != nil {
 				return err
 			}
-			client := newShardClient(node, shardClient)
 			c.clients.data[node.nodeID] = client
 		}
 	}

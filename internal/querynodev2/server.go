@@ -1,4 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
+z// Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -336,12 +336,9 @@ func (node *QueryNode) Init() error {
 				}
 			}
 
-			client, err := grpcquerynodeclient.NewClient(node.ctx, addr, nodeID)
-			if err != nil {
-				return nil, err
-			}
-
-			return cluster.NewRemoteWorker(client), nil
+			return cluster.NewPoolingRemoteWorker(func() (types.QueryNodeClient, error) {
+				return grpcquerynodeclient.NewClient(node.ctx, addr, nodeID)
+			}), nil
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()

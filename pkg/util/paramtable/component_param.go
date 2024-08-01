@@ -1169,6 +1169,7 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
+	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1570,6 +1571,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
+
+	p.QueryNodePoolingSize = ParamItem{
+		Key:          "proxy.queryNodePooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for shardleader(querynode) client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.QueryNodePoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2284,6 +2294,8 @@ type queryNodeConfig struct {
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	QueryStreamBatchSize ParamItem `refreshable:"false"`
+	// worker
+	WorkerPoolingSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2917,6 +2929,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.WorkerPoolingSize = ParamItem{
+		Key:          "queryNode.workerPooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for worker querynode client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.WorkerPoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
