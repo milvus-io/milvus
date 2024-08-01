@@ -61,14 +61,13 @@ class MilvusCDCPerformanceTest:
         while time.time() < end_time:
             entities = self.generate_data(batch_size)
             self.source_collection.insert(entities)
-            with (self.insert_lock):
-                self.insert_count += batch_size
-                self.latest_insert_status = {
-                    "latest_ts": entities[0][-1],
-                    "latest_count": self.insert_count
-                }  # Update the latest insert timestamp
+            self.insert_count += batch_size
+            self.latest_insert_status = {
+                "latest_ts": entities[0][-1],
+                "latest_count": self.insert_count
+            }  # Update the latest insert timestamp
                 # logger.info(f"insert_count: {self.insert_count}, latest_ts: {self.latest_insert_status['latest_ts']}")
-            time.sleep(0.01)  # Small delay to prevent overwhelming the system
+            time.sleep(0.001)  # Small delay to prevent overwhelming the system
 
     def continuous_query(self):
         while not self.stop_query:
