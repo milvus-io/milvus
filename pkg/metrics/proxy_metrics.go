@@ -381,6 +381,14 @@ var (
 			Help:      "latency which request waits in the queue",
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
+
+	MaxInsertRate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "max_insert_rate",
+			Help:      "max insert rate",
+		}, []string{"node_id", "scope"})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -437,6 +445,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySlowQueryCount)
 	registry.MustRegister(ProxyReportValue)
 	registry.MustRegister(ProxyReqInQueueLatency)
+
+	registry.MustRegister(MaxInsertRate)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
