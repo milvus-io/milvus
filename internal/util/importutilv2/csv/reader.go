@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -36,10 +35,14 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
 	}
-	count, err := estimateReadCountPerBatch(bufferSize, schema)
-	if err != nil {
-		return nil, err
-	}
+	// count, err := estimateReadCountPerBatch(bufferSize, schema)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// set the interval for determining if the buffer is exceeded
+	var count int64 = 1000
+
 	csvReader := csv.NewReader(cmReader)
 	csvReader.Comma = sep
 
@@ -116,13 +119,13 @@ func (r *reader) Size() (int64, error) {
 	return size, nil
 }
 
-func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
-	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
-	if err != nil {
-		return 0, err
-	}
-	if 1000*sizePerRecord <= bufferSize {
-		return 1000, nil
-	}
-	return int64(bufferSize) / int64(sizePerRecord), nil
-}
+// func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+// 	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	if 1000*sizePerRecord <= bufferSize {
+// 		return 1000, nil
+// 	}
+// 	return int64(bufferSize) / int64(sizePerRecord), nil
+// }
