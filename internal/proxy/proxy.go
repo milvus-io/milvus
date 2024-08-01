@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -383,8 +384,20 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	}()
 }
 
+func watchQuotaAndLimit() {
+	pt := paramtable.Get()
+	pt.Watch(pt.QuotaConfig.DMLMaxInsertRate.Key, config.NewHandler(pt.QuotaConfig.DMLMaxInsertRate.Key, func(event *config.Event) {
+		metrics.MaxInsertRate.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "cluster").Set(pt.QuotaConfig.DMLMaxInsertRate.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DMLMaxInsertRatePerCollection.Key, config.NewHandler(pt.QuotaConfig.DMLMaxInsertRatePerCollection.Key, func(event *config.Event) {
+		metrics.MaxInsertRate.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "collection").Set(pt.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
+	}))
+}
+
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
+	watchQuotaAndLimit()
+
 	if err := node.sched.Start(); err != nil {
 		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
