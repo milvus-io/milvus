@@ -19,11 +19,14 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"sync"
+	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -38,50 +41,76 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *CompactionSuite) TestL0Compaction() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+type L2SingleCompactionSuite struct {
+	integration.MiniClusterSuite
+}
+
+func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
 
 	const (
-		dim       = 128
-		dbName    = ""
-		rowNum    = 100000
-		deleteCnt = 50000
-
+		dim        = 128
+		dbName     = "default"
+		rowNum     = 10000
+		deleteCnt  = 5000
 		indexType  = integration.IndexFaissIvfFlat
 		metricType = metric.L2
-		vecType    = schemapb.DataType_FloatVector
 	)
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+	collectionName := "TestL2SingleCompaction" + funcutil.GenRandomStr()
 
-	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
+	pk := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            integration.Int64Field,
+		IsPrimaryKey:    true,
+		Description:     "",
+		DataType:        schemapb.DataType_Int64,
+		TypeParams:      nil,
+		IndexParams:     nil,
+		AutoID:          false,
+		IsClusteringKey: true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      102,
+		Name:         integration.FloatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+		IndexParams: nil,
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
+	}
 
-	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, false, vecType)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	// create collection
 	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Schema:           marshaledSchema,
-		ShardsNum:        common.DefaultShardsNum,
-		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
 	})
-	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	// show collection
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	// insert
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
@@ -92,9 +121,8 @@ func (s *CompactionSuite) TestL0Compaction() {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	err = merr.CheckRPCCall(insertResult, err)
 	s.NoError(err)
-	s.Equal(int64(rowNum), insertResult.GetInsertCnt())
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
 	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
@@ -111,6 +139,8 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
+	log.Info("Finish flush", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
@@ -121,12 +151,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	err = merr.CheckRPCCall(createIndexStatus, err)
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
-	segments, err := c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	s.Equal(1, len(segments))
-	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
+	log.Info("Finish create index", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -136,6 +161,29 @@ func (s *CompactionSuite) TestL0Compaction() {
 	err = merr.CheckRPCCall(loadStatus, err)
 	s.NoError(err)
 	s.WaitForLoad(ctx, collectionName)
+	log.Info("Finish load", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+
+	compactReq := &milvuspb.ManualCompactionRequest{
+		CollectionID:    showCollectionsResp.CollectionIds[0],
+		MajorCompaction: true,
+	}
+	compactResp, err := c.Proxy.ManualCompaction(ctx, compactReq)
+	s.NoError(err)
+	log.Info("compact", zap.Any("compactResp", compactResp))
+
+	compacted := func() bool {
+		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+			CompactionID: compactResp.GetCompactionID(),
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetState() == commonpb.CompactionState_Completed
+	}
+	for !compacted() {
+		time.Sleep(3 * time.Second)
+	}
+	log.Info("compact done")
 
 	// delete
 	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
@@ -157,23 +205,15 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-	// query
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Expr:           "",
-		OutputFields:   []string{"count(*)"},
-	})
-	err = merr.CheckRPCCall(queryResult, err)
-	s.NoError(err)
-	s.Equal(int64(rowNum-deleteCnt), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
-
 	// wait for l0 compaction completed
 	showSegments := func() bool {
-		segments, err = c.MetaWatcher.ShowSegments()
+		segments, err := c.MetaWatcher.ShowSegments()
 		s.NoError(err)
 		s.NotEmpty(segments)
-		log.Info("ShowSegments result", zap.Any("segments", segments))
+
+		for _, segment := range segments {
+			log.Info("ShowSegments result", zap.Int64("id", segment.ID), zap.String("state", segment.GetState().String()), zap.String("level", segment.GetLevel().String()), zap.Int64("numOfRows", segment.GetNumOfRows()))
+		}
 		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
@@ -191,48 +231,52 @@ func (s *CompactionSuite) TestL0Compaction() {
 		case <-ctx.Done():
 			s.Fail("waiting for compaction timeout")
 			return
-		case <-time.After(1 * time.Second):
+		case <-time.After(3 * time.Second):
 		}
 	}
 
-	// search
-	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
-	nq := 10
-	topk := 10
-	roundDecimal := -1
-	params := integration.GetSearchParams(indexType, metricType)
-	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
+	checkQuerySegmentInfo := func() bool {
+		querySegmentInfo, err := c.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		s.NoError(err)
+		return len(querySegmentInfo.GetInfos()) == 1
+	}
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
-	err = merr.CheckRPCCall(searchResult, err)
-	s.NoError(err)
-	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+	checkWaitGroup := sync.WaitGroup{}
+	checkWaitGroup.Add(1)
+	go func() {
+		defer checkWaitGroup.Done()
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, time.Minute*2)
+		defer cancelFunc()
 
-	// query
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Expr:           "",
-		OutputFields:   []string{"count(*)"},
-	})
-	err = merr.CheckRPCCall(queryResult, err)
-	s.NoError(err)
-	s.Equal(int64(rowNum-deleteCnt), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("check query segment info timeout")
+				return
+			default:
+				if checkQuerySegmentInfo() {
+					return
+				}
+			}
+			time.Sleep(time.Second * 3)
+		}
+	}()
 
-	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(status, err)
-	s.NoError(err)
+	checkWaitGroup.Wait()
 
-	// drop collection
-	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-	//	 CollectionName: collectionName,
-	// })
-	// err = merr.CheckRPCCall(status, err)
-	// s.NoError(err)
+	log.Info("TestL2SingleCompaction succeed")
+}
 
-	log.Info("Test compaction succeed")
+func TestL2SingleCompaction(t *testing.T) {
+	paramtable.Init()
+	// to speed up the test
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "10")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "0")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+
+	suite.Run(t, new(L2SingleCompactionSuite))
 }
