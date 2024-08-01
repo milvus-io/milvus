@@ -148,34 +148,38 @@ func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	}
 }
 
-func genDDLMsg(msgType commonpb.MsgType) msgstream.TsMsg {
+func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
 	switch msgType {
 	case commonpb.MsgType_CreateCollection:
 		return &msgstream.CreateCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			CreateCollectionRequest: &msgpb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_DropCollection:
 		return &msgstream.DropCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			DropCollectionRequest: &msgpb.DropCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_CreatePartition:
 		return &msgstream.CreatePartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			CreatePartitionRequest: &msgpb.CreatePartitionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_DropPartition:
 		return &msgstream.DropPartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			DropPartitionRequest: &msgpb.DropPartitionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+				CollectionID: collectionID,
 			},
 		}
 	}
