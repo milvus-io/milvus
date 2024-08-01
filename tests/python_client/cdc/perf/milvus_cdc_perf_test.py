@@ -20,6 +20,26 @@ class MilvusCDCPerformanceTest:
         self.stop_query = False
         self.latencies = []
         self.latest_insert_status = {"latest_ts": 0, "latest_count": 0}
+        self.init_collection()
+
+    def init_collection(self):
+        connections.connect(alias="default", uri=self.source_uri, token=self.source_token)
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="timestamp", dtype=DataType.INT64),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=128)
+        ]
+        schema = CollectionSchema(fields, "Milvus CDC test collection")
+        collection = Collection(self.collection_name, schema)
+        index_params = {
+            "index_type": "IVF_FLAT",
+            "metric_type": "L2",
+            "params": {"nlist": 1024}
+        }
+        collection.create_index("vector", index_params)
+        collection.load()
+        connections.disconnect(alias="default")
+        return collection
 
     def setup_collection(self, alias):
         fields = [
@@ -29,13 +49,6 @@ class MilvusCDCPerformanceTest:
         ]
         schema = CollectionSchema(fields, "Milvus CDC test collection")
         collection = Collection(self.collection_name, schema, using=alias)
-        index_params = {
-            "index_type": "IVF_FLAT",
-            "metric_type": "L2",
-            "params": {"nlist": 1024}
-        }
-        collection.create_index("vector", index_params)
-        collection.load()
         return collection
 
     def generate_data(self, num_entities):
@@ -153,6 +166,7 @@ class MilvusCDCPerformanceTest:
 
     def run_all_tests(self, duration=300, batch_size=1000, max_concurrency=10):
         logger.info("Starting Milvus CDC Performance Tests")
+
         self.test_scalability(duration, batch_size, max_concurrency)
         logger.info("Milvus CDC Performance Tests Completed")
 
