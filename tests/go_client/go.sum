@@ -390,8 +390,6 @@ github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/le
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240717062137-3ffb1db01632 h1:CXig0DNtUsCLzchCFe3PR2KgOdobbz9gK2nSV7195PM=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240717062137-3ffb1db01632/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
-github.com/milvus-io/milvus/client/v2 v2.0.0-20240729131949-a8a4779749de h1:GtxjVQ5VfGNf/bEN/K4zKCnVXtq7PkSsniWVlAF7GlI=
-github.com/milvus-io/milvus/client/v2 v2.0.0-20240729131949-a8a4779749de/go.mod h1:CGX8NwpP5T7tSDzYOBJDgyW1PK/vNixosoR8r5BMqMA=
 github.com/milvus-io/milvus/pkg v0.0.2-0.20240801085213-a642a26ed4c6 h1:dotu470D/DkctdLHsTCCmuvAD3h5C8gkFhMxb0Zlu7A=
 github.com/milvus-io/milvus/pkg v0.0.2-0.20240801085213-a642a26ed4c6/go.mod h1:tdeEcpeaAcrIJgrr6LVzu7SYl9zn18dNKZwPmCUb0Io=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
@@ -1014,8 +1012,8 @@ google.golang.org/genproto v0.0.0-20210319143718-93e7006c17a6/go.mod h1:FWY/as6D
 google.golang.org/genproto v0.0.0-20210402141018-6c239bbf2bb1/go.mod h1:9lPAdzaEmUacj36I+k7YKbEc5CXzPIeORRgDAUOu28A=
 google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c/go.mod h1:UODoCrxHCcBojKKwX1terBiRUaqAsFqJiF615XL43r0=
 google.golang.org/genproto v0.0.0-20210624195500-8bfb893ecb84/go.mod h1:SzzZ/N+nwJDaO1kznhnlzqS8ocJICar6hYhVyhi++24=
-google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d h1:VBu5YqKPv6XiJ199exd8Br+Aetz+o08F+PLMnwJQHAY=
-google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d/go.mod h1:yZTlhN0tQnXo3h00fuXNCxJdLdIdnVFVBaRJ5LWBbw4=
+google.golang.org/genproto v0.0.0-20231106174013-bbf56f31fb17 h1:wpZ8pe2x1Q3f2KyT5f8oP/fa9rHAKgFPr/HZdNuS+PQ=
+google.golang.org/genproto v0.0.0-20231106174013-bbf56f31fb17/go.mod h1:J7XzRzVy1+IPwWHZUzoD0IccYZIrXILAQpc+Qy9CMhY=
 google.golang.org/genproto/googleapis/api v0.0.0-20240528184218-531527333157 h1:7whR9kGa5LUwFtpLm2ArCEejtnxlGeLbAyjFY8sGNFw=
 google.golang.org/genproto/googleapis/api v0.0.0-20240528184218-531527333157/go.mod h1:99sLkeliLXfdj2J75X3Ho+rrVCaJze0uwN7zDDkjPVU=
 google.golang.org/genproto/googleapis/rpc v0.0.0-20240730163845-b1a4ccb954bf h1:liao9UHurZLtiEwBgT9LMOnKYsHze6eA6w1KQCMVN2Q=

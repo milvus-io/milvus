@@ -5,7 +5,7 @@ go 1.21
 toolchain go1.21.10
 
 require (
-	github.com/milvus-io/milvus/client/v2 v2.0.0-20240729131949-a8a4779749de
+	github.com/milvus-io/milvus/client/v2 v2.0.0-20240801032013-9412002d7df4
 	github.com/milvus-io/milvus/pkg v0.0.2-0.20240801085213-a642a26ed4c6
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/stretchr/testify v1.9.0
@@ -13,6 +13,8 @@ require (
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.65.0
 )
+
+replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240801032013-9412002d7df4 => ../../../milvus/client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -114,7 +116,7 @@ require (
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d // indirect
+	google.golang.org/genproto v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240528184218-531527333157 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240730163845-b1a4ccb954bf // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
