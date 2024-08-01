@@ -2273,6 +2273,7 @@ type queryNodeConfig struct {
 	CacheMemoryLimit                    ParamItem `refreshable:"false"`
 	MmapDirPath                         ParamItem `refreshable:"false"`
 	MmapEnabled                         ParamItem `refreshable:"false"`
+	VectorIndexMmapEnabled              ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2540,6 +2541,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.VectorIndexMmapEnabled = ParamItem{
+		Key:          "queryNode.mmap.vectorIndexMmapEnabled",
+		Version:      "2.4.8",
+		DefaultValue: "false",
+		Doc:          "Enable mmap for loading vector index",
+		Export:       true,
+	}
+	p.VectorIndexMmapEnabled.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",

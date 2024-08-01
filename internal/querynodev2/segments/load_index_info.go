@@ -75,13 +75,21 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 
 func isIndexMmapEnable(indexInfo *querypb.FieldIndexInfo) bool {
 	enableMmap := common.IsMmapEnabled(indexInfo.IndexParams...)
-	if !enableMmap {
-		_, ok := funcutil.KeyValuePair2Map(indexInfo.IndexParams)[common.MmapEnabledKey]
-		indexType := datacoord.GetIndexType(indexInfo.IndexParams)
-		indexSupportMmap := indexparamcheck.IsMmapSupported(indexType)
-		enableMmap = !ok && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool() && indexSupportMmap
+	if enableMmap {
+		// if index param enable mmap, we should use mmap
+		return true
 	}
-	return enableMmap
+
+	_, ok := funcutil.KeyValuePair2Map(indexInfo.IndexParams)[common.MmapEnabledKey]
+	if ok {
+		// if index param disable mmap, we should not use mmap
+		return false
+	}
+
+	indexType := datacoord.GetIndexType(indexInfo.IndexParams)
+	indexSupportMmap := indexparamcheck.IsMmapSupported(indexType)
+	// for vector index, we should check whether vector index mmap is enabled and whether index support mmap
+	return indexSupportMmap && params.Params.QueryNodeCfg.VectorIndexMmapEnabled.GetAsBool()
 }
 
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
