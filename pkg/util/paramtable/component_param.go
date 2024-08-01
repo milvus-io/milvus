@@ -1874,7 +1874,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.DelegatorMemoryOverloadFactor = ParamItem{
 		Key:          "queryCoord.delegatorMemoryOverloadFactor",
 		Version:      "2.3.19",
-		DefaultValue: "0.3",
+		DefaultValue: "0.1",
 		PanicIfEmpty: true,
 		Doc:          "the factor of delegator overloaded memory",
 		Export:       true,
