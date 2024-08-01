@@ -3002,21 +3002,21 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval              ParamItem `refreshable:"false"`
 
 	// Clustering Compaction
-	ClusteringCompactionEnable               ParamItem `refreshable:"true"`
-	ClusteringCompactionAutoEnable           ParamItem `refreshable:"true"`
-	ClusteringCompactionTriggerInterval      ParamItem `refreshable:"true"`
-	ClusteringCompactionMinInterval          ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxInterval          ParamItem `refreshable:"true"`
-	ClusteringCompactionNewDataSizeThreshold ParamItem `refreshable:"true"`
-	ClusteringCompactionPreferSegmentSize    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxSegmentSize       ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds     ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxCentroidsNum      ParamItem `refreshable:"true"`
-	ClusteringCompactionMinCentroidsNum      ParamItem `refreshable:"true"`
-	ClusteringCompactionMinClusterSizeRatio  ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSizeRatio  ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSize       ParamItem `refreshable:"true"`
+	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
+	ClusteringCompactionTriggerInterval        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval            ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval            ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold   ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3449,7 +3449,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "false",
 		Doc:          "Enable clustering compaction",
 		Export:       true,
@@ -3458,7 +3458,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionAutoEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.autoEnable",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "false",
 		Doc:          "Enable auto clustering compaction",
 		Export:       true,
@@ -3467,7 +3467,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "600",
 		Doc:          "clustering compaction trigger interval in seconds",
 		Export:       true,
@@ -3476,7 +3476,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction",
 		DefaultValue: "3600",
 		Export:       true,
@@ -3485,7 +3485,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "If a collection haven't been clustering compacted for longer than maxInterval, force compact",
 		DefaultValue: "86400",
 		Export:       true,
@@ -3494,7 +3494,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionNewDataSizeThreshold = ParamItem{
 		Key:          "dataCoord.compaction.clustering.newDataSizeThreshold",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute clustering compaction",
 		DefaultValue: "512m",
 		Export:       true,
@@ -3503,32 +3503,32 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionTimeoutInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.clustering.timeout",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "3600",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
 
-	p.ClusteringCompactionPreferSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.clustering.preferSegmentSize",
-		Version:      "2.4.6",
-		DefaultValue: "512m",
+	p.ClusteringCompactionPreferSegmentSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.preferSegmentSizeRatio",
+		Version:      "2.4.7",
+		DefaultValue: "0.8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ClusteringCompactionPreferSegmentSize.Init(base.mgr)
+	p.ClusteringCompactionPreferSegmentSizeRatio.Init(base.mgr)
 
-	p.ClusteringCompactionMaxSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.clustering.maxSegmentSize",
-		Version:      "2.4.6",
-		DefaultValue: "1024m",
+	p.ClusteringCompactionMaxSegmentSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxSegmentSizeRatio",
+		Version:      "2.4.7",
+		DefaultValue: "1.0",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ClusteringCompactionMaxSegmentSize.Init(base.mgr)
+	p.ClusteringCompactionMaxSegmentSizeRatio.Init(base.mgr)
 
 	p.ClusteringCompactionMaxTrainSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxTrainSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "0.8",
 		Doc:          "max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
@@ -3537,7 +3537,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "10240",
 		Doc:          "maximum centroids number in Kmeans train",
 		Export:       true,
@@ -3546,7 +3546,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minCentroidsNum",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "16",
 		Doc:          "minimum centroids number in Kmeans train",
 		Export:       true,
@@ -3555,7 +3555,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minClusterSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "0.01",
 		Doc:          "minimum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3564,7 +3564,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "10",
 		Doc:          "maximum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3573,7 +3573,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSize",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "5g",
 		Doc:          "maximum cluster size in Kmeans train",
 		Export:       true,

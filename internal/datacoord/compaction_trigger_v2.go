@@ -24,10 +24,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -296,19 +300,29 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
 	taskID, _, err := m.allocator.allocN(2)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()),
+			zap.Error(err))
 		return
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()),
+			zap.Error(err))
 		return
 	}
-	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
+
+	expectedSegmentSize := m.getExpectedSegmentSize(collection)
+
+	_, totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
+	if err != nil {
+		log.Warn("Failed to calculate cluster compaction config fail", zap.String("view", view.String()), zap.Error(err))
+		return
+	}
+
 	resultSegmentNum := totalRows / preferSegmentRows * 2
 	start, end, err := m.allocator.allocN(resultSegmentNum)
 	if err != nil {
-		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()))
+		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))
 		return
 	}
 	task := &datapb.CompactionTask{
@@ -395,6 +409,29 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 	)
+}
+
+func (m *CompactionTriggerManager) getExpectedSegmentSize(collection *collectionInfo) int64 {
+	indexInfos := m.meta.indexMeta.GetIndexesForCollection(collection.ID, "")
+
+	vectorFields := typeutil.GetVectorFieldSchemas(collection.Schema)
+	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
+		return t.FieldID, GetIndexType(t.IndexParams)
+	})
+	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
+		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
+			return indexparamcheck.IsDiskIndex(indexType)
+		}
+		return false
+	})
+
+	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	if allDiskIndex {
+		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+	}
+	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName

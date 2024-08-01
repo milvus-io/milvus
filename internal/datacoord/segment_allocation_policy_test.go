@@ -140,6 +140,58 @@ func TestGetChannelOpenSegCapacityPolicy(t *testing.T) {
 	}
 }
 
+func TestCalBySegmentSizePolicy(t *testing.T) {
+	t.Run("nil schema", func(t *testing.T) {
+		rows, err := calBySegmentSizePolicy(nil, 1024)
+
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("get dim failed", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "coll1",
+			Description: "",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "fake"}}},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		}
+
+		rows, err := calBySegmentSizePolicy(schema, 1024)
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("sizePerRecord is zero", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: nil}
+		rows, err := calBySegmentSizePolicy(schema, 1024)
+
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "coll1",
+			Description: "",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		}
+
+		rows, err := calBySegmentSizePolicy(schema, 1200)
+		assert.NoError(t, err)
+		// 1200/(4*8+8)
+		assert.Equal(t, 30, rows)
+	})
+}
+
 func TestSortSegmentsByLastExpires(t *testing.T) {
 	segs := make([]*SegmentInfo, 0, 10)
 	for i := 0; i < 10; i++ {

@@ -540,8 +540,8 @@ dataCoord:
       minInterval: 3600 # The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction
       maxInterval: 259200 # If a collection haven't been clustering compacted for longer than maxInterval, force compact
       newDataSizeThreshold: 512m # If new data size is large than newDataSizeThreshold, execute clustering compaction
-      preferSegmentSize: 512m
-      maxSegmentSize: 1024m
+      preferSegmentSizeRatio: 0.8
+      maxSegmentSizeRatio: 1
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
       maxCentroidsNum: 10240 # maximum centroids number in Kmeans train
       minCentroidsNum: 16 # minimum centroids number in Kmeans train

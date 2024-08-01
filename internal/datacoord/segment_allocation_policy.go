@@ -67,6 +67,21 @@ func calBySchemaPolicyWithDiskIndex(schema *schemapb.CollectionSchema) (int, err
 	return int(threshold / float64(sizePerRecord)), nil
 }
 
+func calBySegmentSizePolicy(schema *schemapb.CollectionSchema, segmentSize int64) (int, error) {
+	if schema == nil {
+		return -1, errors.New("nil schema")
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil {
+		return -1, err
+	}
+	// check zero value, preventing panicking
+	if sizePerRecord == 0 {
+		return -1, errors.New("zero size record schema found")
+	}
+	return int(segmentSize) / sizePerRecord, nil
+}
+
 // AllocatePolicy helper function definition to allocate Segment space
 type AllocatePolicy func(segments []*SegmentInfo, count int64,
 	maxCountPerL1Segment int64, level datapb.SegmentLevel) ([]*Allocation, []*Allocation)
