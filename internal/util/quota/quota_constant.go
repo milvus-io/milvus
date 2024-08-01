@@ -89,8 +89,8 @@ func initLimitConfigMaps() {
 		pt.Watch(quotaConfig.DMLMaxInsertRate.Key, config.NewHandler(quotaConfig.DMLMaxInsertRate.Key, func(event *config.Event) {
 			metrics.MaxInsertRate.WithLabelValues(paramtable.GetStringNodeID(), "cluster").Set(quotaConfig.DMLMaxInsertRate.GetAsFloat())
 		}))
-		pt.Watch(quotaConfig.DMLMaxInsertRatePerDB.Key, config.NewHandler(quotaConfig.DMLMaxUpsertRatePerDB.Key, func(event *config.Event) {
-			metrics.MaxInsertRate.WithLabelValues(paramtable.GetStringNodeID(), "db").Set(quotaConfig.DMLMaxUpsertRatePerDB.GetAsFloat())
+		pt.Watch(quotaConfig.DMLMaxInsertRatePerDB.Key, config.NewHandler(quotaConfig.DMLMaxInsertRatePerDB.Key, func(event *config.Event) {
+			metrics.MaxInsertRate.WithLabelValues(paramtable.GetStringNodeID(), "db").Set(quotaConfig.DMLMaxInsertRatePerDB.GetAsFloat())
 		}))
 		pt.Watch(quotaConfig.DMLMaxInsertRatePerCollection.Key, config.NewHandler(quotaConfig.DMLMaxInsertRatePerCollection.Key, func(event *config.Event) {
 			metrics.MaxInsertRate.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(quotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
