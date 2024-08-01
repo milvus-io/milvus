@@ -123,6 +123,8 @@ linters-settings:
             desc: not allowed, use github.com/tikv/client-go/v2/txnkv
           - pkg: "github.com/gogo/protobuf"
             desc: "not allowed, gogo protobuf is deprecated"
+          - pkg: "github.com/golang/protobuf/proto"
+            desc: "not allowed, protobuf v1 is deprecated, use google.golang.org/protobuf/proto instead"
   forbidigo:
     forbid:
       - '^time\.Tick$'

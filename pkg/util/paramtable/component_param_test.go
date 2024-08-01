@@ -340,7 +340,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
 
-		assert.Equal(t, 0.3, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
+		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
 	})
 
@@ -468,6 +468,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		params.Save("dataCoord.compaction.gcInterval", "100")
+		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
+		params.Save("dataCoord.compaction.dropTolerance", "100")
+		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
+
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10")
@@ -478,8 +483,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
 		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.dropTolerance", "86400")
-		assert.Equal(t, int64(86400), Params.ClusteringCompactionDropTolerance.GetAsInt64())
 		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
 		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")

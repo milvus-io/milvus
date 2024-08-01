@@ -278,7 +278,7 @@ queryCoord:
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
   growingRowCountWeight: 4 # the memory weight of growing segment row count
-  delegatorMemoryOverloadFactor: 0.3 # the factor of delegator overloaded memory
+  delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
@@ -465,16 +465,15 @@ dataCoord:
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
+    dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
+    gcInterval: 1800 # The time interval in seconds for compaction gc
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
       triggerInterval: 600 # clustering compaction trigger interval in seconds
-      stateCheckInterval: 10
-      gcInterval: 600
       minInterval: 3600 # The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction
       maxInterval: 259200 # If a collection haven't been clustering compacted for longer than maxInterval, force compact
       newDataSizeThreshold: 512m # If new data size is large than newDataSizeThreshold, execute clustering compaction
-      dropTolerance: 86400 # If clustering compaction job is finished for a long time, gc it
       preferSegmentSize: 512m
       maxSegmentSize: 1024m
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
