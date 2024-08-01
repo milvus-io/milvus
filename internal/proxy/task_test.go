@@ -1796,6 +1796,61 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	})
 }
 
+func TestIndexType(t *testing.T) {
+	rc := NewRootCoordMock()
+	defer rc.Close()
+
+	ctx := context.Background()
+	shardsNum := int32(2)
+	prefix := "TestTask_all"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+
+	t.Run("invalid type param", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
+		for _, field := range schema.Fields {
+			dataType := field.GetDataType()
+			if typeutil.IsVectorType(dataType) {
+				field.IndexParams = append(field.IndexParams, &commonpb.KeyValuePair{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				})
+				break
+			}
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createColT := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+		}
+		assert.NoError(t, createColT.OnEnqueue())
+		assert.Error(t, createColT.PreExecute(ctx))
+	})
+}
+
 func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
 

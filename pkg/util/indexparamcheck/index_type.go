@@ -11,11 +11,19 @@
 
 package indexparamcheck
 
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/milvus-io/milvus/pkg/common"
+)
+
 // IndexType string.
 type IndexType = string
 
 // IndexType definitions
 const (
+	// vector index
 	IndexGpuBF           IndexType = "GPU_BRUTE_FORCE"
 	IndexRaftIvfFlat     IndexType = "GPU_IVF_FLAT"
 	IndexRaftIvfPQ       IndexType = "GPU_IVF_PQ"
@@ -32,12 +40,14 @@ const (
 	IndexDISKANN         IndexType = "DISKANN"
 	IndexSparseInverted  IndexType = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand      IndexType = "SPARSE_WAND"
-	IndexINVERTED        IndexType = "INVERTED"
 
-	IndexSTLSORT IndexType = "STL_SORT"
-	IndexTRIE    IndexType = "TRIE"
-	IndexTrie    IndexType = "Trie"
-	IndexBitmap  IndexType = "BITMAP"
+	// scalar index
+	IndexSTLSORT  IndexType = "STL_SORT"
+	IndexTRIE     IndexType = "TRIE"
+	IndexTrie     IndexType = "Trie"
+	IndexBitmap   IndexType = "BITMAP"
+	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
+	IndexINVERTED IndexType = "INVERTED"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )
@@ -49,7 +59,8 @@ func IsGpuIndex(indexType IndexType) bool {
 		indexType == IndexRaftCagra
 }
 
-func IsMmapSupported(indexType IndexType) bool {
+// IsVectorMmapIndex check if the vector index can be mmaped
+func IsVectorMmapIndex(indexType IndexType) bool {
 	return indexType == IndexFaissIDMap ||
 		indexType == IndexFaissIvfFlat ||
 		indexType == IndexFaissIvfPQ ||
@@ -62,4 +73,24 @@ func IsMmapSupported(indexType IndexType) bool {
 
 func IsDiskIndex(indexType IndexType) bool {
 	return indexType == IndexDISKANN
+}
+
+func IsScalarMmapIndex(indexType IndexType) bool {
+	return indexType == IndexINVERTED
+}
+
+func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {
+	mmapEnable, ok := indexParams[common.MmapEnabledKey]
+	if !ok {
+		return nil
+	}
+	enable, err := strconv.ParseBool(mmapEnable)
+	if err != nil {
+		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.MmapEnabledKey, mmapEnable)
+	}
+	mmapSupport := indexType == AutoIndex || IsVectorMmapIndex(indexType) || IsScalarMmapIndex(indexType)
+	if enable && !mmapSupport {
+		return fmt.Errorf("index type %s does not support mmap", indexType)
+	}
+	return nil
 }
