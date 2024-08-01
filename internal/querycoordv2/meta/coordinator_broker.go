@@ -151,6 +151,22 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		}
 	}
 
+	if replicaNum <= 0 || len(rgs) == 0 {
+		if replicaNum <= 0 {
+			replicaNum = paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
+			if replicaNum > 0 {
+				log.Info("get cluster level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
+			}
+		}
+
+		if len(rgs) == 0 {
+			rgs = paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+			if len(rgs) > 0 {
+				log.Info("get cluster level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
+			}
+		}
+	}
+
 	return rgs, replicaNum, nil
 }
 
