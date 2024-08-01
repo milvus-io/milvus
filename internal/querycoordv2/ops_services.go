@@ -436,23 +436,19 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		}
 	}
 
-	// check segment list
 	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
 	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
 	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
 		return s.GetID(), s
 	})
-	for _, s := range segmentOnSrc {
-		if _, ok := segmentDstMap[s.GetID()]; !ok {
-			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
+
+	// check whether all segment which both exist in target and source node has been loaded on target node
+	for _, segment := range segmentOnSrc {
+		if s.targetMgr.GetSealedSegment(segment.CollectionID, segment.ID, meta.CurrentTargetFirst) == nil {
+			continue
 		}
-	}
-	segmentSrcMap := lo.SliceToMap(segmentOnSrc, func(s *meta.Segment) (int64, *meta.Segment) {
-		return s.GetID(), s
-	})
-	for _, s := range segmentOnDst {
-		if _, ok := segmentSrcMap[s.GetID()]; !ok {
-			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
+		if _, ok := segmentDstMap[segment.GetID()]; !ok {
+			return merr.Status(merr.WrapErrSegmentLack(segment.GetID())), nil
 		}
 	}
 

@@ -337,6 +337,9 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 		{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 10, CollectionID: 1}, Node: 3},
 	}
 
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.DelegatorMemoryOverloadFactor.Key, "0.3")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.DelegatorMemoryOverloadFactor.Key)
+
 	// mock 50 growing row count in node 1, which is delegator, expect all segment assign to node 2
 	leaderView := &meta.LeaderView{
 		ID:           1,
@@ -431,7 +434,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -552,7 +554,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
 		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
-		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 	}
 
 	// 2. set up target for distribution for multi collections
@@ -711,7 +712,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -831,7 +831,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.segmentDist {
@@ -924,7 +923,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -999,7 +997,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -1097,7 +1094,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
@@ -1222,7 +1218,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	balancer.meta.ReplicaManager.Spawn(1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
 	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
-	balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
 
 	// 3. set up nodes info and resourceManager for balancer
 	nodeCount := 4
