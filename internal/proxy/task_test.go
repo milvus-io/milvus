@@ -2342,6 +2342,58 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 		assert.NoError(t, cit.PreExecute(context.Background()))
 	})
 
+	t.Run("collection loaded", func(t *testing.T) {
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         fieldName,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+					AutoID: false,
+				},
+			},
+		}), nil)
+		globalMetaCache = cache
+		cit.req.ExtraParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "IVF_FLAT",
+			},
+			{
+				Key:   "nlist",
+				Value: "1024",
+			},
+			{
+				Key:   common.MetricTypeKey,
+				Value: "L2",
+			},
+		}
+		qc := mocks.NewMockQueryCoordClient(t)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        merr.Success(),
+			CollectionIDs: []int64{100},
+		}, nil)
+		assert.Error(t, cit.PreExecute(context.Background()))
+	})
+
 	t.Run("collection not found", func(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.On("GetCollectionID",

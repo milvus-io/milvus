@@ -57,11 +57,12 @@ const (
 type createIndexTask struct {
 	baseTask
 	Condition
-	req       *milvuspb.CreateIndexRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	datacoord types.DataCoordClient
-	result    *commonpb.Status
+	req        *milvuspb.CreateIndexRequest
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	datacoord  types.DataCoordClient
+	querycoord types.QueryCoordClient
+	result     *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 
@@ -448,6 +449,14 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	err = cit.parseIndexParams()
 	if err != nil {
 		return err
+	}
+
+	loaded, err := isCollectionLoaded(ctx, cit.querycoord, collID)
+	if err != nil {
+		return err
+	}
+	if loaded {
+		return merr.WrapErrCollectionLoaded(collName, "can't create index on loaded collection, please release the collection first")
 	}
 
 	return nil

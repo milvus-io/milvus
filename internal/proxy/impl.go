@@ -1981,6 +1981,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		req:                request,
 		rootCoord:          node.rootCoord,
 		datacoord:          node.dataCoord,
+		querycoord:         node.queryCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
