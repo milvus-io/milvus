@@ -1229,7 +1229,8 @@ func TestProxy(t *testing.T) {
 		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
 		assert.Equal(t, floatIndexName, resp.IndexDescriptions[0].IndexName)
-		assert.True(t, common.IsMmapEnabled(resp.IndexDescriptions[0].GetParams()...), "params: %+v", resp.IndexDescriptions[0])
+		enableMmap, _ := common.IsMmapDataEnabled(resp.IndexDescriptions[0].GetParams()...)
+		assert.True(t, enableMmap, "params: %+v", resp.IndexDescriptions[0])
 
 		// disable mmap then the tests below could continue
 		req := &milvuspb.AlterIndexRequest{

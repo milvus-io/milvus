@@ -84,7 +84,7 @@ func (m *MmapMigration) MigrateIndexCoordCollection(ctx context.Context) {
 
 	alteredIndexes := make([]*model.Index, 0)
 	for _, index := range fieldIndexes {
-		if !indexparamcheck.IsMmapSupported(getIndexType(index.IndexParams)) {
+		if !indexparamcheck.IsVectorMmapIndex(getIndexType(index.IndexParams)) {
 			continue
 		}
 		fmt.Printf("migrate index, collection:%v, indexId: %v, indexName: %s\n", index.CollectionID, index.IndexID, index.IndexName)

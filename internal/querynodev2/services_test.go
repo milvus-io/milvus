@@ -95,7 +95,6 @@ func (suite *ServiceSuite) SetupSuite() {
 	// init param
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GCEnabled.Key, "false")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CacheEnabled.Key, "false")
 
 	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
