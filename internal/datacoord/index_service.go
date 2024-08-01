@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/samber/lo"
@@ -28,9 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -271,22 +270,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 func ValidateIndexParams(index *model.Index) error {
-	for _, paramSet := range [][]*commonpb.KeyValuePair{index.IndexParams, index.UserIndexParams} {
-		for _, param := range paramSet {
-			switch param.GetKey() {
-			case common.MmapEnabledKey:
-				indexType := GetIndexType(index.IndexParams)
-				if !indexparamcheck.IsMmapSupported(indexType) {
-					return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
-				}
-
-				if _, err := strconv.ParseBool(param.GetValue()); err != nil {
-					return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", param.GetKey(), param.GetValue())
-				}
-			}
-		}
+	indexType := GetIndexType(index.IndexParams)
+	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
+	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid mmap index params", err.Error())
 	}
-
+	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
+	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+	}
 	return nil
 }
 

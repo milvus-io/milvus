@@ -149,8 +149,16 @@ func (cit *createIndexTask) parseIndexParams() error {
 		}
 	}
 
+	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
+		return err
+	}
+
 	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 	if exist && specifyIndexType != "" {
+		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
+			log.Ctx(cit.ctx).Warn("Invalid mmap type params", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
+			return merr.WrapErrParameterInvalidMsg("invalid mmap type params", err.Error())
+		}
 		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
 		// not enable hybrid index for user, used in milvus internally
 		if err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
@@ -565,6 +573,12 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	if err = validateIndexName(t.req.GetIndexName()); err != nil {
 		return err
 	}
+
+	// TODO fubang should implement it when the alter index is reconstructed
+	// typeParams := funcutil.KeyValuePair2Map(t.req.GetExtraParams())
+	// if err = ValidateAutoIndexMmapConfig(typeParams); err != nil {
+	// 	return err
+	// }
 
 	loaded, err := isCollectionLoaded(ctx, t.querycoord, collection)
 	if err != nil {
