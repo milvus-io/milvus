@@ -267,6 +267,7 @@ queryCoord:
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
   checkInterval: 1000
+  delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
