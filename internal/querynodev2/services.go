@@ -1208,6 +1208,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Partition:          s.Partition(),
 			Channel:            s.Shard().VirtualName(),
 			Version:            s.Version(),
+			Level:              s.Level(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.FieldID, info.IndexInfo
