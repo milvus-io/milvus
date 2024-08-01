@@ -19,6 +19,7 @@ package paramtable
 import (
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -2496,6 +2497,12 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "mmap")
+			}
+			return v
+		},
 	}
 	p.MmapDirPath.Init(base.mgr)
 
