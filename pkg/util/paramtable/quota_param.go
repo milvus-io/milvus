@@ -204,6 +204,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.ddl.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether DDL request throttling is enabled.",
 		Export:       true,
 	}
 	p.DDLLimitEnabled.Init(base.mgr)
@@ -222,7 +223,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection",
+		Doc: `Maximum number of collection-related DDL requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 collection-related DDL requests per second, including collection creation requests, collection drop requests, collection load requests, and collection release requests.
+To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DDLCollectionRate.Init(base.mgr)
@@ -260,7 +263,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition",
+		Doc: `Maximum number of partition-related DDL requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including partition creation requests, partition drop requests, partition load requests, and partition release requests.
+To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DDLPartitionRate.Init(base.mgr)
@@ -288,6 +293,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.indexRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether index-related request throttling is enabled.",
 		Export:       true,
 	}
 	p.IndexLimitEnabled.Init(base.mgr)
@@ -306,7 +312,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for CreateIndex, DropIndex",
+		Doc: `Maximum number of index-related requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including index creation requests and index drop requests.
+To use this setting, set quotaAndLimits.indexRate.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxIndexRate.Init(base.mgr)
@@ -334,6 +342,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "true",
+		Doc:          "Whether flush request throttling is enabled.",
 		Export:       true,
 	}
 	p.FlushLimitEnabled.Init(base.mgr)
@@ -352,7 +361,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for flush",
+		Doc: `Maximum number of flush requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 flush requests per second.
+To use this setting, set quotaAndLimits.flushRate.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxFlushRate.Init(base.mgr)
@@ -399,6 +410,7 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.compactionRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "Whether manual compaction request throttling is enabled.",
 		Export:       true,
 	}
 	p.CompactionLimitEnabled.Init(base.mgr)
@@ -417,7 +429,9 @@ seconds, (0 ~ 65536)`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for manualCompaction",
+		Doc: `Maximum number of manual-compaction requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 manual-compaction requests per second.
+To use this setting, set quotaAndLimits.compaction.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.MaxCompactionRate.Init(base.mgr)
@@ -446,9 +460,8 @@ seconds, (0 ~ 65536)`,
 		Key:          "quotaAndLimits.dml.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc: `dml limit rates, default no limit.
-The maximum rate will not be greater than ` + "max" + `.`,
-		Export: true,
+		Doc:          "Whether DML request throttling is enabled.",
+		Export:       true,
 	}
 	p.DMLLimitEnabled.Init(base.mgr)
 
@@ -470,7 +483,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data insertion rate per second.
+Setting this item to 5 indicates that Milvus only allows data insertion at the rate of 5 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxInsertRate.Init(base.mgr)
@@ -558,7 +573,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data insertion rate per collection per second.
+Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxInsertRatePerCollection.Init(base.mgr)
@@ -822,7 +839,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data deletion rate per second.
+Setting this item to 0.1 indicates that Milvus only allows data deletion at the rate of 0.1 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxDeleteRate.Init(base.mgr)
@@ -910,7 +929,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return fmt.Sprintf("%f", rate)
 		},
-		Doc:    "MB/s, default no limit",
+		Doc: `Highest data deletion rate per second.
+Setting this item to 0.1 indicates that Milvus only allows data deletion from any collection at the rate of 0.1 MB/s.
+To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DMLMaxDeleteRatePerCollection.Init(base.mgr)
@@ -1161,9 +1182,8 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		Key:          "quotaAndLimits.dql.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc: `dql limit rates, default no limit.
-The maximum rate will not be greater than ` + "max" + `.`,
-		Export: true,
+		Doc:          "Whether DQL request throttling is enabled.",
+		Export:       true,
 	}
 	p.DQLLimitEnabled.Init(base.mgr)
 
@@ -1181,7 +1201,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "vps (vectors per second), default no limit",
+		Doc: `Maximum number of vectors to search per second.
+Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxSearchRate.Init(base.mgr)
@@ -1261,7 +1283,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "vps (vectors per second), default no limit",
+		Doc: `Maximum number of vectors to search per collection per second.
+Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second per collection no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxSearchRatePerCollection.Init(base.mgr)
@@ -1341,7 +1365,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit",
+		Doc: `Maximum number of queries per second.
+Setting this item to 100 indicates that Milvus only allows 100 queries per second.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxQueryRate.Init(base.mgr)
@@ -1421,7 +1447,9 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			return v
 		},
-		Doc:    "qps, default no limit",
+		Doc: `Maximum number of queries per collection per second.
+Setting this item to 100 indicates that Milvus only allows 100 queries per collection per second.
+To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export: true,
 	}
 	p.DQLMaxQueryRatePerCollection.Init(base.mgr)
@@ -1500,6 +1528,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",
 		Version:      "2.2.0",
 		DefaultValue: "65536",
+		Doc:          "Maximum number of collections per database.",
 		Export:       true,
 	}
 	p.MaxCollectionNumPerDB.Init(base.mgr)
