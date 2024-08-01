@@ -87,7 +87,7 @@ class MilvusCDCPerformanceTest:
                 if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
 
                     end_time = time.time()
-                    latency = end_time - (latest_insert_ts / 1000)  # Convert milliseconds to seconds
+                    latency = end_time - (latest_insert_ts / 1000) - tt  # Convert milliseconds to seconds
                     with self.sync_lock:
                         self.latest_query_ts = latest_insert_ts
                         self.sync_count = latest_insert_count
@@ -143,7 +143,7 @@ class MilvusCDCPerformanceTest:
 
     def test_scalability(self, max_duration=300, batch_size=1000, max_concurrency=10):
         results = []
-        for concurrency in range(5, max_concurrency + 1):
+        for concurrency in range(10, max_concurrency + 1, 10):
             logger.info(f"\nTesting with concurrency: {concurrency}")
             total_time, insert_count, sync_count, insert_throughput, sync_throughput, avg_latency, min_latency, max_latency = self.measure_performance(
                 max_duration, batch_size, concurrency)
@@ -179,4 +179,4 @@ if __name__ == "__main__":
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
     cdc_test = MilvusCDCPerformanceTest("source", "target")
-    cdc_test.run_all_tests(duration=300, batch_size=1000, max_concurrency=20)
+    cdc_test.run_all_tests(duration=300, batch_size=1000, max_concurrency=100)
