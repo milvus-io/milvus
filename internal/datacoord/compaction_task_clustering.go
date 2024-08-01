@@ -200,6 +200,10 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 
 func (t *clusteringCompactionTask) processPipelining() error {
 	log := log.With(zap.Int64("triggerID", t.TriggerID), zap.Int64("collectionID", t.GetCollectionID()), zap.Int64("planID", t.GetPlanID()))
+	if t.NeedReAssignNodeID() {
+		log.Debug("wait for the node to be assigned before proceeding with the subsequent steps")
+		return nil
+	}
 	var operators []UpdateOperator
 	for _, segID := range t.InputSegments {
 		operators = append(operators, UpdateSegmentLevelOperator(segID, datapb.SegmentLevel_L2))
