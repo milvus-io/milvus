@@ -8,12 +8,14 @@ on:
     paths:
       - 'build/docker/builder/gpu/**'
       - '.github/workflows/publish-gpu-builder.yaml'
+      - 'scripts/install_deps.sh'
       - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/docker/builder/gpu/**'
       - '.github/workflows/publish-gpu-builder.yaml'
+      - 'scripts/install_deps.sh'
       - '!**.md'
 
 concurrency:
