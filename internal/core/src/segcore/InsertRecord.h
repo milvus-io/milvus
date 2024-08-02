@@ -63,7 +63,9 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const = 0;
 
     virtual void
     clear() = 0;
@@ -167,7 +169,9 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -176,7 +180,7 @@ class OffsetOrderedMap : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_by_index(limit, bitset, false_filtered_out);
     }
 
     void
@@ -187,10 +191,15 @@ class OffsetOrderedMap : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit,
+                        const BitsetType& bitset,
+                        bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
+        int64_t cnt = bitset.count();
         auto size = bitset.size();
-        int64_t cnt = size - bitset.count();
+        if (!false_filtered_out) {
+            cnt = size - bitset.count();
+        }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -205,7 +214,7 @@ class OffsetOrderedMap : public OffsetMap {
                     continue;
                 }
 
-                if (!bitset[seg_offset]) {
+                if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
                     // PK hit, no need to continue traversing offsets with the same PK.
@@ -337,7 +346,9 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit,
+               const BitsetType& bitset,
+               bool false_filtered_out) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -346,7 +357,7 @@ class OffsetOrderedArray : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_by_index(limit, bitset, false_filtered_out);
     }
 
     void
@@ -357,10 +368,15 @@ class OffsetOrderedArray : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit,
+                        const BitsetType& bitset,
+                        bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
+        int64_t cnt = bitset.count();
         auto size = bitset.size();
-        int64_t cnt = size - bitset.count();
+        if (!false_filtered_out) {
+            cnt = size - bitset.count();
+        }
         auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
@@ -373,7 +389,7 @@ class OffsetOrderedArray : public OffsetMap {
                 continue;
             }
 
-            if (!bitset[seg_offset]) {
+            if (!(bitset[seg_offset] ^ false_filtered_out)) {
                 seg_offsets.push_back(seg_offset);
                 hit_num++;
             }

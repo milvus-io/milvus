@@ -66,7 +66,7 @@ TYPED_TEST_SUITE_P(TypedOffsetOrderedArrayTest);
 
 TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     // not sealed.
-    ASSERT_ANY_THROW(this->map_.find_first(Unlimited, {}));
+    ASSERT_ANY_THROW(this->map_.find_first(Unlimited, {}, true));
 
     // insert 10 entities.
     int num = 10;
@@ -81,8 +81,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     // all is satisfied.
     {
         BitsetType all(num);
+        all.set();
         {
-            auto [offsets, has_more_res] = this->map_.find_first(num / 2, all);
+            auto [offsets, has_more_res] =
+                this->map_.find_first(num / 2, all, true);
             ASSERT_EQ(num / 2, offsets.size());
             ASSERT_TRUE(has_more_res);
             for (int i = 1; i < offsets.size(); i++) {
@@ -91,7 +93,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
         }
         {
             auto [offsets, has_more_res] =
-                this->map_.find_first(Unlimited, all);
+                this->map_.find_first(Unlimited, all, true);
             ASSERT_EQ(num, offsets.size());
             ASSERT_FALSE(has_more_res);
             for (int i = 1; i < offsets.size(); i++) {
@@ -102,9 +104,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     {
         // corner case, segment offset exceeds the size of bitset.
         BitsetType all_minus_1(num - 1);
+        all_minus_1.set();
         {
             auto [offsets, has_more_res] =
-                this->map_.find_first(num / 2, all_minus_1);
+                this->map_.find_first(num / 2, all_minus_1, true);
             ASSERT_EQ(num / 2, offsets.size());
             ASSERT_TRUE(has_more_res);
             for (int i = 1; i < offsets.size(); i++) {
@@ -113,7 +116,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
         }
         {
             auto [offsets, has_more_res] =
-                this->map_.find_first(Unlimited, all_minus_1);
+                this->map_.find_first(Unlimited, all_minus_1, true);
             ASSERT_EQ(all_minus_1.size(), offsets.size());
             ASSERT_FALSE(has_more_res);
             for (int i = 1; i < offsets.size(); i++) {
@@ -124,11 +127,11 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
     {
         // none is satisfied.
         BitsetType none(num);
-        none.set();
-        auto result_pair = this->map_.find_first(num / 2, none);
+        none.reset();
+        auto result_pair = this->map_.find_first(num / 2, none, true);
         ASSERT_EQ(0, result_pair.first.size());
         ASSERT_FALSE(result_pair.second);
-        result_pair = this->map_.find_first(NoLimit, none);
+        result_pair = this->map_.find_first(NoLimit, none, true);
         ASSERT_EQ(0, result_pair.first.size());
         ASSERT_FALSE(result_pair.second);
     }

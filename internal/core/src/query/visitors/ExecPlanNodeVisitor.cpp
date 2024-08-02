@@ -75,11 +75,13 @@ empty_search_result(int64_t num_queries, SearchInfo& search_info) {
 }
 
 void
-ExecPlanNodeVisitor::ExecuteExprNode(
+ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     const std::shared_ptr<milvus::plan::PlanNode>& plannode,
     const milvus::segcore::SegmentInternalInterface* segment,
     int64_t active_count,
-    BitsetType& bitset_holder) {
+    BitsetType& bitset_holder,
+    bool& cache_offset_getted,
+    std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plannode->ToString(),
@@ -92,7 +94,6 @@ ExecPlanNodeVisitor::ExecuteExprNode(
 
     auto task =
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
-    bool cache_offset_getted = false;
     for (;;) {
         auto result = task->Next();
         if (!result) {
@@ -114,16 +115,19 @@ ExecPlanNodeVisitor::ExecuteExprNode(
 
             if (!cache_offset_getted) {
                 // offset cache only get once because not support iterator batch
-                auto cache_bits_vec =
+                auto cache_offset_vec =
                     std::dynamic_pointer_cast<ColumnVector>(row->child(1));
-                TargetBitmapView view(cache_bits_vec->GetRawData(),
-                                      cache_bits_vec->size());
-                // If get empty cached bits. mean no record hits in this segment
+                // If get empty cached offsets. mean no record hits in this segment
                 // no need to get next batch.
-                if (view.count() == 0) {
+                if (cache_offset_vec->size() == 0) {
                     bitset_holder.resize(active_count);
                     task->RequestCancel();
                     break;
+                }
+                auto cache_offset_vec_ptr =
+                    (int64_t*)(cache_offset_vec->GetRawData());
+                for (size_t i = 0; i < cache_offset_vec->size(); ++i) {
+                    cache_offset.push_back(cache_offset_vec_ptr[i]);
                 }
                 cache_offset_getted = true;
             }
@@ -277,12 +281,17 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         bitset_holder.resize(active_count);
     }
 
+    // This flag used to indicate whether to get offset from expr module that
+    // speeds up mvcc filter in the next interface: "timestamp_filter"
+    bool get_cache_offset = false;
     std::vector<int64_t> cache_offsets;
     if (node.filter_plannode_.has_value()) {
-        ExecuteExprNode(node.filter_plannode_.value(),
-                        segment,
-                        active_count,
-                        bitset_holder);
+        ExecuteExprNodeInternal(node.filter_plannode_.value(),
+                                segment,
+                                active_count,
+                                bitset_holder,
+                                get_cache_offset,
+                                cache_offsets);
         bitset_holder.flip();
     }
 
@@ -304,7 +313,16 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     retrieve_result.total_data_cnt_ = bitset_holder.size();
-    auto results_pair = segment->find_first(node.limit_, bitset_holder);
+    bool false_filtered_out = false;
+    if (get_cache_offset) {
+        segment->timestamp_filter(bitset_holder, cache_offsets, timestamp_);
+    } else {
+        bitset_holder.flip();
+        false_filtered_out = true;
+        segment->timestamp_filter(bitset_holder, timestamp_);
+    }
+    auto results_pair =
+        segment->find_first(node.limit_, bitset_holder, false_filtered_out);
     retrieve_result.result_offsets_ = std::move(results_pair.first);
     retrieve_result.has_more_result = results_pair.second;
     retrieve_result_opt_ = std::move(retrieve_result);

@@ -2547,6 +2547,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
         // If enable plan_visitor pk index cache, pass offsets_ to it
         if (plan_visitor_ != nullptr) {
             plan_visitor_->SetExprUsePkIndex(true);
+            plan_visitor_->SetExprCacheOffsets(std::move(cached_offsets));
         }
         AssertInfo(bitset.size() == row_count_,
                    "[ExecExprVisitor]Size of results not equal row count");
