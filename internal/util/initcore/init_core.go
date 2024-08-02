@@ -173,13 +173,6 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 
 func InitMmapManager(params *paramtable.ComponentParam) error {
 	mmapDirPath := params.QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDirPath) == 0 {
-		paramtable.Get().Save(
-			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
-			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
-		)
-		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	}
 	cMmapChunkManagerDir := C.CString(path.Join(mmapDirPath, "/mmap_chunk_manager/"))
 	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
 	defer C.free(unsafe.Pointer(cMmapChunkManagerDir))
