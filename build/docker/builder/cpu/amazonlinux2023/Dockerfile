@@ -27,7 +27,7 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.10.linux-$TARG
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
-RUN pip3 install conan==1.61.0
+RUN pip3 install conan==1.64.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.4-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
