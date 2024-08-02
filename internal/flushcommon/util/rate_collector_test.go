@@ -14,31 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pipeline
+package util
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func TestInsertMsg_TimeTick(te *testing.T) {
-	tests := []struct {
-		timeTimestanpMax typeutil.Timestamp
+func TestRateCollector(t *testing.T) {
+	t.Run("test FlowGraphTt", func(t *testing.T) {
+		collector, err := newRateCollector()
+		assert.NoError(t, err)
 
-		description string
-	}{
-		{0, "Zero timestampMax"},
-		{1, "Normal timestampMax"},
-	}
-
-	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			fgMsg := &FlowGraphMsg{TimeRange: util.TimeRange{TimestampMax: test.timeTimestanpMax}}
-			assert.Equal(t, test.timeTimestanpMax, fgMsg.TimeTick())
-		})
-	}
+		c, minTt := collector.GetMinFlowGraphTt()
+		assert.Equal(t, "", c)
+		assert.Equal(t, typeutil.MaxTimestamp, minTt)
+		collector.UpdateFlowGraphTt("channel1", 100)
+		collector.UpdateFlowGraphTt("channel2", 200)
+		collector.UpdateFlowGraphTt("channel3", 50)
+		c, minTt = collector.GetMinFlowGraphTt()
+		assert.Equal(t, "channel3", c)
+		assert.Equal(t, typeutil.Timestamp(50), minTt)
+	})
 }

@@ -28,7 +28,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -40,6 +40,7 @@ type ChannelCPUpdaterSuite struct {
 }
 
 func (s *ChannelCPUpdaterSuite) SetupTest() {
+	paramtable.Init()
 	s.broker = broker.NewMockBroker(s.T())
 	s.updater = NewChannelCheckpointUpdater(s.broker)
 }

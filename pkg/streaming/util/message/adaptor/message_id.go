@@ -1,6 +1,8 @@
 package adaptor
 
 import (
+	"fmt"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -31,4 +33,22 @@ func MustGetMessageIDFromMQWrapperID(commonMessageID common.MessageID) message.M
 		return rmq.NewRmqID(id.MessageID)
 	}
 	return nil
+}
+
+// DeserializeToMQWrapperID deserializes messageID bytes to common.MessageID
+// TODO: should be removed in future after common.MessageID is removed
+func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, error) {
+	switch walName {
+	case "pulsar":
+		pulsarID, err := mqpulsar.DeserializePulsarMsgID(msgID)
+		if err != nil {
+			return nil, err
+		}
+		return mqpulsar.NewPulsarID(pulsarID), nil
+	case "rocksmq":
+		rID := server.DeserializeRmqID(msgID)
+		return &server.RmqID{MessageID: rID}, nil
+	default:
+		return nil, fmt.Errorf("unsupported mq type %s", walName)
+	}
 }

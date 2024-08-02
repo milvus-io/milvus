@@ -22,31 +22,18 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-type (
-	// UniqueID is type int64
-	UniqueID = typeutil.UniqueID
-
-	// Timestamp is type uint64
-	Timestamp = typeutil.Timestamp
-
-	// IntPrimaryKey is type int64
-	IntPrimaryKey = typeutil.IntPrimaryKey
-
-	// DSL is type string
-	DSL = string
 )
 
 type PipelineParams struct {
@@ -61,13 +48,14 @@ type PipelineParams struct {
 	Session            *sessionutil.Session
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
-	Allocator          allocator.Allocator
+	Allocator          allocator.Interface
+	FlushMsgHandler    flusher.FlushMsgHandler
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
 type TimeRange struct {
-	TimestampMin Timestamp
-	TimestampMax Timestamp
+	TimestampMin typeutil.Timestamp
+	TimestampMax typeutil.Timestamp
 }
 
 func StartTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span) {

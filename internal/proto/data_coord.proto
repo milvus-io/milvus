@@ -54,6 +54,7 @@ service DataCoord {
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
+  rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
   rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
   rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
   rpc GetFlushAllState(milvus.GetFlushAllStateRequest) returns(milvus.GetFlushAllStateResponse) {}
@@ -461,6 +462,17 @@ message GetRecoveryInfoRequestV2 {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
+}
+
+message GetChannelRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  string vchannel = 2;
+}
+
+message GetChannelRecoveryInfoResponse {
+  common.Status status = 1;
+  VchannelInfo info = 2;
+  schema.CollectionSchema schema = 3;
 }
 
 message GetSegmentsByStatesRequest {

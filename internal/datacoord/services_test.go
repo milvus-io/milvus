@@ -1460,6 +1460,56 @@ func TestImportV2(t *testing.T) {
 	})
 }
 
+func TestGetChannelRecoveryInfo(t *testing.T) {
+	ctx := context.Background()
+
+	// server not healthy
+	s := &Server{}
+	s.stateCode.Store(commonpb.StateCode_Initializing)
+	resp, err := s.GetChannelRecoveryInfo(ctx, nil)
+	assert.NoError(t, err)
+	assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// get collection failed
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+		Return(nil, errors.New("mock err"))
+	s.handler = handler
+	assert.NoError(t, err)
+	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
+		Vchannel: "ch-1",
+	})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+
+	// normal case
+	channelInfo := &datapb.VchannelInfo{
+		CollectionID:        0,
+		ChannelName:         "ch-1",
+		SeekPosition:        nil,
+		UnflushedSegmentIds: []int64{1},
+		FlushedSegmentIds:   []int64{2},
+		DroppedSegmentIds:   []int64{3},
+		IndexedSegmentIds:   []int64{4},
+	}
+
+	handler = NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+		Return(&collectionInfo{Schema: &schemapb.CollectionSchema{}}, nil)
+	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
+	s.handler = handler
+
+	assert.NoError(t, err)
+	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
+		Vchannel: "ch-1",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+	assert.NotNil(t, resp.GetSchema())
+	assert.Equal(t, channelInfo, resp.GetInfo())
+}
+
 type GcControlServiceSuite struct {
 	suite.Suite
 

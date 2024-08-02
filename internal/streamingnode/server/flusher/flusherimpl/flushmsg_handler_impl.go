@@ -14,31 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pipeline
+package flusherimpl
 
 import (
-	"testing"
+	"context"
 
-	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
-func TestInsertMsg_TimeTick(te *testing.T) {
-	tests := []struct {
-		timeTimestanpMax typeutil.Timestamp
-
-		description string
-	}{
-		{0, "Zero timestampMax"},
-		{1, "Normal timestampMax"},
-	}
-
-	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			fgMsg := &FlowGraphMsg{TimeRange: util.TimeRange{TimestampMax: test.timeTimestanpMax}}
-			assert.Equal(t, test.timeTimestanpMax, fgMsg.TimeTick())
-		})
+// TODO: func(vchannel string, msg FlushMsg)
+func flushMsgHandlerImpl(wbMgr writebuffer.BufferManager) func(vchannel string, segmentIDs []int64) {
+	return func(vchannel string, segmentIDs []int64) {
+		err := wbMgr.SealSegments(context.Background(), vchannel, segmentIDs)
+		if err != nil {
+			log.Warn("failed to seal segments", zap.Error(err))
+		}
 	}
 }

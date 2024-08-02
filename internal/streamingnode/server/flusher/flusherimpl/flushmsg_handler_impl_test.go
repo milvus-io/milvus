@@ -14,31 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pipeline
+package flusherimpl
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 )
 
-func TestInsertMsg_TimeTick(te *testing.T) {
-	tests := []struct {
-		timeTimestanpMax typeutil.Timestamp
+func TestFlushMsgHandler(t *testing.T) {
+	// test failed
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-		description string
-	}{
-		{0, "Zero timestampMax"},
-		{1, "Normal timestampMax"},
-	}
+	fn := flushMsgHandlerImpl(wbMgr)
+	fn("ch-0", []int64{1, 2, 3})
 
-	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			fgMsg := &FlowGraphMsg{TimeRange: util.TimeRange{TimestampMax: test.timeTimestanpMax}}
-			assert.Equal(t, test.timeTimestanpMax, fgMsg.TimeTick())
-		})
-	}
+	// test normal
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	fn = flushMsgHandlerImpl(wbMgr)
+	fn("ch-0", []int64{1, 2, 3})
 }
