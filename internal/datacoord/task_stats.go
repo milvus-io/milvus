@@ -338,6 +338,7 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	}
 
 	// second update the task meta
+	// TODO: @xiaocai2333 no need to save, delete it
 	if err = meta.statsTaskMeta.FinishTask(st.taskID, st.taskInfo); err != nil {
 		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID), zap.Error(err))
 		return err
