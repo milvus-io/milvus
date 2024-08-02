@@ -14,6 +14,7 @@ package paramtable
 import (
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -2477,6 +2478,12 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "mmap")
+			}
+			return v
+		},
 	}
 	p.MmapDirPath.Init(base.mgr)
 
