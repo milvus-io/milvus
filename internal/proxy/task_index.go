@@ -47,7 +47,7 @@ const (
 	GetIndexStateTaskName         = "GetIndexStateTask"
 	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
 
-	AutoIndexName = "AUTOINDEX"
+	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
 )
 
@@ -67,8 +67,9 @@ type createIndexTask struct {
 	newTypeParams  []*commonpb.KeyValuePair
 	newExtraParams []*commonpb.KeyValuePair
 
-	collectionID UniqueID
-	fieldSchema  *schemapb.FieldSchema
+	collectionID                     UniqueID
+	fieldSchema                      *schemapb.FieldSchema
+	userAutoIndexMetricTypeSpecified bool
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -186,6 +187,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			if metricTypeExist {
 				// make the users' metric type first class citizen.
 				indexParamsMap[common.MetricTypeKey] = metricType
+				cit.userAutoIndexMetricTypeSpecified = true
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
 			autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -225,6 +227,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 					useAutoIndex()
 					// make the users' metric type first class citizen.
 					indexParamsMap[common.MetricTypeKey] = metricType
+					cit.userAutoIndexMetricTypeSpecified = true
 				}
 
 				return nil
@@ -398,14 +401,15 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 
 	var err error
 	req := &indexpb.CreateIndexRequest{
-		CollectionID:    cit.collectionID,
-		FieldID:         cit.fieldSchema.GetFieldID(),
-		IndexName:       cit.req.GetIndexName(),
-		TypeParams:      cit.newTypeParams,
-		IndexParams:     cit.newIndexParams,
-		IsAutoIndex:     cit.isAutoIndex,
-		UserIndexParams: cit.newExtraParams,
-		Timestamp:       cit.BeginTs(),
+		CollectionID:                     cit.collectionID,
+		FieldID:                          cit.fieldSchema.GetFieldID(),
+		IndexName:                        cit.req.GetIndexName(),
+		TypeParams:                       cit.newTypeParams,
+		IndexParams:                      cit.newIndexParams,
+		IsAutoIndex:                      cit.isAutoIndex,
+		UserIndexParams:                  cit.newExtraParams,
+		Timestamp:                        cit.BeginTs(),
+		UserAutoindexMetricTypeSpecified: cit.userAutoIndexMetricTypeSpecified,
 	}
 	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
 	if err != nil {
