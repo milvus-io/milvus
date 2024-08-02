@@ -218,6 +218,14 @@ var (
 			indexName,
 			isVectorIndex,
 		})
+
+	QueryNodeMemoryHighWaterLevel = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "qn_mem_high_water_level",
+			Help:      "querynode memory high water level",
+		})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -256,6 +264,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(RootCoordNumEntities)
 	registry.MustRegister(RootCoordIndexedNumEntities)
+
+	registry.MustRegister(QueryNodeMemoryHighWaterLevel)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {
