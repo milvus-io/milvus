@@ -18,7 +18,6 @@
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
 #include "query/Plan.h"
-#include "query/generated/ExecExprVisitor.h"
 
 using namespace milvus::segcore;
 using namespace milvus;

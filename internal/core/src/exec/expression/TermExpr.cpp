@@ -139,7 +139,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     if (segment_->type() == SegmentType::Sealed &&
         skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
         cached_bits_.resize(active_count_, false);
-        cached_offsets_inited_ = true;
+        cached_bits_inited_ = true;
         return true;
     }
     return false;
@@ -181,12 +181,12 @@ PhyTermFilterExpr::InitPkCacheOffset() {
         auto _offset = (int64_t)offset.get();
         cached_bits_[_offset] = true;
     }
-    cached_offsets_inited_ = true;
+    cached_bits_inited_ = true;
 }
 
 VectorPtr
 PhyTermFilterExpr::ExecPkTermImpl() {
-    if (!cached_offsets_inited_) {
+    if (!cached_bits_inited_) {
         InitPkCacheOffset();
     }
 
@@ -207,15 +207,7 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         res[i] = cached_bits_[current_data_chunk_pos_++];
     }
 
-    if (use_cache_offsets_) {
-        auto cache_bits_copy = cached_bits_.clone();
-        std::vector<VectorPtr> vecs{
-            res_vec,
-            std::make_shared<ColumnVector>(std::move(cache_bits_copy))};
-        return std::make_shared<RowVector>(vecs);
-    } else {
-        return res_vec;
-    }
+    return res_vec;
 }
 
 template <typename ValueType>

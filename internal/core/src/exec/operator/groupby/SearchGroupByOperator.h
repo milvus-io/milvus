@@ -26,7 +26,7 @@
 #include "query/Utils.h"
 
 namespace milvus {
-namespace query {
+namespace exec {
 
 template <typename T>
 class DataGetter {
@@ -249,5 +249,5 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     std::vector<float>& distances,
                     const knowhere::MetricType& metrics_type);
 
-}  // namespace query
+}  // namespace exec
 }  // namespace milvus

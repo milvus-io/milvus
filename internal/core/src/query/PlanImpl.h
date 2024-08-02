@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Consts.h"
+#include "common/Schema.h"
 
 namespace milvus::query {
 

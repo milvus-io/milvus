@@ -257,13 +257,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
 inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
-    // For pk in [...] can use cache to accelate, but not for other exprs like expr1 && pk in [...]
-    if (exprs.size() == 1) {
-        if (auto casted_expr =
-                std::dynamic_pointer_cast<PhyTermFilterExpr>(exprs[0])) {
-            casted_expr->SetUseCacheOffsets();
-        }
-    }
+    //TODO: add optimization pattern
 }
+
 }  // namespace exec
 }  // namespace milvus

@@ -43,7 +43,7 @@ SegmentGrowingImpl::PreInsert(int64_t size) {
 }
 
 void
-SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
+SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
@@ -816,7 +816,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
+SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                          Timestamp timestamp) const {
     // DO NOTHING
 }

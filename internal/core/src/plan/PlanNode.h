@@ -25,6 +25,7 @@
 #include "expr/ITypeExpr.h"
 #include "common/EasyAssert.h"
 #include "segcore/SegmentInterface.h"
+#include "plan/PlanNodeIdGenerator.h"
 
 namespace milvus {
 namespace plan {
@@ -67,6 +68,15 @@ class PlanNode {
     GatherInfo() const {
         return {};
     };
+
+    std::string
+    SourceToString() const {
+        std::vector<std::string> sources_str;
+        for (auto& source : sources()) {
+            sources_str.emplace_back(source->ToString());
+        }
+        return "[" + Join(sources_str, ",") + "]";
+    }
 
  private:
     PlanNodeId id_;
@@ -244,7 +254,7 @@ class FilterBitsNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("FilterBitsNode:[filter_expr:{}]",
+        return fmt::format("FilterBitsNode:\n\t[filter_expr:{}]",
                            filter_->ToString());
     }
 
@@ -258,6 +268,135 @@ class FilterBitsNode : public PlanNode {
  private:
     const std::vector<PlanNodePtr> sources_;
     const expr::TypedExprPtr filter_;
+};
+
+class MvccNode : public PlanNode {
+ public:
+    MvccNode(const PlanNodeId& id,
+             std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "MvccNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("MvccNode:\n\t[source node:{}]", SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+
+class VectorSearchNode : public PlanNode {
+ public:
+    VectorSearchNode(
+        const PlanNodeId& id,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "VectorSearchNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("VectorSearchNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+
+class GroupByNode : public PlanNode {
+ public:
+    GroupByNode(const PlanNodeId& id,
+                std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "GroupByNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("GroupByNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+
+class CountNode : public PlanNode {
+ public:
+    CountNode(
+        const PlanNodeId& id,
+        const std::vector<PlanNodePtr>& sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::INT64;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "CountNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("VectorSearchNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
 };
 
 enum class ExecutionStrategy {
