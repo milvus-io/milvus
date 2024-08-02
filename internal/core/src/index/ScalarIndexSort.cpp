@@ -68,6 +68,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values) {
         PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
     data_.reserve(n);
+    total_num_rows_ = n;
     idx_to_offsets_.resize(n);
     T* p = const_cast<T*>(values);
     for (size_t i = 0; i < n; ++i) {
@@ -84,28 +85,31 @@ template <typename T>
 void
 ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
-    int64_t total_num_rows = 0;
+    int64_t length = 0;
     for (const auto& data : field_datas) {
-        total_num_rows += data->get_num_rows();
+        total_num_rows_ += data->get_num_rows();
+        length += data->get_num_rows() - data->get_null_count();
     }
-    if (total_num_rows == 0) {
+    if (length == 0) {
         PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
-    data_.reserve(total_num_rows);
+    data_.reserve(length);
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (size_t i = 0; i < slice_num; ++i) {
-            auto value = reinterpret_cast<const T*>(data->RawValue(i));
-            data_.emplace_back(IndexStructure(*value, offset));
+            if (data->is_valid(i)) {
+                auto value = reinterpret_cast<const T*>(data->RawValue(i));
+                data_.emplace_back(IndexStructure(*value, offset));
+            }
             offset++;
         }
     }
 
     std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows);
-    for (size_t i = 0; i < total_num_rows; ++i) {
+    idx_to_offsets_.resize(total_num_rows_);
+    for (size_t i = 0; i < length; ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;
@@ -124,9 +128,13 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     auto index_size = data_.size();
     memcpy(index_length.get(), &index_size, sizeof(size_t));
 
+    std::shared_ptr<uint8_t[]> index_num_rows(new uint8_t[sizeof(size_t)]);
+    memcpy(index_num_rows.get(), &total_num_rows_, sizeof(size_t));
+
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
     res_set.Append("index_length", index_length, sizeof(size_t));
+    res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
 
     milvus::Disassemble(res_set);
 
@@ -158,11 +166,16 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     auto index_data = index_binary.GetByName("index_data");
     data_.resize(index_size);
-    idx_to_offsets_.resize(index_size);
+    auto index_num_rows = index_binary.GetByName("index_num_rows");
+    memcpy(&total_num_rows_,
+           index_num_rows->data.get(),
+           (size_t)index_length->size);
+    idx_to_offsets_.resize(total_num_rows_);
     memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
+
     is_built_ = true;
 }
 
@@ -185,7 +198,7 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
+        auto size = data->DataSize();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
@@ -199,7 +212,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(data_.size());
+    TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(
             data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
@@ -221,7 +234,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(data_.size(), true);
+    TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(
             data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
@@ -243,7 +256,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::Range(const T value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(data_.size());
+    TargetBitmap bitset(Count());
     auto lb = data_.begin();
     auto ub = data_.end();
     if (ShouldSkip(value, value, op)) {
@@ -283,7 +296,7 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
                           T upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(data_.size());
+    TargetBitmap bitset(Count());
     if (lower_bound_value > upper_bound_value ||
         (lower_bound_value == upper_bound_value &&
          !(lb_inclusive && ub_inclusive))) {

@@ -248,6 +248,7 @@ class SegmentInternalInterface : public SegmentInterface {
                            int64_t chunk_id,
                            DataType data_type,
                            const void* chunk_data,
+                           const bool* valid_data,
                            int64_t count);
 
     void

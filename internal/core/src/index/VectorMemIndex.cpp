@@ -195,7 +195,6 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 std::string prefix = item[NAME];
                 int slice_num = item[SLICE_NUM];
                 auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-                // todo: support nullable index
                 auto new_field_data = milvus::storage::CreateFieldData(
                     DataType::INT8, false, 1, total_len);
 

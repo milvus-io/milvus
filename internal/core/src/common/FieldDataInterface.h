@@ -476,7 +476,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();
             if (valid_data == nullptr) {
-                valid_data_.resize((n + 7) / 8, 0xFF);
+                valid_data_.assign((n + 7) / 8, 0xFF);
             } else {
                 std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
             }
