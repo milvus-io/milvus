@@ -2,80 +2,52 @@ import time
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema
+from datetime import datetime
+from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
-from kubernetes import client, config
-from urllib.parse import urlparse
-import itertools
 
 class MilvusCDCPerformanceTest:
-    def __init__(self, source_uri, source_token, target_uri, target_token, source_release_name):
-        self.source_uri = source_uri
-        self.source_token = source_token
-        self.target_uri = target_uri
-        self.target_token = target_token
-        self.collection_name = "milvus_cdc_perf_test"
+    def __init__(self, source_alias, target_alias):
+        self.source_alias = source_alias
+        self.target_alias = target_alias
+        self.source_collection = None
+        self.target_collection = None
         self.insert_count = 0
         self.sync_count = 0
         self.insert_lock = threading.Lock()
         self.sync_lock = threading.Lock()
+        self.latest_insert_ts = 0
+        self.latest_query_ts = 0
         self.stop_query = False
         self.latencies = []
-        self.latest_insert_status = {"latest_ts": 0, "latest_count": 0}
-        config.load_kube_config()
+        self.latest_insert_status = {
+            "latest_ts": 0,
+            "latest_count": 0
+        }
 
-        self.k8s_api = client.CoreV1Api()
-        self.source_release_name = source_release_name
-        self.source_pod_ips = self.get_pod_ips(self.source_release_name)
-        self.source_ip_cycle = itertools.cycle(self.source_pod_ips)
-        self.init_collection()
-
-
-    def init_collection(self):
-        connections.connect(alias="default", uri=self.source_uri, token=self.source_token)
+    def setup_collections(self):
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="timestamp", dtype=DataType.INT64),
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=128)
         ]
         schema = CollectionSchema(fields, "Milvus CDC test collection")
-        collection = Collection(self.collection_name, schema, num_shards=8)
+        c_name = "milvus_cdc_perf_test"
+        # Create collections
+        self.source_collection = Collection(c_name, schema, using=self.source_alias)
+        time.sleep(1)
+        self.target_collection = Collection(c_name, schema, using=self.target_alias)
+
         index_params = {
             "index_type": "IVF_FLAT",
             "metric_type": "L2",
             "params": {"nlist": 1024}
         }
-        collection.create_index("vector", index_params)
-        collection.load()
-        connections.disconnect(alias="default")
-        return collection
-
-    def get_pod_ips(self, instance, namespace='chaos-testing'):
-        try:
-            label_selector = f"app.kubernetes.io/instance={instance},app.kubernetes.io/component=proxy"
-            pod_list = self.k8s_api.list_namespaced_pod(namespace=namespace, label_selector=label_selector)
-
-            pod_ips = []
-            for pod in pod_list.items:
-                if pod.status.phase == 'Running' and pod.status.pod_ip:
-                    pod_ips.append(pod.status.pod_ip)
-            logger.info(f"Found {len(pod_ips)} pod IPs for instance {instance}: {pod_ips}")
-            return pod_ips
-        except Exception as e:
-            logger.error(f"Error getting pod IPs: {str(e)}")
-            return []
-    def get_next_source_ip(self):
-        return next(self.source_ip_cycle)
-
-    def setup_collection(self, alias):
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
-            FieldSchema(name="timestamp", dtype=DataType.INT64),
-            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=128)
-        ]
-        schema = CollectionSchema(fields, "Milvus CDC test collection")
-        collection = Collection(self.collection_name, schema, using=alias)
-        return collection
+        self.source_collection.create_index("vector", index_params)
+        self.source_collection.load()
+        time.sleep(1)
+        # self.source_collection.description()
+        # self.target_collection.description()
 
     def generate_data(self, num_entities):
         current_ts = int(time.time() * 1000)
@@ -84,76 +56,72 @@ class MilvusCDCPerformanceTest:
             [[random.random() for _ in range(128)] for _ in range(num_entities)]  # vector
         ]
 
-    def continuous_insert(self, duration, batch_size, thread_id):
-        alias = f"source_{thread_id}"
-        pod_ip = self.get_next_source_ip()
-        uri = f"http://{pod_ip}:19530"
-        connections.connect(alias, uri=uri, token=self.source_token)
-        collection = self.setup_collection(alias)
+    def continuous_insert(self, duration, batch_size):
         end_time = time.time() + duration
-        local_insert_count = 0
         while time.time() < end_time:
             entities = self.generate_data(batch_size)
-            collection.insert(entities)
-            local_insert_count += batch_size
-            with self.insert_lock:
+            self.source_collection.insert(entities)
+            with (self.insert_lock):
                 self.insert_count += batch_size
                 self.latest_insert_status = {
                     "latest_ts": entities[0][-1],
                     "latest_count": self.insert_count
-                }
-            time.sleep(0.001)
-
-        connections.disconnect(alias)
-        logger.info(f"Thread {thread_id} inserted {local_insert_count} entities")
+                }  # Update the latest insert timestamp
+                # logger.info(f"insert_count: {self.insert_count}, latest_ts: {self.latest_insert_status['latest_ts']}")
+            time.sleep(0.01)  # Small delay to prevent overwhelming the system
 
     def continuous_query(self):
-        connections.connect("target", uri=self.target_uri, token=self.target_token)
-        collection = self.setup_collection("target")
-
-        latest_query_ts = int(time.time() * 1000)
         while not self.stop_query:
             with self.insert_lock:
                 latest_insert_ts = self.latest_insert_status["latest_ts"]
                 latest_insert_count = self.latest_insert_status["latest_count"]
-            if latest_insert_ts > latest_query_ts:
+            if latest_insert_ts > self.latest_query_ts:
                 t0 = time.time()
-                results = collection.query(
+                results = self.target_collection.query(
                     expr=f"timestamp == {latest_insert_ts}",
                     output_fields=["timestamp"],
                     limit=1
                 )
                 tt = time.time() - t0
+                # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
                 if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
+
                     end_time = time.time()
-                    latency = end_time - (latest_insert_ts / 1000) - tt
+                    latency = end_time - (latest_insert_ts / 1000) - tt  # Convert milliseconds to seconds
                     with self.sync_lock:
-                        latest_query_ts = latest_insert_ts
+                        self.latest_query_ts = latest_insert_ts
                         self.sync_count = latest_insert_count
                         self.latencies.append(latency)
-            time.sleep(0.01)
-
-        connections.disconnect("target")
+                    # logger.debug(f"query latest_insert_ts: {latest_insert_ts}, results: {results} query cost time: {tt} seconds")
+                    # logger.debug(f"Synced {latest_insert_count}/{self.latest_insert_status['latest_count']} entities, latency: {latency:.2f} seconds")
+            time.sleep(0.01)  # Query interval
 
     def measure_performance(self, duration, batch_size, concurrency):
         self.insert_count = 0
         self.sync_count = 0
+        self.latest_insert_ts = 0
+        self.latest_query_ts = int(time.time() * 1000)
         self.latencies = []
         self.stop_query = False
 
         start_time = time.time()
 
+        # Start continuous query thread
         query_thread = threading.Thread(target=self.continuous_query)
         query_thread.start()
 
+        # Start continuous insert threads
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = [executor.submit(self.continuous_insert, duration, batch_size, i) for i in range(concurrency)]
+            futures = [executor.submit(self.continuous_insert, duration, batch_size) for _ in range(concurrency)]
 
+        # Wait for all insert operations to complete
         for future in futures:
             future.result()
 
         self.stop_query = True
         query_thread.join()
+
+        # self.source_collection.flush()
 
         end_time = time.time()
         total_time = end_time - start_time
@@ -193,20 +161,22 @@ class MilvusCDCPerformanceTest:
 
     def run_all_tests(self, duration=300, batch_size=1000, max_concurrency=10):
         logger.info("Starting Milvus CDC Performance Tests")
-
+        self.setup_collections()
         self.test_scalability(duration, batch_size, max_concurrency)
         logger.info("Milvus CDC Performance Tests Completed")
 
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description='cdc perf test')
-    parser.add_argument('--source_uri', type=str, default='http://10.104.20.175:19530', help='source uri')
+    parser.add_argument('--source_uri', type=str, default='http://127.0.0.1:19530', help='source uri')
     parser.add_argument('--source_token', type=str, default='root:Milvus', help='source token')
-    parser.add_argument('--target_uri', type=str, default='http://10.104.14.148:19530', help='target uri')
+    parser.add_argument('--target_uri', type=str, default='http://127.0.0.1:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
-    parser.add_argument('--source_release_name', type=str, default='cdc-test-upstream-12', help='source release name')
+
     args = parser.parse_args()
-    cdc_test = MilvusCDCPerformanceTest(args.source_uri, args.source_token, args.target_uri, args.target_token, args.source_release_name)
+
+    connections.connect("source", uri=args.source_uri, token=args.source_token)
+    connections.connect("target", uri=args.target_uri, token=args.target_token)
+    cdc_test = MilvusCDCPerformanceTest("source", "target")
     cdc_test.run_all_tests(duration=300, batch_size=1000, max_concurrency=100)
