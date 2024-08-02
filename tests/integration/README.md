@@ -7,7 +7,7 @@ This folder contains the integration test for Milvus components.
 Integration test still need some thirdparty components to start:
 
 ```bash
-cd [milvus-folder]/deployments/docker/dev && docker-compose up -d
+cd [milvus-folder]/deployments/docker/dev && docker compose up -d
 ```
 
 Run following script to start the full integration test:
