@@ -268,7 +268,8 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<float> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void SparseRowsToProto(
+inline void
+SparseRowsToProto(
     const std::function<const knowhere::sparse::SparseRow<float>*(size_t)>&
         source,
     int64_t rows,
@@ -286,5 +287,19 @@ inline void SparseRowsToProto(
     }
     proto->set_dim(max_dim);
 }
+
+class Defer {
+ public:
+    Defer(std::function<void()> fn) : fn_(fn) {
+    }
+    ~Defer() {
+        fn_();
+    }
+
+ private:
+    std::function<void()> fn_;
+};
+
+#define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
 }  // namespace milvus

@@ -87,7 +87,8 @@ TEST(Growing, RemoveDuplicatedRecords) {
 
         BitsetType bitset(c);
         std::cout << "start to search delete" << std::endl;
-        segment->mask_with_delete(bitset, c, 1003);
+        BitsetTypeView bitset_view(bitset);
+        segment->mask_with_delete(bitset_view, c, 1003);
 
         for (int i = 0; i < bitset.size(); i++) {
             ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;

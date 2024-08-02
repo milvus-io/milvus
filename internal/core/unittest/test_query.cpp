@@ -12,12 +12,9 @@
 #include <gtest/gtest.h>
 
 #include "pb/schema.pb.h"
-#include "query/Expr.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
@@ -29,26 +26,6 @@ using namespace milvus::segcore;
 
 namespace {
 const int64_t ROW_COUNT = 100 * 1000;
-}
-
-TEST(Query, ShowExecutor) {
-    auto metric_type = knowhere::metric::L2;
-    auto node = std::make_unique<FloatVectorANNS>();
-    auto schema = std::make_shared<Schema>();
-    auto field_id = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, metric_type);
-    int64_t num_queries = 100L;
-    auto raw_data = DataGen(schema, num_queries);
-    auto& info = node->search_info_;
-    info.metric_type_ = metric_type;
-    info.topk_ = 20;
-    info.field_id_ = field_id;
-    node->predicate_ = std::nullopt;
-    ShowPlanNodeVisitor show_visitor;
-    PlanNodePtr base(node.release());
-    auto res = show_visitor.call_child(*base);
-    auto dup = res;
-    std::cout << dup.dump(4);
 }
 
 TEST(Query, ParsePlaceholderGroup) {

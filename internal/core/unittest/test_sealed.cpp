@@ -1035,7 +1035,8 @@ TEST(Sealed, Delete) {
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
-    segment->mask_with_delete(bitset, 10, 11);
+    auto bitset_view = BitsetTypeView(bitset);
+    segment->mask_with_delete(bitset_view, 10, 11);
     ASSERT_EQ(bitset.count(), pks.size());
 
     int64_t new_count = 3;
@@ -1133,11 +1134,12 @@ TEST(Sealed, OverlapDelete) {
     segment->LoadDeletedRecord(overlap_info);
 
     BitsetType bitset(N, false);
+    auto bitset_view = BitsetTypeView(bitset);
     auto deleted_record2 = pks.size();
     ASSERT_EQ(segment->get_deleted_count(), deleted_record1 + deleted_record2)
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << deleted_record1 + deleted_record2 << std::endl;
-    segment->mask_with_delete(bitset, 10, 12);
+    segment->mask_with_delete(bitset_view, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
         << std::endl;
@@ -1330,7 +1332,8 @@ TEST(Sealed, DeleteDuplicatedRecords) {
 
         BitsetType bitset(c);
         std::cout << "start to search delete" << std::endl;
-        segment->mask_with_delete(bitset, c, 1003);
+        BitsetTypeView bitset_view(bitset);
+        segment->mask_with_delete(bitset_view, c, 1003);
 
         for (int i = 0; i < bitset.size(); i++) {
             ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;

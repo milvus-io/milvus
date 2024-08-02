@@ -26,7 +26,7 @@
 #include "query/Utils.h"
 
 namespace milvus {
-namespace query {
+namespace exec {
 
 template <typename T>
 class DataGetter {
@@ -199,7 +199,7 @@ struct GroupByMap {
 
  public:
     GroupByMap(int group_capacity, int group_size)
-        : group_capacity_(group_capacity), group_size_(group_size){};
+        : group_capacity_(group_capacity), group_size_(group_size) {};
     bool
     IsGroupResEnough() {
         return group_map_.size() == group_capacity_ &&
@@ -235,5 +235,5 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     std::vector<float>& distances,
                     const knowhere::MetricType& metrics_type);
 
-}  // namespace query
+}  // namespace exec
 }  // namespace milvus

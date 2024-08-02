@@ -71,6 +71,11 @@ class CallbackSink : public Operator {
         return BlockingReason::kNotBlocked;
     }
 
+    virtual std::string
+    ToString() const override {
+        return "CallbackSink";
+    }
+
  private:
     void
     Close() override {

@@ -19,7 +19,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -156,9 +156,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     std::unordered_set<TypeParam> elems(this->vec_of_array_[0].begin(),
                                         this->vec_of_array_[0].end());
@@ -205,9 +204,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAll) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     std::unordered_set<TypeParam> elems(this->vec_of_array_[0].begin(),
                                         this->vec_of_array_[0].end());
@@ -262,9 +260,8 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayEqual) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, this->N_, final);
+    final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
     auto ref = [this](size_t offset) -> bool {
         if (this->vec_of_array_[0].size() !=

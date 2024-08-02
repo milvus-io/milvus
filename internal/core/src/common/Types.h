@@ -376,6 +376,7 @@ using SegOffset =
 
 //using BitsetType = boost::dynamic_bitset<>;
 using BitsetType = CustomBitset;
+using BitsetTypeView = CustomBitsetView;
 using BitsetTypePtr = std::shared_ptr<BitsetType>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 

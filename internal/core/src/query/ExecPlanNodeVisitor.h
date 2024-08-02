@@ -17,6 +17,8 @@
 #include "segcore/SegmentGrowing.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
+#include "plan/PlanNode.h"
+#include "exec/QueryContext.h"
 
 namespace milvus::query {
 
@@ -88,11 +90,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return expr_use_pk_index_;
     }
 
-    void
-    ExecuteExprNode(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-                    const milvus::segcore::SegmentInternalInterface* segment,
-                    int64_t active_count,
-                    BitsetType& result);
+    static BitsetType
+    ExecuteTask(plan::PlanFragment& plan,
+                std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
     template <typename VectorType>
@@ -108,4 +108,23 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     RetrieveResultOpt retrieve_result_opt_;
     bool expr_use_pk_index_ = false;
 };
+
+// for test use only
+inline BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp) {
+    auto plan_fragment = plan::PlanFragment(plannode);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, timestamp);
+    auto bitset =
+        ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+
+    // For test case, bitset 1 indicates true but executor is verse
+    bitset.flip();
+    return bitset;
+}
+
 }  // namespace milvus::query
