@@ -818,3 +818,56 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 		log.Info("analyze stats files recycle success", zap.Int64("taskID", taskID))
 	}
 }
+
+// recycleUnusedBinlogFiles load meta file info and compares OSS keys
+// if missing found, performs gc cleanup
+func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.With(zap.String("gcName", "recycleUnusedStatsFiles"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedStatsFiles...")
+	defer func() { log.Info("recycleUnusedStatsFiles done", zap.Duration("timeCost", time.Since(start))) }()
+
+	type scanTask struct {
+		prefix  string
+		checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
+		label   string
+	}
+	scanTasks := []scanTask{
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				return segment != nil
+			},
+			label: metrics.InsertFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
+				if err != nil {
+					log.Warn("garbageCollector find dirty stats log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					return false
+				}
+				return segment != nil && segment.IsStatsLogExists(logID)
+			},
+			label: metrics.StatFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
+				if err != nil {
+					log.Warn("garbageCollector find dirty dleta log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					return false
+				}
+				return segment != nil && segment.IsDeltaLogExists(logID)
+			},
+			label: metrics.DeleteFileLabel,
+		},
+	}
+
+	for _, task := range scanTasks {
+		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
+	}
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
