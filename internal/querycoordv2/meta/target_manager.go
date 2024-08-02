@@ -692,18 +692,16 @@ func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 }
 
 // if segment isn't l0 segment, and exist in current/next target, then it can be moved
-func (mgr *TargetManager) CanSegmentBeMoved(segment *Segment) bool {
-	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		return false
-	}
-
-	current := mgr.current.getCollectionTarget(segment.CollectionID)
-	if current != nil && current.segments[segment.GetID()] != nil {
+func (mgr *TargetManager) CanSegmentBeMoved(collectionID, segmentID int64) bool {
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
+	current := mgr.current.getCollectionTarget(collectionID)
+	if current != nil && current.segments[segmentID] != nil && current.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
 		return true
 	}
 
-	next := mgr.next.getCollectionTarget(segment.CollectionID)
-	if next != nil && next.segments[segment.GetID()] != nil {
+	next := mgr.next.getCollectionTarget(collectionID)
+	if next != nil && next.segments[segmentID] != nil && next.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
 		return true
 	}
 
