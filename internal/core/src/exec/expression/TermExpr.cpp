@@ -139,7 +139,6 @@ PhyTermFilterExpr::CanSkipSegment() {
     if (segment_->type() == SegmentType::Sealed &&
         skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
         cached_bits_.resize(active_count_, false);
-        cached_offsets_ = std::make_shared<ColumnVector>(DataType::INT64, 0);
         cached_offsets_inited_ = true;
         return true;
     }
@@ -178,14 +177,9 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     auto [uids, seg_offsets] =
         segment_->search_ids(*id_array, query_timestamp_);
     cached_bits_.resize(active_count_, false);
-    cached_offsets_ =
-        std::make_shared<ColumnVector>(DataType::INT64, seg_offsets.size());
-    int64_t* cached_offsets_ptr = (int64_t*)cached_offsets_->GetRawData();
-    int i = 0;
     for (const auto& offset : seg_offsets) {
         auto _offset = (int64_t)offset.get();
         cached_bits_[_offset] = true;
-        cached_offsets_ptr[i++] = _offset;
     }
     cached_offsets_inited_ = true;
 }
@@ -214,7 +208,10 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     }
 
     if (use_cache_offsets_) {
-        std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
+        auto cache_bits_copy = cached_bits_.clone();
+        std::vector<VectorPtr> vecs{
+            res_vec,
+            std::make_shared<ColumnVector>(std::move(cache_bits_copy))};
         return std::make_shared<RowVector>(vecs);
     } else {
         return res_vec;
