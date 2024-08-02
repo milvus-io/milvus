@@ -644,7 +644,7 @@ SegmentSealedImpl::size_per_chunk() const {
     return get_row_count();
 }
 
-BufferView
+std::pair<BufferView, FixedVector<bool>>
 SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
                                     int64_t chunk_id,
                                     int64_t start_offset,
@@ -655,7 +655,15 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
-        return field_data->GetBatchBuffer(start_offset, length);
+        FixedVector<bool> valid_data;
+        if (field_data->IsNullable()) {
+            valid_data.reserve(length);
+            for (int i = 0; i < length; i++) {
+                valid_data.push_back(field_data->IsValid(start_offset + i));
+            }
+        }
+        return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
+                              valid_data);
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
@@ -680,10 +688,11 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto field_data = insert_record_.get_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
+    // system field
     return field_data->get_span_base(0);
 }
 
-std::vector<std::string_view>
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
 SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),

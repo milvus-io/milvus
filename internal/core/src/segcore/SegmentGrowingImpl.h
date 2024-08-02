@@ -76,6 +76,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return id_;
     }
 
+    bool
+    is_nullable(FieldId field_id) const override {
+        AssertInfo(insert_record_.is_data_exist(field_id),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        return insert_record_.is_valid_data_exist(field_id);
+    };
+
  public:
     const InsertRecord<>&
     get_insert_record() const {
@@ -318,10 +326,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,

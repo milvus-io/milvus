@@ -128,6 +128,12 @@ class VectorBase {
     virtual int64_t
     get_chunk_size(ssize_t chunk_index) const = 0;
 
+    virtual int64_t
+    get_element_size() const = 0;
+
+    virtual int64_t
+    get_element_offset(ssize_t chunk_index) const = 0;
+
     virtual ssize_t
     num_chunk() const = 0;
 
@@ -243,6 +249,26 @@ class ConcurrentVectorImpl : public VectorBase {
     int64_t
     get_chunk_size(ssize_t chunk_index) const override {
         return chunks_ptr_->get_chunk_size(chunk_index);
+    }
+
+    int64_t
+    get_element_size() const override {
+        if constexpr (is_type_entire_row) {
+            return chunks_ptr_->get_element_size();
+        } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
+                             std::is_same_v<Type, int>) {
+            // only for testing
+            PanicInfo(NotImplemented, "unimplemented");
+        } else {
+            static_assert(
+                std::is_same_v<typename TraitType::embedded_type, Type>);
+            return elements_per_row_;
+        }
+    }
+
+    int64_t
+    get_element_offset(ssize_t chunk_index) const override {
+        return chunks_ptr_->get_element_offset(chunk_index);
     }
 
     // just for fun, don't use it directly

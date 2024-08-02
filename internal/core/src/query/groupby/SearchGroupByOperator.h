@@ -68,11 +68,12 @@ class SealedDataGetter : public DataGetter<T> {
             if constexpr (std::is_same_v<T, std::string>) {
                 str_field_data_ =
                     std::make_shared<std::vector<std::string_view>>(
-                        segment.chunk_view<std::string_view>(field_id, 0));
+                        segment.chunk_view<std::string_view>(field_id, 0)
+                            .first);
             } else {
                 auto span = segment.chunk_data<T>(field_id, 0);
-                field_data_ =
-                    std::make_shared<Span<T>>(span.data(), span.row_count());
+                field_data_ = std::make_shared<Span<T>>(
+                    span.data(), span.valid_data(), span.row_count());
             }
         } else if (segment.HasIndex(field_id)) {
             this->field_index_ = &(segment.chunk_scalar_index<T>(field_id, 0));
