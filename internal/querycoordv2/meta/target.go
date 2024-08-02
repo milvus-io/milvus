@@ -73,7 +73,12 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		}
 	}
 
-	return NewCollectionTarget(segments, dmChannels, partitions)
+	return &CollectionTarget{
+		segments:   segments,
+		dmChannels: dmChannels,
+		partitions: typeutil.NewSet(partitions...),
+		version:    target.GetVersion(),
+	}
 }
 
 func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {

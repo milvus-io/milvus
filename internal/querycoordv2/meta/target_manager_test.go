@@ -608,6 +608,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.mgr.SaveCurrentTarget(suite.catalog)
 
 	// clear target in memory
+	version := suite.mgr.current.getCollectionTarget(collectionID).GetTargetVersion()
 	suite.mgr.current.removeCollectionTarget(collectionID)
 	// try to recover
 	suite.mgr.Recover(suite.catalog)
@@ -616,6 +617,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.NotNil(target)
 	suite.Len(target.GetAllDmChannelNames(), 2)
 	suite.Len(target.GetAllSegmentIDs(), 2)
+	suite.Equal(target.GetTargetVersion(), version)
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets()
