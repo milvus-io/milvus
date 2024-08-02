@@ -2,6 +2,8 @@
 
 set -eo pipefail
 
+source ./build/util.sh
+
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
@@ -18,12 +20,12 @@ fi
 pushd "${toplevel}"
 
 if [[ "${1-}" == "pull" ]]; then
-    docker-compose pull --ignore-pull-failures builder
+    $DOCKER_COMPOSE_COMMAND pull  builder
     exit 0
 fi
 
 if [[ "${1-}" == "down" ]]; then
-    docker-compose down
+    $DOCKER_COMPOSE_COMMAND down
     exit 0
 fi
 
@@ -37,11 +39,11 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-ex
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
-docker-compose pull --ignore-pull-failures builder
+$DOCKER_COMPOSE_COMMAND pull builder
 if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
-    docker-compose build builder
+    $DOCKER_COMPOSE_COMMAND build builder
 fi
 
-docker-compose run --no-deps --rm builder "$@"
+$DOCKER_COMPOSE_COMMAND run --no-deps --rm builder "$@"
 
 popd

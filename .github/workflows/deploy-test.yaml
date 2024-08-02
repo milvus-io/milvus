@@ -102,9 +102,9 @@ jobs:
             wget https://github.com/milvus-io/milvus/releases/download/${{ env.PREVIOUS_RELEASE_VERSION }}/milvus-${{ matrix.mode }}-docker-compose.yml -O docker-compose.yml;
             replace_image_tag ${{ env.OLD_IMAGE_REPO }} ${{ env.OLD_IMAGE_TAG }};
           fi
-          docker-compose up -d
+          docker compose up -d
           bash ../check_healthy.sh
-          docker-compose ps -a
+          docker compose ps -a
           sleep 10s
       - name: Run first test
         timeout-minutes: 15
@@ -130,7 +130,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
-          docker-compose ps -a || true
+          docker compose ps -a || true
           mkdir -p logs/first_deploy
           bash ../../../scripts/export_log_docker.sh ./logs/first_deploy || echo "export logs failed"
       - name: Second Milvus deployment
@@ -140,15 +140,15 @@ jobs:
         run: |
           source ../utils.sh
           if [ ${{ matrix.task }} == "reinstall" ]; then
-            docker-compose restart
+            docker compose restart
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
             replace_image_tag ${{ env.NEW_IMAGE_REPO }} ${{ env.NEW_IMAGE_TAG }};
-            docker-compose up -d;
+            docker compose up -d;
           fi
           bash ../check_healthy.sh
-          docker-compose ps -a
+          docker compose ps -a
 
           echo "sleep 120s for the second deployment to be ready"
           sleep 120s
@@ -169,7 +169,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
-          docker-compose ps -a || true
+          docker compose ps -a || true
           mkdir -p logs/second_deploy
           bash ../../../scripts/export_log_docker.sh ./logs/second_deploy || echo "export logs failed"
 
@@ -181,9 +181,9 @@ jobs:
           echo "restart docker service"
           sudo systemctl restart docker
           sleep 20s
-          docker-compose up -d
+          docker compose up -d
           bash ../check_healthy.sh
-          docker-compose ps -a
+          docker compose ps -a
 
           echo "sleep 120s for the deployment to be ready after docker restart"
           sleep 120s
@@ -206,7 +206,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
-          docker-compose ps -a || true
+          docker compose ps -a || true
           mkdir -p logs/second_deploy
           bash ../../../scripts/export_log_docker.sh ./logs/third_deploy || echo "export logs failed"      
       
