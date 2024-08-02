@@ -33,7 +33,7 @@ func RecoverPChannelSegmentAllocManager(
 	resp, err := resource.Resource().RootCoordClient().GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 		Pchannel: pchannel.Name,
 	})
-	if merr.CheckRPCCall(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to get pchannel info from rootcoord")
 	}
 	managers, waitForSealed := buildNewPartitionManagers(pchannel, rawMetas, resp.GetCollections())
@@ -207,7 +207,7 @@ func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 
 	segments := make([]*segmentAllocManager, 0)
 	m.managers.Range(func(pm *partitionSegmentManager) {
-		segments = append(segments, pm.CollectAllDirtySegments()...)
+		segments = append(segments, pm.CollectDirtySegmentsAndClear()...)
 	})
 
 	// commitAllSegmentsOnSamePChannel commits all segments on the same pchannel.

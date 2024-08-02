@@ -96,7 +96,8 @@ func (s *FlusherSuite) SetupSuite() {
 	wbMgr.EXPECT().Start().Return()
 	wbMgr.EXPECT().Stop().Return()
 
-	resource.Init(
+	resource.InitForTest(
+		s.T(),
 		resource.OptSyncManager(syncMgr),
 		resource.OptBufferManager(wbMgr),
 		resource.OptRootCoordClient(rootcoord),

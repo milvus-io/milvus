@@ -21,10 +21,13 @@ func buildNewPartitionManagers(
 ) (*partitionSegmentManagers, []*segmentAllocManager) {
 	// create a map to check if the partition exists.
 	partitionExist := make(map[int64]struct{}, len(collectionInfos))
+	// collectionMap is a map from collectionID to collectionInfo.
+	collectionInfoMap := make(map[int64]*rootcoordpb.CollectionInfoOnPChannel, len(collectionInfos))
 	for _, collectionInfo := range collectionInfos {
 		for _, partition := range collectionInfo.GetPartitions() {
 			partitionExist[partition.GetPartitionId()] = struct{}{}
 		}
+		collectionInfoMap[collectionInfo.GetCollectionId()] = collectionInfo
 	}
 
 	// recover the segment infos from the streaming node segment assignment meta storage
@@ -42,12 +45,6 @@ func buildNewPartitionManagers(
 			metaMaps[rawMeta.GetPartitionId()] = make([]*segmentAllocManager, 0, 2)
 		}
 		metaMaps[rawMeta.GetPartitionId()] = append(metaMaps[rawMeta.GetPartitionId()], m)
-	}
-
-	// collectionMap is a map from collectionID to collectionInfo.
-	collectionInfoMap := make(map[int64]*rootcoordpb.CollectionInfoOnPChannel, len(collectionInfos))
-	for _, collectionInfo := range collectionInfos {
-		collectionInfoMap[collectionInfo.GetCollectionId()] = collectionInfo
 	}
 
 	// create managers list.
@@ -176,7 +173,7 @@ func (m *partitionSegmentManagers) RemoveCollection(collectionID int64) []*segme
 	for _, partition := range collectionInfo.Partitions {
 		pm, ok := m.managers.Get(partition.PartitionId)
 		if ok {
-			needSealed = append(needSealed, pm.CollectAllCanBeSealed()...)
+			needSealed = append(needSealed, pm.CollectAllCanBeSealedAndClear()...)
 		}
 		m.managers.Remove(partition.PartitionId)
 	}
@@ -208,7 +205,7 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 			zap.Int64("partitionID", partitionID))
 		return nil
 	}
-	return pm.CollectAllCanBeSealed()
+	return pm.CollectAllCanBeSealedAndClear()
 }
 
 // Range ranges the partition managers.

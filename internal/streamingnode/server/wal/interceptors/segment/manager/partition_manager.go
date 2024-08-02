@@ -92,8 +92,8 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 	return shouldBeSealedSegments
 }
 
-// CollectAllDirtySegments collects all segments in the manager.
-func (m *partitionSegmentManager) CollectAllDirtySegments() []*segmentAllocManager {
+// CollectDirtySegmentsAndClear collects all segments in the manager and clear the maanger.
+func (m *partitionSegmentManager) CollectDirtySegmentsAndClear() []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	dirtySegments := make([]*segmentAllocManager, 0, len(m.segments))
@@ -106,8 +106,8 @@ func (m *partitionSegmentManager) CollectAllDirtySegments() []*segmentAllocManag
 	return dirtySegments
 }
 
-// CollectAllCanBeSealed collects all segments that can be sealed.
-func (m *partitionSegmentManager) CollectAllCanBeSealed() []*segmentAllocManager {
+// CollectAllCanBeSealedAndClear collects all segments that can be sealed and clear the manager.
+func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear() []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	canBeSealed := make([]*segmentAllocManager, 0, len(m.segments))
@@ -159,7 +159,7 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 		SegmentId:    pendingSegment.GetSegmentID(),
 		Vchannel:     pendingSegment.GetVChannel(),
 	})
-	if merr.CheckRPCCall(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
 	}
 
