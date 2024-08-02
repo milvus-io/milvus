@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
@@ -41,11 +42,13 @@ type taskScheduler struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	scheduleDuration time.Duration
+	scheduleDuration       time.Duration
+	collectMetricsDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
 	tasks      map[int64]Task
 	notifyChan chan struct{}
+	taskLock   *lock.KeyLock[int64]
 
 	meta *meta
 
@@ -71,7 +74,9 @@ func newTaskScheduler(
 		meta:                      metaTable,
 		tasks:                     make(map[int64]Task),
 		notifyChan:                make(chan struct{}, 1),
+		taskLock:                  lock.NewKeyLock[int64](),
 		scheduleDuration:          Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
+		collectMetricsDuration:    time.Minute,
 		policy:                    defaultBuildIndexPolicy,
 		nodeManager:               nodeManager,
 		chunkManager:              chunkManager,
@@ -83,8 +88,9 @@ func newTaskScheduler(
 }
 
 func (s *taskScheduler) Start() {
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.schedule()
+	go s.collectTaskMetrics()
 }
 
 func (s *taskScheduler) Stop() {
@@ -108,6 +114,9 @@ func (s *taskScheduler) reloadFromKV() {
 						State:      segIndex.IndexState,
 						FailReason: segIndex.FailReason,
 					},
+					queueTime: time.Now(),
+					startTime: time.Now(),
+					endTime:   time.Now(),
 				}
 			}
 		}
@@ -124,6 +133,9 @@ func (s *taskScheduler) reloadFromKV() {
 					State:      t.State,
 					FailReason: t.FailReason,
 				},
+				queueTime: time.Now(),
+				startTime: time.Now(),
+				endTime:   time.Now(),
 			}
 		}
 	}
@@ -146,6 +158,7 @@ func (s *taskScheduler) enqueue(task Task) {
 	if _, ok := s.tasks[taskID]; !ok {
 		s.tasks[taskID] = task
 	}
+	task.SetQueueTime(time.Now())
 	log.Info("taskScheduler enqueue task", zap.Int64("taskID", taskID))
 }
 
@@ -194,11 +207,14 @@ func (s *taskScheduler) run() {
 	s.policy(taskIDs)
 
 	for _, taskID := range taskIDs {
+		s.taskLock.Lock(taskID)
 		ok := s.process(taskID)
 		if !ok {
+			s.taskLock.Unlock(taskID)
 			log.Ctx(s.ctx).Info("there is no idle indexing node, wait a minute...")
 			break
 		}
+		s.taskLock.Unlock(taskID)
 	}
 }
 
@@ -262,6 +278,15 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 			task.SetState(indexpb.JobState_JobStateRetry, "update meta building state failed")
 			return false
 		}
+		task.SetStartTime(time.Now())
+		queueingTime := task.GetStartTime().Sub(task.GetQueueTime())
+		if queueingTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+			log.Warn("task queueing time is too long", zap.Int64("taskID", taskID),
+				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
+		}
+		metrics.DataCoordTaskExecuteLatency.
+			WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
+
 		log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", taskID),
 			zap.Int64("nodeID", nodeID))
 	case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
@@ -269,6 +294,15 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 			log.Ctx(s.ctx).Warn("update task info failed", zap.Error(err))
 			return true
 		}
+		task.SetEndTime(time.Now())
+		runningTime := task.GetEndTime().Sub(task.GetStartTime())
+		if runningTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+			log.Warn("task running time is too long", zap.Int64("taskID", taskID),
+				zap.Int64("running time(ms)", runningTime.Milliseconds()))
+		}
+		metrics.DataCoordTaskExecuteLatency.
+			WithLabelValues(task.GetTaskType(), metrics.Executing).Observe(float64(runningTime.Milliseconds()))
+
 		client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
 		if exist {
 			if !task.DropTaskOnWorker(s.ctx, client) {
@@ -296,4 +330,80 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 		task.SetState(indexpb.JobState_JobStateRetry, "")
 	}
 	return true
+}
+
+func (s *taskScheduler) collectTaskMetrics() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.collectMetricsDuration)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Warn("task scheduler context done")
+			return
+		case <-ticker.C:
+			s.RLock()
+			taskIDs := make([]UniqueID, 0, len(s.tasks))
+			for tID := range s.tasks {
+				taskIDs = append(taskIDs, tID)
+			}
+			s.RUnlock()
+
+			maxTaskQueueingTime := make(map[string]int64)
+			maxTaskRunningTime := make(map[string]int64)
+
+			collectMetricsFunc := func(taskID int64) {
+				s.taskLock.Lock(taskID)
+				defer s.taskLock.Unlock(taskID)
+
+				task := s.getTask(taskID)
+				if task == nil {
+					return
+				}
+
+				state := task.GetState()
+				switch state {
+				case indexpb.JobState_JobStateNone:
+					return
+				case indexpb.JobState_JobStateInit:
+					queueingTime := time.Since(task.GetQueueTime())
+					if queueingTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+						log.Warn("task queueing time is too long", zap.Int64("taskID", taskID),
+							zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
+					}
+
+					maxQueueingTime, ok := maxTaskQueueingTime[task.GetTaskType()]
+					if !ok || maxQueueingTime < queueingTime.Milliseconds() {
+						maxTaskQueueingTime[task.GetTaskType()] = queueingTime.Milliseconds()
+					}
+				case indexpb.JobState_JobStateInProgress:
+					runningTime := time.Since(task.GetStartTime())
+					if runningTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+						log.Warn("task running time is too long", zap.Int64("taskID", taskID),
+							zap.Int64("running time(ms)", runningTime.Milliseconds()))
+					}
+
+					maxRunningTime, ok := maxTaskRunningTime[task.GetTaskType()]
+					if !ok || maxRunningTime < runningTime.Milliseconds() {
+						maxTaskRunningTime[task.GetTaskType()] = runningTime.Milliseconds()
+					}
+				}
+			}
+
+			for _, taskID := range taskIDs {
+				collectMetricsFunc(taskID)
+			}
+
+			for taskType, queueingTime := range maxTaskQueueingTime {
+				metrics.DataCoordTaskExecuteLatency.
+					WithLabelValues(taskType, metrics.Pending).Observe(float64(queueingTime))
+			}
+
+			for taskType, runningTime := range maxTaskRunningTime {
+				metrics.DataCoordTaskExecuteLatency.
+					WithLabelValues(taskType, metrics.Executing).Observe(float64(runningTime))
+			}
+		}
+	}
 }
