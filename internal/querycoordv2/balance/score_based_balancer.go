@@ -41,7 +41,7 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 ) *ScoreBasedBalancer {
 	return &ScoreBasedBalancer{
 		RowCountBasedBalancer: NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),

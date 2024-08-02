@@ -57,7 +57,7 @@ type Executor struct {
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	broker    meta.Broker
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
@@ -69,7 +69,7 @@ type Executor struct {
 func NewExecutor(meta *meta.Meta,
 	dist *meta.DistributionManager,
 	broker meta.Broker,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
 ) *Executor {

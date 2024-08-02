@@ -39,7 +39,7 @@ type ReleaseCollectionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 }
@@ -50,7 +50,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 ) *ReleaseCollectionJob {
@@ -114,7 +114,7 @@ type ReleasePartitionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 }
@@ -125,7 +125,7 @@ func NewReleasePartitionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 ) *ReleasePartitionJob {

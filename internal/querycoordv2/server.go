@@ -90,7 +90,7 @@ type Server struct {
 	store     metastore.QueryCoordCatalog
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	broker    meta.Broker
 
 	// Session
