@@ -48,7 +48,7 @@ type LoadCollectionJob struct {
 	meta               *meta.Meta
 	broker             meta.Broker
 	cluster            session.Cluster
-	targetMgr          *meta.TargetManager
+	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
 	nodeMgr            *session.NodeManager
@@ -61,7 +61,7 @@ func NewLoadCollectionJob(
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
@@ -239,7 +239,7 @@ type LoadPartitionJob struct {
 	meta               *meta.Meta
 	broker             meta.Broker
 	cluster            session.Cluster
-	targetMgr          *meta.TargetManager
+	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
 	nodeMgr            *session.NodeManager
@@ -252,7 +252,7 @@ func NewLoadPartitionJob(
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
