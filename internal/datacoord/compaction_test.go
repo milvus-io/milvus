@@ -769,19 +769,19 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 			PlanID:    1,
 			Type:      datapb.CompactionType_MixCompaction,
 			State:     datapb.CompactionTaskState_completed,
-			StartTime: time.Now().UnixMilli() - (time.Second * 100000).Milliseconds(),
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
 		},
 		{
 			PlanID:    2,
 			Type:      datapb.CompactionType_MixCompaction,
 			State:     datapb.CompactionTaskState_cleaned,
-			StartTime: time.Now().UnixMilli() - (time.Second * 100000).Milliseconds(),
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
 		},
 		{
 			PlanID:    3,
 			Type:      datapb.CompactionType_MixCompaction,
 			State:     datapb.CompactionTaskState_cleaned,
-			StartTime: time.Now().UnixMilli(),
+			StartTime: time.Now().Unix(),
 		},
 	}
 
