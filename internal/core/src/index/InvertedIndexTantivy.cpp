@@ -378,6 +378,13 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    if (schema_.nullable()) {
+        int64_t total = 0;
+        for (const auto& data : field_datas) {
+            total += data->get_num_rows();
+        }
+        valid_data.reserve(total);
+    }
     switch (schema_.data_type()) {
         case proto::schema::DataType::Bool:
         case proto::schema::DataType::Int8:
@@ -390,6 +397,15 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::VarChar: {
             for (const auto& data : field_datas) {
                 auto n = data->get_num_rows();
+                if (schema_.nullable()) {
+                    for (int i = 0; i < n; i++) {
+                        valid_data.push_back(data->is_valid(i));
+                        wrapper_->add_multi_data<T>(
+                            static_cast<const T*>(data->RawValue(i)),
+                            data->is_valid(i));
+                    }
+                    continue;
+                }
                 wrapper_->add_data<T>(static_cast<const T*>(data->Data()), n);
             }
             break;
@@ -417,9 +433,12 @@ InvertedIndexTantivy<T>::build_index_for_array(
         for (int64_t i = 0; i < n; i++) {
             assert(array_column[i].get_element_type() ==
                    static_cast<DataType>(schema_.element_type()));
+            if (schema_.nullable()) {
+                valid_data.push_back(data->is_valid(i));
+            }
+            auto length = data->is_valid(i) ? array_column[i].length() : 0;
             wrapper_->template add_multi_data(
-                reinterpret_cast<const T*>(array_column[i].data()),
-                array_column[i].length());
+                reinterpret_cast<const T*>(array_column[i].data()), length);
         }
     }
 }
@@ -435,12 +454,16 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             Assert(IsStringDataType(array_column[i].get_element_type()));
             Assert(IsStringDataType(
                 static_cast<DataType>(schema_.element_type())));
+            if (schema_.nullable()) {
+                valid_data.push_back(data->is_valid(i));
+            }
             std::vector<std::string> output;
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
                     array_column[i].template get_data<std::string>(j));
             }
-            wrapper_->template add_multi_data(output.data(), output.size());
+            auto length = data->is_valid(i) ? output.size() : 0;
+            wrapper_->template add_multi_data(output.data(), length);
         }
     }
 }

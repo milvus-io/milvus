@@ -95,8 +95,10 @@ BitmapIndex<T>::BuildPrimitiveField(
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
-            auto val = reinterpret_cast<const T*>(data->RawValue(i));
-            data_[*val].add(offset);
+            if (data->is_valid(i)) {
+                auto val = reinterpret_cast<const T*>(data->RawValue(i));
+                data_[*val].add(offset);
+            }
             offset++;
         }
     }
@@ -151,12 +153,13 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
-            auto array =
-                reinterpret_cast<const milvus::Array*>(data->RawValue(i));
-
-            for (size_t j = 0; j < array->length(); ++j) {
-                auto val = static_cast<T>(array->template get_data<GetType>(j));
-                data_[val].add(offset);
+            if (data->is_valid(i)) {
+                auto array =
+                    reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+                for (size_t j = 0; j < array->length(); ++j) {
+                    auto val = array->template get_data<T>(j);
+                    data_[val].add(offset);
+                }
             }
             offset++;
         }
@@ -389,7 +392,7 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
+        auto size = data->DataSize();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
