@@ -102,11 +102,6 @@ func (job *LoadCollectionJob) PreExecute() error {
 		)
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
-	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
-		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
-			collection.GetFieldIndexID())
-		log.Warn(msg)
-		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded collection")
 	}
 
 	return nil
@@ -291,11 +286,6 @@ func (job *LoadPartitionJob) PreExecute() error {
 		msg := "collection with different replica number existed, release this collection first before changing its replica number"
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
-	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
-		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
-			job.meta.GetFieldIndex(req.GetCollectionID()))
-		log.Warn(msg)
-		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded partitions")
 	}
 
 	return nil
