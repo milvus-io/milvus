@@ -138,6 +138,7 @@ var (
 			databaseLabelName,
 			collectionIDLabelName,
 			segmentIDLabelName,
+			segmentStateLabelName,
 		})
 	DataCoordSegmentBinLogFileCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
