@@ -164,7 +164,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan
 
 ```shell
-pip install conan==1.61.0
+pip install conan==1.64.1
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.61.
@@ -232,8 +232,8 @@ sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip t
 ```bash
 # Verify python3 version, need python3 version > 3.8
 python3 --version
-# pip install conan 1.61.0
-pip3 install conan==1.61.0
+# pip install conan 1.64.1
+pip3 install conan==1.64.1
 ```
 
 #### Install GO 1.80
