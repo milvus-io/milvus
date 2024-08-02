@@ -124,7 +124,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d azurite
+          docker compose up -d azurite
 #      - name: 'Setup upterm session'
 #        uses: lhotari/action-upterm@v1
       - name: UT
@@ -172,7 +172,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio azurite
+          docker compose up -d pulsar etcd minio azurite
 #      - name: 'Setup upterm session'
 #        uses: lhotari/action-upterm@v1
       - name: UT
@@ -220,7 +220,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio
+          docker compose up -d pulsar etcd minio
       - name: IntegrationTest
         run: |
           chmod +x build/builder.sh
