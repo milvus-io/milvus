@@ -136,8 +136,12 @@ case "${unameOut}" in
     Darwin*)
         llvm_prefix="$(brew --prefix llvm)"
         export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-        export CC="${llvm_prefix}/bin/clang"
-        export CXX="${llvm_prefix}/bin/clang++"
+        if [ -z CC ];then
+            export CC="${llvm_prefix}/bin/clang"
+        fi
+        if [ -z CXX ];then
+            export CXX="${llvm_prefix}/bin/clang++"
+        fi
         export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
         export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
         ;;
