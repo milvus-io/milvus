@@ -544,7 +544,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	)
 
 	// Update segment info in memory and meta.
-	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil {
+	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
