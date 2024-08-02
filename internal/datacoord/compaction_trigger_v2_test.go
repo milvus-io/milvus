@@ -215,7 +215,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
 	})
 
 	s.Run("HNSW & DISKANN", func() {
@@ -270,7 +270,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(100*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
 	})
 
 	s.Run("some vector has no index", func() {
@@ -311,6 +311,6 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(100*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
 	})
 }
