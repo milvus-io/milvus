@@ -41,10 +41,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -276,10 +278,18 @@ func (q *QuotaCenter) Start() {
 	}()
 }
 
+func (q *QuotaCenter) watchQuotaAndLimit() {
+	pt := paramtable.Get()
+	pt.Watch(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, config.NewHandler(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, func(event *config.Event) {
+		metrics.QueryNodeMemoryHighWaterLevel.Set(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat())
+	}))
+}
+
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
 	interval := Params.QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
+	q.watchQuotaAndLimit()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
