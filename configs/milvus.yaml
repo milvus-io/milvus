@@ -411,8 +411,8 @@ queryNode:
   mmap:
     mmapEnabled: false # Enable mmap for loading data
     growingMmapEnabled: false # Enable mmap for using in growing raw data
-    fixedFileSizeForMmapAlloc: 4 # tmp file size for mmap chunk manager
-    maxDiskUsagePercentageForMmapAlloc: 20 # disk percentage used in mmap chunk manager
+    fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
+    maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
