@@ -943,6 +943,7 @@ message PartitionStatsInfo {
   int64 version = 4;
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
+  int64 commitTime = 7;
 }
 
 message DropCompactionPlanRequest {

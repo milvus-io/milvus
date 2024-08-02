@@ -14,6 +14,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
+const emptyPartitionStatsVersion = int64(0)
+
 type partitionStatsMeta struct {
 	sync.RWMutex
 	ctx                 context.Context
@@ -180,10 +182,23 @@ func (psm *partitionStatsMeta) GetCurrentPartitionStatsVersion(collectionID, par
 	defer psm.RUnlock()
 
 	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
-		return 0
+		return emptyPartitionStatsVersion
 	}
 	if _, ok := psm.partitionStatsInfos[vChannel][partitionID]; !ok {
-		return 0
+		return emptyPartitionStatsVersion
 	}
 	return psm.partitionStatsInfos[vChannel][partitionID].currentVersion
+}
+
+func (psm *partitionStatsMeta) GetPartitionStats(collectionID, partitionID int64, vChannel string, version int64) *datapb.PartitionStatsInfo {
+	psm.RLock()
+	defer psm.RUnlock()
+
+	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
+		return nil
+	}
+	if _, ok := psm.partitionStatsInfos[vChannel][partitionID]; !ok {
+		return nil
+	}
+	return psm.partitionStatsInfos[vChannel][partitionID].infos[version]
 }
