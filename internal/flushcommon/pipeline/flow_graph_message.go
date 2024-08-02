@@ -18,10 +18,11 @@ package pipeline
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type (
@@ -52,12 +53,12 @@ type FlowGraphMsg struct {
 	EndPositions   []*msgpb.MsgPosition
 
 	// segmentsToSync is the signal used by insertBufferNode to notify deleteNode to flush
-	segmentsToSync []util.UniqueID
+	segmentsToSync []typeutil.UniqueID
 	dropCollection bool
-	dropPartitions []util.UniqueID
+	dropPartitions []typeutil.UniqueID
 }
 
-func (fgMsg *FlowGraphMsg) TimeTick() util.Timestamp {
+func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {
 	return fgMsg.TimeRange.TimestampMax
 }
 

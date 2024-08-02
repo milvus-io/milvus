@@ -26,15 +26,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type StatsUpdater interface {
-	Update(channel string, ts Timestamp, stats []*commonpb.SegmentStats)
+	Update(channel string, ts typeutil.Timestamp, stats []*commonpb.SegmentStats)
 }
 
 // TimeTickSender is to merge channel states updated by flow graph node and send to datacoord periodically

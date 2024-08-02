@@ -20,6 +20,9 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer:
     interfaces:
       Consumer:
+  github.com/milvus-io/milvus/internal/streamingnode/server/flusher:
+    interfaces:
+      Flusher:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal:
     interfaces:
       OpenerBuilder:

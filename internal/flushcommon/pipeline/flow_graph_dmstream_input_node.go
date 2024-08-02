@@ -39,27 +39,28 @@ import (
 //
 // messages between two timeticks to the following flowgraph node. In DataNode, the following flow graph node is
 // flowgraph ddNode.
-func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
+func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPosition, dmNodeConfig *nodeConfig, input <-chan *msgstream.MsgPack) (*flowgraph.InputNode, error) {
 	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("collectionID", dmNodeConfig.collectionID),
 		zap.String("vchannel", dmNodeConfig.vChannelName))
 	var err error
-	var input <-chan *msgstream.MsgPack
-	if seekPos != nil && len(seekPos.MsgID) != 0 {
-		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, common.SubscriptionPositionUnknown)
-		if err != nil {
-			return nil, err
+	if input == nil {
+		if seekPos != nil && len(seekPos.MsgID) != 0 {
+			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, common.SubscriptionPositionUnknown)
+			if err != nil {
+				return nil, err
+			}
+			log.Info("datanode seek successfully when register to msgDispatcher",
+				zap.ByteString("msgID", seekPos.GetMsgID()),
+				zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
+				zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
+		} else {
+			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, common.SubscriptionPositionEarliest)
+			if err != nil {
+				return nil, err
+			}
+			log.Info("datanode consume successfully when register to msgDispatcher")
 		}
-		log.Info("datanode seek successfully when register to msgDispatcher",
-			zap.ByteString("msgID", seekPos.GetMsgID()),
-			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
-			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
-	} else {
-		input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, common.SubscriptionPositionEarliest)
-		if err != nil {
-			return nil, err
-		}
-		log.Info("datanode consume successfully when register to msgDispatcher")
 	}
 
 	name := fmt.Sprintf("dmInputNode-data-%s", dmNodeConfig.vChannelName)

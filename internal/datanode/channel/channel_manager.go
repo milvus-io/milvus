@@ -24,8 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -241,7 +241,7 @@ type opRunner struct {
 	watchFunc      watchFunc
 
 	guard      sync.RWMutex
-	allOps     map[util.UniqueID]*opInfo // opID -> tickler
+	allOps     map[typeutil.UniqueID]*opInfo // opID -> tickler
 	opsInQueue chan *datapb.ChannelWatchInfo
 	resultCh   chan *opState
 
@@ -256,7 +256,7 @@ func NewOpRunner(channel string, pipelineParams *util.PipelineParams, releaseF r
 		releaseFunc:    releaseF,
 		watchFunc:      watchF,
 		opsInQueue:     make(chan *datapb.ChannelWatchInfo, 10),
-		allOps:         make(map[util.UniqueID]*opInfo),
+		allOps:         make(map[typeutil.UniqueID]*opInfo),
 		resultCh:       resultCh,
 		closeCh:        lifetime.NewSafeChan(),
 	}
@@ -277,13 +277,13 @@ func (r *opRunner) Start() {
 	}()
 }
 
-func (r *opRunner) FinishOp(opID util.UniqueID) {
+func (r *opRunner) FinishOp(opID typeutil.UniqueID) {
 	r.guard.Lock()
 	defer r.guard.Unlock()
 	delete(r.allOps, opID)
 }
 
-func (r *opRunner) Exist(opID util.UniqueID) (progress int32, exists bool) {
+func (r *opRunner) Exist(opID typeutil.UniqueID) (progress int32, exists bool) {
 	r.guard.RLock()
 	defer r.guard.RUnlock()
 	info, ok := r.allOps[opID]
@@ -423,7 +423,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 }
 
 // releaseWithTimer will return ReleaseFailure after WatchTimeoutInterval
-func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opID util.UniqueID) *opState {
+func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opID typeutil.UniqueID) *opState {
 	opState := &opState{
 		channel: channel,
 		opID:    opID,

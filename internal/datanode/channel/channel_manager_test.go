@@ -25,15 +25,18 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -43,10 +46,6 @@ import (
 
 func TestMain(t *testing.M) {
 	paramtable.Init()
-	err := util.InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
 	code := t.Run()
 	os.Exit(code)
 }
@@ -74,10 +73,10 @@ func (s *OpRunnerSuite) SetupTest() {
 		Return(make(chan *msgstream.MsgPack), nil).Maybe()
 	dispClient.EXPECT().Deregister(mock.Anything).Maybe()
 
-	s.pipelineParams = &util.PipelineParams{
+	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
 		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
-		CheckpointUpdater:  util.NewChannelCheckpointUpdater(mockedBroker),
+		CheckpointUpdater:  util2.NewChannelCheckpointUpdater(mockedBroker),
 		WriteBufferManager: wbManager,
 		Broker:             mockedBroker,
 		DispClient:         dispClient,
@@ -91,7 +90,7 @@ func (s *OpRunnerSuite) TestWatchWithTimer() {
 		channel string = "ch-1"
 		commuCh        = make(chan *opState)
 	)
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	mockReleaseFunc := func(channel string) {
 		log.Info("mock release func")
 	}
@@ -111,13 +110,13 @@ func (s *OpRunnerSuite) TestWatchTimeout() {
 	channel := "by-dev-rootcoord-dml-1000"
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key, "0.000001")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key)
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 
 	sig := make(chan struct{})
 	commuCh := make(chan *opState)
 
 	mockReleaseFunc := func(channel string) { log.Info("mock release func") }
-	mockWatchFunc := func(ctx context.Context, param *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error) {
+	mockWatchFunc := func(ctx context.Context, param *util2.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util2.Tickler) (*pipeline.DataSyncService, error) {
 		<-ctx.Done()
 		sig <- struct{}{}
 		return nil, errors.New("timeout")
@@ -138,13 +137,13 @@ func (s *OpRunnerSuite) TestWatchTimeout() {
 
 type OpRunnerSuite struct {
 	suite.Suite
-	pipelineParams *util.PipelineParams
+	pipelineParams *util2.PipelineParams
 }
 
 type ChannelManagerSuite struct {
 	suite.Suite
 
-	pipelineParams *util.PipelineParams
+	pipelineParams *util2.PipelineParams
 	manager        *ChannelManagerImpl
 }
 
@@ -160,7 +159,7 @@ func (s *ChannelManagerSuite) SetupTest() {
 	mockedBroker := &broker.MockBroker{}
 	mockedBroker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
-	s.pipelineParams = &util.PipelineParams{
+	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
 		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
 		WriteBufferManager: wbManager,
@@ -189,7 +188,7 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 		stuckSig <- struct{}{}
 	}
 
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	s.Require().Equal(0, s.manager.opRunners.Len())
 	err := s.manager.Submit(info)
 	s.Require().NoError(err)
@@ -199,7 +198,7 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 
 	s.manager.handleOpState(opState)
 
-	releaseInfo := util.GetWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
+	releaseInfo := GetWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key, "0.1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key)
 
@@ -225,7 +224,7 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 	channel := "by-dev-rootcoord-dml-1"
 
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	s.Require().Equal(0, s.manager.opRunners.Len())
 
 	for i := 0; i < 10; i++ {
@@ -244,7 +243,7 @@ func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 func (s *ChannelManagerSuite) TestSubmitSkip() {
 	channel := "by-dev-rootcoord-dml-1"
 
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	s.Require().Equal(0, s.manager.opRunners.Len())
 
 	err := s.manager.Submit(info)
@@ -271,7 +270,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	channel := "by-dev-rootcoord-dml-0"
 
 	// watch
-	info := util.GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	err := s.manager.Submit(info)
 	s.NoError(err)
 
@@ -296,7 +295,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(datapb.ChannelWatchState_WatchSuccess, resp.GetState())
 
 	// release
-	info = util.GetWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
+	info = GetWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
 	err = s.manager.Submit(info)
 	s.NoError(err)
 
@@ -319,4 +318,35 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	runner, ok := s.manager.opRunners.Get(channel)
 	s.False(ok)
 	s.Nil(runner)
+}
+
+func GetWatchInfoByOpID(opID typeutil.UniqueID, channel string, state datapb.ChannelWatchState) *datapb.ChannelWatchInfo {
+	return &datapb.ChannelWatchInfo{
+		OpID:  opID,
+		State: state,
+		Vchan: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  channel,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		},
+	}
 }

@@ -111,6 +111,6 @@ func TestNewDmInputNode(t *testing.T) {
 	_, err := newDmInputNode(context.Background(), client, new(msgpb.MsgPosition), &nodeConfig{
 		msFactory:    &mockMsgStreamFactory{},
 		vChannelName: "mock_vchannel_0",
-	})
+	}, nil)
 	assert.NoError(t, err)
 }

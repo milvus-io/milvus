@@ -3,6 +3,7 @@ package adaptor
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/ddl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
@@ -31,5 +32,6 @@ func (b builderAdaptorImpl) Build() (wal.Opener, error) {
 	// Add all interceptor here.
 	return adaptImplsToOpener(o, []interceptors.InterceptorBuilder{
 		timetick.NewInterceptorBuilder(),
+		ddl.NewInterceptorBuilder(),
 	}), nil
 }

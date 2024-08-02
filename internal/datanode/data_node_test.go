@@ -31,11 +31,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -72,11 +73,6 @@ func TestMain(t *testing.M) {
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 
-	err = util.InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
-
 	code := t.Run()
 	os.Exit(code)
 }
@@ -92,10 +88,9 @@ func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
 	node.broker = broker
-	node.timeTickSender = util.NewTimeTickSender(broker, 0)
+	node.timeTickSender = util2.NewTimeTickSender(broker, 0)
 
-	syncMgr, _ := syncmgr.NewSyncManager(node.chunkManager)
-
+	syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 	node.syncMgr = syncMgr
 	node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
@@ -145,7 +140,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&util.RootCoordFactory{}, true, "valid input"},
+			{mocks.NewMockRootCoordClient(t), true, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -168,7 +163,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&util.DataCoordFactory{}, true, "valid input"},
+			{mocks.NewMockDataCoordClient(t), true, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -205,10 +200,10 @@ func TestDataNode(t *testing.T) {
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
-		util.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
+		util2.DeregisterRateCollector(metricsinfo.InsertConsumeThroughput)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		util.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
+		util2.RegisterRateCollector(metricsinfo.InsertConsumeThroughput)
 	})
 }

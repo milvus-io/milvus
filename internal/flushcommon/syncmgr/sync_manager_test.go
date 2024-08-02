@@ -17,7 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -160,8 +160,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
+	manager := NewSyncManager(s.chunkManager)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 	task.WithTimeRange(50, 100)
@@ -174,7 +173,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	_, err = f.Await()
+	_, err := f.Await()
 	s.NoError(err)
 }
 
@@ -190,8 +189,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
+	manager := NewSyncManager(s.chunkManager)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 	task.WithTimeRange(50, 100)
@@ -204,14 +202,13 @@ func (s *SyncManagerSuite) TestCompacted() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	_, err = f.Await()
+	_, err := f.Await()
 	s.NoError(err)
 	s.EqualValues(1001, segmentID.Load())
 }
 
 func (s *SyncManagerSuite) TestResizePool() {
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
+	manager := NewSyncManager(s.chunkManager)
 
 	syncMgr, ok := manager.(*syncManager)
 	s.Require().True(ok)
@@ -245,26 +242,8 @@ func (s *SyncManagerSuite) TestResizePool() {
 	s.Equal(cap*2, syncMgr.keyLockDispatcher.workerPool.Cap())
 }
 
-func (s *SyncManagerSuite) TestNewSyncManager() {
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
-
-	_, ok := manager.(*syncManager)
-	s.Require().True(ok)
-
-	params := paramtable.Get()
-	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasks.Key
-	defer params.Reset(configKey)
-
-	params.Save(configKey, "0")
-
-	_, err = NewSyncManager(s.chunkManager)
-	s.Error(err)
-}
-
 func (s *SyncManagerSuite) TestUnexpectedError() {
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
+	manager := NewSyncManager(s.chunkManager)
 
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
@@ -273,13 +252,12 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task.EXPECT().HandleError(mock.Anything)
 
 	f := manager.SyncData(context.Background(), task)
-	_, err = f.Await()
+	_, err := f.Await()
 	s.Error(err)
 }
 
 func (s *SyncManagerSuite) TestTargetUpdateSameID() {
-	manager, err := NewSyncManager(s.chunkManager)
-	s.NoError(err)
+	manager := NewSyncManager(s.chunkManager)
 
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
@@ -288,7 +266,7 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task.EXPECT().HandleError(mock.Anything)
 
 	f := manager.SyncData(context.Background(), task)
-	_, err = f.Await()
+	_, err := f.Await()
 	s.Error(err)
 }
 

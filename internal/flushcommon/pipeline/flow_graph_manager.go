@@ -22,7 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -71,7 +71,7 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		fm.flowgraphs.Remove(channel)
 
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-		util.RateCol.RemoveFlowGraphChannel(channel)
+		util.GetRateCollector().RemoveFlowGraphChannel(channel)
 	}
 }
 
@@ -95,7 +95,7 @@ func (fm *fgManagerImpl) HasFlowgraph(channel string) bool {
 	return exist
 }
 
-func (fm *fgManagerImpl) HasFlowgraphWithOpID(channel string, opID util.UniqueID) bool {
+func (fm *fgManagerImpl) HasFlowgraphWithOpID(channel string, opID typeutil.UniqueID) bool {
 	ds, exist := fm.flowgraphs.Get(channel)
 	return exist && ds.opID == opID
 }
