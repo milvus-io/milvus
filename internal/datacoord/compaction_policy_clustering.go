@@ -194,14 +194,15 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	return false, 0
 }
 
-func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
+func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
 		segmentIDs = append(segmentIDs, s.ID)
 	}
 	clusteringMaxSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat()
 	clusteringPreferSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
-	maxRows, err := calBySchemaPolicy(coll.Schema)
+
+	maxRows, err := calBySegmentSizePolicy(coll.Schema, expectedSegmentSize)
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
