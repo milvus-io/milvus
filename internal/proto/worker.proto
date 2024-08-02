@@ -139,6 +139,7 @@ message CreateStatsRequest {
   int64 num_rows = 14;
   int64 collection_ttl = 15;
   uint64 current_ts = 16;
+  int64 task_version = 17;
 }
 
 message CreateJobV2Request {

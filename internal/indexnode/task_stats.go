@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/common"
+
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -280,7 +282,13 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	fieldStatsLog, err := st.createTextIndex(ctx, lo.Values(allBinlogs))
+	fieldStatsLog, err := st.createTextIndex(ctx,
+		st.req.GetStorageConfig(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetTaskVersion(),
+		lo.Values(allBinlogs))
 	if err != nil {
 		log.Warn("stats wrong, failed to create text index", zap.Error(err))
 		return err
@@ -532,7 +540,17 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 	return binlogNum, statFieldLog, nil
 }
 
-func (st *statsTask) createTextIndex(ctx context.Context, insertBinlogs []*datapb.FieldBinlog) ([]*datapb.FieldStatsLog, error) {
+func buildTextLogPrefix(rootPath string, collID, partID, segID, fieldID, version int64) string {
+	return fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", rootPath, common.TextIndexPath, collID, partID, segID, fieldID, version)
+}
+
+func (st *statsTask) createTextIndex(ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+	version int64,
+	insertBinlogs []*datapb.FieldBinlog) ([]*datapb.FieldStatsLog, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -547,8 +565,10 @@ func (st *statsTask) createTextIndex(ctx context.Context, insertBinlogs []*datap
 			for _, binlog := range insertBinlogs {
 				if binlog.GetFieldID() == field.GetFieldID() {
 					// do text index
+					_ = buildTextLogPrefix(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, field.GetFieldID(), version)
 					fieldStatsLogs = append(fieldStatsLogs, &datapb.FieldStatsLog{
 						FieldID: field.GetFieldID(),
+						Version: version,
 						Files:   nil,
 					})
 					log.Info("TODO: call CGO CreateTextIndex", zap.Int64("fieldID", field.GetFieldID()))
