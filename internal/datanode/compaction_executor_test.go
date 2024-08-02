@@ -40,7 +40,10 @@ func TestCompactionExecutor(t *testing.T) {
 		ex := newCompactionExecutor()
 		mc := newMockCompactor(true)
 		ex.executeWithState(mc)
-		ex.stopTask(&sync.WaitGroup{}, UniqueID(1))
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go ex.stopTask(wg, UniqueID(1))
+		wg.Wait()
 	})
 
 	t.Run("Test start", func(t *testing.T) {
