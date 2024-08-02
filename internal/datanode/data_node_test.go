@@ -31,12 +31,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -140,7 +140,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&util.RootCoordFactory{}, true, "valid input"},
+			{mocks.NewMockRootCoordClient(t), true, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -163,7 +163,7 @@ func TestDataNode(t *testing.T) {
 			description string
 		}{
 			{nil, false, "nil input"},
-			{&util.DataCoordFactory{}, true, "valid input"},
+			{mocks.NewMockDataCoordClient(t), true, "valid input"},
 		}
 
 		for _, test := range tests {

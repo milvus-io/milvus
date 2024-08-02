@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -238,11 +237,11 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 
 func TestGetChannelWithTickler(t *testing.T) {
 	channelName := "by-dev-rootcoord-dml-0"
-	info := util.GetWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
+	info := GetWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
 	chunkManager := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer chunkManager.RemoveWithPrefix(context.Background(), chunkManager.RootPath())
 
-	meta := util.NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
+	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
 	info.Schema = meta.GetSchema()
 
 	pipelineParams := &util2.PipelineParams{
@@ -299,7 +298,7 @@ func TestGetChannelWithTickler(t *testing.T) {
 
 type DataSyncServiceSuite struct {
 	suite.Suite
-	util.MockDataSuiteBase
+	MockDataSuiteBase
 
 	pipelineParams           *util2.PipelineParams // node param
 	chunkManager             *mocks.ChunkManager
@@ -358,7 +357,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	var (
 		insertChannelName = fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
 
-		Factory  = &util.MetaFactory{}
+		Factory  = &MetaFactory{}
 		collMeta = Factory.GetCollectionMeta(typeutil.UniqueID(0), "coll1", schemapb.DataType_Int64)
 	)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -442,7 +441,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	}
 
 	msgTs := tsoutil.GetCurrentTime()
-	dataFactory := util.NewDataFactory()
+	dataFactory := NewDataFactory()
 	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName, msgTs)
 
 	msgPack := msgstream.MsgPack{
