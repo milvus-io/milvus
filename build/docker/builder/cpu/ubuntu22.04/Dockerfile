@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
     && unlink g++ && ln -s g++-12 g++ \
     && unlink gcov && ln -s gcov-12 gcov
 
-RUN pip3 install conan==1.61.0
+RUN pip3 install conan==1.64.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
