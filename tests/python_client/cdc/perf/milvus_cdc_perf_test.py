@@ -39,7 +39,7 @@ class MilvusCDCPerformanceTest:
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=128)
         ]
         schema = CollectionSchema(fields, "Milvus CDC test collection")
-        collection = Collection(self.collection_name, schema)
+        collection = Collection(self.collection_name, schema, num_shards=8)
         index_params = {
             "index_type": "IVF_FLAT",
             "metric_type": "L2",
