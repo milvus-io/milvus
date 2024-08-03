@@ -17,8 +17,8 @@ option go_package = "github.com/milvus-io/milvus/pkg/streaming/util/message/mess
 /// 7. DropPartitionRequest
 ///
 
-// FlushMessagePayload is the payload of flush message.
-message FlushMessagePayload {
+// FlushMessageBody is the body of flush message.
+message FlushMessageBody {
     int64 collection_id =
         1;  // indicate which the collection that segment belong to.
     repeated int64 segment_id = 2;  // indicate which segment to flush.
@@ -63,7 +63,8 @@ message FlushMessageHeader {}
 
 // CreateCollectionMessageHeader is the header of create collection message.
 message CreateCollectionMessageHeader {
-    int64 collection_id = 1;
+    int64 collection_id          = 1;
+    repeated int64 partition_ids = 2;
 }
 
 // DropCollectionMessageHeader is the header of drop collection message.

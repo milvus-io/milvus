@@ -63,6 +63,18 @@ func (cv *ContextCond) Wait(ctx context.Context) error {
 	return nil
 }
 
+// WaitChan returns a channel that can be used to wait for a broadcast.
+// Should be called after Lock.
+// The channel is closed when a broadcast is received.
+func (cv *ContextCond) WaitChan() <-chan struct{} {
+	if cv.ch == nil {
+		cv.ch = make(chan struct{})
+	}
+	ch := cv.ch
+	cv.L.Unlock()
+	return ch
+}
+
 // noCopy may be added to structs which must not be copied
 // after the first use.
 //

@@ -4,10 +4,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -19,6 +21,7 @@ type ServerBuilder struct {
 	rc         types.RootCoordClient
 	dc         types.DataCoordClient
 	session    *sessionutil.Session
+	kv         kv.MetaKv
 }
 
 // NewServerBuilder creates a new server builder.
@@ -56,12 +59,19 @@ func (b *ServerBuilder) WithSession(session *sessionutil.Session) *ServerBuilder
 	return b
 }
 
+// WithMetaKV sets meta kv to the server builder.
+func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
+	b.kv = kv
+	return b
+}
+
 // Build builds a streaming node server.
 func (s *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
 		resource.OptRootCoordClient(s.rc),
 		resource.OptDataCoordClient(s.dc),
+		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(s.kv)),
 	)
 	return &Server{
 		session:               s.session,
