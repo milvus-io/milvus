@@ -34,6 +34,9 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector:
+    interfaces:
+      SealOperator:
   google.golang.org/grpc:
     interfaces:
       ClientStream:
@@ -54,6 +57,7 @@ packages:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
       StreamingCoordCataLog:
+      StreamingNodeCataLog:
   github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer:
     interfaces:
       Discoverer:
@@ -71,3 +75,4 @@ packages:
   google.golang.org/grpc/balancer:
     interfaces:
       SubConn:
+

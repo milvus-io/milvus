@@ -3,15 +3,28 @@
 
 package resource
 
-import "github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
+import (
+	"testing"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+)
 
 // InitForTest initializes the singleton of resources for test.
-func InitForTest(opts ...optResourceInit) {
+func InitForTest(t *testing.T, opts ...optResourceInit) {
 	r = &resourceImpl{}
 	for _, opt := range opts {
 		opt(r)
 	}
 	if r.rootCoordClient != nil {
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+	} else {
+		r.rootCoordClient = idalloc.NewMockRootCoordClient(t)
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
+	r.segmentAssignStatsManager = stats.NewStatsManager()
+	r.segmentSealedInspector = inspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
 }

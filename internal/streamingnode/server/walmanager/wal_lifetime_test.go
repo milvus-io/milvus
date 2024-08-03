@@ -25,7 +25,8 @@ func TestWALLifetime(t *testing.T) {
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
 	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return()
 
-	resource.Init(
+	resource.InitForTest(
+		t,
 		resource.OptFlusher(flusher),
 		resource.OptRootCoordClient(rootcoord),
 		resource.OptDataCoordClient(datacoord),

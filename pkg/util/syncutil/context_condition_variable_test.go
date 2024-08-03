@@ -13,7 +13,7 @@ func TestContextCond(t *testing.T) {
 	cv := NewContextCond(&sync.Mutex{})
 	cv.L.Lock()
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(10 * time.Millisecond)
 		cv.LockAndBroadcast()
 		cv.L.Unlock()
 	}()
@@ -23,7 +23,7 @@ func TestContextCond(t *testing.T) {
 
 	cv.L.Lock()
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(20 * time.Millisecond)
 		cv.LockAndBroadcast()
 		cv.L.Unlock()
 	}()

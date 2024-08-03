@@ -21,6 +21,8 @@ type (
 	DropCollectionMessageHeader   = messagepb.DropCollectionMessageHeader
 	CreatePartitionMessageHeader  = messagepb.CreatePartitionMessageHeader
 	DropPartitionMessageHeader    = messagepb.DropPartitionMessageHeader
+	FlushMessageHeader            = messagepb.FlushMessageHeader
+	FlushMessagePayload           = messagepb.FlushMessageBody
 )
 
 // messageTypeMap maps the proto message type to the message type.
@@ -32,6 +34,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&DropCollectionMessageHeader{}):   MessageTypeDropCollection,
 	reflect.TypeOf(&CreatePartitionMessageHeader{}):  MessageTypeCreatePartition,
 	reflect.TypeOf(&DropPartitionMessageHeader{}):    MessageTypeDropPartition,
+	reflect.TypeOf(&FlushMessageHeader{}):            MessageTypeFlush,
 }
 
 // List all specialized message types.

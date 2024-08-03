@@ -30,7 +30,8 @@ func TestManager(t *testing.T) {
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
 
-	resource.Init(
+	resource.InitForTest(
+		t,
 		resource.OptFlusher(flusher),
 		resource.OptRootCoordClient(rootcoord),
 		resource.OptDataCoordClient(datacoord),

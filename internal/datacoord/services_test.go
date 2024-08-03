@@ -475,6 +475,10 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	expireTs := allocations[0].ExpireTime
 	segID := allocations[0].SegmentID
 
+	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), 0, 1, 1, "channel-1")
+	s.NoError(err)
+	s.NotNil(info)
+
 	resp, err := s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
