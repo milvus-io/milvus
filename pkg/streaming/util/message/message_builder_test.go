@@ -32,7 +32,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 35, mutableMessage.EstimateSize())
+	assert.Equal(t, 32, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
@@ -67,7 +67,7 @@ func TestMessage(t *testing.T) {
 		[]byte("payload"),
 		map[string]string{
 			"key": "value",
-			"_t":  "1200",
+			"_t":  "1",
 			"_tt": message.EncodeUint64(456),
 			"_v":  "1",
 			"_lc": "lcMsgID",
@@ -80,7 +80,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 39, immutableMessage.EstimateSize())
+	assert.Equal(t, 36, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(1), immutableMessage.Version())
 	assert.Equal(t, uint64(456), immutableMessage.TimeTick())
 	assert.NotNil(t, immutableMessage.LastConfirmedMessageID())
@@ -90,7 +90,7 @@ func TestMessage(t *testing.T) {
 		[]byte("payload"),
 		map[string]string{
 			"key": "value",
-			"_t":  "1200",
+			"_t":  "1",
 		})
 
 	assert.True(t, immutableMessage.MessageID().EQ(msgID))
@@ -100,7 +100,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 21, immutableMessage.EstimateSize())
+	assert.Equal(t, 18, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(0), immutableMessage.Version())
 	assert.Panics(t, func() {
 		immutableMessage.TimeTick()

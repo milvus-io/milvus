@@ -40,8 +40,8 @@ type MockFlusher_RegisterPChannel_Call struct {
 }
 
 // RegisterPChannel is a helper method to define mock.On call
-//  - pchannel string
-//  - w wal.WAL
+//   - pchannel string
+//   - w wal.WAL
 func (_e *MockFlusher_Expecter) RegisterPChannel(pchannel interface{}, w interface{}) *MockFlusher_RegisterPChannel_Call {
 	return &MockFlusher_RegisterPChannel_Call{Call: _e.mock.On("RegisterPChannel", pchannel, w)}
 }
@@ -74,8 +74,8 @@ type MockFlusher_RegisterVChannel_Call struct {
 }
 
 // RegisterVChannel is a helper method to define mock.On call
-//  - vchannel string
-//  - _a1 wal.WAL
+//   - vchannel string
+//   - _a1 wal.WAL
 func (_e *MockFlusher_Expecter) RegisterVChannel(vchannel interface{}, _a1 interface{}) *MockFlusher_RegisterVChannel_Call {
 	return &MockFlusher_RegisterVChannel_Call{Call: _e.mock.On("RegisterVChannel", vchannel, _a1)}
 }
@@ -172,7 +172,7 @@ type MockFlusher_UnregisterPChannel_Call struct {
 }
 
 // UnregisterPChannel is a helper method to define mock.On call
-//  - pchannel string
+//   - pchannel string
 func (_e *MockFlusher_Expecter) UnregisterPChannel(pchannel interface{}) *MockFlusher_UnregisterPChannel_Call {
 	return &MockFlusher_UnregisterPChannel_Call{Call: _e.mock.On("UnregisterPChannel", pchannel)}
 }
@@ -205,7 +205,7 @@ type MockFlusher_UnregisterVChannel_Call struct {
 }
 
 // UnregisterVChannel is a helper method to define mock.On call
-//  - vchannel string
+//   - vchannel string
 func (_e *MockFlusher_Expecter) UnregisterVChannel(vchannel interface{}) *MockFlusher_UnregisterVChannel_Call {
 	return &MockFlusher_UnregisterVChannel_Call{Call: _e.mock.On("UnregisterVChannel", vchannel)}
 }

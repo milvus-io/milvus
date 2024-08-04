@@ -42,13 +42,20 @@ var (
 	NewDropCollectionMessageBuilderV1   = createNewMessageBuilderV1[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]()
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
-	NewFlushMessageBuilderV1            = createNewMessageBuilderV1[*FlushMessageHeader, *FlushMessagePayload]()
+	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
 )
 
 // createNewMessageBuilderV1 creates a new message builder with v1 marker.
 func createNewMessageBuilderV1[H proto.Message, B proto.Message]() func() *mutableMesasgeBuilder[H, B] {
 	return func() *mutableMesasgeBuilder[H, B] {
 		return newMutableMessageBuilder[H, B](VersionV1)
+	}
+}
+
+// List all type-safe mutable message builders here.
+func createNewMessageBuilderV2[H proto.Message, B proto.Message]() func() *mutableMesasgeBuilder[H, B] {
+	return func() *mutableMesasgeBuilder[H, B] {
+		return newMutableMessageBuilder[H, B](VersionV2)
 	}
 }
 

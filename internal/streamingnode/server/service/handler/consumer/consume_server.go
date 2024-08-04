@@ -7,15 +7,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -31,22 +32,17 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create consumer request is required")
 	}
-	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.GetPchannel()))
+	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
-
-	deliverPolicy, err := typeconverter.NewDeliverPolicyFromProto(l.WALName(), createReq.GetDeliverPolicy())
+	filter, err := options.GetFilterFunc(createReq.DeliverFilters)
 	if err != nil {
-		return nil, status.NewInvaildArgument("at convert deliver policy, err: %s", err.Error())
-	}
-	deliverFilters, err := newMessageFilter(createReq.DeliverFilters)
-	if err != nil {
-		return nil, status.NewInvaildArgument("at convert deliver filters, err: %s", err.Error())
+		return nil, err
 	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
-		DeliverPolicy: deliverPolicy,
-		MessageFilter: deliverFilters,
+		DeliverPolicy: createReq.GetDeliverPolicy(),
+		MessageFilter: filter,
 	})
 	if err != nil {
 		return nil, err
@@ -117,10 +113,10 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			// Send Consumed message to client and do metrics.
 			messageSize := msg.EstimateSize()
 			if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
-				Id: &streamingpb.MessageID{
-					Id: msg.MessageID().Marshal(),
-				},
-				Message: &streamingpb.Message{
+				Message: &messagespb.ImmutableMessage{
+					Id: &messagespb.MessageID{
+						Id: msg.MessageID().Marshal(),
+					},
 					Payload:    msg.Payload(),
 					Properties: msg.Properties().ToRawMap(),
 				},
@@ -173,19 +169,4 @@ func (c *ConsumeServer) recvLoop() (err error) {
 			c.logger.Warn("unknown request type", zap.Any("request", req))
 		}
 	}
-}
-
-func newMessageFilter(filters []*streamingpb.DeliverFilter) (wal.MessageFilter, error) {
-	fs, err := typeconverter.NewDeliverFiltersFromProtos(filters)
-	if err != nil {
-		return nil, err
-	}
-	return func(msg message.ImmutableMessage) bool {
-		for _, f := range fs {
-			if !f.Filter(msg) {
-				return false
-			}
-		}
-		return true
-	}, nil
 }

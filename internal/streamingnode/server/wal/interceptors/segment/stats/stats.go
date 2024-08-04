@@ -3,7 +3,7 @@ package stats
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 // SegmentStats is the usage stats of a segment.

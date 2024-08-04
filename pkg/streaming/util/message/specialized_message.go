@@ -8,21 +8,21 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/messagepb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 )
 
 type (
-	SegmentAssignment             = messagepb.SegmentAssignment
-	PartitionSegmentAssignment    = messagepb.PartitionSegmentAssignment
-	TimeTickMessageHeader         = messagepb.TimeTickMessageHeader
-	InsertMessageHeader           = messagepb.InsertMessageHeader
-	DeleteMessageHeader           = messagepb.DeleteMessageHeader
-	CreateCollectionMessageHeader = messagepb.CreateCollectionMessageHeader
-	DropCollectionMessageHeader   = messagepb.DropCollectionMessageHeader
-	CreatePartitionMessageHeader  = messagepb.CreatePartitionMessageHeader
-	DropPartitionMessageHeader    = messagepb.DropPartitionMessageHeader
-	FlushMessageHeader            = messagepb.FlushMessageHeader
-	FlushMessagePayload           = messagepb.FlushMessageBody
+	SegmentAssignment             = messagespb.SegmentAssignment
+	PartitionSegmentAssignment    = messagespb.PartitionSegmentAssignment
+	TimeTickMessageHeader         = messagespb.TimeTickMessageHeader
+	InsertMessageHeader           = messagespb.InsertMessageHeader
+	DeleteMessageHeader           = messagespb.DeleteMessageHeader
+	CreateCollectionMessageHeader = messagespb.CreateCollectionMessageHeader
+	DropCollectionMessageHeader   = messagespb.DropCollectionMessageHeader
+	CreatePartitionMessageHeader  = messagespb.CreatePartitionMessageHeader
+	DropPartitionMessageHeader    = messagespb.DropPartitionMessageHeader
+	FlushMessageHeader            = messagespb.FlushMessageHeader
+	FlushMessageBody              = messagespb.FlushMessageBody
 )
 
 // messageTypeMap maps the proto message type to the message type.
@@ -46,6 +46,7 @@ type (
 	MutableDropCollectionMessageV1   = specializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	MutableCreatePartitionMessageV1  = specializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	MutableDropPartitionMessageV1    = specializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	MutableFlushMessageV2            = specializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
 
 	ImmutableTimeTickMessageV1         = specializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	ImmutableInsertMessageV1           = specializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
@@ -54,6 +55,7 @@ type (
 	ImmutableDropCollectionMessageV1   = specializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	ImmutableCreatePartitionMessageV1  = specializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	ImmutableDropPartitionMessageV1    = specializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	ImmutableFlushMessageV2            = specializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
 )
 
 // List all as functions for specialized messages.
@@ -65,6 +67,7 @@ var (
 	AsMutableDropCollectionMessageV1   = asSpecializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	AsMutableCreatePartitionMessageV1  = asSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsMutableDropPartitionMessageV1    = asSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	AsMutableFlushMessageV2            = asSpecializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
 
 	AsImmutableTimeTickMessageV1         = asSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	AsImmutableInsertMessageV1           = asSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
@@ -73,6 +76,7 @@ var (
 	AsImmutableDropCollectionMessageV1   = asSpecializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	AsImmutableCreatePartitionMessageV1  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsImmutableDropPartitionMessageV1    = asSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	AsImmutableFlushMessageV2            = asSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
 )
 
 // asSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.

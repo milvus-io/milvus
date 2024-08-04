@@ -75,7 +75,7 @@ func (w *walAccesserImpl) dispatchByPChannel(ctx context.Context, msgs ...messag
 		pchannel := pchannel
 		msgs := msgs
 		idxes := indexes[pchannel]
-		go func() {
+		w.appendExecutionPool.Submit(func() (struct{}, error) {
 			defer wg.Done()
 			singleResp := w.appendToPChannel(ctx, pchannel, msgs...)
 			mu.Lock()
@@ -83,7 +83,8 @@ func (w *walAccesserImpl) dispatchByPChannel(ctx context.Context, msgs ...messag
 				resp.fillResponseAtIdx(singleResp.Responses[i], idx)
 			}
 			mu.Unlock()
-		}()
+			return struct{}{}, nil
+		})
 	}
 	wg.Wait()
 	return resp
@@ -137,7 +138,7 @@ func (w *walAccesserImpl) appendToPChannel(ctx context.Context, pchannel string,
 	for i, msg := range msgs {
 		i := i
 		msg := msg
-		go func() {
+		w.appendExecutionPool.Submit(func() (struct{}, error) {
 			defer wg.Done()
 			msgID, err := p.Produce(ctx, msg)
 
@@ -147,7 +148,8 @@ func (w *walAccesserImpl) appendToPChannel(ctx context.Context, pchannel string,
 				Error:     err,
 			}, i)
 			mu.Unlock()
-		}()
+			return struct{}{}, nil
+		})
 	}
 	wg.Wait()
 	return resp

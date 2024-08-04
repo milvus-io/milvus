@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 var _ ManagerService = (*managerServiceImpl)(nil)
@@ -31,7 +31,7 @@ type managerServiceImpl struct {
 // Assign assigns a wal instance for the channel on this Manager.
 // After assign returns, the wal instance is ready to use.
 func (ms *managerServiceImpl) Assign(ctx context.Context, req *streamingpb.StreamingNodeManagerAssignRequest) (*streamingpb.StreamingNodeManagerAssignResponse, error) {
-	pchannelInfo := typeconverter.NewPChannelInfoFromProto(req.GetPchannel())
+	pchannelInfo := types.NewPChannelInfoFromProto(req.GetPchannel())
 	if err := ms.walManager.Open(ctx, pchannelInfo); err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (ms *managerServiceImpl) Assign(ctx context.Context, req *streamingpb.Strea
 // Remove removes the wal instance for the channel.
 // After remove returns, the wal instance is removed and all underlying read write operation should be rejected.
 func (ms *managerServiceImpl) Remove(ctx context.Context, req *streamingpb.StreamingNodeManagerRemoveRequest) (*streamingpb.StreamingNodeManagerRemoveResponse, error) {
-	pchannelInfo := typeconverter.NewPChannelInfoFromProto(req.GetPchannel())
+	pchannelInfo := types.NewPChannelInfoFromProto(req.GetPchannel())
 	if err := ms.walManager.Remove(ctx, pchannelInfo); err != nil {
 		return nil, err
 	}

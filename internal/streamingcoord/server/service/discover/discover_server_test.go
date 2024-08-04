@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )

@@ -4,10 +4,9 @@ import (
 	"io"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -51,7 +50,7 @@ func (c *assignmentDiscoverClient) ReportAssignmentError(pchannel types.PChannel
 	case c.requestCh <- &streamingpb.AssignmentDiscoverRequest{
 		Command: &streamingpb.AssignmentDiscoverRequest_ReportError{
 			ReportError: &streamingpb.ReportAssignmentErrorRequest{
-				Pchannel: typeconverter.NewProtoFromPChannelInfo(pchannel),
+				Pchannel: types.NewProtoFromPChannelInfo(pchannel),
 				Err:      statusErr,
 			},
 		},
@@ -136,10 +135,10 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 			for _, assignment := range resp.FullAssignment.Assignments {
 				channels := make(map[string]types.PChannelInfo, len(assignment.Channels))
 				for _, channel := range assignment.Channels {
-					channels[channel.Name] = typeconverter.NewPChannelInfoFromProto(channel)
+					channels[channel.Name] = types.NewPChannelInfoFromProto(channel)
 				}
 				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
-					NodeInfo: typeconverter.NewStreamingNodeInfoFromProto(assignment.Node),
+					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),
 					Channels: channels,
 				}
 			}

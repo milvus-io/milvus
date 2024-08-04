@@ -8,8 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -64,10 +65,10 @@ func TestConsumer(t *testing.T) {
 	recvCh <- &streamingpb.ConsumeResponse{
 		Response: &streamingpb.ConsumeResponse_Consume{
 			Consume: &streamingpb.ConsumeMessageReponse{
-				Id: &streamingpb.MessageID{
-					Id: walimplstest.NewTestMessageID(1).Marshal(),
-				},
-				Message: &streamingpb.Message{
+				Message: &messagespb.ImmutableMessage{
+					Id: &messagespb.MessageID{
+						Id: walimplstest.NewTestMessageID(1).Marshal(),
+					},
 					Payload:    []byte{},
 					Properties: make(map[string]string),
 				},
