@@ -19,28 +19,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var errWaitNextBackoff = errors.New("wait for next backoff")
 
 type handlerClientImpl struct {
-	lifetime              lifetime.Lifetime[lifetime.State]
-	service               lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
-	rb                    resolver.Builder
-	watcher               assignment.Watcher
-	rebalanceTrigger      types.AssignmentRebalanceTrigger
-	sharedProducers       map[string]*typeutil.WeakReference[Producer] // map the pchannel to shared producer.
-	sharedProducerKeyLock *lock.KeyLock[string]
-	newProducer           func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
-	newConsumer           func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
+	lifetime         lifetime.Lifetime[lifetime.State]
+	service          lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
+	rb               resolver.Builder
+	watcher          assignment.Watcher
+	rebalanceTrigger types.AssignmentRebalanceTrigger
+	newProducer      func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
+	newConsumer      func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
 }
 
 // CreateProducer creates a producer.
 func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerOptions) (Producer, error) {
 	if hc.lifetime.Add(lifetime.IsWorking) != nil {
-		return nil, status.NewOnShutdownError("handler client is closed")
+		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
 
@@ -50,7 +46,9 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 		if err != nil {
 			return nil, err
 		}
-		return hc.createOrGetSharedProducer(ctx, &producer.ProducerOptions{Assignment: assign}, handlerService)
+		return hc.newProducer(ctx, &producer.ProducerOptions{
+			Assignment: assign,
+		}, handlerService)
 	})
 	if err != nil {
 		return nil, err
@@ -61,7 +59,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 // CreateConsumer creates a consumer.
 func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error) {
 	if hc.lifetime.Add(lifetime.IsWorking) != nil {
-		return nil, status.NewOnShutdownError("handler client is closed")
+		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
 
@@ -132,60 +130,6 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 		return err == nil, nil
 	}
 	return false, err
-}
-
-// getFromSharedProducers gets a shared producer from shared producers.A
-func (hc *handlerClientImpl) getFromSharedProducers(channelInfo types.PChannelInfo) Producer {
-	weakProducerRef, ok := hc.sharedProducers[channelInfo.Name]
-	if !ok {
-		return nil
-	}
-
-	strongProducerRef := weakProducerRef.Upgrade()
-	if strongProducerRef == nil {
-		// upgrade failure means the outer producer is all closed.
-		// remove the weak ref and create again.
-		delete(hc.sharedProducers, channelInfo.Name)
-		return nil
-	}
-
-	p := newSharedProducer(strongProducerRef)
-	if !p.IsAvailable() || p.Assignment().Channel.Term < channelInfo.Term {
-		// if the producer is not available or the term is less than expected.
-		// close it and return to create new one.
-		p.Close()
-		delete(hc.sharedProducers, channelInfo.Name)
-		return nil
-	}
-	return p
-}
-
-// createOrGetSharedProducer creates or get a shared producer.
-// because vchannel in same pchannel can share the same producer.
-func (hc *handlerClientImpl) createOrGetSharedProducer(
-	ctx context.Context,
-	opts *producer.ProducerOptions,
-	handlerService streamingpb.StreamingNodeHandlerServiceClient,
-) (Producer, error) {
-	hc.sharedProducerKeyLock.Lock(opts.Assignment.Channel.Name)
-	defer hc.sharedProducerKeyLock.Unlock(opts.Assignment.Channel.Name)
-
-	// check if shared producer is created within key lock.
-	if p := hc.getFromSharedProducers(opts.Assignment.Channel); p != nil {
-		return p, nil
-	}
-
-	// create a new producer and insert it into shared producers.
-	newProducer, err := hc.newProducer(ctx, opts, handlerService)
-	if err != nil {
-		return nil, err
-	}
-	newStrongProducerRef := typeutil.NewSharedReference(newProducer)
-	// store a weak ref and return a strong ref.
-	returned := newStrongProducerRef.Clone()
-	stored := newStrongProducerRef.Downgrade()
-	hc.sharedProducers[opts.Assignment.Channel.Name] = stored
-	return newSharedProducer(returned), nil
 }
 
 // Close closes the handler client.

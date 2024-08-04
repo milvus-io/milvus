@@ -52,10 +52,6 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of log system.
 	WithTimeTick(tt uint64) MutableMessage
 
-	// WithVChannel sets the virtual channel of current message.
-	// !!! preserved for streaming system internal usage, don't call it outside of log system.
-	WithVChannel(vChannel string) MutableMessage
-
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }
@@ -83,13 +79,7 @@ type ImmutableMessage interface {
 type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	BasicMessage
 
-	// VChannel returns the vchannel of the message.
-	VChannel() string
-
-	// TimeTick returns the time tick of the message.
-	TimeTick() uint64
-
-	// Header returns the message header.
+	// MessageHeader returns the message header.
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 

@@ -170,6 +170,7 @@ function test_streaming()
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/streaming/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 pushd pkg
 go test -race -cover -tags dynamic,test "${PKG_DIR}/streaming/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 popd

@@ -140,7 +140,7 @@ func (b *balancerImpl) execute() {
 				// balancer is closed.
 				return
 			}
-			b.logger.Warn("fail to apply balance, start a backoff...")
+			b.logger.Warn("fail to apply balance, start a backoff...", zap.Error(err))
 			balanceTimer.EnableBackoff()
 			continue
 		}

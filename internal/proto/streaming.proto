@@ -279,6 +279,7 @@ message CreateProducerResponse {
     // call at producer level.
 }
 
+// ProduceMessageResponse is the response of the ProduceMessage RPC.
 message ProduceMessageResponse {
     int64 request_id = 1;
     oneof response {

@@ -116,6 +116,49 @@ func (_c *MockWAL_AppendAsync_Call) RunAndReturn(run func(context.Context, messa
 	return _c
 }
 
+// Available provides a mock function with given fields:
+func (_m *MockWAL) Available() <-chan struct{} {
+	ret := _m.Called()
+
+	var r0 <-chan struct{}
+	if rf, ok := ret.Get(0).(func() <-chan struct{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+
+	return r0
+}
+
+// MockWAL_Available_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Available'
+type MockWAL_Available_Call struct {
+	*mock.Call
+}
+
+// Available is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) Available() *MockWAL_Available_Call {
+	return &MockWAL_Available_Call{Call: _e.mock.On("Available")}
+}
+
+func (_c *MockWAL_Available_Call) Run(run func()) *MockWAL_Available_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_Available_Call) Return(_a0 <-chan struct{}) *MockWAL_Available_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWAL_Available_Call) RunAndReturn(run func() <-chan struct{}) *MockWAL_Available_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Channel provides a mock function with given fields:
 func (_m *MockWAL) Channel() types.PChannelInfo {
 	ret := _m.Called()
@@ -185,6 +228,47 @@ func (_c *MockWAL_Close_Call) Return() *MockWAL_Close_Call {
 }
 
 func (_c *MockWAL_Close_Call) RunAndReturn(run func()) *MockWAL_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsAvailable provides a mock function with given fields:
+func (_m *MockWAL) IsAvailable() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockWAL_IsAvailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsAvailable'
+type MockWAL_IsAvailable_Call struct {
+	*mock.Call
+}
+
+// IsAvailable is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) IsAvailable() *MockWAL_IsAvailable_Call {
+	return &MockWAL_IsAvailable_Call{Call: _e.mock.On("IsAvailable")}
+}
+
+func (_c *MockWAL_IsAvailable_Call) Run(run func()) *MockWAL_IsAvailable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_IsAvailable_Call) Return(_a0 bool) *MockWAL_IsAvailable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWAL_IsAvailable_Call) RunAndReturn(run func() bool) *MockWAL_IsAvailable_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -12,6 +12,7 @@ import (
 
 func TestAsSpecializedMessage(t *testing.T) {
 	m, err := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
 		WithHeader(&message.InsertMessageHeader{
 			CollectionId: 1,
 			Partitions: []*message.PartitionSegmentAssignment{

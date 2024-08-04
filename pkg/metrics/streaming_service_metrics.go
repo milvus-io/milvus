@@ -37,7 +37,7 @@ var (
 		Name:    "produce_bytes",
 		Help:    "Bytes of produced message",
 		Buckets: bytesBuckets,
-	})
+	}, statusLabelName)
 
 	StreamingServiceClientConsumeBytes = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
 		Name:    "consume_bytes",
