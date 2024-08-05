@@ -7,6 +7,7 @@ from datetime import datetime
 import requests
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
+import matplotlib.pyplot as plt
 import sys
 logger.remove()
 logger.add(sink=sys.stdout, level="DEBUG")
@@ -29,7 +30,79 @@ class MilvusCDCPerformance:
             "latest_ts": 0,
             "latest_count": 0
         }
+        self.start_time = None
+        self.last_report_time = None
+        self.last_insert_count = 0
+        self.last_sync_count = 0
 
+        # New attributes for time series data
+        self.time_series_data = {
+            'timestamp': [],
+            'insert_throughput': [],
+            'sync_throughput': [],
+            'avg_latency': []
+        }
+
+    def report_realtime_metrics(self):
+        current_time = time.time()
+        if self.last_report_time is None:
+            self.last_report_time = current_time
+            self.last_insert_count = self.insert_count
+            self.last_sync_count = self.sync_count
+            return
+
+        time_diff = current_time - self.last_report_time
+        insert_diff = self.insert_count - self.last_insert_count
+        sync_diff = self.sync_count - self.last_sync_count
+
+        insert_throughput = insert_diff / time_diff
+        sync_throughput = sync_diff / time_diff
+
+        avg_latency = sum(self.latencies[-100:]) / len(self.latencies[-100:]) if self.latencies else 0
+
+        logger.info(f"Real-time metrics:")
+        logger.info(f"  Insert Throughput: {insert_throughput:.2f} entities/second")
+        logger.info(f"  Sync Throughput: {sync_throughput:.2f} entities/second")
+        logger.info(f"  Avg Latency (last 100): {avg_latency:.2f} seconds")
+
+        # Store time series data
+        self.time_series_data['timestamp'].append(current_time - self.start_time)
+        self.time_series_data['insert_throughput'].append(insert_throughput)
+        self.time_series_data['sync_throughput'].append(sync_throughput)
+        self.time_series_data['avg_latency'].append(avg_latency)
+
+        self.last_report_time = current_time
+        self.last_insert_count = self.insert_count
+        self.last_sync_count = self.sync_count
+
+    def continuous_monitoring(self, interval=5):
+        while not self.stop_query:
+            self.report_realtime_metrics()
+            time.sleep(interval)
+
+    def plot_time_series_data(self):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+        # Plot throughput
+        ax1.plot(self.time_series_data['timestamp'], self.time_series_data['insert_throughput'],
+                 label='Insert Throughput')
+        ax1.plot(self.time_series_data['timestamp'], self.time_series_data['sync_throughput'], label='Sync Throughput')
+        ax1.set_xlabel('Time (seconds)')
+        ax1.set_ylabel('Throughput (entities/second)')
+        ax1.set_title('Insert and Sync Throughput over Time')
+        ax1.legend()
+        ax1.grid(True)
+
+        # Plot latency
+        ax2.plot(self.time_series_data['timestamp'], self.time_series_data['avg_latency'])
+        ax2.set_xlabel('Time (seconds)')
+        ax2.set_ylabel('Average Latency (seconds)')
+        ax2.set_title('Average Latency over Time')
+        ax2.grid(True)
+
+        plt.tight_layout()
+        plt.savefig('milvus_cdc_performance.png')
+        logger.info("Performance plot saved as 'milvus_cdc_performance.png'")
     def list_cdc_tasks(self):
         url = f"http://{self.cdc_host}:8444/cdc"
         payload = json.dumps({"request_type": "list"})
@@ -203,6 +276,9 @@ class MilvusCDCPerformance:
 
         cdc_thread = threading.Thread(target=self.pause_and_resume_cdc_tasks, args=(duration,))
         cdc_thread.start()
+        monitor_thread = threading.Thread(target=self.continuous_monitoring)
+        monitor_thread.start()
+
         # Start continuous insert threads
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = [executor.submit(self.continuous_insert, duration, batch_size) for _ in range(concurrency)]
@@ -215,6 +291,7 @@ class MilvusCDCPerformance:
         query_thread.join()
         count_thread.join()
         cdc_thread.join()
+        monitor_thread.join()
 
         end_time = time.time()
         total_time = end_time - start_time
@@ -230,7 +307,7 @@ class MilvusCDCPerformance:
         logger.info(f"Average latency: {avg_latency:.2f} seconds")
         logger.info(f"Min latency: {min(self.latencies):.2f} seconds")
         logger.info(f"Max latency: {max(self.latencies):.2f} seconds")
-
+        self.plot_time_series_data()
         return total_time, self.insert_count, self.sync_count, insert_throughput, sync_throughput, avg_latency, min(
             self.latencies), max(self.latencies)
 
@@ -250,6 +327,8 @@ class MilvusCDCPerformance:
             logger.info(f"  Insert Throughput: {insert_throughput:.2f} entities/second")
             logger.info(f"  Sync Throughput: {sync_throughput:.2f} entities/second")
             logger.info(f"  Avg Latency: {avg_latency:.2f} seconds")
+            logger.info(f"  Min Latency: {min_latency:.2f} seconds")
+            logger.info(f"  Max Latency: {max_latency:.2f} seconds")
 
         return results
 
@@ -275,4 +354,4 @@ if __name__ == "__main__":
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
     cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
-    cdc_test.run_all_tests(duration=100, batch_size=1000, max_concurrency=20)
+    cdc_test.run_all_tests(duration=100, batch_size=1000, max_concurrency=10)
