@@ -53,7 +53,7 @@ func (b *listDeleteBuffer[T]) Put(entry T) {
 	}
 }
 
-func (b *listDeleteBuffer[T]) ListAfter(ts uint64) []T {
+func (b *listDeleteBuffer[T]) ListAfter(ts uint64) ([]T, uint64) {
 	b.mut.RLock()
 	defer b.mut.RUnlock()
 
@@ -61,7 +61,7 @@ func (b *listDeleteBuffer[T]) ListAfter(ts uint64) []T {
 	for _, block := range b.list {
 		result = append(result, block.ListAfter(ts)...)
 	}
-	return result
+	return result, b.safeTs
 }
 
 func (b *listDeleteBuffer[T]) SafeTs() uint64 {

@@ -74,8 +74,10 @@ func (s *DoubleCacheBufferSuite) TestCache() {
 		},
 	})
 
-	s.Equal(2, len(buffer.ListAfter(11)))
-	s.Equal(1, len(buffer.ListAfter(12)))
+	deleteRecords, _ := buffer.ListAfter(11)
+	s.Equal(2, len(deleteRecords))
+	deleteRecords, _ = buffer.ListAfter(12)
+	s.Equal(1, len(deleteRecords))
 }
 
 func TestDoubleCacheDeleteBuffer(t *testing.T) {
