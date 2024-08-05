@@ -543,10 +543,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
 	)
 
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		operators = append(operators, UpdateStorageVersionOperator(req.GetSegmentID(), req.GetStorageVersion()))
-	}
-
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
@@ -882,18 +878,6 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			continue
 		}
 
-		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-				ID:            segment.ID,
-				PartitionID:   segment.PartitionID,
-				CollectionID:  segment.CollectionID,
-				InsertChannel: segment.InsertChannel,
-				NumOfRows:     segment.NumOfRows,
-				Level:         segment.GetLevel(),
-			})
-			continue
-		}
-
 		binlogs := segment.GetBinlogs()
 		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 {
 			continue
@@ -920,6 +904,42 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
+	return resp, nil
+}
+
+// GetChannelRecoveryInfo get recovery channel info.
+// Called by: StreamingNode.
+func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("vchannel", req.GetVchannel()),
+	)
+	log.Info("get channel recovery info request received")
+	resp := &datapb.GetChannelRecoveryInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
+	collection, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
+	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
+	log.Info("datacoord get channel recovery info",
+		zap.String("channel", channelInfo.GetChannelName()),
+		zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
+		zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
+		zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
+		zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
+		zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+	)
+
+	resp.Info = channelInfo
+	resp.Schema = collection.Schema
 	return resp, nil
 }
 

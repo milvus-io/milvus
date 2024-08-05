@@ -72,6 +72,10 @@ class ColumnBase {
         SetPaddingSize(data_type);
 
         if (IsVariableDataType(data_type)) {
+            if (field_meta.is_nullable()) {
+                nullable_ = true;
+                valid_data_.reserve(reserve);
+            }
             return;
         }
 
@@ -214,7 +218,7 @@ class ColumnBase {
     ColumnBase(ColumnBase&& column) noexcept
         : data_(column.data_),
           nullable_(column.nullable_),
-          valid_data_(column.valid_data_),
+          valid_data_(std::move(column.valid_data_)),
           padding_(column.padding_),
           type_size_(column.type_size_),
           num_rows_(column.num_rows_),
@@ -282,7 +286,7 @@ class ColumnBase {
                   "GetBatchBuffer only supported for VariableColumn");
     }
 
-    virtual std::vector<std::string_view>
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
     StringViews() const {
         PanicInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
@@ -519,7 +523,8 @@ class Column : public ColumnBase {
 
     SpanBase
     Span() const override {
-        return SpanBase(data_, num_rows_, data_cap_size_ / num_rows_);
+        return SpanBase(
+            data_, valid_data_.data(), num_rows_, data_cap_size_ / num_rows_);
     }
 };
 
@@ -681,7 +686,7 @@ class VariableColumn : public ColumnBase {
                   "span() interface is not implemented for variable column");
     }
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     StringViews() const override {
         std::vector<std::string_view> res;
         char* pos = data_;
@@ -692,7 +697,7 @@ class VariableColumn : public ColumnBase {
             res.emplace_back(std::string_view(pos, size));
             pos += size;
         }
-        return res;
+        return std::make_pair(res, valid_data_);
     }
 
     [[nodiscard]] std::vector<ViewType>
@@ -861,7 +866,10 @@ class ArrayColumn : public ColumnBase {
 
     SpanBase
     Span() const override {
-        return SpanBase(views_.data(), views_.size(), sizeof(ArrayView));
+        return SpanBase(views_.data(),
+                        valid_data_.data(),
+                        views_.size(),
+                        sizeof(ArrayView));
     }
 
     [[nodiscard]] const std::vector<ArrayView>&
@@ -885,8 +893,8 @@ class ArrayColumn : public ColumnBase {
         element_indices_.emplace_back(array.get_offsets());
         if (nullable_) {
             return ColumnBase::Append(static_cast<const char*>(array.data()),
-                                      array.byte_size(),
-                                      valid_data);
+                                      valid_data,
+                                      array.byte_size());
         }
         ColumnBase::Append(static_cast<const char*>(array.data()),
                            array.byte_size());

@@ -23,14 +23,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestMain(t *testing.M) {
 	paramtable.Init()
-	err := InitGlobalRateCollector()
-	if err != nil {
-		panic("init test failed, err = " + err.Error())
-	}
 	code := t.Run()
 	os.Exit(code)
 }
@@ -40,13 +37,13 @@ func TestSegmentCache(t *testing.T) {
 
 	assert.False(t, segCache.checkIfCached(0))
 
-	segCache.Cache(UniqueID(0))
+	segCache.Cache(typeutil.UniqueID(0))
 	assert.True(t, segCache.checkIfCached(0))
 
-	assert.False(t, segCache.checkOrCache(UniqueID(1)))
+	assert.False(t, segCache.checkOrCache(typeutil.UniqueID(1)))
 	assert.True(t, segCache.checkIfCached(1))
-	assert.True(t, segCache.checkOrCache(UniqueID(1)))
+	assert.True(t, segCache.checkOrCache(typeutil.UniqueID(1)))
 
-	segCache.Remove(UniqueID(0))
+	segCache.Remove(typeutil.UniqueID(0))
 	assert.False(t, segCache.checkIfCached(0))
 }

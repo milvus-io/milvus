@@ -26,7 +26,6 @@
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -37,10 +36,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    explicit ScalarIndexSort(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
-
     BinarySet
     Serialize(const Config& config) override;
 
@@ -49,9 +44,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -68,9 +60,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     void
     Build(const Config& config = {}) override;
-
-    void
-    BuildV2(const Config& config = {}) override;
 
     const TargetBitmap
     In(size_t n, const T* values) override;
@@ -97,8 +86,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
-    BinarySet
-    UploadV2(const Config& config = {}) override;
 
     const bool
     HasRawData() const override {
@@ -133,7 +120,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
     std::vector<IndexStructure<T>> data_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 template <typename T>
@@ -147,12 +133,5 @@ inline ScalarIndexSortPtr<T>
 CreateScalarIndexSort(const storage::FileManagerContext& file_manager_context =
                           storage::FileManagerContext()) {
     return std::make_unique<ScalarIndexSort<T>>(file_manager_context);
-}
-
-template <typename T>
-inline ScalarIndexSortPtr<T>
-CreateScalarIndexSort(const storage::FileManagerContext& file_manager_context,
-                      std::shared_ptr<milvus_storage::Space> space) {
-    return std::make_unique<ScalarIndexSort<T>>(file_manager_context, space);
 }
 }  // namespace milvus::index

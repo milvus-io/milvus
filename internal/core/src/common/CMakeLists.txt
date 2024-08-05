@@ -24,6 +24,9 @@ set(COMMON_SRC
         EasyAssert.cpp
         FieldData.cpp
         RegexQuery.cpp
+        ChunkTarget.cpp
+        Chunk.cpp
+        ChunkWriter.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})

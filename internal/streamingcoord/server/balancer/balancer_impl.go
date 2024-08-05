@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -106,7 +108,7 @@ func (b *balancerImpl) execute() {
 		b.logger.Info("balancer execute finished")
 	}()
 
-	balanceTimer := newBalanceTimer()
+	balanceTimer := typeutil.NewBackoffTimer(&backoffConfigFetcher{})
 	nodeChanged, err := resource.Resource().StreamingNodeManagerClient().WatchNodeChanged(b.backgroundTaskNotifier.Context())
 	if err != nil {
 		b.logger.Error("fail to watch node changed", zap.Error(err))
@@ -283,4 +285,18 @@ func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allN
 		AssignedChannels: assigned,
 		AllNodesInfo:     allNodesInfo,
 	}
+}
+
+type backoffConfigFetcher struct{}
+
+func (f *backoffConfigFetcher) BackoffConfig() typeutil.BackoffConfig {
+	return typeutil.BackoffConfig{
+		InitialInterval: paramtable.Get().StreamingCoordCfg.AutoBalanceBackoffInitialInterval.GetAsDurationByParse(),
+		Multiplier:      paramtable.Get().StreamingCoordCfg.AutoBalanceBackoffMultiplier.GetAsFloat(),
+		MaxInterval:     paramtable.Get().StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse(),
+	}
+}
+
+func (f *backoffConfigFetcher) DefaultInterval() time.Duration {
+	return paramtable.Get().StreamingCoordCfg.AutoBalanceTriggerInterval.GetAsDurationByParse()
 }

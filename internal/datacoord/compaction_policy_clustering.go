@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type clusteringCompactionPolicy struct {
@@ -197,27 +195,27 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	return false, 0
 }
 
-func calculateClusteringCompactionConfig(view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
+func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
 		segmentIDs = append(segmentIDs, s.ID)
 	}
-	clusteringMaxSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSize.GetAsSize()
-	clusteringPreferSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize()
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	maxSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringMaxSegmentSize / segmentMaxSize
-	preferSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringPreferSegmentSize / segmentMaxSize
+	clusteringMaxSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat()
+	clusteringPreferSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
+
+	maxRows, err := calBySegmentSizePolicy(coll.Schema, expectedSegmentSize)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	maxSegmentRows = int64(float64(maxRows) * clusteringMaxSegmentSizeRatio)
+	preferSegmentRows = int64(float64(maxRows) * clusteringPreferSegmentSizeRatio)
 	return
 }
 
 func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
-	partitionStatsInfos := meta.partitionStatsMeta.ListPartitionStatsInfos(collectionID, partitionID, channel)
-	sort.Slice(partitionStatsInfos, func(i, j int) bool {
-		return partitionStatsInfos[i].Version > partitionStatsInfos[j].Version
-	})
-
-	if len(partitionStatsInfos) == 0 {
+	currentVersion := meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
+	if currentVersion == 0 {
 		var newDataSize int64 = 0
 		for _, seg := range segments {
 			newDataSize += seg.getSegmentSize()
@@ -230,9 +228,13 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 		return false, nil
 	}
 
-	partitionStats := partitionStatsInfos[0]
-	version := partitionStats.Version
-	pTime, _ := tsoutil.ParseTS(uint64(version))
+	partitionStats := meta.GetPartitionStatsMeta().GetPartitionStats(collectionID, partitionID, channel, currentVersion)
+	if partitionStats == nil {
+		log.Info("partition stats not found")
+		return false, nil
+	}
+	timestampSeconds := partitionStats.GetCommitTime()
+	pTime := time.Unix(timestampSeconds, 0)
 	if time.Since(pTime) < Params.DataCoordCfg.ClusteringCompactionMinInterval.GetAsDuration(time.Second) {
 		log.Info("Too short time before last clustering compaction, skip compaction")
 		return false, nil

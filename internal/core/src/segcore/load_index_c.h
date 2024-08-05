@@ -63,9 +63,6 @@ CStatus
 AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info);
 
 CStatus
-AppendIndexV3(CLoadIndexInfo c_load_index_info);
-
-CStatus
 AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
                                    int32_t index_engine_version);
 

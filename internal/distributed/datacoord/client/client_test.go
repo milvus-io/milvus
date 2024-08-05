@@ -2271,3 +2271,50 @@ func Test_ListIndexes(t *testing.T) {
 	_, err = client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func Test_GetChannelRecoveryInfo(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetChannelRecoveryInfoResponse{
+		Status: merr.Success(),
+	}, nil).Once()
+	_, err = client.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).Return(
+		&datapb.GetChannelRecoveryInfoResponse{
+			Status: merr.Status(merr.ErrServiceNotReady),
+		}, nil).Once()
+
+	rsp, err := client.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{})
+
+	assert.Nil(t, err)
+	assert.False(t, merr.Ok(rsp.GetStatus()))
+
+	// test return error
+	mockDC.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).Return(nil, mockErr).Once()
+	_, err = client.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{})
+	assert.Error(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = client.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{})
+	assert.ErrorIs(t, err, context.Canceled)
+}

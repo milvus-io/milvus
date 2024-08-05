@@ -20,7 +20,7 @@ type InsertParams struct {
 	IsRows        bool
 }
 
-func NewInsertParams(schema *entity.Schema, nb int) *InsertParams {
+func NewInsertParams(schema *entity.Schema) *InsertParams {
 	return &InsertParams{
 		Schema: schema,
 	}

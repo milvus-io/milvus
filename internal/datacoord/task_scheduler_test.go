@@ -732,14 +732,26 @@ func (s *taskSchedulerSuite) TearDownSuite() {
 func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	ctx := context.Background()
 
+	var once sync.Once
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskSlowThreshold.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TaskSlowThreshold.Key)
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task *indexpb.AnalyzeTask) error {
+		once.Do(func() {
+			time.Sleep(time.Second * 3)
+		})
+		return nil
+	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+			once.Do(func() {
+				time.Sleep(time.Second * 3)
+			})
 			switch request.GetJobType() {
 			case indexpb.JobType_JobTypeIndexJob:
 				results := make([]*indexpb.IndexTaskInfo, 0)
@@ -815,6 +827,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	mt.segments.DropSegment(segID + 9)
 
 	scheduler.scheduleDuration = time.Millisecond * 500
+	scheduler.collectMetricsDuration = time.Millisecond * 200
 	scheduler.Start()
 
 	s.Run("enqueue", func() {
@@ -909,15 +922,6 @@ func (s *taskSchedulerSuite) Test_scheduler() {
 	s.Run("test scheduler with indexBuilderV1", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-		s.scheduler(handler)
-	})
-
-	s.Run("test scheduler with indexBuilderV2", func() {
-		paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("true")
-		defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
-		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
-		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-
 		s.scheduler(handler)
 	})
 }
@@ -1289,24 +1293,9 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
-		err := Params.Save("common.storage.scheme", "fake")
-		defer Params.Reset("common.storage.scheme")
-		Params.CommonCfg.EnableStorageV2.SwapTempValue("True")
-		defer Params.CommonCfg.EnableStorageV2.SwapTempValue("False")
 		scheduler.Start()
 
 		// get collection info failed --> init
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
-
-		// partition key field is nil, get collection info failed  --> init
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-			ID: collID,
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
-				},
-			},
-		}, nil).Once()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
 		// get collection info success, get dim failed --> init
@@ -1318,38 +1307,11 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 					{FieldID: s.fieldID, Name: "vec"},
 				},
 			},
-		}, nil).Twice()
-
-		// peek client success, update version success, get collection info success, get dim success, get storage uri failed --> init
-		s.NoError(err)
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*collectionInfo, error) {
-			return &collectionInfo{
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", IsPrimaryKey: true, IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
-					},
-				},
-			}, nil
-		}).Twice()
-		s.NoError(err)
+		}, nil).Once()
 
 		// assign failed --> retry
 		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*collectionInfo, error) {
-			Params.Reset("common.storage.scheme")
-			return &collectionInfo{
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", IsPrimaryKey: true, IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
-					},
-				},
-			}, nil
-		}).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 
 		// retry --> init

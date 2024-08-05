@@ -71,7 +71,7 @@ $ for image in $(find . -type f -wholename "./images/*.tar.gz") ; do gunzip -c $
 ### With Docker Compose
 
 ```shell
-$ docker-compose -f docker-compose.yml up -d
+$ docker compose -f docker-compose.yml up -d
 ```
 
 ### On Kubernetes
@@ -85,7 +85,7 @@ $ kubectl apply -f milvus_manifest.yaml
 ### With Docker Compose
 
 ```shell
-$ docker-compose -f docker-compose.yml down
+$ docker compose -f docker-compose.yml down
 ```
 
 ### On Kubernetes

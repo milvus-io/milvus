@@ -115,12 +115,6 @@ class SegmentInterface {
     virtual void
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
 
-    virtual void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) = 0;
-
-    virtual void
-    RemoveDuplicatePkRecords() = 0;
-
     virtual int64_t
     get_segment_id() const = 0;
 
@@ -129,6 +123,9 @@ class SegmentInterface {
 
     virtual bool
     HasRawData(int64_t field_id) const = 0;
+
+    virtual bool
+    is_nullable(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -142,23 +139,26 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    std::vector<ViewType>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
     chunk_view(FieldId field_id, int64_t chunk_id) const {
-        auto string_views = chunk_view_impl(field_id, chunk_id);
+        auto chunk_info = chunk_view_impl(field_id, chunk_id);
+        auto string_views = chunk_info.first;
+        auto valid_data = chunk_info.second;
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return std::move(string_views);
+            return std::make_pair(std::move(string_views),
+                                  std::move(valid_data));
         } else {
             std::vector<ViewType> res;
             res.reserve(string_views.size());
             for (const auto& view : string_views) {
                 res.emplace_back(view);
             }
-            return res;
+            return std::make_pair(res, valid_data);
         }
     }
 
     template <typename ViewType>
-    std::vector<ViewType>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
     get_batch_views(FieldId field_id,
                     int64_t chunk_id,
                     int64_t start_offset,
@@ -167,8 +167,9 @@ class SegmentInternalInterface : public SegmentInterface {
             PanicInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        BufferView buffer =
+        auto chunk_info =
             get_chunk_buffer(field_id, chunk_id, start_offset, length);
+        BufferView buffer = chunk_info.first;
         std::vector<ViewType> res;
         res.reserve(length);
         char* pos = buffer.data_;
@@ -179,7 +180,7 @@ class SegmentInternalInterface : public SegmentInterface {
             res.emplace_back(ViewType(pos, size));
             pos += size;
         }
-        return res;
+        return std::make_pair(res, chunk_info.second);
     }
 
     template <typename T>
@@ -336,9 +337,7 @@ class SegmentInternalInterface : public SegmentInterface {
      * @return All candidates offsets.
      */
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const = 0;
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
 
     void
     FillTargetEntry(
@@ -355,16 +354,17 @@ class SegmentInternalInterface : public SegmentInterface {
     is_mmap_field(FieldId field_id) const = 0;
 
  protected:
+    // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
     virtual SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual std::vector<std::string_view>
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // internal API: return buffer reference to field chunk data located from start_offset
-    virtual BufferView
+    virtual std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,
@@ -389,9 +389,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
-
-    virtual void
-    check_retrieve(const query::RetrievePlan* plan) const = 0;
 
     virtual const ConcurrentVector<Timestamp>&
     get_timestamps() const = 0;

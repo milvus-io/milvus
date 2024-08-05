@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -36,19 +37,24 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	streamingnodeserver "github.com/milvus-io/milvus/internal/streamingnode/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,6 +65,7 @@ type Server struct {
 
 	// session of current server.
 	session *sessionutil.Session
+	metaKV  kv.MetaKv
 
 	// server
 	streamingnode *streamingnodeserver.Server
@@ -69,6 +76,7 @@ type Server struct {
 
 	// component client
 	etcdCli   *clientv3.Client
+	tikvCli   *txnkv.Client
 	rootCoord types.RootCoordClient
 	dataCoord types.DataCoordClient
 }
@@ -112,13 +120,13 @@ func (s *Server) stop() {
 		log.Warn("streamingnode unregister session failed", zap.Error(err))
 	}
 
-	// Stop grpc server.
-	log.Info("streamingnode stop grpc server...")
-	s.grpcServer.GracefulStop()
-
 	// Stop StreamingNode service.
 	log.Info("streamingnode stop service...")
 	s.streamingnode.Stop()
+
+	// Stop grpc server.
+	log.Info("streamingnode stop grpc server...")
+	s.grpcServer.GracefulStop()
 
 	// Stop all session
 	log.Info("streamingnode stop session...")
@@ -128,6 +136,13 @@ func (s *Server) stop() {
 	log.Info("streamingnode stop rootCoord client...")
 	if err := s.rootCoord.Close(); err != nil {
 		log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
+	}
+
+	// Stop tikv
+	if s.tikvCli != nil {
+		if err := s.tikvCli.Close(); err != nil {
+			log.Warn("streamingnode stop tikv client failed", zap.Error(err))
+		}
 	}
 
 	// Wait for grpc server to stop.
@@ -153,6 +168,9 @@ func (s *Server) init() (err error) {
 	// Create etcd client.
 	s.etcdCli, _ = kvfactory.GetEtcdAndPath()
 
+	if err := s.initMeta(); err != nil {
+		return err
+	}
 	if err := s.allocateAddress(); err != nil {
 		return err
 	}
@@ -174,6 +192,7 @@ func (s *Server) init() (err error) {
 		WithRootCoordClient(s.rootCoord).
 		WithDataCoordClient(s.dataCoord).
 		WithSession(s.session).
+		WithMetaKV(s.metaKV).
 		Build()
 	if err := s.streamingnode.Init(context.Background()); err != nil {
 		return errors.Wrap(err, "StreamingNode service init failed")
@@ -215,6 +234,29 @@ func (s *Server) initSession() error {
 	s.session.Init(typeutil.StreamingNodeRole, addr, false, true)
 	paramtable.SetNodeID(s.session.ServerID)
 	log.Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", addr))
+	return nil
+}
+
+func (s *Server) initMeta() error {
+	params := paramtable.Get()
+	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
+	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
+	metaRootPath := ""
+	if metaType == util.MetaStoreTypeTiKV {
+		var err error
+		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
+		if err != nil {
+			log.Warn("Streamingnode init tikv client failed", zap.Error(err))
+			return err
+		}
+		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
+		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
+			tikvkv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+	} else if metaType == util.MetaStoreTypeEtcd {
+		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
+		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
+			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+	}
 	return nil
 }
 

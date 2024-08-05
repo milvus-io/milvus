@@ -36,7 +36,6 @@
 #include "index/Utils.h"
 #include "index/Index.h"
 #include "storage/Util.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -45,16 +44,6 @@ StringIndexMarisa::StringIndexMarisa(
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-    }
-}
-
-StringIndexMarisa::StringIndexMarisa(
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space)
-    : space_(space) {
-    if (file_manager_context.Valid()) {
-        file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
-            file_manager_context, space_);
     }
 }
 
@@ -68,65 +57,6 @@ valid_str_id(size_t str_id) {
     return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
 }
 
-void
-StringIndexMarisa::BuildV2(const Config& config) {
-    if (built_) {
-        throw std::runtime_error("index has been built");
-    }
-    auto field_name = file_manager_->GetIndexMeta().field_name;
-    auto reader = space_->ScanData();
-    std::vector<FieldDataPtr> field_datas;
-    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
-        if (!rec.ok()) {
-            PanicInfo(DataFormatBroken, "failed to read data");
-        }
-        auto data = rec.ValueUnsafe();
-        auto total_num_rows = data->num_rows();
-        auto col_data = data->GetColumnByName(field_name);
-        auto nullable =
-            col_data->type()->id() == arrow::Type::NA ? true : false;
-        // will support build scalar index when nullable in the future just skip it
-        // now, not support to build index in nullable field_data
-        // todo: support nullable index
-        AssertInfo(!nullable,
-                   "not support to build index in nullable field_data");
-        auto field_data = storage::CreateFieldData(
-            DataType::STRING, nullable, 0, total_num_rows);
-        field_data->FillFieldData(col_data);
-        field_datas.push_back(field_data);
-    }
-    int64_t total_num_rows = 0;
-
-    // fill key set.
-    marisa::Keyset keyset;
-    for (auto data : field_datas) {
-        auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
-            keyset.push_back(
-                (*static_cast<const std::string*>(data->RawValue(i))).c_str());
-        }
-        total_num_rows += slice_num;
-    }
-    trie_.build(keyset);
-
-    // fill str_ids_
-    str_ids_.resize(total_num_rows);
-    int64_t offset = 0;
-    for (auto data : field_datas) {
-        auto slice_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_num; ++i) {
-            auto str_id =
-                lookup(*static_cast<const std::string*>(data->RawValue(i)));
-            AssertInfo(valid_str_id(str_id), "invalid marisa key");
-            str_ids_[offset++] = str_id;
-        }
-    }
-
-    // fill str_ids_to_offsets_
-    fill_offsets();
-
-    built_ = true;
-}
 void
 StringIndexMarisa::Build(const Config& config) {
     if (built_) {
@@ -245,20 +175,6 @@ StringIndexMarisa::Upload(const Config& config) {
     return ret;
 }
 
-BinarySet
-StringIndexMarisa::UploadV2(const Config& config) {
-    auto binary_set = Serialize(config);
-    file_manager_->AddFileV2(binary_set);
-
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
-}
-
 void
 StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
                                        const Config& config) {
@@ -317,46 +233,6 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
         binary_set.Append(key, buf, size);
-    }
-
-    LoadWithoutAssemble(binary_set, config);
-}
-
-void
-StringIndexMarisa::LoadV2(const Config& config) {
-    auto blobs = space_->StatisticsBlobs();
-    std::vector<std::string> index_files;
-    auto prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
-    for (auto& b : blobs) {
-        if (b.name.rfind(prefix, 0) == 0) {
-            index_files.push_back(b.name);
-        }
-    }
-    std::map<std::string, FieldDataPtr> index_datas{};
-    for (auto& file_name : index_files) {
-        auto res = space_->GetBlobByteSize(file_name);
-        if (!res.ok()) {
-            PanicInfo(DataFormatBroken, "unable to read index blob");
-        }
-        auto index_blob_data =
-            std::shared_ptr<uint8_t[]>(new uint8_t[res.value()]);
-        auto status = space_->ReadBlob(file_name, index_blob_data.get());
-        if (!status.ok()) {
-            PanicInfo(DataFormatBroken, "unable to read index blob");
-        }
-        auto raw_index_blob =
-            storage::DeserializeFileData(index_blob_data, res.value());
-        index_datas[file_name] = raw_index_blob->GetFieldData();
-    }
-    AssembleIndexDatas(index_datas);
-    BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        auto file_name = key.substr(key.find_last_of('/') + 1);
-        binary_set.Append(file_name, buf, size);
     }
 
     LoadWithoutAssemble(binary_set, config);

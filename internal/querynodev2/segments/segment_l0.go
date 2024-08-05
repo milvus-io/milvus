@@ -23,7 +23,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -159,10 +158,6 @@ func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.Delete
 	s.pks = append(s.pks, deltaData.Pks...)
 	s.tss = append(s.tss, deltaData.Tss...)
 	return nil
-}
-
-func (s *L0Segment) LoadDeltaData2(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	return merr.WrapErrServiceInternal("not implemented")
 }
 
 func (s *L0Segment) DeleteRecords() ([]storage.PrimaryKey, []uint64) {

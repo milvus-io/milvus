@@ -19,16 +19,15 @@ package datacoord
 import (
 	"context"
 	"path"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	itypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -40,6 +39,10 @@ type indexBuildTask struct {
 	taskID   int64
 	nodeID   int64
 	taskInfo *indexpb.IndexTaskInfo
+
+	queueTime time.Time
+	startTime time.Time
+	endTime   time.Time
 
 	req *indexpb.CreateJobRequest
 }
@@ -56,6 +59,34 @@ func (it *indexBuildTask) GetNodeID() int64 {
 
 func (it *indexBuildTask) ResetNodeID() {
 	it.nodeID = 0
+}
+
+func (it *indexBuildTask) SetQueueTime(t time.Time) {
+	it.queueTime = t
+}
+
+func (it *indexBuildTask) GetQueueTime() time.Time {
+	return it.queueTime
+}
+
+func (it *indexBuildTask) SetStartTime(t time.Time) {
+	it.startTime = t
+}
+
+func (it *indexBuildTask) GetStartTime() time.Time {
+	return it.startTime
+}
+
+func (it *indexBuildTask) SetEndTime(t time.Time) {
+	it.endTime = t
+}
+
+func (it *indexBuildTask) GetEndTime() time.Time {
+	return it.endTime
+}
+
+func (it *indexBuildTask) GetTaskType() string {
+	return indexpb.JobType_JobTypeIndexJob.String()
 }
 
 func (it *indexBuildTask) CheckTaskHealthy(mt *meta) bool {
@@ -201,68 +232,27 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		}
 	}
 
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to get storage uri", zap.Error(err))
-			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return true
-		}
-		indexStorePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue()+"/index", segment.GetID())
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to get storage uri", zap.Error(err))
-			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return true
-		}
-
-		it.req = &indexpb.CreateJobRequest{
-			ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:               it.taskID,
-			IndexVersion:          segIndex.IndexVersion + 1,
-			StorageConfig:         storageConfig,
-			IndexParams:           indexParams,
-			TypeParams:            typeParams,
-			NumRows:               segIndex.NumRows,
-			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-			CollectionID:          segment.GetCollectionID(),
-			PartitionID:           segment.GetPartitionID(),
-			SegmentID:             segment.GetID(),
-			FieldID:               fieldID,
-			FieldName:             field.GetName(),
-			FieldType:             field.GetDataType(),
-			StorePath:             storePath,
-			StoreVersion:          segment.GetStorageVersion(),
-			IndexStorePath:        indexStorePath,
-			Dim:                   int64(dim),
-			DataIds:               binlogIDs,
-			OptionalScalarFields:  optionalFields,
-			Field:                 field,
-			PartitionKeyIsolation: partitionKeyIsolation,
-		}
-	} else {
-		it.req = &indexpb.CreateJobRequest{
-			ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:               it.taskID,
-			IndexVersion:          segIndex.IndexVersion + 1,
-			StorageConfig:         storageConfig,
-			IndexParams:           indexParams,
-			TypeParams:            typeParams,
-			NumRows:               segIndex.NumRows,
-			CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-			CollectionID:          segment.GetCollectionID(),
-			PartitionID:           segment.GetPartitionID(),
-			SegmentID:             segment.GetID(),
-			FieldID:               fieldID,
-			FieldName:             field.GetName(),
-			FieldType:             field.GetDataType(),
-			Dim:                   int64(dim),
-			DataIds:               binlogIDs,
-			OptionalScalarFields:  optionalFields,
-			Field:                 field,
-			PartitionKeyIsolation: partitionKeyIsolation,
-		}
+	it.req = &indexpb.CreateJobRequest{
+		ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
+		IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
+		BuildID:               it.taskID,
+		IndexVersion:          segIndex.IndexVersion + 1,
+		StorageConfig:         storageConfig,
+		IndexParams:           indexParams,
+		TypeParams:            typeParams,
+		NumRows:               segIndex.NumRows,
+		CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+		CollectionID:          segment.GetCollectionID(),
+		PartitionID:           segment.GetPartitionID(),
+		SegmentID:             segment.GetID(),
+		FieldID:               fieldID,
+		FieldName:             field.GetName(),
+		FieldType:             field.GetDataType(),
+		Dim:                   int64(dim),
+		DataIds:               binlogIDs,
+		OptionalScalarFields:  optionalFields,
+		Field:                 field,
+		PartitionKeyIsolation: partitionKeyIsolation,
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()))

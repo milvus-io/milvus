@@ -21,12 +21,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestInsertMsg_TimeTick(te *testing.T) {
 	tests := []struct {
-		timeTimestanpMax util.Timestamp
+		timeTimestanpMax typeutil.Timestamp
 
 		description string
 	}{

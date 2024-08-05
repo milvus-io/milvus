@@ -24,7 +24,7 @@ func TestSearchDefault(t *testing.T) {
 
 	// create -> insert -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -44,7 +44,7 @@ func TestSearchDefaultGrowing(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 
 	// search
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
@@ -190,7 +190,7 @@ func TestSearchEmptyOutputFields(t *testing.T) {
 
 	for _, dynamic := range []bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(dynamic))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 100), hp.TNewDataOption())
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(100))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -220,7 +220,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 
 	for _, enableDynamic := range []bool{false, true} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamic))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -262,7 +262,7 @@ func TestSearchOutputAllFields(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -290,7 +290,7 @@ func TestSearchOutputBinaryPk(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -316,7 +316,7 @@ func TestSearchOutputSparse(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -342,7 +342,7 @@ func TestSearchInvalidVectorField(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -384,7 +384,7 @@ func TestSearchInvalidVectors(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -460,7 +460,7 @@ func TestSearchNotMatchMetricType(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).
 		TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewHNSWIndex(entity.COSINE, 8, 200)}))
@@ -477,7 +477,7 @@ func TestSearchInvalidTopK(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -495,7 +495,7 @@ func TestSearchInvalidOffset(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -519,7 +519,7 @@ func TestSearchEfHnsw(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).
 		TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: index.NewHNSWIndex(entity.COSINE, 8, 200)}))
@@ -542,7 +542,7 @@ func TestSearchInvalidScannReorderK(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 500), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
 		common.DefaultFloatVecFieldName: index.NewSCANNIndex(entity.COSINE, 16, true),
@@ -588,7 +588,7 @@ func TestSearchExpr(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -620,7 +620,7 @@ func TestSearchInvalidExpr(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -665,7 +665,7 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(dynamicField))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -689,7 +689,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -751,7 +751,7 @@ func TestSearchArrayFieldExpr(t *testing.T) {
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecArray), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -802,7 +802,7 @@ func TestSearchNotExistedExpr(t *testing.T) {
 	for _, isDynamic := range [2]bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(isDynamic))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -828,7 +828,7 @@ func TestSearchMultiVectors(t *testing.T) {
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb*2), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(common.DefaultNb*2))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	flatIndex := index.NewFlatIndex(entity.L2)
 	binIndex := index.NewGenericIndex(common.DefaultBinaryVecFieldName, map[string]string{"nlist": "64", index.MetricTypeKey: "JACCARD", index.IndexTypeKey: "BIN_IVF_FLAT"})
@@ -895,7 +895,7 @@ func TestSearchSparseVector(t *testing.T) {
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(true))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb*2), hp.TNewDataOption().TWithSparseMaxLen(128))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128).TWithNb(common.DefaultNb*2))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -929,7 +929,7 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(true))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -964,7 +964,7 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(true))
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -1002,7 +1002,7 @@ func TestRangeSearchSparseVector(t *testing.T) {
 		TWithEnableDynamicField(true))
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithSparseMaxLen(128))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// TODO range search

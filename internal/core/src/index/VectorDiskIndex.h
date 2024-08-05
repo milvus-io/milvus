@@ -21,7 +21,6 @@
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus::index {
 
@@ -32,14 +31,6 @@ class VectorDiskAnnIndex : public VectorIndex {
         const IndexType& index_type,
         const MetricType& metric_type,
         const IndexVersion& version,
-        const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
-
-    explicit VectorDiskAnnIndex(
-        const IndexType& index_type,
-        const MetricType& metric_type,
-        const IndexVersion& version,
-        std::shared_ptr<milvus_storage::Space> space,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -58,9 +49,6 @@ class VectorDiskAnnIndex : public VectorIndex {
     BinarySet
     Upload(const Config& config = {}) override;
 
-    BinarySet
-    UploadV2(const Config& config = {}) override;
-
     int64_t
     Count() override {
         return index_.Count();
@@ -74,17 +62,11 @@ class VectorDiskAnnIndex : public VectorIndex {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     void
-    LoadV2(const Config& config = {}) override;
-
-    void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override;
 
     void
     Build(const Config& config = {}) override;
-
-    void
-    BuildV2(const Config& config = {}) override;
 
     void
     Query(const DatasetPtr dataset,
@@ -119,7 +101,6 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
     uint32_t search_beamwidth_ = 8;
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 template <typename T>

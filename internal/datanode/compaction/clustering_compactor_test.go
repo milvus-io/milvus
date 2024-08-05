@@ -26,13 +26,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus-storage/go/common/log"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -72,7 +70,6 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockAlloc.EXPECT().Alloc(mock.Anything).RunAndReturn(func(x uint32) (int64, int64, error) {
 		start := s.mockID.Load()
 		end := s.mockID.Add(int64(x))
-		log.Info("wayblink", zap.Int64("start", start), zap.Int64("end", end))
 		return start, end, nil
 	}).Maybe()
 	s.mockAlloc.EXPECT().AllocOne().RunAndReturn(func() (int64, error) {

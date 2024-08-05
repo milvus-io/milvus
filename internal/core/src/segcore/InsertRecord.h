@@ -63,18 +63,10 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const = 0;
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
 
     virtual void
     clear() = 0;
-
-    virtual std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
-
-    virtual void
-    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) = 0;
 };
 
 template <typename T>
@@ -103,57 +95,6 @@ class OffsetOrderedMap : public OffsetMap {
         map_[std::get<T>(pk)].emplace_back(offset);
     }
 
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        std::shared_lock<std::shared_mutex> lck(mtx_);
-        std::vector<PkType> remove_pks;
-        std::vector<Timestamp> remove_timestamps;
-
-        for (auto& [pk, offsets] : map_) {
-            if (offsets.size() > 1) {
-                // find max timestamp offset
-                int64_t max_timestamp_offset = 0;
-                for (auto& offset : offsets) {
-                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
-                        max_timestamp_offset = offset;
-                    }
-                }
-
-                remove_pks.push_back(pk);
-                remove_timestamps.push_back(timestamps[max_timestamp_offset]);
-            }
-        }
-
-        return std::make_pair(remove_pks, remove_timestamps);
-    }
-
-    void
-    remove_duplicate_pks(
-        const ConcurrentVector<Timestamp>& timestamps) override {
-        std::unique_lock<std::shared_mutex> lck(mtx_);
-
-        for (auto& [pk, offsets] : map_) {
-            if (offsets.size() > 1) {
-                // find max timestamp offset
-                int64_t max_timestamp_offset = 0;
-                for (auto& offset : offsets) {
-                    if (timestamps[offset] > timestamps[max_timestamp_offset]) {
-                        max_timestamp_offset = offset;
-                    }
-                }
-
-                // remove other offsets from pk index
-                offsets.erase(
-                    std::remove_if(offsets.begin(),
-                                   offsets.end(),
-                                   [max_timestamp_offset](int64_t val) {
-                                       return val != max_timestamp_offset;
-                                   }),
-                    offsets.end());
-            }
-        }
-    }
-
     void
     seal() override {
         PanicInfo(
@@ -169,9 +110,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
+    find_first(int64_t limit, const BitsetType& bitset) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -180,7 +119,7 @@ class OffsetOrderedMap : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset, false_filtered_out);
+        return find_first_by_index(limit, bitset);
     }
 
     void
@@ -191,15 +130,10 @@ class OffsetOrderedMap : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit,
-                        const BitsetType& bitset,
-                        bool false_filtered_out) const {
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
-        int64_t cnt = bitset.count();
         auto size = bitset.size();
-        if (!false_filtered_out) {
-            cnt = size - bitset.count();
-        }
+        int64_t cnt = size - bitset.count();
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -214,7 +148,7 @@ class OffsetOrderedMap : public OffsetMap {
                     continue;
                 }
 
-                if (!(bitset[seg_offset] ^ false_filtered_out)) {
+                if (!bitset[seg_offset]) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
                     // PK hit, no need to continue traversing offsets with the same PK.
@@ -277,63 +211,6 @@ class OffsetOrderedArray : public OffsetMap {
             std::make_pair(std::get<T>(pk), static_cast<int32_t>(offset)));
     }
 
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        std::vector<PkType> remove_pks;
-        std::vector<Timestamp> remove_timestamps;
-
-        // cached pks(key, max_timestamp_offset)
-        std::unordered_map<T, int64_t> pks;
-        std::unordered_set<T> need_removed_pks;
-        for (auto it = array_.begin(); it != array_.end(); ++it) {
-            const T& key = it->first;
-            if (pks.find(key) == pks.end()) {
-                pks.insert({key, it->second});
-            } else {
-                need_removed_pks.insert(key);
-                if (timestamps[it->second] > timestamps[pks[key]]) {
-                    pks[key] = it->second;
-                }
-            }
-        }
-
-        // return max_timestamps that removed pks
-        for (auto& pk : need_removed_pks) {
-            remove_pks.push_back(pk);
-            remove_timestamps.push_back(timestamps[pks[pk]]);
-        }
-        return std::make_pair(remove_pks, remove_timestamps);
-    }
-
-    void
-    remove_duplicate_pks(const ConcurrentVector<Timestamp>& timestamps) {
-        // cached pks(key, max_timestamp_offset)
-        std::unordered_map<T, int64_t> pks;
-        std::unordered_set<T> need_removed_pks;
-        for (auto it = array_.begin(); it != array_.end(); ++it) {
-            const T& key = it->first;
-            if (pks.find(key) == pks.end()) {
-                pks.insert({key, it->second});
-            } else {
-                need_removed_pks.insert(key);
-                if (timestamps[it->second] > timestamps[pks[key]]) {
-                    pks[key] = it->second;
-                }
-            }
-        }
-
-        // remove duplicate pks
-        for (auto it = array_.begin(); it != array_.end();) {
-            const T& key = it->first;
-            auto max_offset = pks[key];
-            if (max_offset != it->second) {
-                it = array_.erase(it);
-            } else {
-                it++;
-            }
-        }
-    }
-
     void
     seal() override {
         sort(array_.begin(), array_.end());
@@ -346,9 +223,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
+    find_first(int64_t limit, const BitsetType& bitset) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -357,7 +232,7 @@ class OffsetOrderedArray : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset, false_filtered_out);
+        return find_first_by_index(limit, bitset);
     }
 
     void
@@ -368,15 +243,10 @@ class OffsetOrderedArray : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit,
-                        const BitsetType& bitset,
-                        bool false_filtered_out) const {
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
-        int64_t cnt = bitset.count();
         auto size = bitset.size();
-        if (!false_filtered_out) {
-            cnt = size - bitset.count();
-        }
+        int64_t cnt = size - bitset.count();
         auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
@@ -389,7 +259,7 @@ class OffsetOrderedArray : public OffsetMap {
                 continue;
             }
 
-            if (!(bitset[seg_offset] ^ false_filtered_out)) {
+            if (!bitset[seg_offset]) {
                 seg_offsets.push_back(seg_offset);
                 hit_num++;
             }
@@ -458,6 +328,13 @@ class ThreadSafeValidData {
         std::shared_lock<std::shared_mutex> lck(mutex_);
         Assert(offset < length_);
         return data_[offset];
+    }
+
+    bool*
+    get_chunk_data(size_t offset) {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        Assert(offset < length_);
+        return &data_[offset];
     }
 
  private:
@@ -697,26 +574,6 @@ struct InsertRecord {
     }
 
     bool
-    insert_with_check_existence(const PkType& pk, int64_t offset) {
-        std::lock_guard lck(shared_mutex_);
-        auto exist = pk2offset_->contain(pk);
-        pk2offset_->insert(pk, offset);
-        return exist;
-    }
-
-    std::pair<std::vector<PkType>, std::vector<Timestamp>>
-    get_need_removed_pks() {
-        std::lock_guard lck(shared_mutex_);
-        return pk2offset_->get_need_removed_pks(timestamps_);
-    }
-
-    void
-    remove_duplicate_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_->remove_duplicate_pks(timestamps_);
-    }
-
-    bool
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
         return pk2offset_->empty();
@@ -770,8 +627,28 @@ struct InsertRecord {
     }
 
     bool
-    is_valid_data_exist(FieldId field_id) {
+    is_data_exist(FieldId field_id) const {
+        return data_.find(field_id) != data_.end();
+    }
+
+    bool
+    is_valid_data_exist(FieldId field_id) const {
         return valid_data_.find(field_id) != valid_data_.end();
+    }
+
+    SpanBase
+    get_span_base(FieldId field_id, int64_t chunk_id) const {
+        auto data = get_data_base(field_id);
+        if (is_valid_data_exist(field_id)) {
+            auto size = data->get_chunk_size(chunk_id);
+            auto element_offset = data->get_element_offset(chunk_id);
+            return SpanBase(
+                data->get_chunk_data(chunk_id),
+                get_valid_data(field_id)->get_chunk_data(element_offset),
+                size,
+                data->get_element_size());
+        }
+        return data->get_span_base(chunk_id);
     }
 
     // append a column of scalar or sparse float vector type
