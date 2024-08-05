@@ -7,8 +7,10 @@ from datetime import datetime
 import requests
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
-
-class MilvusCDCPerformanceTest:
+import sys
+logger.remove()
+logger.add(sink=sys.stdout, level="INFO")
+class MilvusCDCPerformance:
     def __init__(self, source_alias, target_alias, cdc_host):
         self.source_alias = source_alias
         self.target_alias = target_alias
@@ -66,14 +68,21 @@ class MilvusCDCPerformanceTest:
         self.cdc_paused = False
         logger.info("All CDC tasks resumed")
 
+    def pause_and_resume_cdc_tasks(self, duration):
+        time.sleep(duration / 3)
+        self.pause_cdc_tasks()
+        time.sleep(duration / 3)
+        self.resume_cdc_tasks()
+
     def setup_collections(self):
+        self.resume_cdc_tasks()
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="timestamp", dtype=DataType.INT64),
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=128)
         ]
         schema = CollectionSchema(fields, "Milvus CDC test collection")
-        c_name = "milvus_cdc_perf_test"
+        c_name = "milvus_cdc_perf_test" + datetime.now().strftime("%Y%m%d%H%M%S")
         # Create collections
         self.source_collection = Collection(c_name, schema, using=self.source_alias, num_shards=4)
         time.sleep(5)
@@ -107,7 +116,8 @@ class MilvusCDCPerformanceTest:
                     "latest_ts": entities[0][-1],
                     "latest_count": self.insert_count
                 }  # Update the latest insert timestamp
-                # logger.info(f"insert_count: {self.insert_count}, latest_ts: {self.latest_insert_status['latest_ts']}")
+                if random.random() < 0.1:
+                    logger.debug(f"insert_count: {self.insert_count}, latest_ts: {self.latest_insert_status['latest_ts']}")
             time.sleep(0.01)  # Small delay to prevent overwhelming the system
 
     def continuous_query(self):
@@ -116,24 +126,43 @@ class MilvusCDCPerformanceTest:
                 latest_insert_ts = self.latest_insert_status["latest_ts"]
                 latest_insert_count = self.latest_insert_status["latest_count"]
             if latest_insert_ts > self.latest_query_ts:
+                try:
+                    t0 = time.time()
+                    results = self.target_collection.query(
+                        expr=f"timestamp == {latest_insert_ts}",
+                        output_fields=["timestamp"],
+                        limit=1
+                    )
+                    tt = time.time() - t0
+                    # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
+                    if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
+                        end_time = time.time()
+                        latency = end_time - (latest_insert_ts / 1000) - tt  # Convert milliseconds to seconds
+                        with self.sync_lock:
+                            self.latest_query_ts = latest_insert_ts
+                            self.latencies.append(latency)
+                        logger.debug(
+                            f"query latest_insert_ts: {latest_insert_ts}, results: {results} query latency: {latency} seconds")
+                except Exception as e:
+                    logger.error(f"Query failed: {e}")
+            time.sleep(0.01)  # Query interval
+
+    def continuous_count(self):
+        while not self.stop_query:
+            try:
                 t0 = time.time()
                 results = self.target_collection.query(
-                    expr=f"timestamp == {latest_insert_ts}",
-                    output_fields=["timestamp"],
-                    limit=1
+                    expr="",
+                    output_fields=["count(*)"],
                 )
                 tt = time.time() - t0
-                # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
-                if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
-
-                    end_time = time.time()
-                    latency = end_time - (latest_insert_ts / 1000) - tt  # Convert milliseconds to seconds
-                    with self.sync_lock:
-                        self.latest_query_ts = latest_insert_ts
-                        self.sync_count = latest_insert_count
-                        self.latencies.append(latency)
-                    # logger.debug(f"query latest_insert_ts: {latest_insert_ts}, results: {results} query cost time: {tt} seconds")
-                    # logger.debug(f"Synced {latest_insert_count}/{self.latest_insert_status['latest_count']} entities, latency: {latency:.2f} seconds")
+                count = results[0]['count(*)']
+                with self.sync_lock:
+                    self.sync_count = count
+                progress = (self.sync_count / self.insert_count) * 100 if self.insert_count > 0 else 0
+                logger.debug(f"sync progress {self.sync_count}/{self.insert_count} {progress:.2f}%")
+            except Exception as e:
+                logger.error(f"Count failed: {e}")
             time.sleep(0.01)  # Query interval
 
     def measure_performance(self, duration, batch_size, concurrency):
@@ -149,18 +178,14 @@ class MilvusCDCPerformanceTest:
         # Start continuous query thread
         query_thread = threading.Thread(target=self.continuous_query)
         query_thread.start()
+        count_thread = threading.Thread(target=self.continuous_count)
+        count_thread.start()
 
+        cdc_thread = threading.Thread(target=self.pause_and_resume_cdc_tasks, args=(duration,))
+        cdc_thread.start()
         # Start continuous insert threads
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = [executor.submit(self.continuous_insert, duration, batch_size) for _ in range(concurrency)]
-
-        # Pause CDC service after 1/3 of the test duration
-        pause_time = start_time + (duration / 3)
-        threading.Timer(pause_time - start_time, self.pause_cdc_tasks).start()
-
-        # Resume CDC service after 2/3 of the test duration
-        resume_time = start_time + (2 * duration / 3)
-        threading.Timer(resume_time - start_time, self.resume_cdc_tasks).start()
 
         # Wait for all insert operations to complete
         for future in futures:
@@ -168,6 +193,8 @@ class MilvusCDCPerformanceTest:
 
         self.stop_query = True
         query_thread.join()
+        count_thread.join()
+        cdc_thread.join()
 
         end_time = time.time()
         total_time = end_time - start_time
@@ -183,8 +210,6 @@ class MilvusCDCPerformanceTest:
         logger.info(f"Average latency: {avg_latency:.2f} seconds")
         logger.info(f"Min latency: {min(self.latencies):.2f} seconds")
         logger.info(f"Max latency: {max(self.latencies):.2f} seconds")
-        logger.info(f"CDC service paused at: {pause_time - start_time:.2f} seconds")
-        logger.info(f"CDC service resumed at: {resume_time - start_time:.2f} seconds")
 
         return total_time, self.insert_count, self.sync_count, insert_throughput, sync_throughput, avg_latency, min(
             self.latencies), max(self.latencies)
@@ -216,16 +241,17 @@ class MilvusCDCPerformanceTest:
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description='cdc perf test')
-    parser.add_argument('--source_uri', type=str, default='http://127.0.0.1:19530', help='source uri')
+    parser.add_argument('--source_uri', type=str, default='http://10.104.14.232:19530', help='source uri')
     parser.add_argument('--source_token', type=str, default='root:Milvus', help='source token')
-    parser.add_argument('--target_uri', type=str, default='http://127.0.0.1:19530', help='target uri')
+    parser.add_argument('--target_uri', type=str, default='http://10.104.34.103:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
-    parser.add_argument('--cdc_host', type=str, default='127.0.0.1', help='cdc host')
+    parser.add_argument('--cdc_host', type=str, default='10.104.4.90', help='cdc host')
 
     args = parser.parse_args()
 
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
-    cdc_test = MilvusCDCPerformanceTest("source", "target", args.cdc_host)
-    cdc_test.run_all_tests(duration=600, batch_size=1000, max_concurrency=20)
+    cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
+    cdc_test.run_all_tests(duration=100, batch_size=1000, max_concurrency=20)
