@@ -134,11 +134,15 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 			Level:     seg.GetLevel(),
 			NumOfRows: seg.GetNumOfRows(),
 		}
+		statsLogs := make([]*datapb.Binlog, 0)
 		for _, statsLog := range seg.GetStatslogs() {
 			if statsLog.GetFieldID() == pkFieldID {
-				req.SegmentInfos[seg.ID].PkStatsLog = statsLog
-				break
+				statsLogs = append(statsLogs, statsLog.GetBinlogs()...)
 			}
+		}
+		req.SegmentInfos[seg.ID].PkStatsLog = &datapb.FieldBinlog{
+			FieldID: pkFieldID,
+			Binlogs: statsLogs,
 		}
 	}
 
