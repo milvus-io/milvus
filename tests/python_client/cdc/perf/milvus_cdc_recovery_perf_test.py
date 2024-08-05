@@ -136,10 +136,12 @@ class MilvusCDCPerformance:
                                 output_fields=["timestamp"],
                                 limit=1
                             )
-                            break
                         except Exception as e:
                             logger.debug(f"Query failed: {e}")
-                            continue
+                        logger.debug(
+                            f"query latest_insert_ts: {latest_insert_ts}, results: {results} query latency: {time.time()-t0} seconds")
+                        if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
+                            break
                     tt = time.time() - t0
                     # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
                     if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
