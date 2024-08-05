@@ -156,11 +156,11 @@ class MilvusCDCPerformanceTest:
 
         # Pause CDC service after 1/3 of the test duration
         pause_time = start_time + (duration / 3)
-        threading.Timer(pause_time - start_time, self.pause_cdc_service).start()
+        threading.Timer(pause_time - start_time, self.pause_cdc_tasks).start()
 
         # Resume CDC service after 2/3 of the test duration
         resume_time = start_time + (2 * duration / 3)
-        threading.Timer(resume_time - start_time, self.resume_cdc_service).start()
+        threading.Timer(resume_time - start_time, self.resume_cdc_tasks).start()
 
         # Wait for all insert operations to complete
         for future in futures:
