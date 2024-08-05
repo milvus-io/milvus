@@ -5,7 +5,7 @@ go 1.21
 toolchain go1.21.10
 
 require (
-	github.com/milvus-io/milvus/client/v2 v2.0.0-20240801032013-9412002d7df4
+	github.com/milvus-io/milvus/client/v2 v2.0.0-20240805024817-4b553b0333f4
 	github.com/milvus-io/milvus/pkg v0.0.2-0.20240801085213-a642a26ed4c6
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/stretchr/testify v1.9.0
@@ -14,7 +14,7 @@ require (
 	google.golang.org/grpc v1.65.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240801032013-9412002d7df4 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 v2.0.0-20240805024817-4b553b0333f4 => ../../../milvus/client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
