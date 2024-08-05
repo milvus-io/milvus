@@ -73,7 +73,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    auto prefix = disk_file_manager_->GetIndexIdentifier();
     path_ = std::string(TMP_INVERTED_INDEX_PREFIX) + prefix;
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
