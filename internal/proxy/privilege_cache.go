@@ -20,8 +20,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (

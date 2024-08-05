@@ -346,7 +346,8 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 				size: *atomic.NewInt64(1024 * 1024 * 1024 * 10),
 			},
 		}, true},
-		{"very recent partition stats and enough new data",
+		{
+			"very recent partition stats and enough new data",
 			[]*datapb.PartitionStatsInfo{
 				{
 					CollectionID: collectionID,
@@ -361,8 +362,11 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 				{
 					size: *atomic.NewInt64(1024 * 1024 * 1024 * 10),
 				},
-			}, false},
-		{"very old partition stats and not enough new data",
+			},
+			false,
+		},
+		{
+			"very old partition stats and not enough new data",
 			[]*datapb.PartitionStatsInfo{
 				{
 					CollectionID: collectionID,
@@ -377,8 +381,11 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 				{
 					size: *atomic.NewInt64(1024),
 				},
-			}, true},
-		{"partition stats and enough new data",
+			},
+			true,
+		},
+		{
+			"partition stats and enough new data",
 			[]*datapb.PartitionStatsInfo{
 				{
 					CollectionID: collectionID,
@@ -395,8 +402,11 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 					SegmentInfo: &datapb.SegmentInfo{ID: 9999},
 					size:        *atomic.NewInt64(1024 * 1024 * 1024 * 10),
 				},
-			}, true},
-		{"partition stats and not enough new data",
+			},
+			true,
+		},
+		{
+			"partition stats and not enough new data",
 			[]*datapb.PartitionStatsInfo{
 				{
 					CollectionID: collectionID,
@@ -413,7 +423,9 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 					SegmentInfo: &datapb.SegmentInfo{ID: 9999},
 					size:        *atomic.NewInt64(1024),
 				},
-			}, false},
+			},
+			false,
+		},
 	}
 
 	for _, test := range tests {
