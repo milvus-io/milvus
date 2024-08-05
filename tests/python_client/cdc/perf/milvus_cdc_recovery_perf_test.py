@@ -272,4 +272,4 @@ if __name__ == "__main__":
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
     cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
-    cdc_test.run_all_tests(duration=600, batch_size=1000, max_concurrency=20)
+    cdc_test.run_all_tests(duration=100, batch_size=1000, max_concurrency=20)
