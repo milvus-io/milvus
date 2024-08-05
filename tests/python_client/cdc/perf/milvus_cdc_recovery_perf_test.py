@@ -127,12 +127,18 @@ class MilvusCDCPerformance:
                 latest_insert_count = self.latest_insert_status["latest_count"]
             if latest_insert_ts > self.latest_query_ts:
                 try:
+                    results = []
                     t0 = time.time()
-                    results = self.target_collection.query(
-                        expr=f"timestamp == {latest_insert_ts}",
-                        output_fields=["timestamp"],
-                        limit=1
-                    )
+                    while True and (time.time() - t0 < 10*60):
+                        try:
+                            results = self.target_collection.query(
+                                expr=f"timestamp == {latest_insert_ts}",
+                                output_fields=["timestamp"],
+                                limit=1
+                            )
+                        except Exception as e:
+                            logger.error(f"Query failed: {e}")
+                            continue
                     tt = time.time() - t0
                     # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
                     if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
