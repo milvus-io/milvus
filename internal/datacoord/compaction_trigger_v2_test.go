@@ -5,21 +5,18 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/common"
-
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
