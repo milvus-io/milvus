@@ -57,6 +57,13 @@ class OffsetMap {
     virtual void
     seal() = 0;
 
+    // below two interfaces help for delete record operations
+    virtual void
+    set_max_removed_offset(const PkType& pk, int64_t offset) = 0;
+
+    virtual int64_t
+    get_max_removed_offset(const PkType& pk) = 0;
+
     virtual bool
     empty() const = 0;
 
@@ -216,10 +223,24 @@ class OffsetOrderedMap : public OffsetMap {
         return {seg_offsets, it != map_.end()};
     }
 
+    void
+    set_max_removed_offset(const PkType& pk, int64_t offset) {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+        max_removed_offsets_[std::get<T>(pk)] = offset;
+    }
+
+    int64_t
+    get_max_removed_offset(const PkType& pk) {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        auto it = max_removed_offsets_.find(std::get<T>(pk));
+        return it != max_removed_offsets_.end() ? it->second : -1;
+    }
+
  private:
     using OrderedMap = std::map<T, std::vector<int64_t>, std::less<>>;
     OrderedMap map_;
     mutable std::shared_mutex mtx_;
+    std::map<T, int64_t, std::less<>> max_removed_offsets_;
 };
 
 template <typename T>
@@ -355,6 +376,19 @@ class OffsetOrderedArray : public OffsetMap {
         is_sealed = false;
     }
 
+    void
+    set_max_removed_offset(const PkType& pk, int64_t offset) {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+        max_removed_offsets_[std::get<T>(pk)] = offset;
+    }
+
+    int64_t
+    get_max_removed_offset(const PkType& pk) {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        auto it = max_removed_offsets_.find(std::get<T>(pk));
+        return it != max_removed_offsets_.end() ? it->second : -1;
+    }
+
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_by_index(int64_t limit, const BitsetType& bitset) const {
@@ -390,6 +424,8 @@ class OffsetOrderedArray : public OffsetMap {
  private:
     bool is_sealed = false;
     std::vector<std::pair<T, int32_t>> array_;
+    mutable std::shared_mutex mtx_;
+    std::map<T, int64_t, std::less<>> max_removed_offsets_;
 };
 
 class ThreadSafeValidData {
@@ -600,6 +636,18 @@ struct InsertRecord {
             }
         }
         return res_offsets;
+    }
+
+    int64_t
+    get_max_removed_offset(const PkType& pk) const {
+        std::shared_lock lck(shared_mutex_);
+        return pk2offset_->get_max_removed_offset(pk);
+    }
+
+    void
+    set_max_removed_offset(const PkType& pk, int64_t offset) {
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_->set_max_removed_offset(pk, offset);
     }
 
     void
