@@ -260,8 +260,8 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			}
 		case arrow.LIST:
 			listReader := chunk.(*array.List)
-			if !isVectorAligned(listReader.Offsets(), pcr.dim, dataType) {
-				return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+			if err = checkVectorAligned(listReader.Offsets(), pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -308,18 +308,18 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	}, nil
 }
 
-func checkVectorAlignWithDim(offsets []int32, dim int32) bool {
+func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return false
+			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
 		}
 	}
-	return true
+	return nil
 }
 
-func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool {
+func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return false
+		return fmt.Errorf("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -330,9 +330,9 @@ func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool 
 		return checkVectorAlignWithDim(offsets, int32(dim*2))
 	case schemapb.DataType_SparseFloatVector:
 		// JSON format, skip alignment check
-		return true
+		return nil
 	default:
-		return false
+		return fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}
 }
 
@@ -391,8 +391,10 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		}
 		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
-		if typeutil.IsVectorType(dataType) && !isVectorAligned(offsets, pcr.dim, dataType) {
-			return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+		if typeutil.IsVectorType(dataType) {
+			if err = checkVectorAligned(offsets, pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			}
 		}
 		valueReader := listReader.ListValues()
 		switch valueReader.DataType().ID() {
