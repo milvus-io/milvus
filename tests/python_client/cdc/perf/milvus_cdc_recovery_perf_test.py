@@ -223,6 +223,7 @@ class MilvusCDCPerformance:
     def test_scalability(self, max_duration=600, batch_size=1000, max_concurrency=10):
         results = []
         for concurrency in range(10, max_concurrency + 1, 10):
+            self.resume_cdc_tasks()
             logger.info(f"\nTesting with concurrency: {concurrency}")
             total_time, insert_count, sync_count, insert_throughput, sync_throughput, avg_latency, min_latency, max_latency = self.measure_performance(
                 max_duration, batch_size, concurrency)
