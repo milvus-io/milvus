@@ -865,6 +865,12 @@ DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
 }
 
 std::string
+DiskFileManagerImpl::GetIndexIdentifier() {
+    return GenIndexPathIdentifier(index_meta_.build_id,
+                                  index_meta_.index_version);
+}
+
+std::string
 DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
