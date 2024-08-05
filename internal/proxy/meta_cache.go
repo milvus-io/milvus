@@ -1074,6 +1074,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			if le != nil {
 				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
 			}
+			CleanPrivilegeCache()
 		}
 	}()
 	if op.OpType != typeutil.CacheRefresh {
