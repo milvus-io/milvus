@@ -154,6 +154,10 @@ class MilvusCDCPerformance:
             time.sleep(0.01)  # Query interval
 
     def continuous_count(self):
+        previous_count = self.target_collection.query(
+                    expr="",
+                    output_fields=["count(*)"],
+                )[0]['count(*)']
         while not self.stop_query:
             try:
                 t0 = time.time()
@@ -164,7 +168,7 @@ class MilvusCDCPerformance:
                 tt = time.time() - t0
                 count = results[0]['count(*)']
                 with self.sync_lock:
-                    self.sync_count = count
+                    self.sync_count = count - previous_count
                 progress = (self.sync_count / self.insert_count) * 100 if self.insert_count > 0 else 0
                 logger.debug(f"sync progress {self.sync_count}/{self.insert_count} {progress:.2f}%")
             except Exception as e:
