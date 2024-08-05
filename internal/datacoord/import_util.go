@@ -220,13 +220,20 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}, nil
 }
 
-func RegroupImportFiles(meta *meta, job ImportJob, files []*datapb.ImportFileStats) [][]*datapb.ImportFileStats {
+func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, allDiskIndex bool) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
 		return nil
 	}
 
+	var segmentMaxSize int
+	if allDiskIndex {
+		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		segmentMaxSize = Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
+	} else {
+		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+		segmentMaxSize = Params.DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	}
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	segmentMaxSize := int(GetSegmentMaxSize(job.GetCollectionID(), job.GetSchema(), meta))
 	if isL0Import {
 		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}

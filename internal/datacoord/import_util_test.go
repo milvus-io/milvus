@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -209,10 +208,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 		},
 	}
 
-	m := &meta{
-		indexMeta: &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)},
-	}
-	groups := RegroupImportFiles(m, job, files)
+	groups := RegroupImportFiles(job, files, false)
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {

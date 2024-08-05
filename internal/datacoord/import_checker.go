@@ -218,7 +218,8 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	groups := RegroupImportFiles(c.meta, job, lacks)
+	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
+	groups := RegroupImportFiles(job, lacks, allDiskIndex)
 	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
