@@ -1,8 +1,8 @@
 FROM rockylinux/rockylinux:8 as vcpkg-installer
 
 RUN dnf -y install curl wget tar zip unzip git \
-            gcc gcc-c++ make cmake \
-            perl-IPC-Cmd perl-Digest-SHA
+    gcc gcc-c++ make cmake \
+    perl-IPC-Cmd perl-Digest-SHA
 
 # install ninjia
 RUN dnf -y update && \
@@ -32,8 +32,8 @@ FROM rockylinux/rockylinux:8
 ARG TARGETARCH
 
 RUN dnf install -y make cmake automake gcc gcc-c++ curl zip unzip tar git which \
-        libaio libuuid-devel wget python3 python3-pip \
-        pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool
+    libaio libuuid-devel wget python3 python3-pip \
+    pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool
 
 # install openblas-devel texinfo ninja
 RUN dnf -y update && \
@@ -43,7 +43,7 @@ RUN dnf -y update && \
 
 
 RUN pip3 install conan==1.64.1
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.73 -y
 
