@@ -663,8 +663,8 @@ func (t *searchTask) Requery() error {
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := offsets[id]; !ok {
-			return fmt.Errorf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
-				id, typeutil.GetSizeOfIDs(ids), len(offsets), t.GetCollectionID())
+			return merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
+				id, typeutil.GetSizeOfIDs(ids), len(offsets), t.GetCollectionID()))
 		}
 		typeutil.AppendFieldData(t.result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
 	}
