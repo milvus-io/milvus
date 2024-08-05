@@ -14,6 +14,7 @@ package paramtable
 import (
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -1169,6 +1170,7 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
+	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1570,6 +1572,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
+
+	p.QueryNodePoolingSize = ParamItem{
+		Key:          "proxy.queryNodePooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for shardleader(querynode) client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.QueryNodePoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2284,6 +2295,8 @@ type queryNodeConfig struct {
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	QueryStreamBatchSize ParamItem `refreshable:"false"`
+	// worker
+	WorkerPoolingSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2465,6 +2478,12 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "mmap")
+			}
+			return v
+		},
 	}
 	p.MmapDirPath.Init(base.mgr)
 
@@ -2917,6 +2936,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.WorkerPoolingSize = ParamItem{
+		Key:          "queryNode.workerPooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for worker querynode client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.WorkerPoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3008,6 +3036,7 @@ type dataCoordConfig struct {
 	WithCredential             ParamItem `refreshable:"false"`
 	IndexNodeID                ParamItem `refreshable:"false"`
 	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold          ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -3648,6 +3677,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
+
+	p.TaskSlowThreshold = ParamItem{
+		Key:          "datacoord.scheduler.taskSlowThreshold",
+		Version:      "2.0.0",
+		DefaultValue: "300",
+	}
+	p.TaskSlowThreshold.Init(base.mgr)
 
 	p.BrokerTimeout = ParamItem{
 		Key:          "dataCoord.brokerTimeout",

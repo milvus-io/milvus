@@ -247,9 +247,10 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 }
 
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.With(zap.String("view", view.String()))
 	taskID, err := m.allocator.allocID(ctx)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 
@@ -259,7 +260,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
 
@@ -267,7 +268,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		TriggerID:        taskID, // inner trigger, use task id as trigger id
 		PlanID:           taskID,
 		Type:             datapb.CompactionType_Level0DeleteCompaction,
-		StartTime:        time.Now().UnixMilli(),
+		StartTime:        time.Now().Unix(),
 		InputSegments:    levelZeroSegs,
 		State:            datapb.CompactionTaskState_pipelining,
 		Channel:          view.GetGroupLabel().Channel,
@@ -281,13 +282,13 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
 		log.Warn("Failed to execute compaction task",
-			zap.Int64("collection", task.CollectionID),
+			zap.Int64("triggerID", task.GetTriggerID()),
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
 	}
 	log.Info("Finish to submit a LevelZeroCompaction plan",
-		zap.Int64("taskID", taskID),
+		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 		zap.Int64s("L0 segments", levelZeroSegs),
@@ -295,24 +296,22 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 }
 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.With(zap.String("view", view.String()))
 	taskID, _, err := m.allocator.allocN(2)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()),
-			zap.Error(err))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()),
-			zap.Error(err))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
 
-	expectedSegmentSize := m.getExpectedSegmentSize(collection)
-
-	_, totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
+	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection)
+	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
-		log.Warn("Failed to calculate cluster compaction config fail", zap.String("view", view.String()), zap.Error(err))
+		log.Warn("Failed to calculate cluster compaction config fail", zap.Error(err))
 		return
 	}
 
@@ -320,7 +319,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().UnixMilli(),
+		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*ClusteringSegmentsView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_ClusteringCompaction,
@@ -334,34 +333,32 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
 		AnalyzeTaskID:      taskID + 1,
-		LastStateStartTime: time.Now().UnixMilli(),
+		LastStateStartTime: time.Now().Unix(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
 		log.Warn("Failed to execute compaction task",
-			zap.Int64("collection", task.CollectionID),
 			zap.Int64("planID", task.GetPlanID()),
-			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
 	}
 	log.Info("Finish to submit a clustering compaction task",
-		zap.Int64("taskID", taskID),
+		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
-		zap.String("type", task.GetType().String()),
 		zap.Int64("MaxSegmentRows", task.MaxSegmentRows),
 		zap.Int64("PreferSegmentRows", task.PreferSegmentRows),
 	)
 }
 
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.With(zap.String("view", view.String()))
 	taskID, _, err := m.allocator.allocN(1)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
-		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
 	var totalRows int64 = 0
@@ -372,7 +369,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		PlanID:             taskID,
 		TriggerID:          view.(*MixSegmentView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().UnixMilli(),
+		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
@@ -382,25 +379,25 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		Schema:             collection.Schema,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().UnixMilli(),
+		LastStateStartTime: time.Now().Unix(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
 		log.Warn("Failed to execute compaction task",
-			zap.Int64("collection", task.CollectionID),
+			zap.Int64("triggerID", task.GetTriggerID()),
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
 	}
 	log.Info("Finish to submit a single compaction task",
-		zap.Int64("taskID", taskID),
+		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 	)
 }
 
-func (m *CompactionTriggerManager) getExpectedSegmentSize(collection *collectionInfo) int64 {
-	indexInfos := m.meta.indexMeta.GetIndexesForCollection(collection.ID, "")
+func getExpectedSegmentSize(meta *meta, collection *collectionInfo) int64 {
+	indexInfos := meta.indexMeta.GetIndexesForCollection(collection.ID, "")
 
 	vectorFields := typeutil.GetVectorFieldSchemas(collection.Schema)
 	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {

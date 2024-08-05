@@ -164,7 +164,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan
 
 ```shell
-pip install conan==1.61.0
+pip install conan==1.64.1
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.61.
@@ -232,15 +232,15 @@ sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip t
 ```bash
 # Verify python3 version, need python3 version > 3.8
 python3 --version
-# pip install conan 1.61.0
-pip3 install conan==1.61.0
+# pip install conan 1.64.1
+pip3 install conan==1.64.1
 ```
 
 #### Install GO 1.80
 
 ```bash
-wget https://go.dev/dl/go1.21.10.linux-arm64.tar.gz
-tar zxf go1.21.10.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.21.11.linux-arm64.tar.gz
+tar zxf go1.21.11.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin
@@ -383,7 +383,7 @@ For Apple Silicon users (Apple M1):
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose -f docker-compose-apple-silicon.yml up -d
+$ docker compose -f docker-compose-apple-silicon.yml up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -392,7 +392,7 @@ For others:
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -461,13 +461,13 @@ Milvus Cluster includes further component — Pulsar, to be distributed through 
 ```shell
 # Running Milvus cluster
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_cluster.sh
 
 # Or running Milvus standalone
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_standalone.sh
 ```

@@ -25,8 +25,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -38,43 +42,152 @@ type ClusteringCompactionPolicySuite struct {
 
 	mockAlloc                  *NMockAllocator
 	mockTriggerManager         *MockTriggerManager
-	testLabel                  *CompactionGroupLabel
 	handler                    *NMockHandler
 	mockPlanContext            *MockCompactionPlanContext
 	catalog                    *mocks.DataCoordCatalog
+	meta                       *meta
 	clusteringCompactionPolicy *clusteringCompactionPolicy
 }
 
 func (s *ClusteringCompactionPolicySuite) SetupTest() {
-	s.testLabel = &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  10,
-		Channel:      "ch-1",
-	}
-
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog = catalog
 
-	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+	compactionTaskMeta, _ := newCompactionTaskMeta(context.TODO(), s.catalog)
+	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
+	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
+
+	meta := &meta{
+		segments:           NewSegmentsInfo(),
+		collections:        make(map[UniqueID]*collectionInfo, 0),
+		compactionTaskMeta: compactionTaskMeta,
+		partitionStatsMeta: partitionStatsMeta,
+		indexMeta:          indexMeta,
 	}
+	s.meta = meta
+
 	mockAllocator := newMockAllocator()
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
-	s.clusteringCompactionPolicy = newClusteringCompactionPolicy(meta, mockAllocator, mockHandler)
+	s.clusteringCompactionPolicy = newClusteringCompactionPolicy(s.meta, mockAllocator, mockHandler)
 }
 
-func (s *ClusteringCompactionPolicySuite) TestTrigger() {
+func (s *ClusteringCompactionPolicySuite) TestEnable() {
+	// by default
+	s.False(s.clusteringCompactionPolicy.Enable())
+	// enable
+	enableAutoCompactionKey := paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key
+	clusteringCompactionEnableKey := paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key
+	clusteringCompactionAutoEnableKey := paramtable.Get().DataCoordCfg.ClusteringCompactionAutoEnable.Key
+	paramtable.Get().Save(enableAutoCompactionKey, "true")
+	paramtable.Get().Save(clusteringCompactionEnableKey, "true")
+	paramtable.Get().Save(clusteringCompactionAutoEnableKey, "true")
+	defer paramtable.Get().Reset(enableAutoCompactionKey)
+	defer paramtable.Get().Reset(clusteringCompactionEnableKey)
+	defer paramtable.Get().Reset(clusteringCompactionAutoEnableKey)
+	s.True(s.clusteringCompactionPolicy.Enable())
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
+	// trigger with no collections
 	events, err := s.clusteringCompactionPolicy.Trigger()
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeClustering]
 	s.True(ok)
 	s.NotNil(gotViews)
 	s.Equal(0, len(gotViews))
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
+	// valid collection
+	s.meta.collections[1] = &collectionInfo{
+		ID:     1,
+		Schema: newTestScalarClusteringKeySchema(),
+	}
+	// deleted collection
+	s.meta.collections[2] = &collectionInfo{
+		ID:     2,
+		Schema: newTestScalarClusteringKeySchema(),
+	}
+	s.clusteringCompactionPolicy.meta = s.meta
+
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
+		if collectionID == 2 {
+			return nil, errors.New("mock get collection fail error")
+		}
+		coll, exist := s.meta.collections[collectionID]
+		if exist {
+			return coll, nil
+		}
+		return nil, nil
+	})
+
+	// trigger
+	events, err := s.clusteringCompactionPolicy.Trigger()
+	s.NoError(err)
+	gotViews, ok := events[TriggerTypeClustering]
+	s.True(ok)
+	s.NotNil(gotViews)
+	s.Equal(0, len(gotViews))
+}
+
+func (s *ClusteringCompactionPolicySuite) TestCalculateClusteringCompactionConfig() {
+	testCases := []struct {
+		description       string
+		coll              *collectionInfo
+		view              CompactionView
+		totalRows         int64
+		maxSegmentRows    int64
+		preferSegmentRows int64
+		err               error
+	}{
+		{
+			description: "",
+			coll: &collectionInfo{
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "128"},
+							},
+						},
+					},
+				},
+			},
+			view: &ClusteringSegmentsView{
+				segments: []*SegmentView{
+					{
+						NumOfRows: 1000,
+					},
+				},
+			},
+			totalRows:         int64(1000),
+			maxSegmentRows:    int64(2064888),
+			preferSegmentRows: int64(1651910),
+			err:               nil,
+		},
+	}
+
+	for _, test := range testCases {
+		s.Run(test.description, func() {
+			expectedSegmentSize := getExpectedSegmentSize(s.meta, test.coll)
+			totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize)
+			s.Equal(test.totalRows, totalRows)
+			s.Equal(test.maxSegmentRows, maxSegmentRows)
+			s.Equal(test.preferSegmentRows, preferSegmentRows)
+			s.Equal(test.err, err)
+		})
+	}
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAbnormal() {
@@ -100,11 +213,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKe
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-	s.clusteringCompactionPolicy.meta = &meta{
-		compactionTaskMeta: compactionTaskMeta,
-	}
-	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+	s.meta.compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -124,11 +233,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-	s.clusteringCompactionPolicy.meta = &meta{
-		compactionTaskMeta: compactionTaskMeta,
-	}
-	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
+	s.meta.compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
@@ -143,10 +248,6 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 
 func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting() {
 	s.Run("no collection is compacting", func() {
-		compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-		s.clusteringCompactionPolicy.meta = &meta{
-			compactionTaskMeta: compactionTaskMeta,
-		}
 		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
 		s.False(compacting)
 		s.Equal(int64(0), triggerID)
@@ -189,6 +290,41 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 			})
 		}
 	})
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
+	paramtable.Get().Save(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key, "0")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key)
+
+	testLabel := &CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+
+	s.meta.collections[testLabel.CollectionID] = &collectionInfo{
+		ID:     testLabel.CollectionID,
+		Schema: newTestScalarClusteringKeySchema(),
+	}
+
+	segments := genSegmentsForMeta(testLabel)
+	for id, segment := range segments {
+		s.meta.segments.SetSegment(id, segment)
+	}
+
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
+		coll, exist := s.meta.collections[collectionID]
+		if exist {
+			return coll, nil
+		}
+		return nil, nil
+	})
+
+	// trigger
+	view, _, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
+	s.Equal(1, len(view))
+	s.NoError(err)
+	s.Equal(testLabel, view[0].GetGroupLabel())
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {

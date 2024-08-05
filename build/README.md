@@ -95,7 +95,7 @@ Creating milvus_builder_1 ... done
 Check running state of Dev Container:
 
 ```shell
-$ docker-compose -f docker-compose-devcontainer.yml ps
+$ docker compose -f docker-compose-devcontainer.yml ps
 
       Name                    Command                  State                                      Ports
 ---------------------------------------------------------------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 
 ```shell
 cd deployments/docker/dev
-docker-compose up -d
+docker compose up -d
 cd ../../../
 build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
 ```
@@ -149,9 +149,9 @@ build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
 To run E2E tests, use these commands:
 
 ```shell
-MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
+MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker compose ps -q builder))
 cd tests/docker
-docker-compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
+docker compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
 ```
 
 ## Basic Flow

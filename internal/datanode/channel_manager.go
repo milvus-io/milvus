@@ -83,7 +83,7 @@ func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
 
 	// skip enqueue datacoord re-submit the same operations
 	if runner, ok := m.opRunners.Get(channel); ok {
-		if runner.Exist(info.GetOpID()) {
+		if _, exists := runner.Exist(info.GetOpID()); exists {
 			log.Warn("op already exist, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
 			return nil
 		}
@@ -124,7 +124,8 @@ func (m *ChannelManagerImpl) GetProgress(info *datapb.ChannelWatchInfo) *datapb.
 		}
 
 		if runner, ok := m.opRunners.Get(channel); ok {
-			if runner.Exist(info.GetOpID()) {
+			if progress, exists := runner.Exist(info.GetOpID()); exists {
+				resp.Progress = progress
 				resp.State = datapb.ChannelWatchState_ToWatch
 			} else {
 				resp.State = datapb.ChannelWatchState_WatchFailure
@@ -139,9 +140,13 @@ func (m *ChannelManagerImpl) GetProgress(info *datapb.ChannelWatchInfo) *datapb.
 			resp.State = datapb.ChannelWatchState_ReleaseSuccess
 			return resp
 		}
-		if runner, ok := m.opRunners.Get(channel); ok && runner.Exist(info.GetOpID()) {
-			resp.State = datapb.ChannelWatchState_ToRelease
-			return resp
+		runner, ok := m.opRunners.Get(channel)
+		if ok {
+			_, exists := runner.Exist(info.GetOpID())
+			if exists {
+				resp.State = datapb.ChannelWatchState_ToRelease
+				return resp
+			}
 		}
 
 		resp.State = datapb.ChannelWatchState_ReleaseFailure
@@ -277,11 +282,17 @@ func (r *opRunner) FinishOp(opID UniqueID) {
 	delete(r.allOps, opID)
 }
 
-func (r *opRunner) Exist(opID UniqueID) bool {
+func (r *opRunner) Exist(opID UniqueID) (progress int32, exists bool) {
 	r.guard.RLock()
 	defer r.guard.RUnlock()
-	_, ok := r.allOps[opID]
-	return ok
+	info, ok := r.allOps[opID]
+	if !ok {
+		return -1, false
+	}
+	if info.tickler == nil {
+		return 0, true
+	}
+	return info.tickler.progress(), true
 }
 
 func (r *opRunner) Enqueue(info *datapb.ChannelWatchInfo) error {
@@ -320,6 +331,17 @@ func (r *opRunner) Execute(info *datapb.ChannelWatchInfo) *opState {
 	return r.releaseWithTimer(r.releaseFunc, info.GetVchan().GetChannelName(), info.GetOpID())
 }
 
+func (r *opRunner) updateTickler(opID int64, tickler *tickler) bool {
+	r.guard.Lock()
+	defer r.guard.Unlock()
+	opInfo, ok := r.allOps[opID]
+	if !ok {
+		return false
+	}
+	opInfo.tickler = tickler
+	return true
+}
+
 // watchWithTimer will return WatchFailure after WatchTimeoutInterval
 func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	opState := &opState{
@@ -328,15 +350,12 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	}
 	log := log.With(zap.String("channel", opState.channel), zap.Int64("opID", opState.opID))
 
-	r.guard.Lock()
-	opInfo, ok := r.allOps[info.GetOpID()]
-	r.guard.Unlock()
+	tickler := newTickler()
+	ok := r.updateTickler(info.GetOpID(), tickler)
 	if !ok {
 		opState.state = datapb.ChannelWatchState_WatchFailure
 		return opState
 	}
-	tickler := newTickler()
-	opInfo.tickler = tickler
 
 	var (
 		successSig   = make(chan struct{}, 1)

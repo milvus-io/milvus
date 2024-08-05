@@ -137,36 +137,23 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse,
 func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistributionResponse) {
 	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
 	for _, s := range resp.GetSegments() {
-		// for collection which is already loaded
-		segmentInfo := dh.target.GetSealedSegment(s.GetCollection(), s.GetID(), meta.CurrentTarget)
+		segmentInfo := dh.target.GetSealedSegment(s.GetCollection(), s.GetID(), meta.CurrentTargetFirst)
 		if segmentInfo == nil {
-			// for collection which is loading
-			segmentInfo = dh.target.GetSealedSegment(s.GetCollection(), s.GetID(), meta.NextTarget)
-		}
-		var segment *meta.Segment
-		if segmentInfo == nil {
-			segment = &meta.Segment{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            s.GetID(),
-					CollectionID:  s.GetCollection(),
-					PartitionID:   s.GetPartition(),
-					InsertChannel: s.GetChannel(),
-				},
-				Node:               resp.GetNodeID(),
-				Version:            s.GetVersion(),
-				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
-				IndexInfo:          s.GetIndexInfo(),
-			}
-		} else {
-			segment = &meta.Segment{
-				SegmentInfo:        proto.Clone(segmentInfo).(*datapb.SegmentInfo),
-				Node:               resp.GetNodeID(),
-				Version:            s.GetVersion(),
-				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
-				IndexInfo:          s.GetIndexInfo(),
+			segmentInfo = &datapb.SegmentInfo{
+				ID:            s.GetID(),
+				CollectionID:  s.GetCollection(),
+				PartitionID:   s.GetPartition(),
+				InsertChannel: s.GetChannel(),
+				Level:         s.GetLevel(),
 			}
 		}
-		updates = append(updates, segment)
+		updates = append(updates, &meta.Segment{
+			SegmentInfo:        proto.Clone(segmentInfo).(*datapb.SegmentInfo),
+			Node:               resp.GetNodeID(),
+			Version:            s.GetVersion(),
+			LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
+			IndexInfo:          s.GetIndexInfo(),
+		})
 	}
 
 	dh.dist.SegmentDistManager.Update(resp.GetNodeID(), updates...)
