@@ -3080,6 +3080,7 @@ type dataCoordConfig struct {
 	WithCredential             ParamItem `refreshable:"false"`
 	IndexNodeID                ParamItem `refreshable:"false"`
 	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold          ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -3730,6 +3731,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
+
+	p.TaskSlowThreshold = ParamItem{
+		Key:          "datacoord.scheduler.taskSlowThreshold",
+		Version:      "2.0.0",
+		DefaultValue: "300",
+	}
+	p.TaskSlowThreshold.Init(base.mgr)
 
 	p.BrokerTimeout = ParamItem{
 		Key:          "dataCoord.brokerTimeout",

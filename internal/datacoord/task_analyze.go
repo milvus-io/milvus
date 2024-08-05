@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -41,6 +42,10 @@ type analyzeTask struct {
 	nodeID   int64
 	taskInfo *indexpb.AnalyzeResult
 
+	queueTime time.Time
+	startTime time.Time
+	endTime   time.Time
+
 	req *indexpb.AnalyzeRequest
 }
 
@@ -54,6 +59,34 @@ func (at *analyzeTask) GetNodeID() int64 {
 
 func (at *analyzeTask) ResetNodeID() {
 	at.nodeID = 0
+}
+
+func (at *analyzeTask) SetQueueTime(t time.Time) {
+	at.queueTime = t
+}
+
+func (at *analyzeTask) GetQueueTime() time.Time {
+	return at.queueTime
+}
+
+func (at *analyzeTask) SetStartTime(t time.Time) {
+	at.startTime = t
+}
+
+func (at *analyzeTask) GetStartTime() time.Time {
+	return at.startTime
+}
+
+func (at *analyzeTask) SetEndTime(t time.Time) {
+	at.endTime = t
+}
+
+func (at *analyzeTask) GetEndTime() time.Time {
+	return at.endTime
+}
+
+func (at *analyzeTask) GetTaskType() string {
+	return indexpb.JobType_JobTypeIndexJob.String()
 }
 
 func (at *analyzeTask) CheckTaskHealthy(mt *meta) bool {
