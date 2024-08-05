@@ -88,7 +88,6 @@ func (t *CreateAliasTask) OnEnqueue() error {
 
 // PreExecute defines the tion before task execution
 func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
-
 	collAlias := t.Alias
 	// collection alias uses the same format as collection name
 	if err := ValidateCollectionAlias(collAlias); err != nil {
@@ -239,7 +238,6 @@ func (t *AlterAliasTask) OnEnqueue() error {
 }
 
 func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
-
 	collAlias := t.Alias
 	// collection alias uses the same format as collection name
 	if err := ValidateCollectionAlias(collAlias); err != nil {
@@ -383,7 +381,6 @@ func (a *ListAliasesTask) OnEnqueue() error {
 }
 
 func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
-
 	if len(a.GetCollectionName()) > 0 {
 		if err := validateCollectionName(a.GetCollectionName()); err != nil {
 			return err
