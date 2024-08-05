@@ -182,6 +182,7 @@ func (m *sealQueue) sendFlushMessageIntoWAL(ctx context.Context, collectionID in
 func (m *sealQueue) createNewFlushMessage(collectionID int64, vchannel string, segmentIDs []int64) (message.MutableMessage, error) {
 	// Create a flush message.
 	msg, err := message.NewFlushMessageBuilderV1().
+		WithVChannel(vchannel).
 		WithHeader(&message.FlushMessageHeader{}).
 		WithBody(&message.FlushMessagePayload{
 			CollectionId: collectionID,
@@ -190,6 +191,5 @@ func (m *sealQueue) createNewFlushMessage(collectionID int64, vchannel string, s
 	if err != nil {
 		return nil, errors.Wrap(err, "at create new flush message")
 	}
-	msg.WithVChannel(vchannel)
 	return msg, nil
 }
