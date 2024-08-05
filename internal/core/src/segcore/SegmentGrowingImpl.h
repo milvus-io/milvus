@@ -65,9 +65,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
 
-    void
-    RemoveDuplicatePkRecords() override;
-
     std::string
     debug() const override;
 
@@ -75,6 +72,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_segment_id() const override {
         return id_;
     }
+
+    bool
+    is_nullable(FieldId field_id) const override {
+        AssertInfo(insert_record_.is_data_exist(field_id),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        return insert_record_.is_valid_data_exist(field_id);
+    };
 
  public:
     const InsertRecord<>&
@@ -87,7 +92,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_;
     }
 
-    const DeletedRecord<false>&
+    const DeletedRecord&
     get_deleted_record() const {
         return deleted_record_;
     }
@@ -129,11 +134,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     try_remove_chunks(FieldId fieldId);
-
-    std::vector<SegOffset>
-    SearchPk(const PkType& pk, Timestamp ts) const {
-        return insert_record_.search_pk(pk, ts);
-    }
 
  public:
     size_t
@@ -227,7 +227,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
-          deleted_record_(&insert_record_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id) {
         if (mmap_descriptor_ != nullptr) {
@@ -299,11 +298,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
-        return insert_record_.pk2offset_->find_first(
-            limit, bitset, false_filtered_out);
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 
     bool
@@ -318,10 +314,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,
@@ -333,11 +329,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     check_search(const query::Plan* plan) const override {
-        Assert(plan);
-    }
-
-    void
-    check_retrieve(const query::RetrievePlan* plan) const override {
         Assert(plan);
     }
 
@@ -361,7 +352,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable std::shared_mutex chunk_mutex_;
 
     // deleted pks
-    mutable DeletedRecord<false> deleted_record_;
+    mutable DeletedRecord deleted_record_;
 
     int64_t id_;
 

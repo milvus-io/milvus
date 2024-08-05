@@ -14,29 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package flusher
 
-import (
-	"testing"
+// TODO: type FlushMsgHandler = func(vchannel string, msg FlushMsg)
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-func TestRateCollector(t *testing.T) {
-	t.Run("test FlowGraphTt", func(t *testing.T) {
-		collector, err := NewRateCollector()
-		assert.NoError(t, err)
-
-		c, minTt := collector.GetMinFlowGraphTt()
-		assert.Equal(t, "", c)
-		assert.Equal(t, typeutil.MaxTimestamp, minTt)
-		collector.UpdateFlowGraphTt("channel1", 100)
-		collector.UpdateFlowGraphTt("channel2", 200)
-		collector.UpdateFlowGraphTt("channel3", 50)
-		c, minTt = collector.GetMinFlowGraphTt()
-		assert.Equal(t, "channel3", c)
-		assert.Equal(t, Timestamp(50), minTt)
-	})
-}
+type FlushMsgHandler = func(vchannel string, segmentIDs []int64)

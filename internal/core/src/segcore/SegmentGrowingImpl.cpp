@@ -46,7 +46,23 @@ void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
-    deleted_record_.Query(bitset, ins_barrier, timestamp);
+    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return;
+    }
+    auto bitmap_holder = get_deleted_bitmap(
+        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
+        return;
+    }
+    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
+    AssertInfo(
+        delete_bitset.size() == bitset.size(),
+        fmt::format(
+            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
+            delete_bitset.size(),
+            bitset.size()));
+    bitset |= delete_bitset;
 }
 
 void
@@ -147,31 +163,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     ParsePksFromFieldData(
         pks, insert_record_proto->fields_data(field_id_to_offset[field_id]));
     for (int i = 0; i < num_rows; ++i) {
-        auto exist_pk = insert_record_.insert_with_check_existence(
-            pks[i], reserved_offset + i);
-        // if pk exist duplicate record, remove last pk under current insert timestamp
-        // means last pk is invisibale for current insert timestamp
-        if (exist_pk) {
-            auto remove_timestamp = timestamps_raw[i];
-            deleted_record_.Push({pks[i]}, &remove_timestamp);
-        }
+        insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
-}
-
-void
-SegmentGrowingImpl::RemoveDuplicatePkRecords() {
-    std::unique_lock lck(mutex_);
-    //Assert(!insert_record_.timestamps_.empty());
-    // firstly find that need removed records and mark them as deleted
-    auto removed_pks = insert_record_.get_need_removed_pks();
-    deleted_record_.Push(removed_pks.first, removed_pks.second.data());
-
-    // then remove duplicated pks in pk index
-    insert_record_.remove_duplicate_pks();
 }
 
 void
@@ -319,7 +316,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     }
 
     // step 2: fill delete record
-    deleted_record_.Push(sort_pks, sort_timestamps.data());
+    deleted_record_.push(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -340,16 +337,15 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.Push(pks, timestamps);
+    deleted_record_.push(pks, timestamps);
 }
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_data_base(field_id);
-    return vec->get_span_base(chunk_id);
+    return get_insert_record().get_span_base(field_id, chunk_id);
 }
 
-std::vector<std::string_view>
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
 SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     PanicInfo(ErrorCode::NotImplemented,
               "chunk view impl not implement for growing segment");

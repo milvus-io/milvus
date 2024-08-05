@@ -71,6 +71,7 @@ type TargetManagerInterface interface {
 	IsNextTargetExist(collectionID int64) bool
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
+	CanSegmentBeMoved(collectionID, segmentID int64) bool
 }
 
 type TargetManager struct {
@@ -112,18 +113,26 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
 	mgr.next.removeCollectionTarget(collectionID)
 
-	log.Debug("finish to update current target for collection",
-		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
-		zap.Int64("version", newTarget.GetTargetVersion()),
-	)
+	partStatsVersionInfo := "partitionStats:"
 	for channelName, dmlChannel := range newTarget.dmChannels {
 		ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
 		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
 			channelName,
 		).Set(float64(ts.Unix()))
+		partStatsVersionInfo += fmt.Sprintf("%s:[", channelName)
+		partStatsVersion := dmlChannel.PartitionStatsVersions
+		for partID, statVersion := range partStatsVersion {
+			partStatsVersionInfo += fmt.Sprintf("%d:%d,", partID, statVersion)
+		}
+		partStatsVersionInfo += "],"
 	}
+	log.Debug("finish to update current target for collection",
+		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
+		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
+		zap.Int64("version", newTarget.GetTargetVersion()),
+		zap.String("partStatsVersion", partStatsVersionInfo),
+	)
 	return true
 }
 

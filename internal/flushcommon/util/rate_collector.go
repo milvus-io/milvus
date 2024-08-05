@@ -19,14 +19,17 @@ package util
 import (
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// RateCol is global RateCollector in DataNode.
+// rateCol is global RateCollector in DataNode.
 var (
-	RateCol  *RateCollector
+	rateCol  *RateCollector
 	initOnce sync.Once
 )
 
@@ -35,41 +38,49 @@ type RateCollector struct {
 	*ratelimitutil.RateCollector
 
 	flowGraphTtMu sync.Mutex
-	flowGraphTt   map[string]Timestamp
+	flowGraphTt   map[string]typeutil.Timestamp
 }
 
-func InitGlobalRateCollector() error {
-	var err error
+func initGlobalRateCollector() {
 	initOnce.Do(func() {
-		RateCol, err = NewRateCollector()
+		var err error
+		rateCol, err = newRateCollector()
+		if err != nil {
+			log.Warn("DataNode server init rateCollector failed", zap.Error(err))
+			panic(err)
+		}
+		rateCol.Register(metricsinfo.InsertConsumeThroughput)
+		rateCol.Register(metricsinfo.DeleteConsumeThroughput)
 	})
-	RateCol.Register(metricsinfo.InsertConsumeThroughput)
-	RateCol.Register(metricsinfo.DeleteConsumeThroughput)
-	return err
 }
 
 func DeregisterRateCollector(label string) {
-	RateCol.Deregister(label)
+	rateCol.Deregister(label)
 }
 
 func RegisterRateCollector(label string) {
-	RateCol.Register(label)
+	rateCol.Register(label)
+}
+
+func GetRateCollector() *RateCollector {
+	initGlobalRateCollector()
+	return rateCol
 }
 
 // newRateCollector returns a new RateCollector.
-func NewRateCollector() (*RateCollector, error) {
+func newRateCollector() (*RateCollector, error) {
 	rc, err := ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, false)
 	if err != nil {
 		return nil, err
 	}
 	return &RateCollector{
 		RateCollector: rc,
-		flowGraphTt:   make(map[string]Timestamp),
+		flowGraphTt:   make(map[string]typeutil.Timestamp),
 	}, nil
 }
 
 // UpdateFlowGraphTt updates RateCollector's flow graph time tick.
-func (r *RateCollector) UpdateFlowGraphTt(channel string, t Timestamp) {
+func (r *RateCollector) UpdateFlowGraphTt(channel string, t typeutil.Timestamp) {
 	r.flowGraphTtMu.Lock()
 	defer r.flowGraphTtMu.Unlock()
 	r.flowGraphTt[channel] = t
@@ -83,7 +94,7 @@ func (r *RateCollector) RemoveFlowGraphChannel(channel string) {
 }
 
 // GetMinFlowGraphTt returns the vchannel and minimal time tick of flow graphs.
-func (r *RateCollector) GetMinFlowGraphTt() (string, Timestamp) {
+func (r *RateCollector) GetMinFlowGraphTt() (string, typeutil.Timestamp) {
 	r.flowGraphTtMu.Lock()
 	defer r.flowGraphTtMu.Unlock()
 	minTt := typeutil.MaxTimestamp

@@ -28,7 +28,6 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
-#include "common/Types.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
@@ -50,9 +49,6 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
-    // erase duplicate records when sealed segment loaded done
-    void
-    RemoveDuplicatePkRecords() override;
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
@@ -112,10 +108,14 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
 
-    std::vector<SegOffset>
-    SearchPk(const PkType& pk, Timestamp ts) const {
-        return insert_record_.search_pk(pk, ts);
-    }
+    bool
+    is_nullable(FieldId field_id) const override {
+        auto it = fields_.find(field_id);
+        AssertInfo(it != fields_.end(),
+                   "Cannot find field with field_id: " +
+                       std::to_string(field_id.get()));
+        return it->second->IsNullable();
+    };
 
  public:
     int64_t
@@ -142,11 +142,8 @@ class SegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
-        return insert_record_.pk2offset_->find_first(
-            limit, bitset, false_filtered_out);
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 
     // Calculate: output[i] = Vec[seg_offset[i]]
@@ -167,10 +164,10 @@ class SegmentSealedImpl : public SegmentSealed {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,
@@ -189,11 +186,6 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     check_search(const query::Plan* plan) const override;
-
-    void
-    check_retrieve(const query::RetrievePlan* plan) const override {
-        Assert(plan);
-    }
 
     int64_t
     get_active_count(Timestamp ts) const override;
@@ -279,7 +271,7 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 2;
     }
 
-    const DeletedRecord<true>&
+    const DeletedRecord&
     get_deleted_record() const {
         return deleted_record_;
     }
@@ -324,7 +316,7 @@ class SegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord<true> deleted_record_;
+    mutable DeletedRecord deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 
@@ -344,9 +336,6 @@ class SegmentSealedImpl : public SegmentSealed {
     // for sparse vector unit test only! Once a type of sparse index that
     // doesn't has raw data is added, this should be removed.
     bool TEST_skip_index_for_retrieve_ = false;
-
-    // for pk index, when loaded done, need to compact to erase duplicate records
-    bool is_pk_index_valid_ = false;
 };
 
 inline SegmentSealedUPtr

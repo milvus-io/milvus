@@ -36,7 +36,7 @@ type RowCountBasedBalancer struct {
 	*RoundRobinBalancer
 	dist      *meta.DistributionManager
 	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 }
 
 // AssignSegment, when row count based balancer assign segments, it will assign segment to node with least global row count.
@@ -354,7 +354,7 @@ func NewRowCountBasedBalancer(
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 ) *RowCountBasedBalancer {
 	return &RowCountBasedBalancer{
 		RoundRobinBalancer: NewRoundRobinBalancer(scheduler, nodeManager),

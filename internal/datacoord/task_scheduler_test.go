@@ -732,14 +732,26 @@ func (s *taskSchedulerSuite) TearDownSuite() {
 func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	ctx := context.Background()
 
+	var once sync.Once
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskSlowThreshold.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TaskSlowThreshold.Key)
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task *indexpb.AnalyzeTask) error {
+		once.Do(func() {
+			time.Sleep(time.Second * 3)
+		})
+		return nil
+	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+			once.Do(func() {
+				time.Sleep(time.Second * 3)
+			})
 			switch request.GetJobType() {
 			case indexpb.JobType_JobTypeIndexJob:
 				results := make([]*indexpb.IndexTaskInfo, 0)
@@ -815,6 +827,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	mt.segments.DropSegment(segID + 9)
 
 	scheduler.scheduleDuration = time.Millisecond * 500
+	scheduler.collectMetricsDuration = time.Millisecond * 200
 	scheduler.Start()
 
 	s.Run("enqueue", func() {

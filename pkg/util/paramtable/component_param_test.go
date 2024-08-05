@@ -302,6 +302,9 @@ func TestComponentParam(t *testing.T) {
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
 		assert.Equal(t, 2000, checkHealthRPCTimeout)
 
+		updateInterval := Params.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
+		assert.Equal(t, updateInterval, time.Minute*5)
+
 		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
 		params.Save("queryCoord.globalRowCountFactor", "0.4")
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor.GetAsFloat())
@@ -443,6 +446,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -493,6 +497,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 5, Params.MixCompactionSlotUsage.GetAsInt())
 		params.Save("dataCoord.slot.l0DeleteCompactionUsage", "4")
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
+		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
+		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

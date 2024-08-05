@@ -299,6 +299,8 @@ proxy:
   maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos
   gracefulStopTimeout: 30 # seconds. force stop node without graceful stop
   slowQuerySpanInSeconds: 5 # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  queryNodePooling:
+    size: 10 # the size for shardleader(querynode) client pool
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
@@ -365,6 +367,7 @@ queryCoord:
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
+  updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -408,8 +411,8 @@ queryNode:
   mmap:
     mmapEnabled: false # Enable mmap for loading data
     growingMmapEnabled: false # Enable mmap for using in growing raw data
-    fixedFileSizeForMmapAlloc: 4 # tmp file size for mmap chunk manager
-    maxDiskUsagePercentageForMmapAlloc: 20 # disk percentage used in mmap chunk manager
+    fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
+    maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
@@ -451,6 +454,8 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return batch size of stream query
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  workerPooling:
+    size: 10 # the size for worker querynode client pool
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:

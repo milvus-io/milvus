@@ -20,7 +20,6 @@ package segments
 #cgo pkg-config: milvus_segcore
 
 #include "segcore/load_index_c.h"
-#include "segcore/segment_c.h"
 */
 import "C"
 
@@ -820,19 +819,6 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 		return err
 	}
 
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.RemoveDuplicatePkRecords(segment.ptr)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "RemoveDuplicatePkRecords failed",
-		zap.Int64("collectionID", segment.Collection()),
-		zap.Int64("segmentID", segment.ID()),
-		zap.String("segmentType", segment.Type().String())); err != nil {
-		return err
-	}
-
 	log.Ctx(ctx).Info("load field binlogs done for sealed segment",
 		zap.Int64("collection", segment.Collection()),
 		zap.Int64("segment", segment.ID()),
@@ -1196,6 +1182,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 // getResourceUsageEstimateOfSegment estimates the resource usage of the segment
 func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
 	var segmentMemorySize, segmentDiskSize uint64
+	var indexMemorySize uint64
 	var mmapFieldCount int
 
 	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
@@ -1216,7 +1203,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
-			segmentMemorySize += neededMemSize
+			indexMemorySize += neededMemSize
 			if mmapEnabled {
 				segmentDiskSize += neededMemSize + neededDiskSize
 			} else {
@@ -1253,7 +1240,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		segmentMemorySize += uint64(float64(getBinlogDataMemorySize(fieldBinlog)) * multiplyFactor.deltaDataExpansionFactor)
 	}
 	return &ResourceUsage{
-		MemorySize:     segmentMemorySize,
+		MemorySize:     segmentMemorySize + indexMemorySize,
 		DiskSize:       segmentDiskSize,
 		MmapFieldCount: mmapFieldCount,
 	}, nil

@@ -35,13 +35,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -99,8 +100,8 @@ type DataNode struct {
 
 	segmentCache             *util.Cache
 	compactionExecutor       compaction.Executor
-	timeTickSender           *util.TimeTickSender
-	channelCheckpointUpdater *util.ChannelCheckpointUpdater
+	timeTickSender           *util2.TimeTickSender
+	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -233,14 +234,6 @@ func (node *DataNode) Init() error {
 
 		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
 
-		err := util.InitGlobalRateCollector()
-		if err != nil {
-			log.Error("DataNode server init rateCollector failed", zap.Error(err))
-			initError = err
-			return
-		}
-		log.Info("DataNode server init rateCollector done")
-
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
 		log.Info("DataNode server init dispatcher client done")
 
@@ -263,19 +256,14 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(node.chunkManager)
-		if err != nil {
-			initError = err
-			log.Error("failed to create sync manager", zap.Error(err))
-			return
-		}
+		syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 		node.syncMgr = syncMgr
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
-		node.channelCheckpointUpdater = util.NewChannelCheckpointUpdater(node.broker)
+		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		log.Info("init datanode done", zap.String("Address", node.address))
@@ -326,7 +314,7 @@ func (node *DataNode) Start() error {
 
 		go node.importScheduler.Start()
 
-		node.timeTickSender = util.NewTimeTickSender(node.broker, node.session.ServerID,
+		node.timeTickSender = util2.NewTimeTickSender(node.broker, node.session.ServerID,
 			retry.Attempts(20), retry.Sleep(time.Millisecond*100))
 		node.timeTickSender.Start()
 
@@ -420,8 +408,8 @@ func (node *DataNode) GetSession() *sessionutil.Session {
 	return node.session
 }
 
-func getPipelineParams(node *DataNode) *util.PipelineParams {
-	return &util.PipelineParams{
+func getPipelineParams(node *DataNode) *util2.PipelineParams {
+	return &util2.PipelineParams{
 		Ctx:                node.ctx,
 		Broker:             node.broker,
 		SyncMgr:            node.syncMgr,
