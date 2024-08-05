@@ -153,6 +153,11 @@ class Operator {
         return operator_context_->get_plannode_id();
     }
 
+    virtual std::string
+    ToString() const {
+        return "Base Operator";
+    }
+
  protected:
     std::unique_ptr<OperatorContext> operator_context_;
 
@@ -190,6 +195,11 @@ class SourceOperator : public Operator {
     NoMoreInput() override {
         PanicInfo(NotImplemented,
                   "SourceOperator does not support noMoreInput()");
+    }
+
+    virtual std::string
+    ToString() const override {
+        return "source operator";
     }
 };
 

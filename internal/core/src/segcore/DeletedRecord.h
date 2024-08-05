@@ -89,7 +89,7 @@ class DeletedRecord {
     }
 
     void
-    Query(BitsetType& bitset, int64_t insert_barrier, Timestamp timestamp) {
+    Query(BitsetTypeView& bitset, int64_t insert_barrier, Timestamp timestamp) {
         Assert(bitset.size() == insert_barrier);
         // TODO: add cache to bitset
         if (deleted_pairs_.size() == 0) {
