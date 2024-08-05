@@ -2,11 +2,20 @@ package message
 
 import (
 	"fmt"
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 )
 
 type messageImpl struct {
 	payload    []byte
 	properties propertiesImpl
+}
+
+// IsSystemMessage returns whether the message is a system message.
+func (m *messageImpl) IsSystemMessage() bool {
+	_, ok := systemMessageType[m.MessageType()]
+	return ok
 }
 
 // MessageType returns the type of message.
@@ -43,12 +52,12 @@ func (m *messageImpl) EstimateSize() int {
 	return len(m.payload) + m.properties.EstimateSize()
 }
 
-// WithVChannel sets the virtual channel of current message.
-func (m *messageImpl) WithVChannel(vChannel string) MutableMessage {
-	if m.properties.Exist(messageVChannel) {
-		panic("vchannel already set in properties of message")
+// WithWALTerm sets the wal term of current message.
+func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
+	if m.properties.Exist(messageWALTerm) {
+		panic("wal term already set in properties of message")
 	}
-	m.properties.Set(messageVChannel, vChannel)
+	m.properties.Set(messageWALTerm, EncodeInt64(term))
 	return m
 }
 
@@ -63,6 +72,9 @@ func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
 
 // WithLastConfirmed sets the last confirmed message id of current message.
 func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
+	if m.properties.Exist(messageLastConfirmedIDSameWithMessageID) {
+		panic("last confirmed message already set in properties of message")
+	}
 	if m.properties.Exist(messageLastConfirmed) {
 		panic("last confirmed message already set in properties of message")
 	}
@@ -72,7 +84,23 @@ func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
 
 // WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
 func (m *messageImpl) WithLastConfirmedUseMessageID() MutableMessage {
-	m.properties.Set(messageLastConfirmed, messageLastConfirmedValueUseMessageID)
+	if m.properties.Exist(messageLastConfirmedIDSameWithMessageID) {
+		panic("last confirmed message already set in properties of message")
+	}
+	if m.properties.Exist(messageLastConfirmed) {
+		panic("last confirmed message already set in properties of message")
+	}
+	m.properties.Set(messageLastConfirmedIDSameWithMessageID, "")
+	return m
+}
+
+// WithTxnContext sets the transaction context of current message.
+func (m *messageImpl) WithTxnContext(txnCtx TxnContext) MutableMessage {
+	pb, err := EncodeProto(txnCtx.IntoProto())
+	if err != nil {
+		panic("should not happen on txn proto")
+	}
+	m.properties.Set(messageTxnContext, pb)
 	return m
 }
 
@@ -81,6 +109,23 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	return &immutableMessageImpl{
 		messageImpl: *m,
 		id:          id,
+	}
+}
+
+// TxnContext returns the transaction context of current message.
+func (m *messageImpl) TxnContext() *TxnContext {
+	value, ok := m.properties.Get(messageTxnContext)
+	if !ok {
+		return nil
+	}
+	txnCtx := &messagespb.TxnContext{}
+	if err := DecodeProto(value, txnCtx); err != nil {
+		panic(fmt.Sprintf("there's a bug in the message codes, dirty txn context %s in properties of message", value))
+	}
+	return &TxnContext{
+		TxnID:    TxnID(txnCtx.TxnId),
+		TTL:      time.Duration(txnCtx.TtlMilliseconds) * time.Millisecond,
+		BeginTSO: txnCtx.BeginTso,
 	}
 }
 
@@ -123,16 +168,32 @@ func (m *immutableMessageImpl) MessageID() MessageID {
 }
 
 func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
+	// same with message id
+	if _, ok := m.properties.Get(messageLastConfirmedIDSameWithMessageID); ok {
+		return m.MessageID()
+	}
 	value, ok := m.properties.Get(messageLastConfirmed)
 	if !ok {
 		panic(fmt.Sprintf("there's a bug in the message codes, last confirmed message lost in properties of message, id: %+v", m.id))
-	}
-	if value == messageLastConfirmedValueUseMessageID {
-		return m.MessageID()
 	}
 	id, err := UnmarshalMessageID(m.id.WALName(), value)
 	if err != nil {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty last confirmed message in properties of message, id: %+v", m.id))
 	}
 	return id
+}
+
+// immutableTxnMessageImpl is a immutable transaction message.
+type immutableTxnMessageImpl struct {
+	immutableMessageImpl
+	messages []ImmutableMessage // the messages that wrapped by the transaction message.
+}
+
+// RangeOver iterates over the underlying messages in the transaction message.
+func (m *immutableTxnMessageImpl) RangeOver(fn func(ImmutableMessage) bool) {
+	for _, msg := range m.messages {
+		if !fn(msg) {
+			return
+		}
+	}
 }

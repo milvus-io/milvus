@@ -31,7 +31,7 @@ func (ad *AckDetails) AddDetails(details sortedDetails) {
 		ad.detail = details
 		return
 	}
-	if ad.detail[len(ad.detail)-1].Timestamp >= details[0].Timestamp {
+	if ad.detail[len(ad.detail)-1].BeginTimestamp >= details[0].BeginTimestamp {
 		panic("unreachable: the details must be sorted by timestamp")
 	}
 	ad.detail = append(ad.detail, details...)
@@ -62,7 +62,7 @@ func (ad *AckDetails) IsNoPersistedMessage() bool {
 // LastAllAcknowledgedTimestamp returns the last timestamp which all timestamps before it have been acknowledged.
 // panic if no timestamp has been acknowledged.
 func (ad *AckDetails) LastAllAcknowledgedTimestamp() uint64 {
-	return ad.detail[len(ad.detail)-1].Timestamp
+	return ad.detail[len(ad.detail)-1].BeginTimestamp
 }
 
 // EarliestLastConfirmedMessageID returns the last confirmed message id.

@@ -205,9 +205,6 @@ func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	if !msg.MessageType().Valid() {
 		return status.NewInvaildArgument("unsupported message type")
 	}
-	if msg.Payload() == nil {
-		return status.NewInvaildArgument("empty payload for message")
-	}
 	return nil
 }
 
@@ -227,7 +224,8 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 				Id: &messagespb.MessageID{
 					Id: appendResult.MessageID.Marshal(),
 				},
-				Timetick: appendResult.TimeTick,
+				Timetick:   appendResult.TimeTick,
+				TxnContext: appendResult.TxnCtx.IntoProto(),
 			},
 		}
 	}

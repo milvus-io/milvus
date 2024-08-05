@@ -105,6 +105,47 @@ func (_c *MockMutableMessage_IntoImmutableMessage_Call) RunAndReturn(run func(me
 	return _c
 }
 
+// IsSystemMessage provides a mock function with given fields:
+func (_m *MockMutableMessage) IsSystemMessage() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_IsSystemMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSystemMessage'
+type MockMutableMessage_IsSystemMessage_Call struct {
+	*mock.Call
+}
+
+// IsSystemMessage is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) IsSystemMessage() *MockMutableMessage_IsSystemMessage_Call {
+	return &MockMutableMessage_IsSystemMessage_Call{Call: _e.mock.On("IsSystemMessage")}
+}
+
+func (_c *MockMutableMessage_IsSystemMessage_Call) Run(run func()) *MockMutableMessage_IsSystemMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_IsSystemMessage_Call) Return(_a0 bool) *MockMutableMessage_IsSystemMessage_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_IsSystemMessage_Call) RunAndReturn(run func() bool) *MockMutableMessage_IsSystemMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MessageType provides a mock function with given fields:
 func (_m *MockMutableMessage) MessageType() message.MessageType {
 	ret := _m.Called()
@@ -269,6 +310,49 @@ func (_c *MockMutableMessage_TimeTick_Call) Return(_a0 uint64) *MockMutableMessa
 }
 
 func (_c *MockMutableMessage_TimeTick_Call) RunAndReturn(run func() uint64) *MockMutableMessage_TimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TxnContext provides a mock function with given fields:
+func (_m *MockMutableMessage) TxnContext() *message.TxnContext {
+	ret := _m.Called()
+
+	var r0 *message.TxnContext
+	if rf, ok := ret.Get(0).(func() *message.TxnContext); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*message.TxnContext)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_TxnContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TxnContext'
+type MockMutableMessage_TxnContext_Call struct {
+	*mock.Call
+}
+
+// TxnContext is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) TxnContext() *MockMutableMessage_TxnContext_Call {
+	return &MockMutableMessage_TxnContext_Call{Call: _e.mock.On("TxnContext")}
+}
+
+func (_c *MockMutableMessage_TxnContext_Call) Run(run func()) *MockMutableMessage_TxnContext_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_TxnContext_Call) Return(_a0 *message.TxnContext) *MockMutableMessage_TxnContext_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_TxnContext_Call) RunAndReturn(run func() *message.TxnContext) *MockMutableMessage_TxnContext_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -482,6 +566,94 @@ func (_c *MockMutableMessage_WithTimeTick_Call) Return(_a0 message.MutableMessag
 }
 
 func (_c *MockMutableMessage_WithTimeTick_Call) RunAndReturn(run func(uint64) message.MutableMessage) *MockMutableMessage_WithTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithTxnContext provides a mock function with given fields: txnCtx
+func (_m *MockMutableMessage) WithTxnContext(txnCtx message.TxnContext) message.MutableMessage {
+	ret := _m.Called(txnCtx)
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func(message.TxnContext) message.MutableMessage); ok {
+		r0 = rf(txnCtx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithTxnContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithTxnContext'
+type MockMutableMessage_WithTxnContext_Call struct {
+	*mock.Call
+}
+
+// WithTxnContext is a helper method to define mock.On call
+//   - txnCtx message.TxnContext
+func (_e *MockMutableMessage_Expecter) WithTxnContext(txnCtx interface{}) *MockMutableMessage_WithTxnContext_Call {
+	return &MockMutableMessage_WithTxnContext_Call{Call: _e.mock.On("WithTxnContext", txnCtx)}
+}
+
+func (_c *MockMutableMessage_WithTxnContext_Call) Run(run func(txnCtx message.TxnContext)) *MockMutableMessage_WithTxnContext_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.TxnContext))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithTxnContext_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithTxnContext_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithTxnContext_Call) RunAndReturn(run func(message.TxnContext) message.MutableMessage) *MockMutableMessage_WithTxnContext_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithWALTerm provides a mock function with given fields: term
+func (_m *MockMutableMessage) WithWALTerm(term int64) message.MutableMessage {
+	ret := _m.Called(term)
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func(int64) message.MutableMessage); ok {
+		r0 = rf(term)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithWALTerm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithWALTerm'
+type MockMutableMessage_WithWALTerm_Call struct {
+	*mock.Call
+}
+
+// WithWALTerm is a helper method to define mock.On call
+//   - term int64
+func (_e *MockMutableMessage_Expecter) WithWALTerm(term interface{}) *MockMutableMessage_WithWALTerm_Call {
+	return &MockMutableMessage_WithWALTerm_Call{Call: _e.mock.On("WithWALTerm", term)}
+}
+
+func (_c *MockMutableMessage_WithWALTerm_Call) Run(run func(term int64)) *MockMutableMessage_WithWALTerm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithWALTerm_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithWALTerm_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithWALTerm_Call) RunAndReturn(run func(int64) message.MutableMessage) *MockMutableMessage_WithWALTerm_Call {
 	_c.Call.Return(run)
 	return _c
 }

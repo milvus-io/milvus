@@ -50,6 +50,8 @@ type walAccesserImpl struct {
 
 // Append writes a record to the log.
 func (w *walAccesserImpl) Append(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+	assertNoSystemMessage(msgs...)
+
 	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
 		err := status.NewOnShutdownError("wal accesser closed, %s", err.Error())
 		resp := newAppendResponseN(len(msgs))
@@ -58,10 +60,7 @@ func (w *walAccesserImpl) Append(ctx context.Context, msgs ...message.MutableMes
 	}
 	defer w.lifetime.Done()
 
-	// If there is only one message, append it to the corresponding pchannel is ok.
-	if len(msgs) <= 1 {
-		return w.appendToPChannel(ctx, funcutil.ToPhysicalChannel(msgs[0].VChannel()), msgs...)
-	}
+	// dispatch by pchannel.
 	return w.dispatchByPChannel(ctx, msgs...)
 }
 
@@ -82,6 +81,40 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 		MessageHandler: opts.MessageHandler,
 	})
 	return rc
+}
+
+func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
+	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
+		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
+	}
+
+	// Create a new transaction, send the begin txn message.
+	beginTxn, err := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel(opts.VChannel).
+		WithHeader(&message.BeginTxnMessageHeader{
+			TtlMilliseconds: opts.TTL.Milliseconds(),
+		}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		BuildMutable()
+	if err != nil {
+		w.lifetime.Done()
+		return nil, err
+	}
+
+	resps := w.appendToPChannel(ctx, funcutil.ToPhysicalChannel(opts.VChannel), beginTxn)
+	if err := resps.UnwrapFirstError(); err != nil {
+		w.lifetime.Done()
+		return nil, err
+	}
+
+	// Create new transaction success.
+	return &txnImpl{
+		mu:              sync.Mutex{},
+		state:           message.TxnStateInFlight,
+		opts:            opts,
+		txnCtx:          resps.Responses[0].AppendResult.TxnCtx,
+		walAccesserImpl: w,
+	}, nil
 }
 
 // Close closes all the wal accesser.

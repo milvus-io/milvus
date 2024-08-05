@@ -61,6 +61,47 @@ func (_c *MockImmutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *
 	return _c
 }
 
+// IsSystemMessage provides a mock function with given fields:
+func (_m *MockImmutableMessage) IsSystemMessage() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_IsSystemMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSystemMessage'
+type MockImmutableMessage_IsSystemMessage_Call struct {
+	*mock.Call
+}
+
+// IsSystemMessage is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) IsSystemMessage() *MockImmutableMessage_IsSystemMessage_Call {
+	return &MockImmutableMessage_IsSystemMessage_Call{Call: _e.mock.On("IsSystemMessage")}
+}
+
+func (_c *MockImmutableMessage_IsSystemMessage_Call) Run(run func()) *MockImmutableMessage_IsSystemMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_IsSystemMessage_Call) Return(_a0 bool) *MockImmutableMessage_IsSystemMessage_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_IsSystemMessage_Call) RunAndReturn(run func() bool) *MockImmutableMessage_IsSystemMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastConfirmedMessageID provides a mock function with given fields:
 func (_m *MockImmutableMessage) LastConfirmedMessageID() message.MessageID {
 	ret := _m.Called()
@@ -311,6 +352,49 @@ func (_c *MockImmutableMessage_TimeTick_Call) Return(_a0 uint64) *MockImmutableM
 }
 
 func (_c *MockImmutableMessage_TimeTick_Call) RunAndReturn(run func() uint64) *MockImmutableMessage_TimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TxnContext provides a mock function with given fields:
+func (_m *MockImmutableMessage) TxnContext() *message.TxnContext {
+	ret := _m.Called()
+
+	var r0 *message.TxnContext
+	if rf, ok := ret.Get(0).(func() *message.TxnContext); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*message.TxnContext)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_TxnContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TxnContext'
+type MockImmutableMessage_TxnContext_Call struct {
+	*mock.Call
+}
+
+// TxnContext is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) TxnContext() *MockImmutableMessage_TxnContext_Call {
+	return &MockImmutableMessage_TxnContext_Call{Call: _e.mock.On("TxnContext")}
+}
+
+func (_c *MockImmutableMessage_TxnContext_Call) Run(run func()) *MockImmutableMessage_TxnContext_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_TxnContext_Call) Return(_a0 *message.TxnContext) *MockImmutableMessage_TxnContext_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_TxnContext_Call) RunAndReturn(run func() *message.TxnContext) *MockImmutableMessage_TxnContext_Call {
 	_c.Call.Return(run)
 	return _c
 }

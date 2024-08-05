@@ -5,8 +5,6 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
@@ -17,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-var r *resourceImpl // singleton resource instance
+var r = &resourceImpl{} // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -26,20 +24,6 @@ type optResourceInit func(r *resourceImpl)
 func OptFlusher(flusher flusher.Flusher) optResourceInit {
 	return func(r *resourceImpl) {
 		r.flusher = flusher
-	}
-}
-
-// OptSyncManager provides the sync manager to the resource.
-func OptSyncManager(syncMgr syncmgr.SyncManager) optResourceInit {
-	return func(r *resourceImpl) {
-		r.syncMgr = syncMgr
-	}
-}
-
-// OptBufferManager provides the write buffer manager to the resource.
-func OptBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
-	return func(r *resourceImpl) {
-		r.wbMgr = wbMgr
 	}
 }
 
@@ -78,19 +62,21 @@ func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResource
 	}
 }
 
-// Init initializes the singleton of resources.
+// Apply initializes the singleton of resources.
 // Should be call when streaming node startup.
-func Init(opts ...optResourceInit) {
-	r = &resourceImpl{}
+func Apply(opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
+}
+
+// Done finish all initialization of resources.
+func Done() {
 	r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
 	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
-
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.RootCoordClient())
 	assertNotNil(r.DataCoordClient())
@@ -108,10 +94,7 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	flusher flusher.Flusher
-	syncMgr syncmgr.SyncManager
-	wbMgr   writebuffer.BufferManager
-
+	flusher                   flusher.Flusher
 	timestampAllocator        idalloc.Allocator
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
@@ -127,16 +110,6 @@ type resourceImpl struct {
 // Flusher returns the flusher.
 func (r *resourceImpl) Flusher() flusher.Flusher {
 	return r.flusher
-}
-
-// SyncManager returns the sync manager.
-func (r *resourceImpl) SyncManager() syncmgr.SyncManager {
-	return r.syncMgr
-}
-
-// BufferManager returns the write buffer manager.
-func (r *resourceImpl) BufferManager() writebuffer.BufferManager {
-	return r.wbMgr
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.

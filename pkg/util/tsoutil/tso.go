@@ -62,12 +62,6 @@ func ParseHybridTs(ts uint64) (int64, int64) {
 	return int64(physical), int64(logical)
 }
 
-// ParseAndFormatHybridTs parses the ts and returns its human-readable format.
-func ParseAndFormatHybridTs(ts uint64) string {
-	physicalTs, _ := ParseHybridTs(ts)
-	return time.Unix(physicalTs, 0).Format(time.RFC3339) // Convert to RFC3339 format
-}
-
 // CalculateDuration returns the number of milliseconds obtained by subtracting ts2 from ts1.
 func CalculateDuration(ts1, ts2 typeutil.Timestamp) int64 {
 	p1, _ := ParseHybridTs(ts1)

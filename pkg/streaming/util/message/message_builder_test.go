@@ -32,7 +32,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 32, mutableMessage.EstimateSize())
+	assert.Equal(t, 31, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)

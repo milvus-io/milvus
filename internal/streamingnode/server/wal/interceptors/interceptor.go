@@ -39,7 +39,7 @@ type Interceptor interface {
 	// Execute the append operation with interceptor.
 	DoAppend(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error)
 
-	// Close the interceptor release the resources.
+	// Close the interceptor release all the resources.
 	Close()
 }
 
@@ -57,9 +57,19 @@ type InterceptorWithReady interface {
 	Ready() <-chan struct{}
 }
 
+// Some interceptor may need to unwrap the message id from the append result.
 type InterceptorWithUnwrapMessageID interface {
 	Interceptor
 
 	// UnwrapMessageID the message id from the append result.
 	UnwrapMessageID(*wal.AppendResult)
+}
+
+// Some interceptor may need to perform a graceful close operation.
+type InterceptorWithGracefulClose interface {
+	Interceptor
+
+	// GracefulClose will be called when the wal begin to close.
+	// The interceptor can do some operations before the wal rejects all incoming append operations.
+	GracefulClose()
 }

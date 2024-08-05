@@ -10,7 +10,7 @@ import (
 )
 
 // NewMutableMessage creates a new mutable message.
-// Only used at server side for streamingnode internal service, don't use it at client side.
+// !!! Only used at server side for streamingnode internal service, don't use it at client side.
 func NewMutableMessage(payload []byte, properties map[string]string) MutableMessage {
 	return &messageImpl{
 		payload:    payload,
@@ -19,6 +19,7 @@ func NewMutableMessage(payload []byte, properties map[string]string) MutableMess
 }
 
 // NewImmutableMessage creates a new immutable message.
+// !!! Only used at server side for streaming internal service, don't use it at client side.
 func NewImmutableMesasge(
 	id MessageID,
 	payload []byte,
@@ -33,6 +34,31 @@ func NewImmutableMesasge(
 	}
 }
 
+// NewImmutableTxnMesasge creates a new immutable transaction message.
+func NewImmutableTxnMesasge(
+	begin ImmutableBeginTxnMessageV2,
+	body []ImmutableMessage,
+	commit ImmutableCommitTxnMessageV2,
+) (ImmutableTxnMessage, error) {
+	// combine begin and commit messages into one.
+	msg, err := newTxnMessageBuilderV2().
+		WithHeader(&TxnMessageHeader{}).
+		WithBody(&TxnMessageBody{}).
+		WithVChannel(begin.VChannel()).
+		BuildMutable()
+	if err != nil {
+		return nil, err
+	}
+	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
+		WithLastConfirmed(commit.LastConfirmedMessageID()).
+		WithTxnContext(*commit.TxnContext()).
+		IntoImmutableMessage(commit.MessageID())
+	return &immutableTxnMessageImpl{
+		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
+		messages:             body,
+	}, nil
+}
+
 // List all type-safe mutable message builders here.
 var (
 	NewTimeTickMessageBuilderV1         = createNewMessageBuilderV1[*TimeTickMessageHeader, *msgpb.TimeTickMsg]()
@@ -43,6 +69,10 @@ var (
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
 	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
+	NewBeginTxnMessageBuilderV2         = createNewMessageBuilderV2[*BeginTxnMessageHeader, *BeginTxnMessageBody]()
+	NewCommitTxnMessageBuilderV2        = createNewMessageBuilderV2[*CommitTxnMessageHeader, *CommitTxnMessageBody]()
+	NewRollbackTxnMessageBuilderV2      = createNewMessageBuilderV2[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]()
+	newTxnMessageBuilderV2              = createNewMessageBuilderV2[*TxnMessageHeader, *TxnMessageBody]()
 )
 
 // createNewMessageBuilderV1 creates a new message builder with v1 marker.
@@ -143,7 +173,7 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to encode header")
 	}
-	b.properties.Set(messageSpecialiedHeader, sp)
+	b.properties.Set(messageHeader, sp)
 
 	payload, err := proto.Marshal(b.body)
 	if err != nil {

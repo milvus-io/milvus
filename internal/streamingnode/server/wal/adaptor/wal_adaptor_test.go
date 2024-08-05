@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -70,9 +71,12 @@ func TestWALAdaptor(t *testing.T) {
 
 	lAdapted := adaptImplsToWAL(l, nil, func() {})
 	assert.NotNil(t, lAdapted.Channel())
-	_, err := lAdapted.Append(context.Background(), nil)
+
+	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	_, err := lAdapted.Append(context.Background(), msg)
 	assert.NoError(t, err)
-	lAdapted.AppendAsync(context.Background(), nil, func(mi *wal.AppendResult, err error) {
+	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
 		assert.Nil(t, err)
 	})
 
@@ -108,9 +112,9 @@ func TestWALAdaptor(t *testing.T) {
 	case <-ch:
 	}
 
-	_, err = lAdapted.Append(context.Background(), nil)
+	_, err = lAdapted.Append(context.Background(), msg)
 	assertShutdownError(t, err)
-	lAdapted.AppendAsync(context.Background(), nil, func(mi *wal.AppendResult, err error) {
+	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
 		assertShutdownError(t, err)
 	})
 	_, err = lAdapted.Read(context.Background(), wal.ReadOption{})
@@ -132,7 +136,9 @@ func TestNoInterceptor(t *testing.T) {
 
 	lWithInterceptors := adaptImplsToWAL(l, nil, func() {})
 
-	_, err := lWithInterceptors.Append(context.Background(), nil)
+	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	_, err := lWithInterceptors.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lWithInterceptors.Close()
 }
@@ -162,12 +168,14 @@ func TestWALWithInterceptor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 	// Interceptor is not ready, so the append/read will be blocked until timeout.
-	_, err := lWithInterceptors.Append(ctx, nil)
+	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+	_, err := lWithInterceptors.Append(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// Interceptor is ready, so the append/read will return soon.
 	close(readyCh)
-	_, err = lWithInterceptors.Append(context.Background(), nil)
+	_, err = lWithInterceptors.Append(context.Background(), msg)
 	assert.NoError(t, err)
 
 	lWithInterceptors.Close()

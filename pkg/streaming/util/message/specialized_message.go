@@ -22,7 +22,18 @@ type (
 	CreatePartitionMessageHeader  = messagespb.CreatePartitionMessageHeader
 	DropPartitionMessageHeader    = messagespb.DropPartitionMessageHeader
 	FlushMessageHeader            = messagespb.FlushMessageHeader
-	FlushMessageBody              = messagespb.FlushMessageBody
+	BeginTxnMessageHeader         = messagespb.BeginTxnMessageHeader
+	CommitTxnMessageHeader        = messagespb.CommitTxnMessageHeader
+	RollbackTxnMessageHeader      = messagespb.RollbackTxnMessageHeader
+	TxnMessageHeader              = messagespb.TxnMessageHeader
+)
+
+type (
+	FlushMessageBody       = messagespb.FlushMessageBody
+	BeginTxnMessageBody    = messagespb.BeginTxnMessageBody
+	CommitTxnMessageBody   = messagespb.CommitTxnMessageBody
+	RollbackTxnMessageBody = messagespb.RollbackTxnMessageBody
+	TxnMessageBody         = messagespb.TxnMessageBody
 )
 
 // messageTypeMap maps the proto message type to the message type.
@@ -35,6 +46,19 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&CreatePartitionMessageHeader{}):  MessageTypeCreatePartition,
 	reflect.TypeOf(&DropPartitionMessageHeader{}):    MessageTypeDropPartition,
 	reflect.TypeOf(&FlushMessageHeader{}):            MessageTypeFlush,
+	reflect.TypeOf(&BeginTxnMessageHeader{}):         MessageTypeBeginTxn,
+	reflect.TypeOf(&CommitTxnMessageHeader{}):        MessageTypeCommitTxn,
+	reflect.TypeOf(&RollbackTxnMessageHeader{}):      MessageTypeRollbackTxn,
+	reflect.TypeOf(&TxnMessageHeader{}):              MessageTypeTxn,
+}
+
+// A system preserved message, should not allowed to provide outside of the streaming system.
+var systemMessageType = map[MessageType]struct{}{
+	MessageTypeTimeTick:    {},
+	MessageTypeBeginTxn:    {},
+	MessageTypeCommitTxn:   {},
+	MessageTypeRollbackTxn: {},
+	MessageTypeTxn:         {},
 }
 
 // List all specialized message types.
@@ -47,6 +71,9 @@ type (
 	MutableCreatePartitionMessageV1  = specializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	MutableDropPartitionMessageV1    = specializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	MutableFlushMessageV2            = specializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	MutableBeginTxnMessageV2         = specializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	MutableCommitTxnMessageV2        = specializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	MutableRollbackTxnMessageV2      = specializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 
 	ImmutableTimeTickMessageV1         = specializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	ImmutableInsertMessageV1           = specializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
@@ -56,6 +83,9 @@ type (
 	ImmutableCreatePartitionMessageV1  = specializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	ImmutableDropPartitionMessageV1    = specializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	ImmutableFlushMessageV2            = specializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	ImmutableBeginTxnMessageV2         = specializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	ImmutableCommitTxnMessageV2        = specializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	ImmutableRollbackTxnMessageV2      = specializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 )
 
 // List all as functions for specialized messages.
@@ -68,6 +98,9 @@ var (
 	AsMutableCreatePartitionMessageV1  = asSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsMutableDropPartitionMessageV1    = asSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	AsMutableFlushMessageV2            = asSpecializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	AsMutableBeginTxnMessageV2         = asSpecializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	AsMutableCommitTxnMessageV2        = asSpecializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	AsMutableRollbackTxnMessageV2      = asSpecializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 
 	AsImmutableTimeTickMessageV1         = asSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	AsImmutableInsertMessageV1           = asSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
@@ -77,6 +110,16 @@ var (
 	AsImmutableCreatePartitionMessageV1  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsImmutableDropPartitionMessageV1    = asSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	AsImmutableFlushMessageV2            = asSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	AsImmutableBeginTxnMessageV2         = asSpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	AsImmutableCommitTxnMessageV2        = asSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	AsImmutableRollbackTxnMessageV2      = asSpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	AsImmutableTxnMessage                = func(msg ImmutableMessage) ImmutableTxnMessage {
+		underlying, ok := msg.(*immutableTxnMessageImpl)
+		if !ok {
+			return nil
+		}
+		return underlying
+	}
 )
 
 // asSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
@@ -94,7 +137,7 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMe
 	}
 
 	// Get the specialized header from the message.
-	val, ok := underlying.properties.Get(messageSpecialiedHeader)
+	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
 		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
 	}
@@ -120,7 +163,11 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMe
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return asSpecializedImmutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
 func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H, B], error) {
-	underlying := msg.(*immutableMessageImpl)
+	underlying, ok := msg.(*immutableMessageImpl)
+	if !ok {
+		// maybe a txn message.
+		return nil, nil
+	}
 
 	var header H
 	msgType := mustGetMessageTypeFromHeader(header)
@@ -130,7 +177,7 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 	}
 
 	// Get the specialized header from the message.
-	val, ok := underlying.properties.Get(messageSpecialiedHeader)
+	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
 		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
 	}
@@ -184,7 +231,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to encode insert header, there's a bug, %+v, %s", m.header, err.Error()))
 	}
-	m.messageImpl.properties.Set(messageSpecialiedHeader, newHeader)
+	m.messageImpl.properties.Set(messageHeader, newHeader)
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.

@@ -20,7 +20,10 @@ import (
 
 var _ wal.WAL = (*walAdaptorImpl)(nil)
 
-type unwrapMessageIDFunc func(*wal.AppendResult)
+type (
+	unwrapMessageIDFunc func(*wal.AppendResult)
+	gracefulCloseFunc   func()
+)
 
 // adaptImplsToWAL creates a new wal from wal impls.
 func adaptImplsToWAL(
@@ -84,6 +87,8 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		return nil, ctx.Err()
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
+	// Setup the term of wal.
+	msg = msg.WithWALTerm(w.Channel().Term)
 
 	// Execute the interceptor and wal append.
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg, w.inner.Append)
@@ -150,6 +155,10 @@ func (w *walAdaptorImpl) Available() <-chan struct{} {
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
+	// graceful close the interceptors before wal closing.
+	w.interceptorBuildResult.GracefulCloseFunc()
+
+	// begin to close the wal.
 	w.lifetime.SetState(lifetime.Stopped)
 	w.lifetime.Wait()
 	w.lifetime.Close()
@@ -168,6 +177,7 @@ func (w *walAdaptorImpl) Close() {
 
 type interceptorBuildResult struct {
 	Interceptor         interceptors.InterceptorWithReady
+	GracefulCloseFunc   gracefulCloseFunc
 	UnwrapMessageIDFunc unwrapMessageIDFunc
 }
 
@@ -195,6 +205,13 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param intercep
 		UnwrapMessageIDFunc: func(result *wal.AppendResult) {
 			for _, f := range unwrapMessageIDFuncs {
 				f(result)
+			}
+		},
+		GracefulCloseFunc: func() {
+			for _, i := range builtIterceptors {
+				if c, ok := i.(interceptors.InterceptorWithGracefulClose); ok {
+					c.GracefulClose()
+				}
 			}
 		},
 	}
