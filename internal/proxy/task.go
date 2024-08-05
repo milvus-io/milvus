@@ -385,7 +385,6 @@ func (t *dropCollectionTask) OnEnqueue() error {
 }
 
 func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -453,7 +452,6 @@ func (t *hasCollectionTask) OnEnqueue() error {
 }
 
 func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -530,7 +528,6 @@ func (t *describeCollectionTask) OnEnqueue() error {
 }
 
 func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
-
 	if t.CollectionID != 0 && len(t.CollectionName) == 0 {
 		return nil
 	}
@@ -827,7 +824,6 @@ func (t *alterCollectionTask) OnEnqueue() error {
 }
 
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -892,7 +888,6 @@ func (t *createPartitionTask) OnEnqueue() error {
 }
 
 func (t *createPartitionTask) PreExecute(ctx context.Context) error {
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -981,7 +976,6 @@ func (t *dropPartitionTask) OnEnqueue() error {
 }
 
 func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1095,7 +1089,6 @@ func (t *hasPartitionTask) OnEnqueue() error {
 }
 
 func (t *hasPartitionTask) PreExecute(ctx context.Context) error {
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1175,7 +1168,6 @@ func (t *showPartitionsTask) OnEnqueue() error {
 }
 
 func (t *showPartitionsTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -1600,7 +1592,6 @@ func (t *releaseCollectionTask) OnEnqueue() error {
 }
 
 func (t *releaseCollectionTask) PreExecute(ctx context.Context) error {
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1695,7 +1686,6 @@ func (t *loadPartitionsTask) OnEnqueue() error {
 }
 
 func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1845,7 +1835,6 @@ func (t *releasePartitionsTask) OnEnqueue() error {
 }
 
 func (t *releasePartitionsTask) PreExecute(ctx context.Context) error {
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1950,7 +1939,6 @@ func (t *CreateResourceGroupTask) OnEnqueue() error {
 }
 
 func (t *CreateResourceGroupTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -2015,7 +2003,6 @@ func (t *DropResourceGroupTask) OnEnqueue() error {
 }
 
 func (t *DropResourceGroupTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -2080,7 +2067,6 @@ func (t *DescribeResourceGroupTask) OnEnqueue() error {
 }
 
 func (t *DescribeResourceGroupTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -2204,7 +2190,6 @@ func (t *TransferNodeTask) OnEnqueue() error {
 }
 
 func (t *TransferNodeTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -2269,7 +2254,6 @@ func (t *TransferReplicaTask) OnEnqueue() error {
 }
 
 func (t *TransferReplicaTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 
@@ -2343,7 +2327,6 @@ func (t *ListResourceGroupsTask) OnEnqueue() error {
 }
 
 func (t *ListResourceGroupsTask) PreExecute(ctx context.Context) error {
-
 	return nil
 }
 

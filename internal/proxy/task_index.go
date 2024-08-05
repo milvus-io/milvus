@@ -362,7 +362,6 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 }
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
-
 	collName := cit.req.GetCollectionName()
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, cit.req.GetDbName(), collName)
@@ -473,7 +472,6 @@ func (dit *describeIndexTask) OnEnqueue() error {
 }
 
 func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -598,7 +596,6 @@ func (dit *getIndexStatisticsTask) OnEnqueue() error {
 }
 
 func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -719,7 +716,6 @@ func (dit *dropIndexTask) OnEnqueue() error {
 }
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
-
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -836,7 +832,6 @@ func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 }
 
 func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
@@ -926,7 +921,6 @@ func (gist *getIndexStateTask) OnEnqueue() error {
 }
 
 func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
-
 	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
 	}

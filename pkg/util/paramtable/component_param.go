@@ -1384,7 +1384,7 @@ type queryCoordConfig struct {
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
-	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`

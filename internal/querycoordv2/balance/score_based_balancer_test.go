@@ -545,7 +545,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestDelegatorPreserveMemory() {
 			suite.Len(segmentPlans, 0)
 
 			paramtable.Get().Save(paramtable.Get().QueryCoordCfg.DelegatorMemoryOverloadFactor.Key, "2")
-			segmentPlans, channelPlans = suite.getCollectionBalancePlans(balancer, c.collectionID)
+			segmentPlans, _ = suite.getCollectionBalancePlans(balancer, c.collectionID)
 			suite.Len(segmentPlans, 1)
 			suite.Equal(segmentPlans[0].To, int64(2))
 		})
