@@ -412,7 +412,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID()), segment.GetState().String()).Set(float64(segmentSize))
 			} else {
 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
@@ -786,6 +786,10 @@ func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) Upda
 			log.Warn("meta update: update level fail - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
+		}
+		if segment.LastLevel == segment.Level && segment.Level == level {
+			log.Debug("segment already is this level", zap.Int64("segID", segmentID), zap.String("level", level.String()))
+			return true
 		}
 		segment.LastLevel = segment.Level
 		segment.Level = level

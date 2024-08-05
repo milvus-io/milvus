@@ -25,8 +25,6 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
-#include "storage/space.h"
-
 #include "common/Consts.h"
 
 namespace milvus::storage {
@@ -34,9 +32,6 @@ namespace milvus::storage {
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
-
-    explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext,
-                                 std::shared_ptr<milvus_storage::Space> space);
 
     virtual ~DiskFileManagerImpl();
 
@@ -78,19 +73,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
     void
-    CacheIndexToDisk();
-
-    uint64_t
-    CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
-                               const std::string& local_file_name,
-                               uint64_t local_file_init_offfset);
-
-    uint64_t
-    CacheBatchIndexFilesToDiskV2(const std::vector<std::string>& remote_files,
-                                 const std::string& local_file_name,
-                                 uint64_t local_file_init_offfset);
-
-    void
     AddBatchIndexFiles(const std::string& local_file_name,
                        const std::vector<int64_t>& local_file_offsets,
                        const std::vector<std::string>& remote_files,
@@ -100,27 +82,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     CacheRawDataToDisk(std::vector<std::string> remote_files);
 
-    template <typename DataType>
-    std::string
-    CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
-
     std::string
     CacheOptFieldToDisk(OptFieldT& fields_map);
 
     std::string
-    CacheOptFieldToDisk(std::shared_ptr<milvus_storage::Space> space,
-                        OptFieldT& fields_map);
-
-    virtual bool
-    AddFileUsingSpace(const std::string& local_file_name,
-                      const std::vector<int64_t>& local_file_offsets,
-                      const std::vector<std::string>& remote_files,
-                      const std::vector<int64_t>& remote_file_sizes);
-
-    std::string
     GetRemoteIndexPrefix() const {
-        return space_ != nullptr ? GetRemoteIndexObjectPrefixV2()
-                                 : GetRemoteIndexObjectPrefix();
+        return GetRemoteIndexObjectPrefix();
     }
 
  private:
@@ -141,8 +108,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
-
-    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;

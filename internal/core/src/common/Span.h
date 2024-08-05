@@ -33,6 +33,15 @@ class SpanBase {
                       int64_t element_sizeof)
         : data_(data), row_count_(row_count), element_sizeof_(element_sizeof) {
     }
+    explicit SpanBase(const void* data,
+                      const bool* valid_data,
+                      int64_t row_count,
+                      int64_t element_sizeof)
+        : data_(data),
+          valid_data_(valid_data),
+          row_count_(row_count),
+          element_sizeof_(element_sizeof) {
+    }
 
     int64_t
     row_count() const {
@@ -49,8 +58,14 @@ class SpanBase {
         return data_;
     }
 
+    const bool*
+    valid_data() const {
+        return valid_data_;
+    }
+
  private:
     const void* data_;
+    const bool* valid_data_{nullptr};
     int64_t row_count_;
     int64_t element_sizeof_;
 };
@@ -65,20 +80,22 @@ class Span<T,
                                      std::is_same_v<T, PkType>>> {
  public:
     using embedded_type = T;
-    explicit Span(const T* data, int64_t row_count)
-        : data_(data), row_count_(row_count) {
+    explicit Span(const T* data, const bool* valid_data, int64_t row_count)
+        : data_(data), valid_data_(valid_data), row_count_(row_count) {
     }
 
-    explicit Span(std::string_view data) {
-        Span(data.data(), data.size());
+    explicit Span(std::string_view data, bool* valid_data) {
+        Span(data.data(), valid_data, data.size());
     }
 
     operator SpanBase() const {
-        return SpanBase(data_, row_count_, sizeof(T));
+        return SpanBase(data_, valid_data_, row_count_, sizeof(T));
     }
 
     explicit Span(const SpanBase& base)
-        : Span(reinterpret_cast<const T*>(base.data()), base.row_count()) {
+        : Span(reinterpret_cast<const T*>(base.data()),
+               base.valid_data(),
+               base.row_count()) {
         assert(base.element_sizeof() == sizeof(T));
     }
 
@@ -90,6 +107,11 @@ class Span<T,
     const T*
     data() const {
         return data_;
+    }
+
+    const bool*
+    valid_data() const {
+        return valid_data_;
     }
 
     const T&
@@ -104,6 +126,7 @@ class Span<T,
 
  private:
     const T* data_;
+    const bool* valid_data_;
     const int64_t row_count_;
 };
 

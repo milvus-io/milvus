@@ -282,75 +282,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
-    // TODO(SPARSE): support storage v2
-    // NOTE: lock only when data is ready to avoid starvation
-    // only one field for now, parallel load field data in golang
-    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
-
-    for (auto& [id, info] : load_info.field_infos) {
-        AssertInfo(info.row_count > 0, "The row count of field data is 0");
-
-        auto field_id = FieldId(id);
-        auto insert_files = info.insert_files;
-        auto field_data_info =
-            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-
-        LOG_INFO("segment {} loads field {} with num_rows {}",
-                 this->get_segment_id(),
-                 field_id.get(),
-                 num_rows);
-
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-        field_data_info.channel->set_capacity(parallel_degree * 2);
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        // auto load_future = pool.Submit(
-        //     LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-
-        auto res = milvus_storage::Space::Open(
-            load_info.url,
-            milvus_storage::Options{nullptr, load_info.storage_version});
-        AssertInfo(res.ok(),
-                   fmt::format("init space failed: {}, error: {}",
-                               load_info.url,
-                               res.status().ToString()));
-        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
-        auto load_future = pool.Submit(
-            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_INFO("segment {} submits load field {} task to thread pool",
-                 this->get_segment_id(),
-                 field_id.get());
-        if (load_info.mmap_dir_path.empty() ||
-            SystemProperty::Instance().IsSystem(field_id)) {
-            LoadFieldData(field_id, field_data_info);
-        } else {
-            MapFieldData(field_id, field_data_info);
-        }
-        LOG_INFO("segment {} loads field {} done",
-                 this->get_segment_id(),
-                 field_id.get());
-    }
-}
-
-void
-SegmentSealedImpl::RemoveDuplicatePkRecords() {
-    std::unique_lock lck(mutex_);
-    if (!is_pk_index_valid_) {
-        // Assert(!insert_record_.timestamps_.empty());
-        // firstly find that need removed records and mark them as deleted
-        auto removed_pks = insert_record_.get_need_removed_pks();
-        deleted_record_.Push(removed_pks.first, removed_pks.second.data());
-
-        // then remove duplicated pks in pk index
-        insert_record_.remove_duplicate_pks();
-        insert_record_.seal_pks();
-        is_pk_index_valid_ = true;
-    }
-}
-
-void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -661,7 +592,7 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.Push(pks, timestamps);
+    deleted_record_.push(pks, timestamps);
 }
 
 void
@@ -697,7 +628,7 @@ SegmentSealedImpl::size_per_chunk() const {
     return get_row_count();
 }
 
-BufferView
+std::pair<BufferView, FixedVector<bool>>
 SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
                                     int64_t chunk_id,
                                     int64_t start_offset,
@@ -708,7 +639,15 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
-        return field_data->GetBatchBuffer(start_offset, length);
+        FixedVector<bool> valid_data;
+        if (field_data->IsNullable()) {
+            valid_data.reserve(length);
+            for (int i = 0; i < length; i++) {
+                valid_data.push_back(field_data->IsValid(start_offset + i));
+            }
+        }
+        return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
+                              valid_data);
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
@@ -733,10 +672,11 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto field_data = insert_record_.get_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
+    // system field
     return field_data->get_span_base(0);
 }
 
-std::vector<std::string_view>
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
 SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
@@ -780,7 +720,24 @@ void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
-    deleted_record_.Query(bitset, ins_barrier, timestamp);
+    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return;
+    }
+
+    auto bitmap_holder = get_deleted_bitmap(
+        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
+        return;
+    }
+    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
+    AssertInfo(
+        delete_bitset.size() == bitset.size(),
+        fmt::format(
+            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
+            delete_bitset.size(),
+            bitset.size()));
+    bitset |= delete_bitset;
 }
 
 void
@@ -1078,7 +1035,6 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       binlog_index_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
-      deleted_record_(&insert_record_),
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
@@ -1582,7 +1538,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
         sort_pks[i] = pk;
     }
 
-    deleted_record_.Push(sort_pks, sort_timestamps.data());
+    deleted_record_.push(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 

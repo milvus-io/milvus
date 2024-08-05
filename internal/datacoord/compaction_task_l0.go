@@ -184,16 +184,20 @@ func (t *l0CompactionTask) processFailed() bool {
 	return true
 }
 
-func (t *l0CompactionTask) GetSpan() trace.Span {
-	return t.span
-}
-
 func (t *l0CompactionTask) GetResult() *datapb.CompactionPlanResult {
 	return t.result
 }
 
+func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
+	t.result = result
+}
+
 func (t *l0CompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.CompactionTask = task
+}
+
+func (t *l0CompactionTask) GetSpan() trace.Span {
+	return t.span
 }
 
 func (t *l0CompactionTask) SetSpan(span trace.Span) {
@@ -224,10 +228,6 @@ func (t *l0CompactionTask) GetLabel() string {
 
 func (t *l0CompactionTask) NeedReAssignNodeID() bool {
 	return t.GetState() == datapb.CompactionTaskState_pipelining && (!t.hasAssignedWorker())
-}
-
-func (t *l0CompactionTask) SetResult(result *datapb.CompactionPlanResult) {
-	t.result = result
 }
 
 func (t *l0CompactionTask) CleanLogPath() {

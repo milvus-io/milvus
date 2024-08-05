@@ -452,7 +452,7 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 type MultiTargetBalancer struct {
 	*ScoreBasedBalancer
 	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 }
 
 func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -510,7 +510,7 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []in
 	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment)
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		nodeSegments[node] = segments
 		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
@@ -548,7 +548,7 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 	return plans
 }
 
-func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr *meta.TargetManager) *MultiTargetBalancer {
+func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
 	return &MultiTargetBalancer{
 		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
 		dist:               dist,

@@ -136,6 +136,13 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
+	t.Run("GetChannelRecoveryInfo", func(t *testing.T) {
+		mockDataCoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetChannelRecoveryInfoResponse{}, nil)
+		resp, err := server.GetChannelRecoveryInfo(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
 	t.Run("GetFlushedSegments", func(t *testing.T) {
 		mockDataCoord.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{}, nil)
 		resp, err := server.GetFlushedSegments(ctx, nil)

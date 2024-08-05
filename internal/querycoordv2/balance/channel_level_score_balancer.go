@@ -41,7 +41,7 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 ) *ChannelLevelScoreBalancer {
 	return &ChannelLevelScoreBalancer{
 		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
@@ -147,7 +147,7 @@ func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(replica *meta.Replica
 	for _, nodeID := range offlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID), meta.WithChannel(channelName))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment)
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		plans := b.AssignSegment(replica.GetCollectionID(), segments, onlineNodes, false)
 		for i := range plans {
@@ -168,7 +168,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(replica *meta.Replica, channe
 	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node), meta.WithChannel(channelName))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(segment)
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		segmentDist[node] = segments
 		totalScore += nodeScore[node].getPriority()

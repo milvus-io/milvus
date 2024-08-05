@@ -23,7 +23,7 @@ import (
 //go:generate mockery --name=BufferManager --structname=MockBufferManager --output=./  --filename=mock_manager.go --with-expecter --inpackage
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
-	Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error
+	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
@@ -140,7 +140,7 @@ func (m *bufferManager) Stop() {
 }
 
 // Register a new WriteBuffer for channel.
-func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error {
+func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -148,7 +148,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 	if ok {
 		return merr.WrapErrChannelReduplicate(channel)
 	}
-	buf, err := NewWriteBuffer(channel, metacache, storageV2Cache, m.syncMgr, opts...)
+	buf, err := NewWriteBuffer(channel, metacache, m.syncMgr, opts...)
 	if err != nil {
 		return err
 	}

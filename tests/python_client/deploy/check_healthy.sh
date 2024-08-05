@@ -4,8 +4,8 @@
 function check_healthy {
     Expect=$(yq '.services | length' 'docker-compose.yml')
     Expect_health=$(yq '.services' 'docker-compose.yml' |grep 'healthcheck'|wc -l)
-    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=$(docker-compose ps | grep "healthy" | wc -l)
+    cnt=$(docker compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker compose ps | grep "healthy" | wc -l)
     time_cnt=0
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
@@ -20,8 +20,8 @@ function check_healthy {
         printf "timeout,there are some issues with deployment!"
         exit 1
     fi
-    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=$(docker-compose ps | grep "healthy" | wc -l)
+    cnt=$(docker compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker compose ps | grep "healthy" | wc -l)
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
     done

@@ -71,6 +71,7 @@ type TargetManagerInterface interface {
 	IsNextTargetExist(collectionID int64) bool
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
+	CanSegmentBeMoved(collectionID, segmentID int64) bool
 }
 
 type TargetManager struct {
@@ -112,18 +113,26 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
 	mgr.next.removeCollectionTarget(collectionID)
 
-	log.Debug("finish to update current target for collection",
-		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
-		zap.Int64("version", newTarget.GetTargetVersion()),
-	)
+	partStatsVersionInfo := "partitionStats:"
 	for channelName, dmlChannel := range newTarget.dmChannels {
 		ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
 		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
 			channelName,
 		).Set(float64(ts.Unix()))
+		partStatsVersionInfo += fmt.Sprintf("%s:[", channelName)
+		partStatsVersion := dmlChannel.PartitionStatsVersions
+		for partID, statVersion := range partStatsVersion {
+			partStatsVersionInfo += fmt.Sprintf("%d:%d,", partID, statVersion)
+		}
+		partStatsVersionInfo += "],"
 	}
+	log.Debug("finish to update current target for collection",
+		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
+		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
+		zap.Int64("version", newTarget.GetTargetVersion()),
+		zap.String("partStatsVersion", partStatsVersionInfo),
+	)
 	return true
 }
 
@@ -692,18 +701,16 @@ func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 }
 
 // if segment isn't l0 segment, and exist in current/next target, then it can be moved
-func (mgr *TargetManager) CanSegmentBeMoved(segment *Segment) bool {
-	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		return false
-	}
-
-	current := mgr.current.getCollectionTarget(segment.CollectionID)
-	if current != nil && current.segments[segment.GetID()] != nil {
+func (mgr *TargetManager) CanSegmentBeMoved(collectionID, segmentID int64) bool {
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
+	current := mgr.current.getCollectionTarget(collectionID)
+	if current != nil && current.segments[segmentID] != nil && current.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
 		return true
 	}
 
-	next := mgr.next.getCollectionTarget(segment.CollectionID)
-	if next != nil && next.segments[segment.GetID()] != nil {
+	next := mgr.next.getCollectionTarget(collectionID)
+	if next != nil && next.segments[segmentID] != nil && next.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
 		return true
 	}
 

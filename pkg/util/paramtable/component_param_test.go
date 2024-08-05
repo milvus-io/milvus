@@ -302,6 +302,9 @@ func TestComponentParam(t *testing.T) {
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
 		assert.Equal(t, 2000, checkHealthRPCTimeout)
 
+		updateInterval := Params.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
+		assert.Equal(t, updateInterval, time.Minute*5)
+
 		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
 		params.Save("queryCoord.globalRowCountFactor", "0.4")
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor.GetAsFloat())
@@ -443,6 +446,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -483,10 +487,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
 		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.maxSegmentSizeRatio", "1.2")
+		assert.Equal(t, 1.2, Params.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())
+		params.Save("dataCoord.compaction.clustering.preferSegmentSizeRatio", "0.5")
+		assert.Equal(t, 0.5, Params.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat())
 		params.Save("dataCoord.slot.clusteringCompactionUsage", "10")
 		assert.Equal(t, 10, Params.ClusteringCompactionSlotUsage.GetAsInt())
 		params.Save("dataCoord.slot.mixCompactionUsage", "5")

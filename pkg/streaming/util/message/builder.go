@@ -43,6 +43,7 @@ var (
 	NewDropCollectionMessageBuilderV1   = createNewMessageBuilderV1[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]()
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
+	NewFlushMessageBuilderV1            = createNewMessageBuilderV1[*FlushMessageHeader, *FlushMessagePayload]()
 )
 
 // createNewMessageBuilderV1 creates a new message builder with v1 marker.
