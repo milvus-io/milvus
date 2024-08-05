@@ -936,7 +936,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 20;
-    auto dataset = DataGen(col->get_schema(), N, 42, 0, 0, 2);
+    auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
@@ -1156,7 +1156,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     // second insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
-    dataset = DataGen(col->get_schema(), N, 42, 0, N);
+    dataset = DataGen(col->get_schema(), N, 42, N);
     insert_data = serialize(dataset.raw_);
     PreInsert(segment, N, &offset);
     res = Insert(segment,
@@ -1194,7 +1194,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
-    auto dataset = DataGen(col->get_schema(), N, 42, 0, 0, 2);
+    auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
     // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);

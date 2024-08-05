@@ -20,7 +20,6 @@ package segments
 #cgo pkg-config: milvus_segcore
 
 #include "segcore/load_index_c.h"
-#include "segcore/segment_c.h"
 */
 import "C"
 
@@ -817,19 +816,6 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 	}
 	err := runningGroup.Wait()
 	if err != nil {
-		return err
-	}
-
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.RemoveDuplicatePkRecords(segment.ptr)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "RemoveDuplicatePkRecords failed",
-		zap.Int64("collectionID", segment.Collection()),
-		zap.Int64("segmentID", segment.ID()),
-		zap.String("segmentType", segment.Type().String())); err != nil {
 		return err
 	}
 

@@ -39,8 +39,6 @@ class SegmentGrowing : public SegmentInternalInterface {
         return SegmentType::Growing;
     }
 
-    virtual std::vector<SegOffset>
-    SearchPk(const PkType& pk, Timestamp ts) const = 0;
     // virtual int64_t
     // PreDelete(int64_t size) = 0;
 

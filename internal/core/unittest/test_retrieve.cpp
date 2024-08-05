@@ -383,7 +383,7 @@ TEST_P(RetrieveTest, LargeTimestamp) {
     int choose_sep = 3;
     auto choose = [=](int i) { return i * choose_sep % N; };
     uint64_t ts_offset = 100;
-    auto dataset = DataGen(schema, N, 42, 0, ts_offset + 1);
+    auto dataset = DataGen(schema, N, 42, ts_offset + 1);
     auto segment = CreateSealedSegment(schema);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
