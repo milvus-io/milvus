@@ -177,6 +177,7 @@ class MilvusCDCPerformance:
                 source_count = results[0]['count(*)']
 
                 progress = (target_count / source_count) * 100 if source_count > 0 else 0
+                self.sync_count = target_count - previous_count
                 logger.debug(f"sync progress {target_count}/{source_count} {progress:.2f}%")
             except Exception as e:
                 logger.error(f"Count failed: {e}")
