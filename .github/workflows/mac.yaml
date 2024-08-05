@@ -15,6 +15,7 @@ on:
       - 'cmd/**'
       - 'build/**'
       - 'tests/integration/**'
+      - 'tests/go_client/**'
       - '.github/workflows/mac.yaml'
       - '.env'
       - docker-compose.yml
