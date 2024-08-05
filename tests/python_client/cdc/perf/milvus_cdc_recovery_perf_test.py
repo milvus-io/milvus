@@ -7,9 +7,9 @@ from datetime import datetime
 import requests
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
-import sys
-logger.remove()
-logger.add(sink=sys.stdout, level="INFO")
+# import sys
+# logger.remove()
+# logger.add(sink=sys.stdout, level="DEBUG")
 class MilvusCDCPerformance:
     def __init__(self, source_alias, target_alias, cdc_host):
         self.source_alias = source_alias
@@ -167,11 +167,17 @@ class MilvusCDCPerformance:
                     output_fields=["count(*)"],
                 )
                 tt = time.time() - t0
-                count = results[0]['count(*)']
-                with self.sync_lock:
-                    self.sync_count = count - previous_count
-                progress = (self.sync_count / self.insert_count) * 100 if self.insert_count > 0 else 0
-                logger.debug(f"sync progress {self.sync_count}/{self.insert_count} {progress:.2f}%")
+                target_count = results[0]['count(*)']
+                t0 = time.time()
+                results = self.source_collection.query(
+                    expr="",
+                    output_fields=["count(*)"],
+                )
+                tt = time.time() - t0
+                source_count = results[0]['count(*)']
+
+                progress = (target_count / source_count) * 100 if source_count > 0 else 0
+                logger.debug(f"sync progress {target_count}/{source_count} {progress:.2f}%")
             except Exception as e:
                 logger.error(f"Count failed: {e}")
             time.sleep(0.01)  # Query interval
