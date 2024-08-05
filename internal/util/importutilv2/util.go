@@ -33,10 +33,12 @@ const (
 	JSON    FileType = 1
 	Numpy   FileType = 2
 	Parquet FileType = 3
+	CSV     FileType = 4
 
 	JSONFileExt    = ".json"
 	NumpyFileExt   = ".npy"
 	ParquetFileExt = ".parquet"
+	CSVFileExt     = ".csv"
 )
 
 var FileTypeName = map[int]string{
@@ -44,6 +46,7 @@ var FileTypeName = map[int]string{
 	1: "JSON",
 	2: "Numpy",
 	3: "Parquet",
+	4: "CSV",
 }
 
 func (f FileType) String() string {
@@ -80,6 +83,11 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 			return Invalid, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
 		}
 		return Parquet, nil
+	case CSVFileExt:
+		if len(file.GetPaths()) != 1 {
+			return Invalid, merr.WrapErrImportFailed("for CSV import, accepts only one file")
+		}
+		return CSV, nil
 	}
 	return Invalid, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
 }

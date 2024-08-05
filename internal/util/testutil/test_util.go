@@ -550,3 +550,104 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 
 	return rows, nil
 }
+
+func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([][]string, error) {
+	rowNum := insertData.GetRowNum()
+	csvData := make([][]string, 0, rowNum+1)
+
+	header := make([]string, 0)
+	nameToFields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		name := field.GetName()
+		if !field.GetAutoID() {
+			header = append(header, name)
+		}
+		return name
+	})
+	csvData = append(csvData, header)
+
+	for i := 0; i < rowNum; i++ {
+		data := make([]string, 0)
+		for _, name := range header {
+			field := nameToFields[name]
+			value := insertData.Data[field.FieldID]
+			dataType := field.GetDataType()
+			elemType := field.GetElementType()
+			if field.GetAutoID() {
+				continue
+			}
+			switch dataType {
+			case schemapb.DataType_Array:
+				var arr any
+				switch elemType {
+				case schemapb.DataType_Bool:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetLongData().GetData()
+				case schemapb.DataType_Float:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
+				case schemapb.DataType_Double:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
+				case schemapb.DataType_String:
+					arr = value.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
+				}
+				j, err := json.Marshal(arr)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_JSON:
+				data = append(data, string(value.GetRow(i).([]byte)))
+			case schemapb.DataType_FloatVector:
+				vec := value.GetRow(i).([]float32)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_BinaryVector:
+				bytes := value.GetRow(i).([]byte)
+				vec := make([]int, 0, len(bytes))
+				for _, b := range bytes {
+					vec = append(vec, int(b))
+				}
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_Float16Vector:
+				bytes := value.GetRow(i).([]byte)
+				vec := typeutil.Float16BytesToFloat32Vector(bytes)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_BFloat16Vector:
+				bytes := value.GetRow(i).([]byte)
+				vec := typeutil.BFloat16BytesToFloat32Vector(bytes)
+				j, err := json.Marshal(vec)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_SparseFloatVector:
+				bytes := value.GetRow(i).([]byte)
+				m := typeutil.SparseFloatBytesToMap(bytes)
+				j, err := json.Marshal(m)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			default:
+				str := fmt.Sprintf("%v", value.GetRow(i))
+				data = append(data, str)
+			}
+		}
+		csvData = append(csvData, data)
+	}
+
+	return csvData, nil
+}

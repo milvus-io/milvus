@@ -99,6 +99,8 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
 	s.NoError(err)
 
+	options := []*commonpb.KeyValuePair{}
+
 	switch s.fileType {
 	case importutilv2.Numpy:
 		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
@@ -130,11 +132,25 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				},
 			},
 		}
+	case importutilv2.CSV:
+		filePath := fmt.Sprintf("/tmp/test_%d.csv", rand.Int())
+		sep := GenerateCSVFile(s.T(), filePath, schema, rowCount)
+		defer os.Remove(filePath)
+		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
+		s.NoError(err)
+		files = []*internalpb.ImportFile{
+			{
+				Paths: []string{
+					filePath,
+				},
+			},
+		}
 	}
 
 	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
+		Options:        options,
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
@@ -195,5 +211,10 @@ func (s *BulkInsertSuite) TestImportDynamicField_Numpy() {
 
 func (s *BulkInsertSuite) TestImportDynamicField_Parquet() {
 	s.fileType = importutilv2.Parquet
+	s.testImportDynamicField()
+}
+
+func (s *BulkInsertSuite) TestImportDynamicField_CSV() {
+	s.fileType = importutilv2.CSV
 	s.testImportDynamicField()
 }
