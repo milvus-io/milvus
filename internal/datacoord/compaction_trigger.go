@@ -306,8 +306,13 @@ func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
 		log.Warn("failed to get collection", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
-
-	return GetSegmentMaxSize(collectionID, collMeta.Schema, t.meta)
+	allDiskIndex := t.meta.indexMeta.AreAllDiskIndex(collectionID, collMeta.Schema)
+	if allDiskIndex {
+		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+	}
+	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
