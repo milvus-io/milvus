@@ -24,7 +24,7 @@ func TestDelete(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// insert
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
@@ -60,7 +60,7 @@ func TestDeleteVarcharPks(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// insert
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
@@ -138,7 +138,7 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// insert
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	idsPk := []int64{0, 1, 2, 3, 4}
@@ -201,7 +201,7 @@ func TestDeleteVarcharEmptyIds(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	// insert
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load collection
@@ -305,8 +305,8 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into p1
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
@@ -343,8 +343,8 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into p1
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
@@ -381,8 +381,8 @@ func TestDeletePartitionName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// insert [0, 3000) into default, insert [3000, 6000) into parName
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
@@ -485,7 +485,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 
 		// insert [0, 3000) into default
-		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 		// index and load
@@ -514,7 +514,7 @@ func TestDeleteInvalidExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 
 	// insert [0, 3000) into default
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load
@@ -537,7 +537,7 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithIsDynamic(true), hp.TNewSchemaOption())
 
 	// insert [0, 3000) into default
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	// index and load

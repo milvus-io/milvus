@@ -16,6 +16,7 @@ on:
       - 'cmd/**'
       - 'build/**'
       - 'tests/integration/**'
+      - 'tests/go_client/**'
       - '.github/workflows/code-checker.yaml'
       - '.env'
       - docker-compose.yml
