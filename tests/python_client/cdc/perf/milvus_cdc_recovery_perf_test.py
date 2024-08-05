@@ -7,9 +7,9 @@ from datetime import datetime
 import requests
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
-# import sys
-# logger.remove()
-# logger.add(sink=sys.stdout, level="DEBUG")
+import sys
+logger.remove()
+logger.add(sink=sys.stdout, level="DEBUG")
 class MilvusCDCPerformance:
     def __init__(self, source_alias, target_alias, cdc_host):
         self.source_alias = source_alias
