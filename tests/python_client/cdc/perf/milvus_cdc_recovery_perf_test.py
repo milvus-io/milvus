@@ -138,20 +138,20 @@ class MilvusCDCPerformance:
                             )
                             break
                         except Exception as e:
-                            logger.error(f"Query failed: {e}")
+                            logger.debug(f"Query failed: {e}")
                             continue
                     tt = time.time() - t0
                     # logger.info(f"start to query, latest_insert_ts: {latest_insert_ts}, results: {results}")
                     if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
                         end_time = time.time()
-                        latency = end_time - (latest_insert_ts / 1000) - tt  # Convert milliseconds to seconds
+                        latency = end_time - (latest_insert_ts / 1000)  # Convert milliseconds to seconds
                         with self.sync_lock:
                             self.latest_query_ts = latest_insert_ts
                             self.latencies.append(latency)
                         logger.debug(
                             f"query latest_insert_ts: {latest_insert_ts}, results: {results} query latency: {latency} seconds")
                 except Exception as e:
-                    logger.error(f"Query failed: {e}")
+                    logger.debug(f"Query failed: {e}")
             time.sleep(0.01)  # Query interval
 
     def continuous_count(self):
