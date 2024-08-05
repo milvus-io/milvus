@@ -62,24 +62,25 @@ ChunkCache::Read(const std::string& filepath,
         field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
         column = Mmap(field_data->GetFieldData(), descriptor);
         allocate_success = true;
-    } catch(const SegcoreError& e) {
+    } catch (const SegcoreError& e) {
         err_code = e.get_error_code();
-        err_msg = fmt::format(
-                "failed to read for chunkCache, seg_core_err:{}",
-                e.what());
+        err_msg = fmt::format("failed to read for chunkCache, seg_core_err:{}",
+                              e.what());
     }
     std::unique_lock mmap_lck(mutex_);
     it = columns_.find(filepath);
     if (it != columns_.end()) {
         // check pair exists then set value
         it->second.first.set_value(column);
-        if(allocate_success) {
+        if (allocate_success) {
             AssertInfo(column, "unexpected null column, file={}", filepath);
         }
     } else {
-        PanicInfo(UnexpectedError, "Wrong code, the thread to download for cache should get the target entry");
+        PanicInfo(UnexpectedError,
+                  "Wrong code, the thread to download for cache should get the "
+                  "target entry");
     }
-    if(err_code != Success) {
+    if (err_code != Success) {
         columns_.erase(filepath);
         throw SegcoreError(err_code, err_msg);
     }
