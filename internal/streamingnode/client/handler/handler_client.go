@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,12 +24,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ HandlerClient = (*handlerClientImpl)(nil)
+var (
+	_               HandlerClient = (*handlerClientImpl)(nil)
+	ErrClientClosed               = errors.New("handler client is closed")
+)
 
 type (
 	Producer = producer.Producer
@@ -94,15 +97,13 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
 	return &handlerClientImpl{
-		lifetime:              lifetime.NewLifetime(lifetime.Working),
-		service:               lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
-		rb:                    rb,
-		watcher:               watcher,
-		rebalanceTrigger:      w,
-		sharedProducers:       make(map[string]*typeutil.WeakReference[Producer]),
-		sharedProducerKeyLock: lock.NewKeyLock[string](),
-		newProducer:           producer.CreateProducer,
-		newConsumer:           consumer.CreateConsumer,
+		lifetime:         lifetime.NewLifetime(lifetime.Working),
+		service:          lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
+		rb:               rb,
+		watcher:          watcher,
+		rebalanceTrigger: w,
+		newProducer:      producer.CreateProducer,
+		newConsumer:      consumer.CreateConsumer,
 	}
 }
 

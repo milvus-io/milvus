@@ -20,7 +20,9 @@ func newTimeTickMsg(ts uint64, sourceID int64) (message.MutableMessage, error) {
 				commonpbutil.WithTimeStamp(ts),
 				commonpbutil.WithSourceID(sourceID),
 			),
-		}).BuildMutable()
+		}).
+		WithBroadcast().
+		BuildMutable()
 	if err != nil {
 		return nil, err
 	}

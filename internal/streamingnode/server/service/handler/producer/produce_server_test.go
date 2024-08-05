@@ -91,7 +91,11 @@ func TestProduceSendArm(t *testing.T) {
 		return errors.New("send failure")
 	})
 
+	wal := mock_wal.NewMockWAL(t)
+	wal.EXPECT().Available().Return(make(<-chan struct{}))
+
 	p := &ProduceServer{
+		wal: wal,
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
@@ -122,6 +126,7 @@ func TestProduceSendArm(t *testing.T) {
 
 	// test send arm failure
 	p = &ProduceServer{
+		wal: wal,
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
@@ -152,6 +157,7 @@ func TestProduceSendArm(t *testing.T) {
 
 	// test send arm failure
 	p = &ProduceServer{
+		wal: wal,
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
@@ -191,6 +197,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 		msgID := walimplstest.NewTestMessageID(1)
 		f(msgID, nil)
 	})
+	l.EXPECT().IsAvailable().Return(true)
 
 	p := &ProduceServer{
 		wal: l,

@@ -1,7 +1,6 @@
 package message
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/cockroachdb/errors"
@@ -71,6 +70,7 @@ type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	header     H
 	body       B
 	properties propertiesImpl
+	broadcast  bool
 }
 
 // WithMessageHeader creates a new builder with determined message type.
@@ -85,12 +85,24 @@ func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H,
 	return b
 }
 
+// WithVChannel creates a new builder with virtual channel.
+func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesasgeBuilder[H, B] {
+	if b.broadcast {
+		panic("a broadcast message cannot hold vchannel")
+	}
+	b.WithProperty(messageVChannel, vchannel)
+	return b
+}
+
+// WithBroadcast creates a new builder with broadcast property.
+func (b *mutableMesasgeBuilder[H, B]) WithBroadcast() *mutableMesasgeBuilder[H, B] {
+	b.broadcast = true
+	return b
+}
+
 // WithProperty creates a new builder with message property.
 // A key started with '_' is reserved for streaming system, should never used at user of client.
 func (b *mutableMesasgeBuilder[H, B]) WithProperty(key string, val string) *mutableMesasgeBuilder[H, B] {
-	if b.properties.Exist(key) {
-		panic(fmt.Sprintf("message builder already set property field, key = %s", key))
-	}
 	b.properties.Set(key, val)
 	return b
 }
@@ -114,6 +126,9 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 	}
 	if reflect.ValueOf(b.body).IsNil() {
 		panic("message builder not ready for body field")
+	}
+	if !b.broadcast && !b.properties.Exist(messageVChannel) {
+		panic("a non broadcast message builder not ready for vchannel field")
 	}
 
 	// setup header.

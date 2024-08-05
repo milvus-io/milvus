@@ -190,10 +190,12 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 			CollectionId: 1,
 			PartitionIds: []int64{2},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).BuildMutable()
+		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithVChannel("v1").
+		BuildMutable()
 	assert.NoError(f.t, err)
 
-	msgID, err := w.Append(ctx, createMsg.WithVChannel("v1"))
+	msgID, err := w.Append(ctx, createMsg)
 	assert.NoError(f.t, err)
 	assert.NotNil(f.t, msgID)
 }
@@ -204,10 +206,12 @@ func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.
 		WithHeader(&message.DropCollectionMessageHeader{
 			CollectionId: 1,
 		}).
-		WithBody(&msgpb.DropCollectionRequest{}).BuildMutable()
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithVChannel("v1").
+		BuildMutable()
 	assert.NoError(f.t, err)
 
-	msgID, err := w.Append(ctx, dropMsg.WithVChannel("v1"))
+	msgID, err := w.Append(ctx, dropMsg)
 	assert.NoError(f.t, err)
 	assert.NotNil(f.t, msgID)
 }

@@ -126,6 +126,16 @@ func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Sca
 	return s, nil
 }
 
+// IsAvailable returns whether the wal is available.
+func (w *walAdaptorImpl) IsAvailable() bool {
+	return !w.lifetime.IsClosed()
+}
+
+// Available returns a channel that will be closed when the wal is shut down.
+func (w *walAdaptorImpl) Available() <-chan struct{} {
+	return w.lifetime.CloseCh()
+}
+
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
 	w.lifetime.SetState(lifetime.Stopped)

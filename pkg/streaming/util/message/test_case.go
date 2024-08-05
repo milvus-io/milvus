@@ -91,11 +91,12 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 			RowIDs:         rowIDs,
 			Timestamps:     timestamps,
 			NumRows:        uint64(totalRows),
-		}).BuildMutable()
+		}).
+		WithVChannel("v1").
+		BuildMutable()
 	if err != nil {
 		panic(err)
 	}
-	msg.WithVChannel("v1")
 	msg.WithTimeTick(timetick)
 	msg.WithLastConfirmed(messageID)
 	return msg
@@ -122,9 +123,9 @@ func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetic
 	msg, err := NewCreateCollectionMessageBuilderV1().
 		WithHeader(header).
 		WithBody(payload).
+		WithVChannel("v1").
 		BuildMutable()
 	assert.NoError(t, err)
-	msg.WithVChannel("v1")
 	msg.WithTimeTick(timetick)
 	msg.WithLastConfirmed(messageID)
 	return msg
@@ -149,10 +150,11 @@ func CreateTestEmptyInsertMesage(msgID int64, extraProperties map[string]string)
 				MsgID:   msgID,
 			},
 		}).
+		WithVChannel("v1").
 		WithProperties(extraProperties).
 		BuildMutable()
 	if err != nil {
 		panic(err)
 	}
-	return msg.WithVChannel("v1")
+	return msg
 }
