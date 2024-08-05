@@ -455,6 +455,15 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 < JSONField`,
 		`ArrayField > 2`,
 		`2 < ArrayField`,
+		// https://github.com/milvus-io/milvus/issues/34139
+		"\"Int64Field\" > 500 && \"Int64Field\" < 1000",
+		"\"Int64Field\" == 500 || \"Int64Field\" != 1000",
+		`"str" < 100`,
+		`"str" <= 100`,
+		`"str" > 100`,
+		`"str" >= 100`,
+		`"str" == 100`,
+		`"str" != 100`,
 		// ------------------------ like ------------------------
 		`(VarCharField % 2) like "prefix%"`,
 		`FloatField like "prefix%"`,
