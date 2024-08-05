@@ -279,10 +279,15 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 func (t *clusteringCompactionTask) processIndexing() error {
 	// wait for segment indexed
 	collectionIndexes := t.meta.GetIndexMeta().GetIndexesForCollection(t.GetCollectionID(), "")
+	if len(collectionIndexes) == 0 {
+		log.Debug("the collection has no index, no need to do indexing")
+		return t.completeTask()
+	}
 	indexed := func() bool {
 		for _, collectionIndex := range collectionIndexes {
 			for _, segmentID := range t.ResultSegments {
 				segmentIndexState := t.meta.GetIndexMeta().GetSegmentIndexState(t.GetCollectionID(), segmentID, collectionIndex.IndexID)
+				log.Debug("segment index state", zap.String("segment", segmentIndexState.String()))
 				if segmentIndexState.GetState() != commonpb.IndexState_Finished {
 					return false
 				}
@@ -292,7 +297,7 @@ func (t *clusteringCompactionTask) processIndexing() error {
 	}()
 	log.Debug("check compaction result segments index states", zap.Bool("indexed", indexed), zap.Int64("planID", t.GetPlanID()), zap.Int64s("segments", t.ResultSegments))
 	if indexed {
-		t.completeTask()
+		return t.completeTask()
 	}
 	return nil
 }
