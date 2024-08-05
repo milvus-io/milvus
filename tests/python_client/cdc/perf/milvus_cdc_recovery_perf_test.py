@@ -136,6 +136,7 @@ class MilvusCDCPerformance:
                                 output_fields=["timestamp"],
                                 limit=1
                             )
+                            break
                         except Exception as e:
                             logger.error(f"Query failed: {e}")
                             continue
