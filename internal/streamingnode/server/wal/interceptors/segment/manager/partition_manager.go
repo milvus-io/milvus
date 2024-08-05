@@ -10,12 +10,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+var ErrFencedAssign = errors.New("fenced assign")
 
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
@@ -42,13 +43,14 @@ func newPartitionSegmentManager(
 
 // partitionSegmentManager is a assign manager of determined partition on determined vchannel.
 type partitionSegmentManager struct {
-	mu           sync.Mutex
-	logger       *log.MLogger
-	pchannel     types.PChannelInfo
-	vchannel     string
-	collectionID int64
-	paritionID   int64
-	segments     []*segmentAllocManager // there will be very few segments in this list.
+	mu                   sync.Mutex
+	logger               *log.MLogger
+	pchannel             types.PChannelInfo
+	vchannel             string
+	collectionID         int64
+	paritionID           int64
+	segments             []*segmentAllocManager // there will be very few segments in this list.
+	fencedAssignTimeTick uint64                 // the time tick that the assign operation is fenced.
 }
 
 func (m *partitionSegmentManager) CollectionID() int64 {
@@ -56,11 +58,35 @@ func (m *partitionSegmentManager) CollectionID() int64 {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-func (m *partitionSegmentManager) AssignSegment(ctx context.Context, insert stats.InsertMetrics) (*AssignSegmentResult, error) {
+func (m *partitionSegmentManager) AssignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.assignSegment(ctx, insert)
+	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
+	// So it's just a promise check here.
+	// If the request time tick is less than the fenced time tick, the assign operation is fenced.
+	// A special error will be returned to indicate the assign operation is fenced.
+	// The wal will retry it with new timetick.
+	if req.TimeTick <= m.fencedAssignTimeTick {
+		return nil, ErrFencedAssign
+	}
+	return m.assignSegment(ctx, req)
+}
+
+// SealAllSegmentsAndFenceUntil seals all segments and fence assign until the maximum of timetick or max time tick.
+func (m *partitionSegmentManager) SealAllSegmentsAndFenceUntil(timeTick uint64) (sealedSegments []*segmentAllocManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	segmentManagers := m.collectShouldBeSealedWithPolicy(func(segmentMeta *segmentAllocManager) bool { return true })
+	// fence the assign operation until the incoming time tick or latest assigned timetick.
+	// The new incoming assignment request will be fenced.
+	// So all the insert operation before the fenced time tick cannot added to the growing segment (no more insert can be applied on it).
+	// In other words, all insert operation before the fenced time tick will be sealed
+	if timeTick > m.fencedAssignTimeTick {
+		m.fencedAssignTimeTick = timeTick
+	}
+	return segmentManagers
 }
 
 // CollectShouldBeSealed try to collect all segments that should be sealed.
@@ -68,6 +94,11 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.collectShouldBeSealedWithPolicy(m.hitSealPolicy)
+}
+
+// collectShouldBeSealedWithPolicy collects all segments that should be sealed by policy.
+func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates func(segmentMeta *segmentAllocManager) bool) []*segmentAllocManager {
 	shouldBeSealedSegments := make([]*segmentAllocManager, 0, len(m.segments))
 	segments := make([]*segmentAllocManager, 0, len(m.segments))
 	for _, segment := range m.segments {
@@ -82,7 +113,7 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 			continue
 		}
 		// policy hitted segment should be removed from assignment manager.
-		if m.hitSealPolicy(segment) {
+		if predicates(segment) {
 			shouldBeSealedSegments = append(shouldBeSealedSegments, segment)
 			continue
 		}
@@ -96,6 +127,7 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 func (m *partitionSegmentManager) CollectDirtySegmentsAndClear() []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	dirtySegments := make([]*segmentAllocManager, 0, len(m.segments))
 	for _, segment := range m.segments {
 		if segment.IsDirtyEnough() {
@@ -110,6 +142,7 @@ func (m *partitionSegmentManager) CollectDirtySegmentsAndClear() []*segmentAlloc
 func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear() []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	canBeSealed := make([]*segmentAllocManager, 0, len(m.segments))
 	for _, segment := range m.segments {
 		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
@@ -215,10 +248,10 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 }
 
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
-func (m *partitionSegmentManager) assignSegment(ctx context.Context, insert stats.InsertMetrics) (*AssignSegmentResult, error) {
+func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// Alloc segment for insert at previous segments.
 	for _, segment := range m.segments {
-		inserted, ack := segment.AllocRows(ctx, insert)
+		inserted, ack := segment.AllocRows(ctx, req)
 		if inserted {
 			return &AssignSegmentResult{SegmentID: segment.GetSegmentID(), Acknowledge: ack}, nil
 		}
@@ -229,8 +262,8 @@ func (m *partitionSegmentManager) assignSegment(ctx context.Context, insert stat
 	if err != nil {
 		return nil, err
 	}
-	if inserted, ack := newGrowingSegment.AllocRows(ctx, insert); inserted {
+	if inserted, ack := newGrowingSegment.AllocRows(ctx, req); inserted {
 		return &AssignSegmentResult{SegmentID: newGrowingSegment.GetSegmentID(), Acknowledge: ack}, nil
 	}
-	return nil, errors.Errorf("too large insert message, cannot hold in empty growing segment, stats: %+v", insert)
+	return nil, errors.Errorf("too large insert message, cannot hold in empty growing segment, stats: %+v", req.InsertMetrics)
 }

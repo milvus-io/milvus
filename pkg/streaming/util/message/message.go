@@ -3,13 +3,17 @@ package message
 import "google.golang.org/protobuf/proto"
 
 var (
-	_ BasicMessage     = (*messageImpl)(nil)
-	_ MutableMessage   = (*messageImpl)(nil)
-	_ ImmutableMessage = (*immutableMessageImpl)(nil)
+	_ BasicMessage        = (*messageImpl)(nil)
+	_ MutableMessage      = (*messageImpl)(nil)
+	_ ImmutableMessage    = (*immutableMessageImpl)(nil)
+	_ ImmutableTxnMessage = (*immutableTxnMessageImpl)(nil)
 )
 
 // BasicMessage is the basic interface of message.
 type BasicMessage interface {
+	// IsSystemMessage returns whether the message is a system message.
+	IsSystemMessage() bool
+
 	// MessageType returns the type of message.
 	MessageType() MessageType
 
@@ -37,6 +41,13 @@ type BasicMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	TimeTick() uint64
+
+	// BarrierTimeTick returns the barrier time tick of current message.
+	// 0 by default, no fence.
+	BarrierTimeTick() uint64
+
+	// TxnContext returns the transaction context of current message.
+	TxnContext() *TxnContext
 }
 
 // MutableMessage is the mutable message interface.
@@ -44,16 +55,31 @@ type BasicMessage interface {
 type MutableMessage interface {
 	BasicMessage
 
+	// WithBarrierTimeTick sets the barrier time tick of current message.
+	// these time tick is used to promised the message will be sent after that time tick.
+	// and the message which timetick is less than it will never concurrent append with it.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithBarrierTimeTick(tt uint64) MutableMessage
+
+	// WithWALTerm sets the wal term of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithWALTerm(term int64) MutableMessage
+
 	// WithLastConfirmed sets the last confirmed message id of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmed(id MessageID) MutableMessage
 
 	// WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmedUseMessageID() MutableMessage
 
 	// WithTimeTick sets the time tick of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithTimeTick(tt uint64) MutableMessage
+
+	// WithTxnContext sets the transaction context of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithTxnContext(txnCtx TxnContext) MutableMessage
 
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
@@ -76,6 +102,26 @@ type ImmutableMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
+}
+
+// ImmutableTxnMessage is the read-only transaction message interface.
+// Once a transaction is commited, the wal will generate a transaction message.
+// The MessageType() is always return MessageTypeTransaction if it's a transaction message.
+type ImmutableTxnMessage interface {
+	ImmutableMessage
+
+	// Begin returns the begin message of the transaction.
+	Begin() ImmutableMessage
+
+	// Commit returns the commit message of the transaction.
+	Commit() ImmutableMessage
+
+	// RangeOver iterates over the underlying messages in the transaction.
+	// If visitor return not nil, the iteration will be stopped.
+	RangeOver(visitor func(ImmutableMessage) error) error
+
+	// Size returns the number of messages in the transaction.
+	Size() int
 }
 
 // specializedMutableMessage is the specialized mutable message interface.

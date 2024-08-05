@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -110,24 +111,28 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			if !ok {
 				return status.NewInner("scanner error: %s", c.scanner.Error())
 			}
-			// Send Consumed message to client and do metrics.
-			messageSize := msg.EstimateSize()
-			if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
-				Message: &messagespb.ImmutableMessage{
-					Id: &messagespb.MessageID{
-						Id: msg.MessageID().Marshal(),
-					},
-					Payload:    msg.Payload(),
-					Properties: msg.Properties().ToRawMap(),
-				},
-			}); err != nil {
-				return status.NewInner("send consume message failed: %s", err.Error())
+			// If the message is a transaction message, we should send the sub messages one by one,
+			// Otherwise we can send the full message directly.
+			if txnMsg, ok := msg.(message.ImmutableTxnMessage); ok {
+				if err := c.sendImmutableMessage(txnMsg.Begin()); err != nil {
+					return err
+				}
+				if err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
+					if err := c.sendImmutableMessage(im); err != nil {
+						return err
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				if err := c.sendImmutableMessage(txnMsg.Commit()); err != nil {
+					return err
+				}
+			} else {
+				if err := c.sendImmutableMessage(msg); err != nil {
+					return err
+				}
 			}
-			metrics.StreamingNodeConsumeBytes.WithLabelValues(
-				paramtable.GetStringNodeID(),
-				c.scanner.Channel().Name,
-				strconv.FormatInt(c.scanner.Channel().Term, 10),
-			).Observe(float64(messageSize))
 		case <-c.closeCh:
 			c.logger.Info("close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
@@ -139,6 +144,28 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			return c.consumeServer.Context().Err()
 		}
 	}
+}
+
+func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) error {
+	// Send Consumed message to client and do metrics.
+	messageSize := msg.EstimateSize()
+	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
+		Message: &messagespb.ImmutableMessage{
+			Id: &messagespb.MessageID{
+				Id: msg.MessageID().Marshal(),
+			},
+			Payload:    msg.Payload(),
+			Properties: msg.Properties().ToRawMap(),
+		},
+	}); err != nil {
+		return status.NewInner("send consume message failed: %s", err.Error())
+	}
+	metrics.StreamingNodeConsumeBytes.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		c.scanner.Channel().Name,
+		strconv.FormatInt(c.scanner.Channel().Term, 10),
+	).Observe(float64(messageSize))
+	return nil
 }
 
 // recvLoop receives messages from client.

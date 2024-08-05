@@ -15,8 +15,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
@@ -59,9 +57,6 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	syncMgr := syncmgr.NewMockSyncManager(t)
-	wbMgr := writebuffer.NewMockBufferManager(t)
-
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
 	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
@@ -70,8 +65,6 @@ func initResourceForTest(t *testing.T) {
 
 	resource.InitForTest(
 		t,
-		resource.OptSyncManager(syncMgr),
-		resource.OptBufferManager(wbMgr),
 		resource.OptRootCoordClient(rc),
 		resource.OptDataCoordClient(dc),
 		resource.OptFlusher(flusher),

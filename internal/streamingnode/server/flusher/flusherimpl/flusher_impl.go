@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -55,22 +56,28 @@ type flusherImpl struct {
 	tasks    *typeutil.ConcurrentMap[string, wal.WAL]     // unwatched vchannels
 	scanners *typeutil.ConcurrentMap[string, wal.Scanner] // watched scanners
 
-	stopOnce sync.Once
-	stopChan chan struct{}
+	stopOnce       sync.Once
+	stopChan       chan struct{}
+	pipelineParams *util.PipelineParams
 }
 
-func NewFlusher() flusher.Flusher {
-	params := GetPipelineParams()
+func NewFlusher(chunkManager storage.ChunkManager) flusher.Flusher {
+	params := getPipelineParams(chunkManager)
+	return newFlusherWithParam(params)
+}
+
+func newFlusherWithParam(params *util.PipelineParams) flusher.Flusher {
 	fgMgr := pipeline.NewFlowgraphManager()
 	return &flusherImpl{
-		fgMgr:     fgMgr,
-		syncMgr:   params.SyncMgr,
-		wbMgr:     params.WriteBufferManager,
-		cpUpdater: params.CheckpointUpdater,
-		tasks:     typeutil.NewConcurrentMap[string, wal.WAL](),
-		scanners:  typeutil.NewConcurrentMap[string, wal.Scanner](),
-		stopOnce:  sync.Once{},
-		stopChan:  make(chan struct{}),
+		fgMgr:          fgMgr,
+		syncMgr:        params.SyncMgr,
+		wbMgr:          params.WriteBufferManager,
+		cpUpdater:      params.CheckpointUpdater,
+		tasks:          typeutil.NewConcurrentMap[string, wal.WAL](),
+		scanners:       typeutil.NewConcurrentMap[string, wal.Scanner](),
+		stopOnce:       sync.Once{},
+		stopChan:       make(chan struct{}),
+		pipelineParams: params,
 	}
 }
 
@@ -194,7 +201,7 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 	}
 
 	// Build and add pipeline.
-	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, GetPipelineParams(),
+	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, f.pipelineParams,
 		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan())
 	if err != nil {
 		return err

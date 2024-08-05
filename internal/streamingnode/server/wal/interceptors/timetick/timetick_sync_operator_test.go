@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -77,7 +78,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	operator.Sync(ctx)
 
 	// After ack, a wal operation will be trigger.
-	acker.Ack()
+	acker.Ack(ack.OptMessageID(msgID), ack.OptTxnSession(nil))
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
 		ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
 		return &types.AppendResult{

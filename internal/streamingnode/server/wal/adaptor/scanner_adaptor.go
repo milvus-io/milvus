@@ -29,12 +29,14 @@ func newScannerAdaptor(
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
 	}
+	logger := log.With(zap.String("name", name), zap.String("channel", l.Channel().Name))
 	s := &scannerAdaptorImpl{
-		logger:           log.With(zap.String("name", name), zap.String("channel", l.Channel().Name)),
+		logger:           logger,
 		innerWAL:         l,
 		readOption:       readOption,
 		reorderBuffer:    utility.NewReOrderBuffer(),
 		pendingQueue:     typeutil.NewMultipartQueue[message.ImmutableMessage](),
+		txnBuffer:        utility.NewTxnBuffer(logger),
 		cleanup:          cleanup,
 		ScannerHelper:    helper.NewScannerHelper(name),
 		lastTimeTickInfo: inspector.TimeTickInfo{},
@@ -51,6 +53,7 @@ type scannerAdaptorImpl struct {
 	readOption       wal.ReadOption
 	reorderBuffer    *utility.ReOrderByTimeTickBuffer                   // only support time tick reorder now.
 	pendingQueue     *typeutil.MultipartQueue[message.ImmutableMessage] //
+	txnBuffer        *utility.TxnBuffer                                 // txn buffer for txn message.
 	cleanup          func()
 	lastTimeTickInfo inspector.TimeTickInfo
 }
@@ -136,8 +139,15 @@ func (s *scannerAdaptorImpl) getUpstream(scanner walimpls.ScannerImpls) <-chan m
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		// If the time tick message incoming,
-		// the reorder buffer can be consumed into a pending queue with latest timetick.
-		s.pendingQueue.Add(s.reorderBuffer.PopUtilTimeTick(msg.TimeTick()))
+		// the reorder buffer can be consumed until latest confirmed timetick.
+		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
+
+		// There's some txn message need to hold until confirmed, so we need to handle them in txn buffer.
+		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
+
+		// Push the confirmed messages into pending queue for consuming.
+		// and push forward timetick info.
+		s.pendingQueue.Add(msgs)
 		s.lastTimeTickInfo = inspector.TimeTickInfo{
 			MessageID:              msg.MessageID(),
 			TimeTick:               msg.TimeTick(),
@@ -145,8 +155,10 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		}
 		return
 	}
+
 	// Filtering the message if needed.
-	if s.readOption.MessageFilter != nil && !s.readOption.MessageFilter(msg) {
+	// System message should never be filtered.
+	if !msg.IsSystemMessage() && (s.readOption.MessageFilter != nil && !s.readOption.MessageFilter(msg)) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.

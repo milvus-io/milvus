@@ -14,6 +14,12 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/client/manager:
     interfaces:
       ManagerClient:
+  github.com/milvus-io/milvus/internal/streamingcoord/client:
+    interfaces:
+      Client:
+  github.com/milvus-io/milvus/internal/streamingnode/client/handler:
+    interfaces:
+      HandlerClient:
   github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment:
     interfaces:
       Watcher:

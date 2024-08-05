@@ -19,6 +19,7 @@ type Producer interface {
 	Assignment() types.PChannelInfoAssigned
 
 	// Produce sends the produce message to server.
+	// TODO: Support Batch produce here.
 	Produce(ctx context.Context, msg message.MutableMessage) (*ProduceResult, error)
 
 	// Check if a producer is available.

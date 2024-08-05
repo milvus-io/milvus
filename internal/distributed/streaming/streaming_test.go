@@ -18,13 +18,13 @@ const vChannel = "by-dev-rootcoord-dml_4"
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	streaming.Init()
-	defer streaming.Release()
 	m.Run()
 }
 
 func TestStreamingProduce(t *testing.T) {
 	t.Skip()
+	streaming.Init()
+	defer streaming.Release()
 	msg, _ := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{
 			CollectionId: 1,
@@ -35,10 +35,10 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp := streaming.WAL().Append(context.Background(), msg)
-	fmt.Printf("%+v\n", resp)
+	resp, err := streaming.WAL().Append(context.Background(), msg)
+	fmt.Printf("%+v\t%+v\n", resp, err)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
 		msg, _ := message.NewInsertMessageBuilderV1().
 			WithHeader(&message.InsertMessageHeader{
@@ -49,8 +49,38 @@ func TestStreamingProduce(t *testing.T) {
 			}).
 			WithVChannel(vChannel).
 			BuildMutable()
-		resp := streaming.WAL().Append(context.Background(), msg)
-		fmt.Printf("%+v\n", resp)
+		resp, err := streaming.WAL().Append(context.Background(), msg)
+		fmt.Printf("%+v\t%+v\n", resp, err)
+	}
+
+	for i := 0; i < 500; i++ {
+		time.Sleep(time.Millisecond * 1)
+		txn, err := streaming.WAL().Txn(context.Background(), streaming.TxnOption{
+			VChannel: vChannel,
+			TTL:      100 * time.Millisecond,
+		})
+		if err != nil {
+			t.Errorf("txn failed: %v", err)
+			return
+		}
+		for j := 0; j < 5; j++ {
+			msg, _ := message.NewInsertMessageBuilderV1().
+				WithHeader(&message.InsertMessageHeader{
+					CollectionId: 1,
+				}).
+				WithBody(&msgpb.InsertRequest{
+					CollectionID: 1,
+				}).
+				WithVChannel(vChannel).
+				BuildMutable()
+			err := txn.Append(context.Background(), msg)
+			fmt.Printf("%+v\n", err)
+		}
+		result, err := txn.Commit(context.Background())
+		if err != nil {
+			t.Errorf("txn failed: %v", err)
+		}
+		fmt.Printf("%+v\n", result)
 	}
 
 	msg, _ = message.NewDropCollectionMessageBuilderV1().
@@ -62,12 +92,14 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp = streaming.WAL().Append(context.Background(), msg)
-	fmt.Printf("%+v\n", resp)
+	resp, err = streaming.WAL().Append(context.Background(), msg)
+	fmt.Printf("%+v\t%+v\n", resp, err)
 }
 
 func TestStreamingConsume(t *testing.T) {
 	t.Skip()
+	streaming.Init()
+	defer streaming.Release()
 	ch := make(message.ChanMessageHandler, 10)
 	s := streaming.WAL().Read(context.Background(), streaming.ReadOption{
 		VChannel:       vChannel,
@@ -83,8 +115,9 @@ func TestStreamingConsume(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		select {
 		case msg := <-ch:
-			fmt.Printf("msgID=%+v, tt=%d, lca=%+v, body=%s, idx=%d\n",
+			fmt.Printf("msgID=%+v, msgType=%+v, tt=%d, lca=%+v, body=%s, idx=%d\n",
 				msg.MessageID(),
+				msg.MessageType(),
 				msg.TimeTick(),
 				msg.LastConfirmedMessageID(),
 				string(msg.Payload()),

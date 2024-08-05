@@ -97,6 +97,7 @@ type consumerImpl struct {
 	logger           *log.MLogger
 	msgHandler       message.Handler
 	finishErr        *syncutil.Future[error]
+	txnBuilder       *message.ImmutableTxnMessageBuilder
 }
 
 // Close close the consumer client.
@@ -157,11 +158,19 @@ func (c *consumerImpl) recvLoop() (err error) {
 			if err != nil {
 				return err
 			}
-			c.msgHandler.Handle(message.NewImmutableMesasge(
+			newImmutableMsg := message.NewImmutableMesasge(
 				msgID,
 				resp.Consume.GetMessage().GetPayload(),
 				resp.Consume.GetMessage().GetProperties(),
-			))
+			)
+			if newImmutableMsg.TxnContext() != nil {
+				c.handleTxnMessage(newImmutableMsg)
+			} else {
+				if c.txnBuilder != nil {
+					panic("txn builder should be nil if we receive a non-txn message")
+				}
+				c.msgHandler.Handle(newImmutableMsg)
+			}
 		case *streamingpb.ConsumeResponse_Close:
 			// Should receive io.EOF after that.
 			// Do nothing at current implementation.
@@ -169,4 +178,42 @@ func (c *consumerImpl) recvLoop() (err error) {
 			c.logger.Warn("unknown response type", zap.Any("response", resp))
 		}
 	}
+}
+
+func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
+	switch msg.MessageType() {
+	case message.MessageTypeBeginTxn:
+		if c.txnBuilder != nil {
+			err := errors.New("txn builder should be nil if we receive a begin txn message")
+			c.logger.DPanic("unreachable code", zap.Error(err))
+			return err
+		}
+		beginMsg, err := message.AsImmutableBeginTxnMessageV2(msg)
+		if err != nil {
+			c.logger.DPanic("failed to convert message to begin txn message")
+			return err
+		}
+		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg)
+	case message.MessageTypeCommitTxn:
+		if c.txnBuilder == nil {
+			err := errors.New("txn builder should not be nil if we receive a commit txn message")
+			c.logger.DPanic("unreachable code", zap.Error(err))
+			return err
+		}
+		commitMsg, err := message.AsImmutableCommitTxnMessageV2(msg)
+		if err != nil {
+			c.logger.DPanic("failed to convert message to commit txn message")
+			return err
+		}
+		msg, err := c.txnBuilder.Build(commitMsg)
+		if err != nil {
+			c.logger.DPanic("failed to build txn message")
+			return err
+		}
+		c.txnBuilder = nil
+		c.msgHandler.Handle(msg)
+	default:
+		c.txnBuilder.Add(msg)
+	}
+	return nil
 }
