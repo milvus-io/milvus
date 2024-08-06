@@ -655,7 +655,7 @@ func (c *Core) restore(ctx context.Context) error {
 				for _, part := range coll.Partitions {
 					switch part.State {
 					case pb.PartitionState_PartitionDropping:
-						go c.garbageCollector.ReDropPartition(coll.DBID, coll.PhysicalChannelNames, part.Clone(), ts)
+						go c.garbageCollector.ReDropPartition(coll.DBID, coll.PhysicalChannelNames, coll.VirtualChannelNames, part.Clone(), ts)
 					case pb.PartitionState_PartitionCreating:
 						go c.garbageCollector.RemoveCreatingPartition(coll.DBID, part.Clone(), ts)
 					default:
