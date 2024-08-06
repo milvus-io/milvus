@@ -8,7 +8,7 @@ require (
 	github.com/gogo/status v1.1.0
 	github.com/golang/protobuf v1.5.4
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.7-0.20240717093336-5d85129b6803
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.7
 	github.com/milvus-io/milvus/pkg v0.0.2-0.20240317152703-17b4938985f3
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
