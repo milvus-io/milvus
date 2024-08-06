@@ -11,6 +11,7 @@
 
 #include "tantivy-binding.h"
 #include "common/Slice.h"
+#include "common/RegexQuery.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "index/InvertedIndexTantivy.h"
 #include "log/Log.h"

@@ -57,6 +57,14 @@ class StringIndexMarisa : public StringIndex {
         return str_ids_.size();
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::MARISA;
+    }
+
+    void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override;
+
     void
     Build(size_t n, const std::string* values) override;
 
@@ -113,7 +121,8 @@ class StringIndexMarisa : public StringIndex {
     prefix_match(const std::string_view prefix);
 
     void
-    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
+    LoadWithoutAssemble(const BinarySet& binary_set,
+                        const Config& config) override;
 
  private:
     Config config_;

@@ -19,6 +19,7 @@
 #include "tantivy-wrapper.h"
 #include "index/StringIndex.h"
 #include "storage/space.h"
+#include "common/RegexQuery.h"
 
 namespace milvus::index {
 
@@ -157,6 +158,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
     bool
     SupportRegexQuery() const override {
         return true;
@@ -164,6 +172,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     const TargetBitmap
     RegexQuery(const std::string& pattern) override;
+
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::INVERTED;
+    }
 
  private:
     void

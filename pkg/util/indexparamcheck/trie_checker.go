@@ -16,8 +16,8 @@ func (c *TRIEChecker) CheckTrain(params map[string]string) error {
 	return c.scalarIndexChecker.CheckTrain(params)
 }
 
-func (c *TRIEChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsStringType(dType) {
+func (c *TRIEChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if !typeutil.IsStringType(field.GetDataType()) {
 		return fmt.Errorf("TRIE are only supported on varchar field")
 	}
 	return nil
