@@ -979,5 +979,5 @@ trace:
 #milvus will automatically initialize half of the available GPU memory,
 #maxMemSize will the whole available GPU memory.
 gpu:
-  initMemSize:  # Gpu Memory Pool init size
-  maxMemSize:  # Gpu Memory Pool Max size
+  initMemSize: 2048 # Gpu Memory Pool init size
+  maxMemSize: 4096 # Gpu Memory Pool Max size
