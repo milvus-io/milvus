@@ -11,6 +11,7 @@
 
 #include "tantivy-binding.h"
 #include "common/Slice.h"
+#include "common/RegexQuery.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "index/InvertedIndexTantivy.h"
 #include "log/Log.h"
@@ -314,9 +315,9 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::RegexQuery(const std::string& pattern) {
+InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
     TargetBitmap bitset(Count());
-    auto array = wrapper_->regex_query(pattern);
+    auto array = wrapper_->regex_query(regex_pattern);
     apply_hits(bitset, array, true);
     return bitset;
 }

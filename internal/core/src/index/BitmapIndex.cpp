@@ -25,6 +25,7 @@
 #include "index/ScalarIndex.h"
 #include "index/Utils.h"
 #include "storage/Util.h"
+#include "query/Utils.h"
 
 namespace milvus {
 namespace index {
@@ -804,6 +805,78 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
         }
     }
     return true;
+}
+
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::Query(const DatasetPtr& dataset) {
+    return ScalarIndex<T>::Query(dataset);
+}
+
+template <>
+const TargetBitmap
+BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
+    AssertInfo(is_built_, "index has not been built");
+
+    auto op = dataset->Get<OpType>(OPERATOR_TYPE);
+    if (op == OpType::PrefixMatch) {
+        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+        TargetBitmap res(total_num_rows_, false);
+        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            for (auto it = data_.begin(); it != data_.end(); ++it) {
+                const auto& key = it->first;
+                if (milvus::query::Match(key, prefix, op)) {
+                    for (const auto& v : it->second) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else {
+            for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
+                const auto& key = it->first;
+                if (milvus::query::Match(key, prefix, op)) {
+                    res |= it->second;
+                }
+            }
+        }
+
+        return res;
+    } else {
+        PanicInfo(OpTypeInvalid,
+                  fmt::format("unsupported op_type:{} for bitmap query", op));
+    }
+}
+
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::RegexQuery(const std::string& regex_pattern) {
+    return ScalarIndex<T>::RegexQuery(regex_pattern);
+}
+
+template <>
+const TargetBitmap
+BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
+    AssertInfo(is_built_, "index has not been built");
+    RegexMatcher matcher(regex_pattern);
+    TargetBitmap res(total_num_rows_, false);
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
+                }
+            }
+        }
+    } else {
+        for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                res |= it->second;
+            }
+        }
+    }
+    return res;
 }
 
 template class BitmapIndex<bool>;

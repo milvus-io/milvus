@@ -21,6 +21,7 @@
 #include <string>
 #include <roaring/roaring.hh>
 
+#include "common/RegexQuery.h"
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -112,6 +113,24 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
+
+    const TargetBitmap
+    Query(const DatasetPtr& dataset) override;
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportRegexQuery() const override {
+        return true;
+    }
+
+    const TargetBitmap
+    RegexQuery(const std::string& regex_pattern) override;
 
  public:
     int64_t

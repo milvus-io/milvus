@@ -88,6 +88,28 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
+    Query(const DatasetPtr& dataset) override {
+        return internal_index_->Query(dataset);
+    }
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportRegexQuery() const override {
+        return internal_index_->SupportRegexQuery();
+    }
+
+    const TargetBitmap
+    RegexQuery(const std::string& pattern) override {
+        return internal_index_->RegexQuery(pattern);
+    }
+
+    const TargetBitmap
     Range(T value, OpType op) override {
         return internal_index_->Range(value, op);
     }

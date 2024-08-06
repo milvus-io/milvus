@@ -207,12 +207,8 @@ struct UnaryIndexFuncForMatch {
                       !std::is_same_v<T, std::string>) {
             PanicInfo(Unsupported, "regex query is only supported on string");
         } else {
-            PatternMatchTranslator translator;
-            auto regex_pattern = translator(val);
-            RegexMatcher matcher(regex_pattern);
-
             if (index->SupportRegexQuery()) {
-                return index->RegexQuery(regex_pattern);
+                return index->PatternMatch(val);
             }
             if (!index->HasRawData()) {
                 PanicInfo(Unsupported,
@@ -223,6 +219,9 @@ struct UnaryIndexFuncForMatch {
             // retrieve raw data to do brute force query, may be very slow.
             auto cnt = index->Count();
             TargetBitmap res(cnt);
+            PatternMatchTranslator translator;
+            auto regex_pattern = translator(val);
+            RegexMatcher matcher(regex_pattern);
             for (int64_t i = 0; i < cnt; i++) {
                 auto raw = index->Reverse_Lookup(i);
                 res[i] = matcher(raw);
