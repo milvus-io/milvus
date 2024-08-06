@@ -151,6 +151,12 @@ func (q *QuotaCenter) watchQuotaAndLimit() {
 	pt.Watch(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, config.NewHandler(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, func(event *config.Event) {
 		metrics.QueryNodeMemoryHighWaterLevel.Set(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat())
 	}))
+	pt.Watch(pt.QuotaConfig.DiskQuota.Key, config.NewHandler(pt.QuotaConfig.DiskQuota.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "cluster").Set(pt.QuotaConfig.DiskQuota.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuotaPerCollection.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerCollection.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "collection").Set(pt.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	}))
 }
 
 // run starts the service of QuotaCenter.
