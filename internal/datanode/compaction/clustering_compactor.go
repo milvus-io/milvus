@@ -22,6 +22,8 @@ import (
 	sio "io"
 	"math"
 	"path"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,15 +31,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -455,15 +457,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
+		t.clusterBufferLocks.RLock(buffer.id)
 		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
-	}
-	return totalBufferSize
-}
-
-func (t *clusteringCompactionTask) getCurrentBufferWrittenMemorySize() int64 {
-	var totalBufferSize int64 = 0
-	for _, buffer := range t.clusterBuffers {
-		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize())
+		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	return totalBufferSize
 }
@@ -554,6 +550,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			err := pkIter.Next()
 			if err != nil {
 				if err == sio.EOF {
+					pkIter.Close()
 					break
 				} else {
 					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
@@ -597,9 +594,12 @@ func (t *clusteringCompactionTask) mappingSegment(
 			if (remained+1)%100 == 0 {
 				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
 				// trigger flushBinlog
+
+				t.clusterBufferLocks.RLock(clusterBuffer.id)
+				currentBufferWriterFull := clusterBuffer.writer.IsFull()
+				t.clusterBufferLocks.RUnlock(clusterBuffer.id)
 				currentSegmentNumRows := clusterBuffer.currentSegmentRowNum.Load()
-				if currentSegmentNumRows > t.plan.GetMaxSegmentRows() ||
-					clusterBuffer.writer.IsFull() {
+				if currentSegmentNumRows > t.plan.GetMaxSegmentRows() || currentBufferWriterFull {
 					// reach segment/binlog max size
 					t.clusterBufferLocks.Lock(clusterBuffer.id)
 					writer := clusterBuffer.writer
@@ -714,8 +714,8 @@ func (t *clusteringCompactionTask) backgroundFlush(ctx context.Context) {
 			if signal.done {
 				t.doneChan <- struct{}{}
 			} else if signal.writer == nil {
-				err = t.flushLargestBuffers(ctx)
 				t.hasSignal.Store(false)
+				err = t.flushLargestBuffers(ctx)
 			} else {
 				future := t.flushPool.Submit(func() (any, error) {
 					err := t.flushBinlog(ctx, t.clusterBuffers[signal.id], signal.writer, signal.pack)
@@ -749,12 +749,15 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "flushLargestBuffers")
 	defer span.End()
 	bufferIDs := make([]int, 0)
+	bufferRowNums := make([]int64, 0)
 	for _, buffer := range t.clusterBuffers {
 		bufferIDs = append(bufferIDs, buffer.id)
+		t.clusterBufferLocks.RLock(buffer.id)
+		bufferRowNums = append(bufferRowNums, buffer.writer.GetRowNum())
+		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	sort.Slice(bufferIDs, func(i, j int) bool {
-		return t.clusterBuffers[i].writer.GetRowNum() >
-			t.clusterBuffers[j].writer.GetRowNum()
+		return bufferRowNums[i] > bufferRowNums[j]
 	})
 	log.Info("start flushLargestBuffers", zap.Ints("bufferIDs", bufferIDs), zap.Int64("currentMemorySize", currentMemorySize))
 
@@ -861,7 +864,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 
 	// clear segment binlogs cache
 	delete(buffer.flushedBinlogs, writer.GetSegmentID())
-	//set old writer nil
+	// set old writer nil
 	writer = nil
 	return nil
 }
@@ -932,6 +935,10 @@ func (t *clusteringCompactionTask) flushBinlog(ctx context.Context, buffer *Clus
 			return err
 		}
 	}
+
+	writer = nil
+	runtime.GC()
+	debug.FreeOSMemory()
 	log.Info("finish flush binlogs", zap.Int64("flushCount", t.flushCount.Load()),
 		zap.Int64("cost", time.Since(start).Milliseconds()))
 	return nil

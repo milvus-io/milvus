@@ -198,3 +198,10 @@ type StreamingCoordCataLog interface {
 	// SavePChannel save a pchannel info to metastore.
 	SavePChannels(ctx context.Context, info []*streamingpb.PChannelMeta) error
 }
+
+// StreamingNodeCataLog is the interface for streamingnode catalog
+type StreamingNodeCataLog interface {
+	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
+
+	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos []*streamingpb.SegmentAssignmentMeta) error
+}

@@ -32,7 +32,8 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
         const Index& index =
             segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
 
-        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID) {
+        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
+            index.GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
             return false;
         }
     }
@@ -212,15 +213,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>();
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>();
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>();
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
+                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>();
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
@@ -359,7 +364,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
 
             // filtering by index, get candidates.
             auto size_per_chunk = segment_->size_per_chunk();
-            auto retrieve = [size_per_chunk, this](int64_t offset) -> auto {
+            auto retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
                 auto chunk_idx = offset / size_per_chunk;
                 auto chunk_offset = offset % size_per_chunk;
                 const auto& chunk =

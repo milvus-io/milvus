@@ -17,7 +17,9 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -757,6 +760,43 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	t = s.handler.getCompactionTask(6)
 	s.Equal(datapb.CompactionTaskState_executing, t.GetState())
+}
+
+func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
+	s.SetupTest()
+	inTasks := []*datapb.CompactionTask{
+		{
+			PlanID:    1,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_completed,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+		},
+		{
+			PlanID:    2,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+		},
+		{
+			PlanID:    3,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Unix(),
+		},
+	}
+
+	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
+	compactionTaskMeta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	s.NoError(err)
+	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
+	for _, t := range inTasks {
+		s.handler.meta.SaveCompactionTask(t)
+	}
+
+	s.handler.cleanCompactionTaskMeta()
+	// two task should be cleaned, one remains
+	tasks := s.handler.meta.GetCompactionTaskMeta().GetCompactionTasks()
+	s.Equal(1, len(tasks))
 }
 
 func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {

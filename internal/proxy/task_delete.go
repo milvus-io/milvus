@@ -6,10 +6,10 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -202,26 +202,25 @@ func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, e
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
 	}
-	sliceRequest := msgpb.DeleteRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-			// msgid of delete msg must be set
-			// or it will be seen as duplicated msg in mq
-			commonpbutil.WithMsgID(msgid),
-			commonpbutil.WithTimeStamp(dt.ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:   dt.collectionID,
-		PartitionID:    dt.partitionID,
-		CollectionName: dt.req.GetCollectionName(),
-		PartitionName:  dt.req.GetPartitionName(),
-		PrimaryKeys:    &schemapb.IDs{},
-	}
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			Ctx: ctx,
 		},
-		DeleteRequest: sliceRequest,
+		DeleteRequest: &msgpb.DeleteRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+				// msgid of delete msg must be set
+				// or it will be seen as duplicated msg in mq
+				commonpbutil.WithMsgID(msgid),
+				commonpbutil.WithTimeStamp(dt.ts),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			CollectionID:   dt.collectionID,
+			PartitionID:    dt.partitionID,
+			CollectionName: dt.req.GetCollectionName(),
+			PartitionName:  dt.req.GetPartitionName(),
+			PrimaryKeys:    &schemapb.IDs{},
+		},
 	}, nil
 }
 
@@ -250,7 +249,6 @@ type deleteRunner struct {
 	ts    uint64
 	lb    LBPolicy
 	count atomic.Int64
-	err   error
 
 	// task queue
 	queue *dmTaskQueue
@@ -442,7 +440,11 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		taskCh := make(chan *deleteTask, 256)
-		go dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
+		var receiveErr error
+		go func() {
+			receiveErr = dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
+			close(taskCh)
+		}()
 		var allQueryCnt int64
 		// wait all task finish
 		for task := range taskCh {
@@ -455,51 +457,43 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		// query or produce task failed
-		if dr.err != nil {
-			return dr.err
+		if receiveErr != nil {
+			return receiveErr
 		}
 		dr.allQueryCnt.Add(allQueryCnt)
 		return nil
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) {
-	defer func() {
-		close(taskCh)
-	}()
-
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) error {
 	for {
 		result, err := client.Recv()
 		if err != nil {
 			if err == io.EOF {
 				log.Debug("query stream for delete finished", zap.Int64("msgID", dr.msgID))
-				return
+				return nil
 			}
-			dr.err = err
-			return
+			return err
 		}
 
 		err = merr.Error(result.GetStatus())
 		if err != nil {
-			dr.err = err
 			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
-			return
+			return err
 		}
 
 		if dr.limiter != nil {
 			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
-				dr.err = err
 				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
-				return
+				return err
 			}
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())
 		if err != nil {
-			dr.err = err
 			log.Warn("produce delete task failed", zap.Error(err))
-			return
+			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
 

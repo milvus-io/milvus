@@ -12,7 +12,8 @@ import (
 
 func TestAsSpecializedMessage(t *testing.T) {
 	m, err := message.NewInsertMessageBuilderV1().
-		WithMessageHeader(&message.InsertMessageHeader{
+		WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeader{
 			CollectionId: 1,
 			Partitions: []*message.PartitionSegmentAssignment{
 				{
@@ -22,33 +23,41 @@ func TestAsSpecializedMessage(t *testing.T) {
 				},
 			},
 		}).
-		WithPayload(&msgpb.InsertRequest{}).BuildMutable()
+		WithBody(&msgpb.InsertRequest{
+			CollectionID: 1,
+		}).BuildMutable()
 	assert.NoError(t, err)
 
-	insertMsg, err := message.AsMutableInsertMessage(m)
+	insertMsg, err := message.AsMutableInsertMessageV1(m)
 	assert.NoError(t, err)
 	assert.NotNil(t, insertMsg)
-	assert.Equal(t, int64(1), insertMsg.MessageHeader().CollectionId)
+	assert.Equal(t, int64(1), insertMsg.Header().CollectionId)
+	body, err := insertMsg.Body()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), body.CollectionID)
 
-	h := insertMsg.MessageHeader()
+	h := insertMsg.Header()
 	h.Partitions[0].SegmentAssignment = &message.SegmentAssignment{
 		SegmentId: 1,
 	}
-	insertMsg.OverwriteMessageHeader(h)
+	insertMsg.OverwriteHeader(h)
 
-	createColMsg, err := message.AsMutableCreateCollection(m)
+	createColMsg, err := message.AsMutableCreateCollectionMessageV1(m)
 	assert.NoError(t, err)
 	assert.Nil(t, createColMsg)
 
 	m2 := m.IntoImmutableMessage(mock_message.NewMockMessageID(t))
 
-	insertMsg2, err := message.AsImmutableInsertMessage(m2)
+	insertMsg2, err := message.AsImmutableInsertMessageV1(m2)
 	assert.NoError(t, err)
 	assert.NotNil(t, insertMsg2)
-	assert.Equal(t, int64(1), insertMsg2.MessageHeader().CollectionId)
-	assert.Equal(t, insertMsg2.MessageHeader().Partitions[0].SegmentAssignment.SegmentId, int64(1))
+	assert.Equal(t, int64(1), insertMsg2.Header().CollectionId)
+	assert.Equal(t, insertMsg2.Header().Partitions[0].SegmentAssignment.SegmentId, int64(1))
+	body, err = insertMsg2.Body()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), body.CollectionID)
 
-	createColMsg2, err := message.AsMutableCreateCollection(m)
+	createColMsg2, err := message.AsMutableCreateCollectionMessageV1(m)
 	assert.NoError(t, err)
 	assert.Nil(t, createColMsg2)
 }

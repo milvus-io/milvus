@@ -16,10 +16,24 @@
 
 # Related configuration of etcd, used to store Milvus metadata & service discovery.
 etcd:
+  # Endpoints used to access etcd service. You can change this parameter as the endpoints of your own etcd cluster.
+  # Environment variable: ETCD_ENDPOINTS
+  # etcd preferentially acquires valid address from environment variable ETCD_ENDPOINTS when Milvus is started.
   endpoints: localhost:2379
-  rootPath: by-dev # The root path where data is stored in etcd
-  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
-  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  # Root prefix of the key to where Milvus stores data in etcd.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  # To share an etcd instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them.
+  # Set an easy-to-identify root path for Milvus if etcd service already exists.
+  # Changing this for an already running Milvus instance may result in failures to read legacy data.
+  rootPath: by-dev
+  # Sub-prefix of the key to where Milvus stores metadata-related information in etcd.
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  metaSubPath: meta
+  # Sub-prefix of the key to where Milvus stores timestamps in etcd.
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended not to change this parameter if there is no specific reason.
+  kvSubPath: kv
   log:
     level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
     # path is one of:
@@ -68,20 +82,49 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  path: /var/lib/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
 minio:
-  address: localhost # Address of MinIO/S3
-  port: 9000 # Port of MinIO/S3
-  accessKeyID: minioadmin # accessKeyID of MinIO/S3
-  secretAccessKey: minioadmin # MinIO/S3 encryption string
-  useSSL: false # Access to MinIO/S3 with SSL
+  # IP address of MinIO or S3 service.
+  # Environment variable: MINIO_ADDRESS
+  # minio.address and minio.port together generate the valid access to MinIO or S3 service.
+  # MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
+  # Default value applies when MinIO or S3 is running on the same network with Milvus.
+  address: localhost
+  port: 9000 # Port of MinIO or S3 service.
+  # Access key ID that MinIO or S3 issues to user for authorized access.
+  # Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
+  # minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
+  # This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
+  # The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.
+  accessKeyID: minioadmin
+  # Secret key used to encrypt the signature string and verify the signature string on server. It must be kept strictly confidential and accessible only to the MinIO or S3 server and users.
+  # Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
+  # minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
+  # This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
+  # The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.
+  secretAccessKey: minioadmin
+  useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
     tlsCACert: /path/to/public.crt # path to your CACert file
-  bucketName: a-bucket # Bucket name in MinIO/S3
-  rootPath: files # The root path where the message is stored in MinIO/S3
+  # Name of the bucket where Milvus stores data in MinIO or S3.
+  # Milvus 2.0.0 does not support storing data in multiple buckets.
+  # Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.
+  # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
+  # The data will be stored in the local Docker if Docker is used to start the MinIO service locally. Ensure that there is sufficient storage space.
+  # A bucket name is globally unique in one MinIO or S3 instance.
+  bucketName: a-bucket
+  # Root prefix of the key to where Milvus stores data in MinIO or S3.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
+  # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
+  # Changing this for an already running Milvus instance may result in failures to read legacy data.
+  rootPath: files
   # Whether to useIAM role to access S3/GCS instead of access/secret keys
   # For more information, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
@@ -126,12 +169,22 @@ mq:
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
-  address: localhost # Address of pulsar
-  port: 6650 # Port of Pulsar
-  webport: 80 # Web port of pulsar, if you connect directly without proxy, should use 8080
-  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
+  # IP address of Pulsar service.
+  # Environment variable: PULSAR_ADDRESS
+  # pulsar.address and pulsar.port together generate the valid access to Pulsar.
+  # Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
+  # Default value applies when Pulsar is running on the same network with Milvus.
+  address: localhost
+  port: 6650 # Port of Pulsar service.
+  webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
+  # The maximum size of each message in Pulsar. Unit: Byte.
+  # By default, Pulsar can transmit at most 5 MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+  # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+  maxMessageSize: 5242880
+  # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
+  # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
-  namespace: default
+  namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
   enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
 
@@ -151,21 +204,23 @@ pulsar:
 #   readTimeout: 10
 
 rocksmq:
-  # The path where the message is stored in rocksmq
-  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
+  # Prefix of the key to where Milvus stores data in RocksMQ.
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
   path: /var/lib/milvus/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
-  rocksmqPageSize: 67108864 # 64 MB, 64 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
-  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
-  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+  rocksmqPageSize: 67108864 # The maximum size of messages in each page in RocksMQ. Messages in RocksMQ are checked and cleared (when expired) in batch based on this parameters. Unit: Byte.
+  retentionTimeInMinutes: 4320 # The maximum retention time of acked messages in RocksMQ. Acked messages in RocksMQ are retained for the specified period of time and then cleared. Unit: Minute.
+  retentionSizeInMB: 8192 # The maximum retention size of acked messages of each topic in RocksMQ. Acked messages in each topic are cleared if their size exceed this parameter. Unit: MB.
+  compactionInterval: 86400 # Time interval to trigger rocksdb compaction to remove deleted data. Unit: Second
   compressionTypes: 0,0,7,7,7 # compaction compression type, only support use 0,7. 0 means not compress, 7 will use zstd. Length of types means num of rocksdb level.
 
 # natsmq configuration.
 # more detail: https://docs.nats.io/running-a-nats-service/configuration
 natsmq:
   server:
-    port: 4222 # Port for nats server listening
+    port: 4222 # Listening port of the NATS server.
     storeDir: /var/lib/milvus/nats # Directory to use for JetStream storage of nats
     maxFileStore: 17179869184 # Maximum size of the 'file' storage
     maxPayload: 8388608 # Maximum number of bytes in a message payload
@@ -184,93 +239,99 @@ natsmq:
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
-  dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxPartitionNum: 1024 # Maximum number of partitions in a collection
-  minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
+  dmlChannelNum: 16 # The number of DML-Channels to create at the root coord startup.
+  # The maximum number of partitions in each collection.
+  # New partitions cannot be created if this parameter is set as 0 or 1.
+  # Range: [0, INT64MAX]
+  maxPartitionNum: 1024
+  # The minimum row count of a segment required for creating index.
+  # Segments with smaller size than this parameter will not be indexed, and will be searched with brute force.
+  minSegmentSizeToEnableIndex: 1024
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
-  ip:  # if not specified, use the first unicastable address
-  port: 53100
+  ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
+  port: 53100 # TCP port of rootCoord
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the rootCoord can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the rootCoord can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on rootCoord can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on rootCoord can receive, unit: byte
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
+  timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
     timeTick:
-      bufSize: 512
-  maxNameLength: 255 # Maximum length of name for a collection or alias
-  # Maximum number of fields in a collection.
-  # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
-  # So adjust at your risk!
-  maxFieldNum: 64
-  maxVectorFieldNum: 4 # Maximum number of vector fields in a collection.
-  maxShardNum: 16 # Maximum number of shards in a collection
-  maxDimension: 32768 # Maximum dimension of a vector
+      bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
+  maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
+  maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
+  maxVectorFieldNum: 4 # The maximum number of vector fields that can be specified in a collection. Value range: [1, 10].
+  maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
+  maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
-  maxTaskNum: 1024 # max task number of proxy task queue
+  maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   accessLog:
-    enable: false # if use access log
-    minioEnable: false # if upload sealed access log file to minio
-    localPath: /tmp/milvus_access
-    filename:  # Log filename, leave empty to use stdout.
-    maxSize: 64 # Max size for a single file, in MB.
-    cacheSize: 0 # Size of log write cache, in B
-    cacheFlushInterval: 3 # time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)
-    rotatedTime: 0 # Max time for single access log file in seconds
-    remotePath: access_log/ # File path in minIO
-    remoteMaxTime: 0 # Max time for log file in minIO, in hours
+    enable: false # Whether to enable the access log feature.
+    minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
+    localPath: /tmp/milvus_access # The local folder path where the access log file is stored. This parameter can be specified when proxy.accessLog.filename is not empty.
+    filename:  # The name of the access log file. If you leave this parameter empty, access logs will be printed to stdout.
+    maxSize: 64 # The maximum size allowed for a single access log file. If the log file size reaches this limit, a rotation process will be triggered. This process seals the current access log file, creates a new log file, and clears the contents of the original log file. Unit: MB.
+    rotatedTime: 0 # The maximum time interval allowed for rotating a single access log file. Upon reaching the specified time interval, a rotation process is triggered, resulting in the creation of a new access log file and sealing of the previous one. Unit: seconds
+    remotePath: access_log/ # The path of the object storage for uploading access log files.
+    remoteMaxTime: 0 # The time interval allowed for uploading access log files. If the upload time of a log file exceeds this interval, the file will be deleted. Setting the value to 0 disables this feature.
     formatters:
       base:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
         methods: "Query,Search,Delete"
+    cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
+    cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
   connectionClientInfoTTLSeconds: 86400 # inactive client info TTL duration, in seconds
   maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos
   gracefulStopTimeout: 30 # seconds. force stop node without graceful stop
   slowQuerySpanInSeconds: 5 # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  queryNodePooling:
+    size: 10 # the size for shardleader(querynode) client pool
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
-  ip:  # if not specified, use the first unicastable address
-  port: 19530
+  ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
+  port: 19530 # TCP port of proxy
   internalPort: 19529
   grpc:
-    serverMaxSendSize: 268435456
-    serverMaxRecvSize: 67108864
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 67108864
+    serverMaxSendSize: 268435456 # The maximum size of each RPC request that the proxy can send, unit: byte
+    serverMaxRecvSize: 67108864 # The maximum size of each RPC request that the proxy can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on proxy can send, unit: byte
+    clientMaxRecvSize: 67108864 # The maximum size of each RPC request that the clients on proxy can receive, unit: byte
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
   taskMergeCap: 1
   taskExecutionCap: 256
-  autoHandoff: true # Enable auto handoff
-  autoBalance: true # Enable auto balance
+  # Switch value to control if to automatically replace a growing segment with the corresponding indexed sealed segment when the growing segment reaches the sealing threshold.
+  # If this parameter is set false, Milvus simply searches the growing segments with brute force.
+  autoHandoff: true
+  autoBalance: true # Switch value to control if to automatically balance the memory usage among query nodes by distributing segment loading and releasing operations evenly.
   autoBalanceChannel: true # Enable auto balance channel
   balancer: ScoreBasedBalancer # auto balancer used for segments on queryNodes
   globalRowCountFactor: 0.1 # the weight used when balancing segments among queryNodes
   scoreUnbalanceTolerationFactor: 0.05 # the least value for unbalanced extent between from and to nodes when doing balance
   reverseUnBalanceTolerationFactor: 1.3 # the largest value for unbalanced extent between from and to nodes after doing balance
-  overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
-  balanceIntervalSeconds: 60
-  memoryUsageMaxDifferencePercentage: 30
+  overloadedMemoryThresholdPercentage: 90 # The threshold of memory usage (in percentage) in a query node to trigger the sealed segment balancing.
+  balanceIntervalSeconds: 60 # The interval at which query coord balances the memory usage among query nodes.
+  memoryUsageMaxDifferencePercentage: 30 # The threshold of memory usage difference (in percentage) between any two query nodes to trigger the sealed segment balancing.
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
@@ -278,6 +339,7 @@ queryCoord:
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
   growingRowCountWeight: 4 # the memory weight of growing segment row count
+  delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
@@ -286,8 +348,6 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
-  collectionObserverInterval: 200
-  checkExecutedFlagInterval: 100
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -305,24 +365,30 @@ queryCoord:
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
+  collectionObserverInterval: 200 # the interval of collection observer
+  checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
+  updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
-  ip:  # if not specified, use the first unicastable address
-  port: 19531
+  ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
+  port: 19531 # TCP port of queryCoord
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the queryCoord can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the queryCoord can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on queryCoord can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on queryCoord can receive, unit: byte
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
   stats:
-    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
+    publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
-    chunkRows: 128 # The number of vectors in a chunk.
+    chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
     interimIndex:
-      enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.
+      # Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
+      # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.
+      # This defaults to true, indicating that Milvus creates temporary index for growing segments and the sealed segments that are not indexed upon searches.
+      enableIndex: true
       nlist: 128 # temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
@@ -344,9 +410,9 @@ queryNode:
     warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
-    growingMmapEnabled: false # Enable mmap for growing segment
-    fixedFileSizeForMmapAlloc: 4 #MB, fixed file size for mmap chunk manager to store chunk data
-    maxDiskUsagePercentageForMmapAlloc: 20 # max percentage of disk usage in memory mapping
+    growingMmapEnabled: false # Enable mmap for using in growing raw data
+    fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
+    maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
@@ -383,17 +449,20 @@ queryNode:
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   dataSync:
     flowGraph:
-      maxQueueLength: 16 # Maximum length of task queue in flowgraph
+      maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  enableSegmentPrune: false # use partition prune function on shard delegator
+  enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return batch size of stream query
-  ip:  # if not specified, use the first unicastable address
-  port: 21123
+  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  workerPooling:
+    size: 10 # the size for worker querynode client pool
+  ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
+  port: 21123 # TCP port of queryNode
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the queryNode can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the queryNode can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on queryNode can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on queryNode can receive, unit: byte
 
 indexCoord:
   bindIndexNodeMode:
@@ -409,13 +478,13 @@ indexNode:
     buildParallel: 1
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
-  ip:  # if not specified, use the first unicastable address
-  port: 21121
+  ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
+  port: 21121 # TCP port of indexNode
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the indexNode can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the indexNode can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on indexNode can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on indexNode can receive, unit: byte
 
 dataCoord:
   channel:
@@ -426,13 +495,11 @@ dataCoord:
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
   segment:
-    maxSize: 1024 # Maximum size of a segment in MB
+    maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
-    sealProportion: 0.12
-    # segment seal proportion jitter ratio, default value 0.1(10%), 
-    # if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
-    sealProportionJitter: 0.1 #
-    assignmentExpiration: 2000 # The time of the assignment expiration in ms
+    sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
+    sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
+    assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
@@ -451,56 +518,53 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
-    segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   sealPolicy:
     channel:
-      # The size threshold in MB, if the total size of growing segments of each shard
+      # The size threshold in MB, if the total size of growing segments of each shard 
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
-  enableCompaction: true # Enable data segment compaction
+  segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  # Switch value to control if to enable segment compaction. 
+  # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
+  enableCompaction: true
   compaction:
+    # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
+    # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
     rpcTimeout: 10
     maxParallelTaskNum: 10
     workerMaxParallelTaskNum: 2
+    dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
+    gcInterval: 1800 # The time interval in seconds for compaction gc
     clustering:
       enable: true # Enable clustering compaction
-      autoEnable: false # Enable auto background clustering compaction
+      autoEnable: false # Enable auto clustering compaction
       triggerInterval: 600 # clustering compaction trigger interval in seconds
-      stateCheckInterval: 10
-      gcInterval: 600
       minInterval: 3600 # The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction
       maxInterval: 259200 # If a collection haven't been clustering compacted for longer than maxInterval, force compact
       newDataSizeThreshold: 512m # If new data size is large than newDataSizeThreshold, execute clustering compaction
-      timeout: 7200 # timeout in seconds for clustering compaction, the task will stop if timeout
-      dropTolerance: 86400
-      # clustering compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
-      # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize, will spilt it into multi segment
-      # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
-      preferSegmentSize: 512m       
-      maxSegmentSize: 1024m
-      
-      # vector clustering related
+      preferSegmentSizeRatio: 0.8
+      maxSegmentSizeRatio: 1
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
       maxCentroidsNum: 10240 # maximum centroids number in Kmeans train
       minCentroidsNum: 16 # minimum centroids number in Kmeans train
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
-      maxClusterSizeRatio: 10 #maximum cluster size / avg size in Kmeans train
+      maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
-
     levelzero:
       forceTrigger:
         minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
-  enableGarbageCollection: true
+  syncSegmentsInterval: 300 # The time interval for regularly syncing segments
+  enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
-    interval: 3600 # meta-based gc scanning interval in seconds
-    missingTolerance: 86400 # orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)
-    dropTolerance: 10800 # meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)
+    interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
+    missingTolerance: 86400 # The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.
+    dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
   enableActiveStandby: false
@@ -517,18 +581,17 @@ dataCoord:
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
-  ip:  # if not specified, use the first unicastable address
-  port: 13333
+  slot:
+    clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
+    mixCompactionUsage: 8 # slot usage of mix compaction job.
+    l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+  ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
+  port: 13333 # TCP port of dataCoord
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-  syncSegmentsInterval: 300
-  slot:  
-    clusteringCompactionUsage: 16
-    mixCompactionUsage: 8
-    l0DeleteCompactionUsage: 8
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the dataCoord can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the dataCoord can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on dataCoord can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
 
 dataNode:
   dataSync:
@@ -541,7 +604,10 @@ dataNode:
       skipNum: 4 # Consume one for every n records skipped
       coldTime: 60 # Turn on skip mode after there are only timetick msg for x seconds
   segment:
-    insertBufSize: 16777216 # Max buffer size to flush for a single segment.
+    # The maximum size of each binlog file in a segment buffered in memory. Binlog files whose size exceeds this value are then flushed to MinIO or S3 service.
+    # Unit: Byte
+    # Setting this parameter too small causes the system to store a small amount of data too frequently. Setting it too large increases the system's demand for memory.
+    insertBufSize: 16777216
     deleteBufBytes: 16777216 # Max buffer size in bytes to flush del for a single channel, default as 16MB
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
   memory:
@@ -556,6 +622,8 @@ dataNode:
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
+    # specify the size of global work pool for channel checkpoint updating
+    # if this parameter <= 0, will set it as 10
     updateChannelCheckpointMaxParallel: 10
     updateChannelCheckpointInterval: 60 # the interval duration(in seconds) for datanode to update channel checkpoint of each channel
     updateChannelCheckpointRPCTimeout: 20 # timeout in seconds for UpdateChannelCheckpoint RPC call
@@ -569,40 +637,34 @@ dataNode:
     levelZeroBatchMemoryRatio: 0.05 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
-  ip:  # if not specified, use the first unicastable address
-  port: 21124
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
   slot:
-    slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
-
+    slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode
   clusteringCompaction:
     memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
-    workPoolSize: 8 # worker pool size for one clustering compaction job
-
-streamingNode:
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 19532
+    workPoolSize: 8 # worker pool size for one clustering compaction job.
+  ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
+  port: 21124 # TCP port of dataNode
   grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the dataNode can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the dataNode can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on dataNode can send, unit: byte
+    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataNode can receive, unit: byte
 
 # Configures the system log output.
 log:
-  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+  # It is recommended to use debug level under test and development environments, and info level in production environment.
+  level: info
   file:
-    rootPath:  # root dir path to put logs, default "" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs
-    maxSize: 300 # MB
-    maxAge: 10 # Maximum time for log retention in day.
-    maxBackups: 20
-  format: text # text or json
+    # Root path to the log files.
+    # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
+    # If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
+    # Set this parameter as the path that you have permission to write.
+    rootPath: 
+    maxSize: 300 # The maximum size of a log file, unit: MB.
+    maxAge: 10 # The maximum retention time before a log file is automatically cleared, unit: day. The minimum value is 1.
+    maxBackups: 20 # The maximum number of log files to back up, unit: day. The minimum value is 1.
+  format: text # Milvus log format. Option: text and JSON
   stdout: true # Stdout enable or not
 
 grpc:
@@ -617,6 +679,7 @@ grpc:
     maxMaxAttempts: 10
     initialBackoff: 0.2
     maxBackoff: 10
+    backoffMultiplier: 2
     minResetInterval: 1000
     maxCancelError: 32
     minSessionCheckInterval: 200
@@ -628,10 +691,10 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 common:
-  defaultPartitionName: _default # default partition name for a collection
-  defaultIndexName: _default_idx # default index name
+  defaultPartitionName: _default # Name of the default partition when a collection is created
+  defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
-  indexSliceSize: 16 # MB
+  indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
@@ -647,6 +710,7 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
+  bitmapIndexCardinalityBound: 500
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -657,8 +721,8 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
+    defaultRootPassword: Milvus # default password for root user
     tlsMode: 0
-    defaultRootPassword: Milvus
   session:
     ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
@@ -671,14 +735,18 @@ common:
   storage:
     scheme: s3
     enablev2: false
-  ttMsgEnabled: true # Whether the instance disable sending ts messages
+  # Whether to disable the internal time messaging mechanism for the system. 
+  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+  # This helps Milvus-CDC synchronize incremental data
+  ttMsgEnabled: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
+  bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
-  # clustering key/compaction related
-  usePartitionKeyAsClusteringKey: false
-  useVectorAsClusteringKey: false
-  enableVectorClusteringKey: false
+  bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
+  usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
+  useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
+  enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -702,43 +770,62 @@ quotaAndLimits:
     allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
     complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
     maxCollectionNum: 65536
-    maxCollectionNumPerDB: 65536
+    maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
     maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
   ddl:
-    enabled: false
-    collectionRate: -1 # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
-    partitionRate: -1 # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
+    enabled: false # Whether DDL request throttling is enabled.
+    # Maximum number of collection-related DDL requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 collection-related DDL requests per second, including collection creation requests, collection drop requests, collection load requests, and collection release requests.
+    # To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.
+    collectionRate: -1
+    # Maximum number of partition-related DDL requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including partition creation requests, partition drop requests, partition load requests, and partition release requests.
+    # To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.
+    partitionRate: -1
     db:
       collectionRate: -1 # qps of db level , default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
       partitionRate: -1 # qps of db level, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
   indexRate:
-    enabled: false
-    max: -1 # qps, default no limit, rate for CreateIndex, DropIndex
+    enabled: false # Whether index-related request throttling is enabled.
+    # Maximum number of index-related requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 partition-related requests per second, including index creation requests and index drop requests.
+    # To use this setting, set quotaAndLimits.indexRate.enabled to true at the same time.
+    max: -1
     db:
       max: -1 # qps of db level, default no limit, rate for CreateIndex, DropIndex
   flushRate:
-    enabled: true
-    max: -1 # qps, default no limit, rate for flush
+    enabled: true # Whether flush request throttling is enabled.
+    # Maximum number of flush requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 flush requests per second.
+    # To use this setting, set quotaAndLimits.flushRate.enabled to true at the same time.
+    max: -1
     collection:
       max: 0.1 # qps, default no limit, rate for flush at collection level.
     db:
       max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:
-    enabled: false
-    max: -1 # qps, default no limit, rate for manualCompaction
+    enabled: false # Whether manual compaction request throttling is enabled.
+    # Maximum number of manual-compaction requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 manual-compaction requests per second.
+    # To use this setting, set quotaAndLimits.compaction.enabled to true at the same time.
+    max: -1
     db:
       max: -1 # qps of db level, default no limit, rate for manualCompaction
   dml:
-    # dml limit rates, default no limit.
-    # The maximum rate will not be greater than max.
-    enabled: false
+    enabled: false # Whether DML request throttling is enabled.
     insertRate:
-      max: -1 # MB/s, default no limit
+      # Highest data insertion rate per second.
+      # Setting this item to 5 indicates that Milvus only allows data insertion at the rate of 5 MB/s.
+      # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
+      max: -1
       db:
         max: -1 # MB/s, default no limit
       collection:
-        max: -1 # MB/s, default no limit
+        # Highest data insertion rate per collection per second.
+        # Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
+        # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
+        max: -1
       partition:
         max: -1 # MB/s, default no limit
     upsertRate:
@@ -750,11 +837,17 @@ quotaAndLimits:
       partition:
         max: -1 # MB/s, default no limit
     deleteRate:
-      max: -1 # MB/s, default no limit
+      # Highest data deletion rate per second.
+      # Setting this item to 0.1 indicates that Milvus only allows data deletion at the rate of 0.1 MB/s.
+      # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
+      max: -1
       db:
         max: -1 # MB/s, default no limit
       collection:
-        max: -1 # MB/s, default no limit
+        # Highest data deletion rate per second.
+        # Setting this item to 0.1 indicates that Milvus only allows data deletion from any collection at the rate of 0.1 MB/s.
+        # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
+        max: -1
       partition:
         max: -1 # MB/s, default no limit
     bulkLoadRate:
@@ -766,23 +859,33 @@ quotaAndLimits:
       partition:
         max: -1 # MB/s, default no limit, not support yet. TODO: limit partition bulkLoad rate
   dql:
-    # dql limit rates, default no limit.
-    # The maximum rate will not be greater than max.
-    enabled: false
+    enabled: false # Whether DQL request throttling is enabled.
     searchRate:
-      max: -1 # vps (vectors per second), default no limit
+      # Maximum number of vectors to search per second.
+      # Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+      # To use this setting, set quotaAndLimits.dql.enabled to true at the same time.
+      max: -1
       db:
         max: -1 # vps (vectors per second), default no limit
       collection:
-        max: -1 # vps (vectors per second), default no limit
+        # Maximum number of vectors to search per collection per second.
+        # Setting this item to 100 indicates that Milvus only allows searching 100 vectors per second per collection no matter whether these 100 vectors are all in one search or scattered across multiple searches.
+        # To use this setting, set quotaAndLimits.dql.enabled to true at the same time.
+        max: -1
       partition:
         max: -1 # vps (vectors per second), default no limit
     queryRate:
-      max: -1 # qps, default no limit
+      # Maximum number of queries per second.
+      # Setting this item to 100 indicates that Milvus only allows 100 queries per second.
+      # To use this setting, set quotaAndLimits.dql.enabled to true at the same time.
+      max: -1
       db:
         max: -1 # qps, default no limit
       collection:
-        max: -1 # qps, default no limit
+        # Maximum number of queries per collection per second.
+        # Setting this item to 100 indicates that Milvus only allows 100 queries per collection per second.
+        # To use this setting, set quotaAndLimits.dql.enabled to true at the same time.
+        max: -1
       partition:
         max: -1 # qps, default no limit
   limitWriting:
@@ -819,6 +922,10 @@ quotaAndLimits:
       diskQuotaPerDB: -1 # MB, (0, +inf), default no limit
       diskQuotaPerCollection: -1 # MB, (0, +inf), default no limit
       diskQuotaPerPartition: -1 # MB, (0, +inf), default no limit
+    l0SegmentsRowCountProtection:
+      enabled: false # switch to enable l0 segment row count quota
+      lowWaterLevel: 32768 # l0 segment row count quota, low water level
+      highWaterLevel: 65536 # l0 segment row count quota, low water level
   limitReading:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.
@@ -860,8 +967,10 @@ trace:
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
   otlp:
-    endpoint:  # example: "127.0.0.1:4318"
+    endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
+    method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
+  initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
 #here, you can set the size of the memory occupied by the memory pool, with the unit being MB.
@@ -870,5 +979,5 @@ trace:
 #milvus will automatically initialize half of the available GPU memory,
 #maxMemSize will the whole available GPU memory.
 gpu:
-  initMemSize:  # Gpu Memory Pool init size
-  maxMemSize:  # Gpu Memory Pool Max size
+  initMemSize: 2048 # Gpu Memory Pool init size
+  maxMemSize: 4096 # Gpu Memory Pool Max size

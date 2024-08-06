@@ -937,7 +937,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	}
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
-		{schema: nil, errMsg: "duplicated field name"},
+		{schema: nil, errMsg: "schema does not contain vector field"},
 		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},

@@ -347,14 +347,14 @@ func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 }
 
 // GetVChannels returns all vchannels belonging to the pchannel.
-func (c *Client) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsRequest, opts ...grpc.CallOption) (*rootcoordpb.GetVChannelsResponse, error) {
+func (c *Client) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.GetVChannelsResponse, error) {
-		return client.GetVChannels(ctx, in)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.GetPChannelInfoResponse, error) {
+		return client.GetPChannelInfo(ctx, in)
 	})
 }
 

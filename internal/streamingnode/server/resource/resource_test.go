@@ -7,6 +7,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 )
 
 func TestInit(t *testing.T) {
@@ -19,7 +20,12 @@ func TestInit(t *testing.T) {
 	assert.Panics(t, func() {
 		Init(OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
 	})
-	Init(OptETCD(&clientv3.Client{}), OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
+	Init(
+		OptETCD(&clientv3.Client{}),
+		OptRootCoordClient(mocks.NewMockRootCoordClient(t)),
+		OptDataCoordClient(mocks.NewMockDataCoordClient(t)),
+		OptStreamingNodeCatalog(mock_metastore.NewMockStreamingNodeCataLog(t)),
+	)
 
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())
@@ -27,5 +33,5 @@ func TestInit(t *testing.T) {
 }
 
 func TestInitForTest(t *testing.T) {
-	InitForTest()
+	InitForTest(t)
 }

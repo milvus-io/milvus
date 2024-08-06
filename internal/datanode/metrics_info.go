@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -34,7 +34,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 	var err error
 	rms := make([]metricsinfo.RateMetric, 0)
 	getRateMetric := func(label metricsinfo.RateMetricLabel) {
-		rate, err2 := util.RateCol.Rate(label, ratelimitutil.DefaultAvgDuration)
+		rate, err2 := util.GetRateCollector().Rate(label, ratelimitutil.DefaultAvgDuration)
 		if err2 != nil {
 			err = err2
 			return
@@ -50,7 +50,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 		return nil, err
 	}
 
-	minFGChannel, minFGTt := util.RateCol.GetMinFlowGraphTt()
+	minFGChannel, minFGTt := util.GetRateCollector().GetMinFlowGraphTt()
 	return &metricsinfo.DataNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,

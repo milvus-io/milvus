@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -890,7 +890,7 @@ func (coord *RootCoordMock) ShowSegments(ctx context.Context, req *milvuspb.Show
 	}, nil
 }
 
-func (coord *RootCoordMock) GetVChannels(ctx context.Context, in *rootcoordpb.GetVChannelsRequest, opts ...grpc.CallOption) (*rootcoordpb.GetVChannelsResponse, error) {
+func (coord *RootCoordMock) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
 	panic("implement me")
 }
 

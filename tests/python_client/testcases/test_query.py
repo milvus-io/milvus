@@ -2579,6 +2579,29 @@ class TestQueryOperation(TestcaseBase):
         _, check_res = collection_w.query(multi_exprs, output_fields=[f'{default_int_field_name}'])
         assert(check_res == True) 
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_multi_logical_exprs(self):
+        """
+        target: test the scenario which search with many logical expressions
+        method: 1. create collection
+                3. search with the expr that like: int64 == 0 || int64 == 1 ........ 
+        expected: run successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+    
+        multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
+    
+        collection_w.load()
+        vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        limit = 1000
+        _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
+                            ct.default_search_params, limit, multi_exprs)
+        assert(check_res == True) 
 
 class TestQueryString(TestcaseBase):
     """

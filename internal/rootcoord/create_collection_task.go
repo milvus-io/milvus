@@ -23,8 +23,8 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -413,7 +413,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		CreateCollectionRequest: msgpb.CreateCollectionRequest{
+		CreateCollectionRequest: &msgpb.CreateCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
 				commonpbutil.WithTimeStamp(ts),

@@ -61,7 +61,7 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 		},
 	}
 	msg, err := NewInsertMessageBuilderV1().
-		WithMessageHeader(&InsertMessageHeader{
+		WithHeader(&InsertMessageHeader{
 			CollectionId: 1,
 			Partitions: []*PartitionSegmentAssignment{
 				{
@@ -72,7 +72,7 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 				},
 			},
 		}).
-		WithPayload(&msgpb.InsertRequest{
+		WithBody(&msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				Timestamp: 100,
@@ -91,11 +91,12 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 			RowIDs:         rowIDs,
 			Timestamps:     timestamps,
 			NumRows:        uint64(totalRows),
-		}).BuildMutable()
+		}).
+		WithVChannel("v1").
+		BuildMutable()
 	if err != nil {
 		panic(err)
 	}
-	msg.WithVChannel("v1")
 	msg.WithTimeTick(timetick)
 	msg.WithLastConfirmed(messageID)
 	return msg
@@ -104,6 +105,7 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
 	header := &CreateCollectionMessageHeader{
 		CollectionId: collectionID,
+		PartitionIds: []int64{2},
 	}
 	payload := &msgpb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -119,11 +121,11 @@ func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetic
 	}
 
 	msg, err := NewCreateCollectionMessageBuilderV1().
-		WithMessageHeader(header).
-		WithPayload(payload).
+		WithHeader(header).
+		WithBody(payload).
+		WithVChannel("v1").
 		BuildMutable()
 	assert.NoError(t, err)
-	msg.WithVChannel("v1")
 	msg.WithTimeTick(timetick)
 	msg.WithLastConfirmed(messageID)
 	return msg
@@ -132,13 +134,23 @@ func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetic
 // CreateTestEmptyInsertMesage creates an empty insert message for testing
 func CreateTestEmptyInsertMesage(msgID int64, extraProperties map[string]string) MutableMessage {
 	msg, err := NewInsertMessageBuilderV1().
-		WithMessageHeader(&InsertMessageHeader{}).
-		WithPayload(&msgpb.InsertRequest{
+		WithHeader(&InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*PartitionSegmentAssignment{
+				{
+					PartitionId: 2,
+					Rows:        1000,
+					BinarySize:  1024 * 1024,
+				},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_Insert,
 				MsgID:   msgID,
 			},
 		}).
+		WithVChannel("v1").
 		WithProperties(extraProperties).
 		BuildMutable()
 	if err != nil {

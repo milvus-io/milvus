@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/samber/lo"
@@ -9,8 +10,13 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
@@ -139,4 +145,169 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
+}
+
+func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
+	var (
+		collectionID = int64(1000)
+		fieldID      = int64(2000)
+		indexID      = int64(3000)
+	)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key, strconv.Itoa(100))
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key, strconv.Itoa(200))
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key)
+
+	s.triggerManager.meta = &meta{
+		indexMeta: &indexMeta{
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {
+					indexID + 1: &model.Index{
+						CollectionID: collectionID,
+						FieldID:      fieldID + 1,
+						IndexID:      indexID + 1,
+						IndexName:    "",
+						IsDeleted:    false,
+						CreateTime:   0,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "DISKANN"},
+						},
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					indexID + 2: &model.Index{
+						CollectionID: collectionID,
+						FieldID:      fieldID + 2,
+						IndexID:      indexID + 2,
+						IndexName:    "",
+						IsDeleted:    false,
+						CreateTime:   0,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "DISKANN"},
+						},
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+		},
+	}
+
+	s.Run("all DISKANN", func() {
+		collection := &collectionInfo{
+			ID: collectionID,
+			Schema: &schemapb.CollectionSchema{
+				Name:        "coll1",
+				Description: "",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+					{FieldID: fieldID + 2, Name: "field2", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+				},
+				EnableDynamicField: false,
+				Properties:         nil,
+			},
+		}
+
+		s.Equal(int64(200*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+	})
+
+	s.Run("HNSW & DISKANN", func() {
+		s.triggerManager.meta = &meta{
+			indexMeta: &indexMeta{
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collectionID: {
+						indexID + 1: &model.Index{
+							CollectionID: collectionID,
+							FieldID:      fieldID + 1,
+							IndexID:      indexID + 1,
+							IndexName:    "",
+							IsDeleted:    false,
+							CreateTime:   0,
+							TypeParams:   nil,
+							IndexParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "HNSW"},
+							},
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						indexID + 2: &model.Index{
+							CollectionID: collectionID,
+							FieldID:      fieldID + 2,
+							IndexID:      indexID + 2,
+							IndexName:    "",
+							IsDeleted:    false,
+							CreateTime:   0,
+							TypeParams:   nil,
+							IndexParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "DISKANN"},
+							},
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+					},
+				},
+			},
+		}
+		collection := &collectionInfo{
+			ID: collectionID,
+			Schema: &schemapb.CollectionSchema{
+				Name:        "coll1",
+				Description: "",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+					{FieldID: fieldID + 2, Name: "field2", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+				},
+				EnableDynamicField: false,
+				Properties:         nil,
+			},
+		}
+
+		s.Equal(int64(100*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+	})
+
+	s.Run("some vector has no index", func() {
+		s.triggerManager.meta = &meta{
+			indexMeta: &indexMeta{
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collectionID: {
+						indexID + 1: &model.Index{
+							CollectionID: collectionID,
+							FieldID:      fieldID + 1,
+							IndexID:      indexID + 1,
+							IndexName:    "",
+							IsDeleted:    false,
+							CreateTime:   0,
+							TypeParams:   nil,
+							IndexParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "HNSW"},
+							},
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+					},
+				},
+			},
+		}
+		collection := &collectionInfo{
+			ID: collectionID,
+			Schema: &schemapb.CollectionSchema{
+				Name:        "coll1",
+				Description: "",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+					{FieldID: fieldID + 2, Name: "field2", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+				},
+				EnableDynamicField: false,
+				Properties:         nil,
+			},
+		}
+
+		s.Equal(int64(100*1024*1024), s.triggerManager.getExpectedSegmentSize(collection))
+	})
 }

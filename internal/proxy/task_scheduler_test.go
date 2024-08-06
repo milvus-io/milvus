@@ -582,7 +582,7 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		it := &insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
 					CollectionName: collectionName,
 				},

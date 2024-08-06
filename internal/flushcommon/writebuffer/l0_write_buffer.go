@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,11 +33,11 @@ type l0WriteBuffer struct {
 	idAllocator allocator.Interface
 }
 
-func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
+func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
 	if option.idAllocator == nil {
 		return nil, merr.WrapErrServiceInternal("id allocator is nil when creating l0 write buffer")
 	}
-	base, err := newWriteBufferBase(channel, metacache, storageV2Cache, syncMgr, option)
+	base, err := newWriteBufferBase(channel, metacache, syncMgr, option)
 	if err != nil {
 		return nil, err
 	}

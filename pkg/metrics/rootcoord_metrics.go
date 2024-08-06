@@ -170,6 +170,15 @@ var (
 			"name",
 		})
 
+	// RootCoordForceDenyWritingCounter records the number of times that milvus turns into force-deny-writing states.
+	RootCoordForceDenyWritingCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "force_deny_writing_counter",
+			Help:      "The number of times milvus turns into force-deny-writing states",
+		})
+
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.
 	RootCoordRateLimitRatio = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -209,6 +218,14 @@ var (
 			indexName,
 			isVectorIndex,
 		})
+
+	QueryNodeMemoryHighWaterLevel = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "qn_mem_high_water_level",
+			Help:      "querynode memory high water level",
+		})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -241,11 +258,14 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
+	registry.MustRegister(RootCoordForceDenyWritingCounter)
 	registry.MustRegister(RootCoordRateLimitRatio)
 	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
 
 	registry.MustRegister(RootCoordNumEntities)
 	registry.MustRegister(RootCoordIndexedNumEntities)
+
+	registry.MustRegister(QueryNodeMemoryHighWaterLevel)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {

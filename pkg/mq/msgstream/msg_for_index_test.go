@@ -29,7 +29,7 @@ import (
 
 func TestCreateIndex(t *testing.T) {
 	var msg TsMsg = &CreateIndexMsg{
-		CreateIndexRequest: milvuspb.CreateIndexRequest{
+		CreateIndexRequest: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_CreateIndex,
 				MsgID:         100,
@@ -65,7 +65,7 @@ func TestCreateIndex(t *testing.T) {
 
 func TestDropIndex(t *testing.T) {
 	var msg TsMsg = &DropIndexMsg{
-		DropIndexRequest: milvuspb.DropIndexRequest{
+		DropIndexRequest: &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_DropIndex,
 				MsgID:         100,

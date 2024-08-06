@@ -1610,44 +1610,65 @@ func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
+	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
 
+	assertCheckHealthResult := func(isHealthy bool) {
+		resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		suite.NoError(err)
+		suite.Equal(resp.IsHealthy, isHealthy)
+		if !isHealthy {
+			suite.NotEmpty(resp.Reasons)
+		} else {
+			suite.Empty(resp.Reasons)
+		}
+	}
+
+	setNodeSate := func(state commonpb.StateCode) {
+		// Test for components state fail
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Unset()
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
+			&milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: state},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			},
+			nil).Maybe()
+	}
+
 	// Test for server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	suite.NoError(err)
-	suite.Equal(resp.IsHealthy, false)
-	suite.NotEmpty(resp.Reasons)
+	assertCheckHealthResult(false)
 
 	// Test for components state fail
-	for _, node := range suite.nodes {
-		suite.cluster.EXPECT().GetComponentStates(mock.Anything, node).Return(
-			&milvuspb.ComponentStates{
-				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			},
-			nil).Once()
-	}
+	setNodeSate(commonpb.StateCode_Abnormal)
 	server.UpdateStateCode(commonpb.StateCode_Healthy)
-	resp, err = server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	suite.NoError(err)
-	suite.Equal(resp.IsHealthy, false)
-	suite.NotEmpty(resp.Reasons)
+	assertCheckHealthResult(false)
 
-	// Test for server is healthy
-	for _, node := range suite.nodes {
-		suite.cluster.EXPECT().GetComponentStates(mock.Anything, node).Return(
-			&milvuspb.ComponentStates{
-				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			},
-			nil).Once()
+	// Test for check load percentage fail
+	setNodeSate(commonpb.StateCode_Healthy)
+	assertCheckHealthResult(true)
+
+	// Test for check channel ok
+	for _, collection := range suite.collections {
+		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.updateChannelDist(collection)
 	}
-	resp, err = server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	suite.NoError(err)
-	suite.Equal(resp.IsHealthy, true)
-	suite.Empty(resp.Reasons)
+	assertCheckHealthResult(true)
+
+	// Test for check channel fail
+	tm := meta.NewMockTargetManager(suite.T())
+	tm.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything).Return(nil).Maybe()
+	otm := server.targetMgr
+	server.targetMgr = tm
+	assertCheckHealthResult(true)
+
+	// Test for get shard leader fail
+	server.targetMgr = otm
+	for _, node := range suite.nodes {
+		suite.nodeMgr.Suspend(node)
+	}
+	assertCheckHealthResult(true)
 }
 
 func (suite *ServiceSuite) TestGetShardLeaders() {

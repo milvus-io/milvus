@@ -60,6 +60,14 @@ INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 GOTESTSUM_VERSION := 1.11.0
 GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
+# protoc-gen-go
+PROTOC_GEN_GO_VERSION := 1.33.0
+PROTOC_GEN_GO_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go --version 2>/dev/null)
+INSTALL_PROTOC_GEN_GO := $(findstring $(PROTOC_GEN_GO_VERSION),$(PROTOC_GEN_GO_OUTPUT))
+# protoc-gen-go-grpc
+PROTOC_GEN_GO_GRPC_VERSION := 1.3.0
+PROTOC_GEN_GO_GRPC_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go-grpc  --version 2>/dev/null)
+INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
 
@@ -74,14 +82,14 @@ milvus: build-cpp print-build-info
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
 		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		-tags dynamic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+		-tags dynamic,sonic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 milvus-gpu: build-cpp-gpu print-gpu-build-info
 	@echo "Building Milvus-gpu ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
 		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		-tags dynamic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+		-tags dynamic,sonic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -103,6 +111,19 @@ getdeps:
 		echo "Install gotestsum v$(GOTESTSUM_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install -ldflags="-X 'gotest.tools/gotestsum/cmd.version=$(GOTESTSUM_VERSION)'" gotest.tools/gotestsum@v$(GOTESTSUM_VERSION); \
 	else \
 		echo "gotestsum v$(GOTESTSUM_VERSION) already installed";\
+	fi
+
+get-proto-deps:
+	@mkdir -p $(INSTALL_PATH) # make sure directory exists
+	@if [ -z "$(INSTALL_PROTOC_GEN_GO)" ]; then \
+		echo "install protoc-gen-go $(PROTOC_GEN_GO_VERSION) to $(INSTALL_PATH)" && GOBIN=$(INSTALL_PATH) go install google.golang.org/protobuf/cmd/protoc-gen-go@v$(PROTOC_GEN_GO_VERSION); \
+	else \
+		echo "protoc-gen-go@v$(PROTOC_GEN_GO_VERSION) already installed";\
+	fi
+	@if [ -z "$(INSTALL_PROTOC_GEN_GO_GRPC)" ]; then \
+		echo "install protoc-gen-go-grpc $(PROTOC_GEN_GO_GRPC_VERSION) to $(INSTALL_PATH)" && GOBIN=$(INSTALL_PATH) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRPC_VERSION); \
+	else \
+		echo "protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRPC_VERSION) already installed";\
 	fi
 
 tools/bin/revive: tools/check/go.mod
@@ -161,13 +182,13 @@ lint-fix: getdeps
 static-check: getdeps
 	@echo "Running $@ check"
 	@echo "Start check core packages"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
 	@echo "Start check pkg package"
-	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags dynamic,test --timeout=30m --config $(PWD)/.golangci.yml
 	@echo "Start check client package"
-	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
-	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 
@@ -223,17 +244,13 @@ build-3rdparty:
 	@echo "Build 3rdparty ..."
 	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal})
 
-generated-proto-without-cpp: download-milvus-proto
+generated-proto-without-cpp: download-milvus-proto get-proto-deps
 	@echo "Generate proto ..."
-	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
-	@(env bash $(PWD)/scripts/generate_proto.sh)
+	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-generated-proto: download-milvus-proto build-3rdparty
+generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
-	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
-	@(env bash $(PWD)/scripts/generate_proto.sh)
+	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
 build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
@@ -318,6 +335,16 @@ test-querycoord:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t querycoord)
 
+generate-mockery-flushcommon: getdeps
+	$(INSTALL_PATH)/mockery --name=MetaCache --dir=$(PWD)/internal/flushcommon/metacache --output=$(PWD)/internal/flushcommon/metacache --filename=mock_meta_cache.go --with-expecter --structname=MockMetaCache --outpkg=metacache --inpackage
+	$(INSTALL_PATH)/mockery --name=SyncManager --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_sync_manager.go --with-expecter --structname=MockSyncManager --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=MetaWriter --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_meta_writer.go --with-expecter --structname=MockMetaWriter --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=Serializer --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_serializer.go --with-expecter --structname=MockSerializer --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=Task --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_task.go --with-expecter --structname=MockTask --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=WriteBuffer --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_write_buffer.go --with-expecter --structname=MockWriteBuffer --outpkg=writebuffer --inpackage
+	$(INSTALL_PATH)/mockery --name=BufferManager --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_manager.go --with-expecter --structname=MockBufferManager --outpkg=writebuffer --inpackage
+	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/flushcommon/pipeline --output=$(PWD)/internal/flushcommon/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
+
 test-metastore:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t metastore)
@@ -381,7 +408,7 @@ clean:
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
-	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+	@. $(PWD)/scripts/setenv.sh && mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-pgo=$(PGO_PATH)/default.pgo -ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
 
@@ -476,21 +503,24 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=Manager --dir=internal/datacoord --filename=mock_segment_manager.go --output=internal/datacoord  --structname=MockManager --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage
-	$(INSTALL_PATH)/mockery --name=Broker --dir=$(PWD)/internal/datanode/broker --output=$(PWD)/internal/datanode/broker/ --filename=mock_broker.go --with-expecter --structname=MockBroker --outpkg=broker --inpackage
-	$(INSTALL_PATH)/mockery --name=MetaCache --dir=$(PWD)/internal/datanode/metacache --output=$(PWD)/internal/datanode/metacache --filename=mock_meta_cache.go --with-expecter --structname=MockMetaCache --outpkg=metacache --inpackage
-	$(INSTALL_PATH)/mockery --name=SyncManager --dir=$(PWD)/internal/datanode/syncmgr --output=$(PWD)/internal/datanode/syncmgr --filename=mock_sync_manager.go --with-expecter --structname=MockSyncManager --outpkg=syncmgr --inpackage
-	$(INSTALL_PATH)/mockery --name=MetaWriter --dir=$(PWD)/internal/datanode/syncmgr --output=$(PWD)/internal/datanode/syncmgr --filename=mock_meta_writer.go --with-expecter --structname=MockMetaWriter --outpkg=syncmgr --inpackage
-	$(INSTALL_PATH)/mockery --name=Serializer --dir=$(PWD)/internal/datanode/syncmgr --output=$(PWD)/internal/datanode/syncmgr --filename=mock_serializer.go --with-expecter --structname=MockSerializer --outpkg=syncmgr --inpackage
-	$(INSTALL_PATH)/mockery --name=Task --dir=$(PWD)/internal/datanode/syncmgr --output=$(PWD)/internal/datanode/syncmgr --filename=mock_task.go --with-expecter --structname=MockTask --outpkg=syncmgr --inpackage
-	$(INSTALL_PATH)/mockery --name=WriteBuffer --dir=$(PWD)/internal/datanode/writebuffer --output=$(PWD)/internal/datanode/writebuffer --filename=mock_write_buffer.go --with-expecter --structname=MockWriteBuffer --outpkg=writebuffer --inpackage
-	$(INSTALL_PATH)/mockery --name=BufferManager --dir=$(PWD)/internal/datanode/writebuffer --output=$(PWD)/internal/datanode/writebuffer --filename=mock_mananger.go --with-expecter --structname=MockBufferManager --outpkg=writebuffer --inpackage
-	$(INSTALL_PATH)/mockery --name=BinlogIO --dir=$(PWD)/internal/datanode/io --output=$(PWD)/internal/datanode/io --filename=mock_binlogio.go --with-expecter --structname=MockBinlogIO --outpkg=io --inpackage
-	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/datanode/pipeline --output=$(PWD)/internal/datanode/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=$(PWD)/internal/datanode/channel --output=$(PWD)/internal/datanode/channel --filename=mock_channelmanager.go --with-expecter --structname=MockChannelManager --outpkg=channel --inpackage
 	$(INSTALL_PATH)/mockery --name=Compactor --dir=$(PWD)/internal/datanode/compaction --output=$(PWD)/internal/datanode/compaction --filename=mock_compactor.go --with-expecter --structname=MockCompactor --outpkg=compaction --inpackage
+
+generate-mockery-flushcommon: getdeps
+	$(INSTALL_PATH)/mockery --name=Broker --dir=$(PWD)/internal/flushcommon/broker --output=$(PWD)/internal/flushcommon/broker/ --filename=mock_broker.go --with-expecter --structname=MockBroker --outpkg=broker --inpackage
+	$(INSTALL_PATH)/mockery --name=MetaCache --dir=$(PWD)/internal/flushcommon/metacache --output=$(PWD)/internal/flushcommon/metacache --filename=mock_meta_cache.go --with-expecter --structname=MockMetaCache --outpkg=metacache --inpackage
+	$(INSTALL_PATH)/mockery --name=SyncManager --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_sync_manager.go --with-expecter --structname=MockSyncManager --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=MetaWriter --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_meta_writer.go --with-expecter --structname=MockMetaWriter --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=Serializer --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_serializer.go --with-expecter --structname=MockSerializer --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=Task --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_task.go --with-expecter --structname=MockTask --outpkg=syncmgr --inpackage
+	$(INSTALL_PATH)/mockery --name=WriteBuffer --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_write_buffer.go --with-expecter --structname=MockWriteBuffer --outpkg=writebuffer --inpackage
+	$(INSTALL_PATH)/mockery --name=BufferManager --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_manager.go --with-expecter --structname=MockBufferManager --outpkg=writebuffer --inpackage
+	$(INSTALL_PATH)/mockery --name=BinlogIO --dir=$(PWD)/internal/flushcommon/io --output=$(PWD)/internal/flushcommon/io --filename=mock_binlogio.go --with-expecter --structname=MockBinlogIO --outpkg=io --inpackage
+	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/flushcommon/pipeline --output=$(PWD)/internal/flushcommon/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
 
 generate-mockery-metastore: getdeps
 	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks

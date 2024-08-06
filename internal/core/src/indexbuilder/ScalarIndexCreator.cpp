@@ -36,18 +36,6 @@ ScalarIndexCreator::ScalarIndexCreator(
         index_info, file_manager_context);
 }
 
-ScalarIndexCreator::ScalarIndexCreator(
-    DataType dtype,
-    Config& config,
-    const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space)
-    : config_(config), dtype_(dtype) {
-    milvus::index::CreateIndexInfo index_info;
-    index_info.field_type = dtype_;
-    index_info.index_type = index_type();
-    index_ = index::IndexFactory::GetInstance().CreateIndex(
-        index_info, file_manager_context, std::move(space));
-}
 void
 ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
     auto size = dataset->GetRows();
@@ -58,11 +46,6 @@ ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
 void
 ScalarIndexCreator::Build() {
     index_->Build(config_);
-}
-
-void
-ScalarIndexCreator::BuildV2() {
-    index_->BuildV2(config_);
 }
 
 milvus::BinarySet
@@ -84,10 +67,4 @@ BinarySet
 ScalarIndexCreator::Upload() {
     return index_->Upload();
 }
-
-BinarySet
-ScalarIndexCreator::UploadV2() {
-    return index_->UploadV2();
-}
-
 }  // namespace milvus::indexbuilder

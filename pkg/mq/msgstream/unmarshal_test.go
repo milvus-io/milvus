@@ -19,8 +19,8 @@ package msgstream
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -34,7 +34,7 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{1},
 		},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,

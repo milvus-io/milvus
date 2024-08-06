@@ -57,7 +57,7 @@ func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
 
 // WithLastConfirmed sets the last confirmed message id of current message.
 func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
-	m.properties.Set(messageLastConfirmed, string(id.Marshal()))
+	m.properties.Set(messageLastConfirmed, id.Marshal())
 	return m
 }
 
@@ -73,7 +73,7 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 func (m *messageImpl) TimeTick() uint64 {
 	value, ok := m.properties.Get(messageTimeTick)
 	if !ok {
-		panic(fmt.Sprintf("there's a bug in the message codes, timetick lost in properties of message"))
+		panic("there's a bug in the message codes, timetick lost in properties of message")
 	}
 	tt, err := DecodeUint64(value)
 	if err != nil {
@@ -86,7 +86,7 @@ func (m *messageImpl) TimeTick() uint64 {
 func (m *messageImpl) VChannel() string {
 	value, ok := m.properties.Get(messageVChannel)
 	if !ok {
-		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message"))
+		panic("there's a bug in the message codes, vchannel lost in properties of message")
 	}
 	return value
 }
@@ -101,25 +101,9 @@ func (m *immutableMessageImpl) WALName() string {
 	return m.id.WALName()
 }
 
-// TimeTick returns the time tick of current message.
-func (m *immutableMessageImpl) TimeTick() uint64 {
-	value, ok := m.properties.Get(messageTimeTick)
-	if !ok {
-		panic(fmt.Sprintf("there's a bug in the message codes, timetick lost in properties of message, id: %+v", m.id))
-	}
-	tt, err := DecodeUint64(value)
-	if err != nil {
-		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick %s in properties of message, id: %+v", value, m.id))
-	}
-	return tt
-}
-
-func (m *immutableMessageImpl) VChannel() string {
-	value, ok := m.properties.Get(messageVChannel)
-	if !ok {
-		panic(fmt.Sprintf("there's a bug in the message codes, vchannel lost in properties of message, id: %+v", m.id))
-	}
-	return value
+// MessageID returns the message id.
+func (m *immutableMessageImpl) MessageID() MessageID {
+	return m.id
 }
 
 func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
@@ -132,9 +116,4 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty last confirmed message in properties of message, id: %+v", m.id))
 	}
 	return id
-}
-
-// MessageID returns the message id.
-func (m *immutableMessageImpl) MessageID() MessageID {
-	return m.id
 }

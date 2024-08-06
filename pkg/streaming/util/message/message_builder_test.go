@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
@@ -15,9 +15,11 @@ import (
 
 func TestMessage(t *testing.T) {
 	b := message.NewTimeTickMessageBuilderV1()
-	mutableMessage, err := b.WithMessageHeader(&message.TimeTickMessageHeader{}).
+	mutableMessage, err := b.WithHeader(&message.TimeTickMessageHeader{}).
 		WithProperties(map[string]string{"key": "value"}).
-		WithPayload(&msgpb.TimeTickMsg{}).BuildMutable()
+		WithProperty("key2", "value2").
+		WithVChannel("v1").
+		WithBody(&msgpb.TimeTickMsg{}).BuildMutable()
 	assert.NoError(t, err)
 
 	payload, err := proto.Marshal(&message.TimeTickMessageHeader{})
@@ -26,16 +28,18 @@ func TestMessage(t *testing.T) {
 	assert.True(t, bytes.Equal(payload, mutableMessage.Payload()))
 	assert.True(t, mutableMessage.Properties().Exist("key"))
 	v, ok := mutableMessage.Properties().Get("key")
+	assert.True(t, mutableMessage.Properties().Exist("key2"))
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 20, mutableMessage.EstimateSize())
+	assert.Equal(t, 35, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
 	tt, err := message.DecodeUint64(v)
 	assert.Equal(t, uint64(123), tt)
 	assert.NoError(t, err)
+	assert.Equal(t, uint64(123), mutableMessage.TimeTick())
 
 	lcMsgID := mock_message.NewMockMessageID(t)
 	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
@@ -43,6 +47,11 @@ func TestMessage(t *testing.T) {
 	v, ok = mutableMessage.Properties().Get("_lc")
 	assert.True(t, ok)
 	assert.Equal(t, v, "lcMsgID")
+
+	v, ok = mutableMessage.Properties().Get("_vc")
+	assert.True(t, ok)
+	assert.Equal(t, "v1", v)
+	assert.Equal(t, "v1", mutableMessage.VChannel())
 
 	msgID := mock_message.NewMockMessageID(t)
 	msgID.EXPECT().EQ(msgID).Return(true)

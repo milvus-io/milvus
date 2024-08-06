@@ -15,6 +15,7 @@ on:
       - 'cmd/**'
       - 'build/**'
       - 'tests/integration/**'
+      - 'tests/go_client/**'
       - '.github/workflows/mac.yaml'
       - '.env'
       - docker-compose.yml
@@ -56,7 +57,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         with:
-          go-version: '~1.21.10'
+          go-version: '~1.21.11'
       - name: Mac Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
@@ -82,7 +83,7 @@ jobs:
           fi
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
-          pip3 install conan==1.61.0
+          pip3 install conan==1.64.1
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi

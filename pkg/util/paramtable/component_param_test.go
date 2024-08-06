@@ -119,6 +119,17 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
 
 		assert.Equal(t, 1000, params.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
+
+		params.Save("common.gcenabled", "false")
+		assert.False(t, Params.GCEnabled.GetAsBool())
+		params.Save("common.gchelper.enabled", "false")
+		assert.False(t, Params.GCHelperEnabled.GetAsBool())
+		params.Save("common.overloadedMemoryThresholdPercentage", "40")
+		assert.Equal(t, 0.4, Params.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		params.Save("common.gchelper.maximumGoGC", "100")
+		assert.Equal(t, 100, Params.MaximumGOGCConfig.GetAsInt())
+		params.Save("common.gchelper.minimumGoGC", "80")
+		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -291,6 +302,9 @@ func TestComponentParam(t *testing.T) {
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
 		assert.Equal(t, 2000, checkHealthRPCTimeout)
 
+		updateInterval := Params.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
+		assert.Equal(t, updateInterval, time.Minute*5)
+
 		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
 		params.Save("queryCoord.globalRowCountFactor", "0.4")
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor.GetAsFloat())
@@ -329,7 +343,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
 		params.Reset("queryCoord.checkExecutedFlagInterval")
 
-		assert.Equal(t, 0.3, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
+		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
 	})
 
@@ -432,6 +446,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -457,6 +472,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		params.Save("dataCoord.compaction.gcInterval", "100")
+		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
+		params.Save("dataCoord.compaction.dropTolerance", "100")
+		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
+
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10")
@@ -467,18 +487,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
 		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.dropTolerance", "86400")
-		assert.Equal(t, int64(86400), Params.ClusteringCompactionDropTolerance.GetAsInt64())
-		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
-		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.maxSegmentSizeRatio", "1.2")
+		assert.Equal(t, 1.2, Params.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())
+		params.Save("dataCoord.compaction.clustering.preferSegmentSizeRatio", "0.5")
+		assert.Equal(t, 0.5, Params.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat())
 		params.Save("dataCoord.slot.clusteringCompactionUsage", "10")
 		assert.Equal(t, 10, Params.ClusteringCompactionSlotUsage.GetAsInt())
 		params.Save("dataCoord.slot.mixCompactionUsage", "5")
 		assert.Equal(t, 5, Params.MixCompactionSlotUsage.GetAsInt())
 		params.Save("dataCoord.slot.l0DeleteCompactionUsage", "4")
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
+		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
+		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

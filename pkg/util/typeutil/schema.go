@@ -28,9 +28,9 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -1038,7 +1038,7 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 
 // GetVectorFieldSchema get vector field schema from collection schema.
 func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range schema.GetFields() {
 		if IsVectorType(fieldSchema.DataType) {
 			return fieldSchema, nil
 		}
@@ -1049,7 +1049,7 @@ func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSch
 // GetVectorFieldSchemas get vector fields schema from collection schema.
 func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0)
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range schema.GetFields() {
 		if IsVectorType(fieldSchema.DataType) {
 			ret = append(ret, fieldSchema)
 		}
@@ -1060,7 +1060,7 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPrimaryKey {
 			return fieldSchema, nil
 		}
@@ -1071,7 +1071,7 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 
 // GetPartitionKeyFieldSchema get partition field schema from collection schema
 func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPartitionKey {
 			return fieldSchema, nil
 		}

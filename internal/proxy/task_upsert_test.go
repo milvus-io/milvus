@@ -41,11 +41,11 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		},
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
-				InsertRequest: msgpb.InsertRequest{},
+				InsertRequest: &msgpb.InsertRequest{},
 			},
 		},
 	}
-	case1.upsertMsg.InsertMsg.InsertRequest = msgpb.InsertRequest{
+	case1.upsertMsg.InsertMsg.InsertRequest = &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 		),
@@ -102,7 +102,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		schema:     schema,
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
-				InsertRequest: msgpb.InsertRequest{},
+				InsertRequest: &msgpb.InsertRequest{},
 			},
 		},
 	}
@@ -120,7 +120,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		newBinaryVectorFieldData("BinaryVector", numRows, dim),
 		newScalarFieldData(varCharFieldSchema, "VarChar", numRows),
 	}
-	case2.upsertMsg.InsertMsg.InsertRequest = msgpb.InsertRequest{
+	case2.upsertMsg.InsertMsg.InsertRequest = &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 		),

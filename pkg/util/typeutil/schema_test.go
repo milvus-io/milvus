@@ -23,11 +23,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -965,7 +965,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[0:2*Dim], result1[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector := proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[0]}
-	assert.Equal(t, tmpSparseFloatVector, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.Equal(t, tmpSparseFloatVector.Contents, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector().Contents)
 
 	AppendFieldData(result2, fieldDataArray2, 0)
 	AppendFieldData(result2, fieldDataArray1, 0)
@@ -982,7 +982,7 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, BFloat16Vector[2*Dim:4*Dim], result2[BFloat16VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector)
 	tmpSparseFloatVector = proto.Clone(SparseFloatVector).(*schemapb.SparseFloatArray)
 	tmpSparseFloatVector.Contents = [][]byte{SparseFloatVector.Contents[1]}
-	assert.Equal(t, tmpSparseFloatVector, result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
+	assert.EqualExportedValues(t, tmpSparseFloatVector, result2[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector())
 }
 
 func TestEstimateEntitySize(t *testing.T) {

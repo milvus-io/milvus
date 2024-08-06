@@ -408,6 +408,20 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
+    auto int8_nullable_id =
+        schema->AddDebugField("int8_null", DataType::INT8, true);
+    auto int16_nullable_id =
+        schema->AddDebugField("int16_null", DataType::INT16, true);
+    auto int32_nullable_id =
+        schema->AddDebugField("int32_null", DataType::INT32, true);
+    auto int64_nullable_id =
+        schema->AddDebugField("int64_null", DataType::INT64, true);
+    auto double_nullable_id =
+        schema->AddDebugField("double_null", DataType::DOUBLE, true);
+    auto str_nullable_id =
+        schema->AddDebugField("str_null", DataType::VARCHAR, true);
+    auto float_nullable_id =
+        schema->AddDebugField("float_null", DataType::FLOAT, true);
 
     auto dataset = DataGen(schema, N);
 
@@ -500,13 +514,49 @@ TEST(Sealed, LoadFieldData) {
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
         segment->get_batch_views<std::string_view>(str_id, 0, 0, N);
+    auto chunk_span4 = segment->chunk_data<int8_t>(int8_nullable_id, 0);
+    auto chunk_span5 = segment->chunk_data<int16_t>(int16_nullable_id, 0);
+    auto chunk_span6 = segment->chunk_data<int32_t>(int32_nullable_id, 0);
+    auto chunk_span7 = segment->chunk_data<int64_t>(int64_nullable_id, 0);
+    auto chunk_span8 = segment->chunk_data<double>(double_nullable_id, 0);
+    auto chunk_span9 =
+        segment->get_batch_views<std::string_view>(str_nullable_id, 0, 0, N);
+
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    auto ref4 = dataset.get_col<int8_t>(int8_nullable_id);
+    auto ref5 = dataset.get_col<int16_t>(int16_nullable_id);
+    auto ref6 = dataset.get_col<int32_t>(int32_nullable_id);
+    auto ref7 = dataset.get_col<int64_t>(int64_nullable_id);
+    auto ref8 = dataset.get_col<double>(double_nullable_id);
+    auto ref9 =
+        dataset.get_col(str_nullable_id)->scalars().string_data().data();
+    auto valid4 = dataset.get_col_valid(int8_nullable_id);
+    auto valid5 = dataset.get_col_valid(int16_nullable_id);
+    auto valid6 = dataset.get_col_valid(int32_nullable_id);
+    auto valid7 = dataset.get_col_valid(int64_nullable_id);
+    auto valid8 = dataset.get_col_valid(double_nullable_id);
+    auto valid9 = dataset.get_col_valid(str_nullable_id);
+    ASSERT_EQ(chunk_span1.valid_data(), nullptr);
+    ASSERT_EQ(chunk_span2.valid_data(), nullptr);
+    ASSERT_EQ(chunk_span3.second.size(), 0);
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(chunk_span1[i], ref1[i]);
-        ASSERT_EQ(chunk_span2[i], ref2[i]);
-        ASSERT_EQ(chunk_span3[i], ref3[i]);
+        ASSERT_EQ(chunk_span1.data()[i], ref1[i]);
+        ASSERT_EQ(chunk_span2.data()[i], ref2[i]);
+        ASSERT_EQ(chunk_span3.first[i], ref3[i]);
+        ASSERT_EQ(chunk_span4.data()[i], ref4[i]);
+        ASSERT_EQ(chunk_span5.data()[i], ref5[i]);
+        ASSERT_EQ(chunk_span6.data()[i], ref6[i]);
+        ASSERT_EQ(chunk_span7.data()[i], ref7[i]);
+        ASSERT_EQ(chunk_span8.data()[i], ref8[i]);
+        ASSERT_EQ(chunk_span9.first[i], ref9[i]);
+        ASSERT_EQ(chunk_span4.valid_data()[i], valid4[i]);
+        ASSERT_EQ(chunk_span5.valid_data()[i], valid5[i]);
+        ASSERT_EQ(chunk_span6.valid_data()[i], valid6[i]);
+        ASSERT_EQ(chunk_span7.valid_data()[i], valid7[i]);
+        ASSERT_EQ(chunk_span8.valid_data()[i], valid8[i]);
+        ASSERT_EQ(chunk_span9.second[i], valid9[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -630,10 +680,11 @@ TEST(Sealed, ClearData) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    ASSERT_EQ(chunk_span3.second.size(), 0);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
-        ASSERT_EQ(chunk_span3[i], ref3[i]);
+        ASSERT_EQ(chunk_span3.first[i], ref3[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -733,10 +784,11 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    ASSERT_EQ(chunk_span3.second.size(), 0);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
-        ASSERT_EQ(chunk_span3[i], ref3[i]);
+        ASSERT_EQ(chunk_span3.first[i], ref3[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -1065,7 +1117,6 @@ TEST(Sealed, OverlapDelete) {
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
-    auto deleted_record1 = pks.size();
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << pks.size() << std::endl;
@@ -1081,10 +1132,10 @@ TEST(Sealed, OverlapDelete) {
     segment->LoadDeletedRecord(overlap_info);
 
     BitsetType bitset(N, false);
-    auto deleted_record2 = pks.size();
-    ASSERT_EQ(segment->get_deleted_count(), deleted_record1 + deleted_record2)
+    // NOTE: need to change delete timestamp, so not to hit the cache
+    ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
-        << " pks_count=" << deleted_record1 + deleted_record2 << std::endl;
+        << " pks_count=" << pks.size() << std::endl;
     segment->mask_with_delete(bitset, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
@@ -1235,63 +1286,6 @@ TEST(Sealed, BF_Overflow) {
     }
 }
 
-TEST(Sealed, DeleteDuplicatedRecords) {
-    {
-        auto schema = std::make_shared<Schema>();
-        auto pk = schema->AddDebugField("pk", DataType::INT64);
-        schema->set_primary_field_id(pk);
-        auto segment = CreateSealedSegment(schema);
-
-        auto offset = segment->get_deleted_count();
-        ASSERT_EQ(offset, 0);
-
-        int64_t c = 1000;
-        // generate random pk that may have dupicated records
-        auto dataset = DataGen(schema, c, 42, 0, 1, 10, true);
-        auto pks = dataset.get_col<int64_t>(pk);
-        // current insert record: { pk: random(0 - 999) timestamp: (0 - 999) }
-        SealedLoadFieldData(dataset, *segment);
-
-        segment->RemoveDuplicatePkRecords();
-
-        BitsetType bits(c);
-        std::map<int64_t, std::vector<int64_t>> different_pks;
-        for (int i = 0; i < pks.size(); i++) {
-            if (different_pks.find(pks[i]) != different_pks.end()) {
-                different_pks[pks[i]].push_back(i);
-            } else {
-                different_pks[pks[i]] = {i};
-            }
-        }
-
-        for (auto& [k, v] : different_pks) {
-            if (v.size() > 1) {
-                for (int i = 0; i < v.size() - 1; i++) {
-                    bits.set(v[i]);
-                }
-            }
-        }
-
-        ASSERT_EQ(segment->get_deleted_count(), c - different_pks.size())
-            << "deleted_count=" << segment->get_deleted_count()
-            << "duplicate_pks " << c - different_pks.size() << std::endl;
-
-        BitsetType bitset(c);
-        std::cout << "start to search delete" << std::endl;
-        segment->mask_with_delete(bitset, c, 1003);
-
-        for (int i = 0; i < bitset.size(); i++) {
-            ASSERT_EQ(bitset[i], bits[i]) << "index:" << i << std::endl;
-        }
-
-        for (auto& [k, v] : different_pks) {
-            //std::cout << "k:" << k << "v:" << join(v, ",") << std::endl;
-            auto res = segment->SearchPk(k, Timestamp(1003));
-            ASSERT_EQ(res.size(), 1);
-        }
-    }
-}
-
 TEST(Sealed, DeleteCount) {
     {
         auto schema = std::make_shared<Schema>();
@@ -1299,17 +1293,14 @@ TEST(Sealed, DeleteCount) {
         schema->set_primary_field_id(pk);
         auto segment = CreateSealedSegment(schema);
 
+        int64_t c = 10;
         auto offset = segment->get_deleted_count();
         ASSERT_EQ(offset, 0);
-        int64_t c = 10;
-        auto dataset = DataGen(schema, c);
-        auto pks = dataset.get_col<int64_t>(pk);
-        SealedLoadFieldData(dataset, *segment);
 
         Timestamp begin_ts = 100;
         auto tss = GenTss(c, begin_ts);
-        auto delete_pks = GenPKs(c, 0);
-        auto status = segment->Delete(offset, c, delete_pks.get(), tss.data());
+        auto pks = GenPKs(c, 0);
+        auto status = segment->Delete(offset, c, pks.get(), tss.data());
         ASSERT_TRUE(status.ok());
 
         // shouldn't be filtered for empty segment.

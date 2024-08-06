@@ -24,6 +24,49 @@ func (_m *MockTargetManager) EXPECT() *MockTargetManager_Expecter {
 	return &MockTargetManager_Expecter{mock: &_m.Mock}
 }
 
+// CanSegmentBeMoved provides a mock function with given fields: collectionID, segmentID
+func (_m *MockTargetManager) CanSegmentBeMoved(collectionID int64, segmentID int64) bool {
+	ret := _m.Called(collectionID, segmentID)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64, int64) bool); ok {
+		r0 = rf(collectionID, segmentID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTargetManager_CanSegmentBeMoved_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CanSegmentBeMoved'
+type MockTargetManager_CanSegmentBeMoved_Call struct {
+	*mock.Call
+}
+
+// CanSegmentBeMoved is a helper method to define mock.On call
+//   - collectionID int64
+//   - segmentID int64
+func (_e *MockTargetManager_Expecter) CanSegmentBeMoved(collectionID interface{}, segmentID interface{}) *MockTargetManager_CanSegmentBeMoved_Call {
+	return &MockTargetManager_CanSegmentBeMoved_Call{Call: _e.mock.On("CanSegmentBeMoved", collectionID, segmentID)}
+}
+
+func (_c *MockTargetManager_CanSegmentBeMoved_Call) Run(run func(collectionID int64, segmentID int64)) *MockTargetManager_CanSegmentBeMoved_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_CanSegmentBeMoved_Call) Return(_a0 bool) *MockTargetManager_CanSegmentBeMoved_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTargetManager_CanSegmentBeMoved_Call) RunAndReturn(run func(int64, int64) bool) *MockTargetManager_CanSegmentBeMoved_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionTargetVersion provides a mock function with given fields: collectionID, scope
 func (_m *MockTargetManager) GetCollectionTargetVersion(collectionID int64, scope int32) int64 {
 	ret := _m.Called(collectionID, scope)

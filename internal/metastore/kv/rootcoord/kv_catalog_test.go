@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1282,7 +1282,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 }
 
 func getUserInfoMetaString(username string) string {
-	validInfo := internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
+	validInfo := &internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
 	validBytes, _ := json.Marshal(validInfo)
 	return string(validBytes)
 }

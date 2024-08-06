@@ -19,7 +19,7 @@ TEST(Common, Span) {
     using namespace milvus;
     using namespace milvus::segcore;
 
-    Span<float> s1(nullptr, 100);
+    Span<float> s1(nullptr, nullptr, 100);
     Span<milvus::FloatVector> s2(nullptr, 10, 16 * sizeof(float));
     SpanBase b1 = s1;
     SpanBase b2 = s2;

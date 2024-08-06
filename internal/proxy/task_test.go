@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1712,7 +1712,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1906,7 +1906,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1962,7 +1962,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					InsertRequest: msgpb.InsertRequest{
+					InsertRequest: &msgpb.InsertRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:  commonpb.MsgType_Insert,
 							MsgID:    0,
@@ -1979,7 +1979,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					DeleteRequest: msgpb.DeleteRequest{
+					DeleteRequest: &msgpb.DeleteRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:   commonpb.MsgType_Delete,
 							MsgID:     0,
@@ -3325,7 +3325,7 @@ func TestPartitionKey(t *testing.T) {
 		it := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,

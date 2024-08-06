@@ -27,15 +27,6 @@
 namespace milvus::storage {
 
 MemFileManagerImpl::MemFileManagerImpl(
-    const FileManagerContext& fileManagerContext,
-    std::shared_ptr<milvus_storage::Space> space)
-    : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta),
-      space_(space) {
-    rcm_ = fileManagerContext.chunkManagerPtr;
-}
-
-MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
                       fileManagerContext.indexMeta) {
@@ -66,50 +57,6 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
     };
 
     auto remotePrefix = GetRemoteIndexObjectPrefix();
-    int64_t batch_size = 0;
-    for (auto iter = binary_set.binary_map_.begin();
-         iter != binary_set.binary_map_.end();
-         iter++) {
-        if (batch_size >= DEFAULT_FIELD_MAX_MEMORY_LIMIT) {
-            AddBatchIndexFiles();
-            data_slices.clear();
-            slice_sizes.clear();
-            slice_names.clear();
-            batch_size = 0;
-        }
-
-        data_slices.emplace_back(iter->second->data.get());
-        slice_sizes.emplace_back(iter->second->size);
-        slice_names.emplace_back(remotePrefix + "/" + iter->first);
-        batch_size += iter->second->size;
-    }
-
-    if (data_slices.size() > 0) {
-        AddBatchIndexFiles();
-    }
-
-    return true;
-}
-
-bool
-MemFileManagerImpl::AddFileV2(const BinarySet& binary_set) {
-    std::vector<const uint8_t*> data_slices;
-    std::vector<int64_t> slice_sizes;
-    std::vector<std::string> slice_names;
-
-    auto AddBatchIndexFiles = [&]() {
-        auto res = PutIndexData(space_,
-                                data_slices,
-                                slice_sizes,
-                                slice_names,
-                                field_meta_,
-                                index_meta_);
-        for (auto& [file, size] : res) {
-            remote_paths_to_size_[file] = size;
-        }
-    };
-
-    auto remotePrefix = GetRemoteIndexObjectPrefixV2();
     int64_t batch_size = 0;
     for (auto iter = binary_set.binary_map_.begin();
          iter != binary_set.binary_map_.end();

@@ -427,7 +427,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 for (int i = 0; i < N; i++) {
                     if (random_pk && schema->get_primary_field_id()->get() ==
                                          field_id.get()) {
-                        data[i] = random() % N;
+                        data[i] = random();
                     } else {
                         data[i] = i / repeat_count;
                     }

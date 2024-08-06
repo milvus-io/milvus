@@ -168,6 +168,12 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	})
 }
 
+func (c *Client) AllocSegment(ctx context.Context, in *datapb.AllocSegmentRequest, opts ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.AllocSegmentResponse, error) {
+		return client.AllocSegment(ctx, in)
+	})
+}
+
 // GetSegmentStates requests segment state information
 //
 // ctx is the context to control request deadline and cancellation
@@ -338,6 +344,18 @@ func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetRecoveryInfoResponseV2, error) {
 		return client.GetRecoveryInfoV2(ctx, req)
+	})
+}
+
+// GetChannelRecoveryInfo returns the corresponding vchannel info.
+func (c *Client) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetChannelRecoveryInfoResponse, error) {
+		return client.GetChannelRecoveryInfo(ctx, req)
 	})
 }
 

@@ -51,17 +51,20 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	nodeID := C.int(paramtable.GetNodeID())
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
@@ -80,16 +83,19 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
 	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
+	defer C.free(unsafe.Pointer(otlpMethod))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
 		sampleFraction: sampleFraction,
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
+		otlpMethod:     otlpMethod,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
@@ -167,20 +173,13 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 
 func InitMmapManager(params *paramtable.ComponentParam) error {
 	mmapDirPath := params.QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDirPath) == 0 {
-		paramtable.Get().Save(
-			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
-			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
-		)
-		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	}
 	cMmapChunkManagerDir := C.CString(path.Join(mmapDirPath, "/mmap_chunk_manager/"))
 	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
 	defer C.free(unsafe.Pointer(cMmapChunkManagerDir))
 	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
 	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
-	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsUint64() * 1024 * 1024
+	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
 	mmapConfig := C.CMmapConfig{
 		cache_read_ahead_policy: cCacheReadAheadPolicy,
 		mmap_path:               cMmapChunkManagerDir,

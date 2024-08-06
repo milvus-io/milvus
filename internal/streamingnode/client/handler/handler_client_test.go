@@ -23,9 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestHandlerClient(t *testing.T) {
@@ -43,8 +41,6 @@ func TestHandlerClient(t *testing.T) {
 	w.EXPECT().Close().Run(func() {})
 
 	p := mock_producer.NewMockProducer(t)
-	p.EXPECT().IsAvailable().Return(true)
-	p.EXPECT().Assignment().Return(*assignment)
 	p.EXPECT().Close().Run(func() {})
 	c := mock_consumer.NewMockConsumer(t)
 	c.EXPECT().Close().Run(func() {})
@@ -54,13 +50,11 @@ func TestHandlerClient(t *testing.T) {
 
 	pK := 0
 	handler := &handlerClientImpl{
-		lifetime:              lifetime.NewLifetime(lifetime.Working),
-		service:               service,
-		rb:                    rb,
-		watcher:               w,
-		rebalanceTrigger:      rebalanceTrigger,
-		sharedProducers:       make(map[string]*typeutil.WeakReference[producer.Producer]),
-		sharedProducerKeyLock: lock.NewKeyLock[string](),
+		lifetime:         lifetime.NewLifetime(lifetime.Working),
+		service:          service,
+		rb:               rb,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
 		newProducer: func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error) {
 			if pK == 0 {
 				pK++
@@ -90,8 +84,6 @@ func TestHandlerClient(t *testing.T) {
 	producer2, err := handler.CreateProducer(ctx, &ProducerOptions{PChannel: "pchannel"})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
-	p.EXPECT().IsAvailable().Unset()
-	p.EXPECT().IsAvailable().Return(false)
 	producer3, err := handler.CreateProducer(ctx, &ProducerOptions{PChannel: "pchannel"})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer3)
@@ -122,10 +114,12 @@ func TestHandlerClient(t *testing.T) {
 	handler.Close()
 	producer, err = handler.CreateProducer(ctx, nil)
 	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, producer)
 
 	consumer, err = handler.CreateConsumer(ctx, nil)
 	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, consumer)
 }
 

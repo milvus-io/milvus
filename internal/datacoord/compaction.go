@@ -375,8 +375,10 @@ func (c *compactionPlanHandler) loopCheck() {
 }
 
 func (c *compactionPlanHandler) loopClean() {
+	interval := Params.DataCoordCfg.CompactionGCIntervalInSeconds.GetAsDuration(time.Second)
+	log.Info("compactionPlanHandler start clean check loop", zap.Any("gc interval", interval))
 	defer c.stopWg.Done()
-	cleanTicker := time.NewTicker(30 * time.Minute)
+	cleanTicker := time.NewTicker(interval)
 	defer cleanTicker.Stop()
 	for {
 		select {
@@ -401,9 +403,10 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
-				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second)) {
+				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(task)
+					log.Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
 					if err != nil {
 						log.Warn("fail to drop task", zap.Int64("planID", task.PlanID), zap.Error(err))
 					}
@@ -589,14 +592,7 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 			sessions:       c.sessions,
 		}
 	case datapb.CompactionType_ClusteringCompaction:
-		task = &clusteringCompactionTask{
-			CompactionTask:   t,
-			allocator:        c.allocator,
-			meta:             c.meta,
-			sessions:         c.sessions,
-			handler:          c.handler,
-			analyzeScheduler: c.analyzeScheduler,
-		}
+		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.sessions, c.handler, c.analyzeScheduler)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}

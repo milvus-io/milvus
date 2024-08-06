@@ -72,6 +72,7 @@ set(MILVUS_TEST_FILES
         test_chunk_vector.cpp
         test_mmap_chunk_manager.cpp
         test_monitor.cpp
+        test_chunk.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

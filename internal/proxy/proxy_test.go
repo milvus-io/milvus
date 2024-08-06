@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +39,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -4433,8 +4433,7 @@ func Test_GetCompactionState(t *testing.T) {
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
-		assert.EqualValues(t, &milvuspb.GetCompactionStateResponse{}, resp)
-		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("get compaction state with unhealthy proxy", func(t *testing.T) {
@@ -4453,8 +4452,7 @@ func Test_ManualCompaction(t *testing.T) {
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.ManualCompaction(context.TODO(), nil)
-		assert.EqualValues(t, &milvuspb.ManualCompactionResponse{}, resp)
-		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 	t.Run("test manual compaction with unhealthy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
@@ -4472,8 +4470,7 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
-		assert.EqualValues(t, &milvuspb.GetCompactionPlansResponse{}, resp)
-		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
 		datacoord := &DataCoordMock{}
@@ -4505,8 +4502,7 @@ func Test_GetFlushState(t *testing.T) {
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
 			CollectionName: "coll",
 		})
-		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{}, resp)
-		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("test get flush state with unhealthy proxy", func(t *testing.T) {
@@ -4529,8 +4525,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	n.session = &sessionutil.Session{}
 	n.session.UpdateRegistered(true)
 	resp, err = n.GetComponentStates(context.Background(), nil)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
 }
 
 func TestProxy_Import(t *testing.T) {
@@ -4575,8 +4570,7 @@ func TestProxy_Import(t *testing.T) {
 			Files:          []string{"a.json"},
 		}
 		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("GetImportState failed", func(t *testing.T) {
@@ -4601,8 +4595,7 @@ func TestProxy_Import(t *testing.T) {
 
 		req := &milvuspb.GetImportStateRequest{}
 		resp, err := proxy.GetImportState(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("ListImportTasks failed", func(t *testing.T) {
@@ -4627,8 +4620,7 @@ func TestProxy_Import(t *testing.T) {
 
 		req := &milvuspb.ListImportTasksRequest{}
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 }
 

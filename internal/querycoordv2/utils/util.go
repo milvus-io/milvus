@@ -19,6 +19,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
@@ -104,7 +106,7 @@ func checkLoadStatus(m *meta.Meta, collectionID int64) error {
 	return nil
 }
 
-func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager,
+func GetShardLeadersWithChannels(m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager,
 	nodeMgr *session.NodeManager, collectionID int64, channels map[string]*meta.DmChannel,
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
@@ -163,7 +165,7 @@ func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, di
 	return ret, nil
 }
 
-func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
+func GetShardLeaders(m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
 	if err := checkLoadStatus(m, collectionID); err != nil {
 		return nil, err
 	}
@@ -179,30 +181,45 @@ func GetShardLeaders(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.Dis
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
-func CheckCollectionsQueryable(m *meta.Meta, targetMgr *meta.TargetManager, dist *meta.DistributionManager, nodeMgr *session.NodeManager) error {
+func CheckCollectionsQueryable(m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager) error {
+	maxInterval := paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
 	for _, coll := range m.GetAllCollections() {
-		collectionID := coll.GetCollectionID()
-		if err := checkLoadStatus(m, collectionID); err != nil {
+		err := checkCollectionQueryable(m, targetMgr, dist, nodeMgr, coll)
+		// the collection is not queryable, if meet following conditions:
+		// 1. Some segments are not loaded
+		// 2. Collection is not starting to release
+		// 3. The load percentage has not been updated in the last 5 minutes.
+		if err != nil && m.Exist(coll.CollectionID) && time.Since(coll.UpdatedAt) >= maxInterval {
 			return err
-		}
-
-		channels := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
-		if len(channels) == 0 {
-			msg := "loaded collection do not found any channel in target, may be in recovery"
-			err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
-			log.Warn("failed to get channels", zap.Error(err))
-			return err
-		}
-
-		shardList, err := GetShardLeadersWithChannels(m, targetMgr, dist, nodeMgr, collectionID, channels)
-		if err != nil {
-			return err
-		}
-
-		if len(channels) != len(shardList) {
-			return merr.WrapErrCollectionNotFullyLoaded(collectionID, "still have unwatched channels or loaded segments")
 		}
 	}
+	return nil
+}
+
+// checkCollectionQueryable check all channels are watched and all segments are loaded for this collection
+func checkCollectionQueryable(m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, coll *meta.Collection) error {
+	collectionID := coll.GetCollectionID()
+	if err := checkLoadStatus(m, collectionID); err != nil {
+		return err
+	}
+
+	channels := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		msg := "loaded collection do not found any channel in target, may be in recovery"
+		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
+		log.Warn("failed to get channels", zap.Error(err))
+		return err
+	}
+
+	shardList, err := GetShardLeadersWithChannels(m, targetMgr, dist, nodeMgr, collectionID, channels)
+	if err != nil {
+		return err
+	}
+
+	if len(channels) != len(shardList) {
+		return merr.WrapErrCollectionNotFullyLoaded(collectionID, "still have unwatched channels or loaded segments")
+	}
+
 	return nil
 }
 

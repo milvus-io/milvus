@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -131,7 +131,7 @@ func convertToByteArray(input interface{}) ([]byte, error) {
 // InsertMsg is a message pack that contains insert request
 type InsertMsg struct {
 	BaseMsg
-	msgpb.InsertRequest
+	*msgpb.InsertRequest
 }
 
 // interface implementation validation
@@ -160,7 +160,7 @@ func (it *InsertMsg) SourceID() int64 {
 // Marshal is used to serialize a message pack to byte array
 func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 	insertMsg := input.(*InsertMsg)
-	insertRequest := &insertMsg.InsertRequest
+	insertRequest := insertMsg.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
 	if err != nil {
 		return nil, err
@@ -170,12 +170,12 @@ func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserialize a message pack from byte array
 func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	insertRequest := msgpb.InsertRequest{}
+	insertRequest := &msgpb.InsertRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &insertRequest)
+	err = proto.Unmarshal(in, insertRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -240,8 +240,8 @@ func (it *InsertMsg) CheckAligned() error {
 	return nil
 }
 
-func (it *InsertMsg) rowBasedIndexRequest(index int) msgpb.InsertRequest {
-	return msgpb.InsertRequest{
+func (it *InsertMsg) rowBasedIndexRequest(index int) *msgpb.InsertRequest {
+	return &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 			commonpbutil.WithMsgID(it.Base.MsgID),
@@ -262,11 +262,11 @@ func (it *InsertMsg) rowBasedIndexRequest(index int) msgpb.InsertRequest {
 	}
 }
 
-func (it *InsertMsg) columnBasedIndexRequest(index int) msgpb.InsertRequest {
+func (it *InsertMsg) columnBasedIndexRequest(index int) *msgpb.InsertRequest {
 	colNum := len(it.GetFieldsData())
 	fieldsData := make([]*schemapb.FieldData, colNum)
 	typeutil.AppendFieldData(fieldsData, it.GetFieldsData(), int64(index))
-	return msgpb.InsertRequest{
+	return &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 			commonpbutil.WithMsgID(it.Base.MsgID),
@@ -288,7 +288,7 @@ func (it *InsertMsg) columnBasedIndexRequest(index int) msgpb.InsertRequest {
 	}
 }
 
-func (it *InsertMsg) IndexRequest(index int) msgpb.InsertRequest {
+func (it *InsertMsg) IndexRequest(index int) *msgpb.InsertRequest {
 	if it.IsRowBased() {
 		return it.rowBasedIndexRequest(index)
 	}
@@ -309,7 +309,7 @@ func (it *InsertMsg) IndexMsg(index int) *InsertMsg {
 }
 
 func (it *InsertMsg) Size() int {
-	return proto.Size(&it.InsertRequest)
+	return proto.Size(it.InsertRequest)
 }
 
 /////////////////////////////////////////Delete//////////////////////////////////////////
@@ -317,7 +317,7 @@ func (it *InsertMsg) Size() int {
 // DeleteMsg is a message pack that contains delete request
 type DeleteMsg struct {
 	BaseMsg
-	msgpb.DeleteRequest
+	*msgpb.DeleteRequest
 }
 
 // interface implementation validation
@@ -346,7 +346,7 @@ func (dt *DeleteMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
 	deleteMsg := input.(*DeleteMsg)
-	deleteRequest := &deleteMsg.DeleteRequest
+	deleteRequest := deleteMsg.DeleteRequest
 	mb, err := proto.Marshal(deleteRequest)
 	if err != nil {
 		return nil, err
@@ -357,12 +357,12 @@ func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	deleteRequest := msgpb.DeleteRequest{}
+	deleteRequest := &msgpb.DeleteRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &deleteRequest)
+	err = proto.Unmarshal(in, deleteRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +412,7 @@ func (dt *DeleteMsg) CheckAligned() error {
 }
 
 func (dt *DeleteMsg) Size() int {
-	return proto.Size(&dt.DeleteRequest)
+	return proto.Size(dt.DeleteRequest)
 }
 
 // ///////////////////////////////////////Upsert//////////////////////////////////////////
@@ -426,7 +426,7 @@ type UpsertMsg struct {
 // TimeTickMsg is a message pack that contains time tick only
 type TimeTickMsg struct {
 	BaseMsg
-	msgpb.TimeTickMsg
+	*msgpb.TimeTickMsg
 }
 
 // interface implementation validation
@@ -455,7 +455,7 @@ func (tst *TimeTickMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
 	timeTickTask := input.(*TimeTickMsg)
-	timeTick := &timeTickTask.TimeTickMsg
+	timeTick := timeTickTask.TimeTickMsg
 	mb, err := proto.Marshal(timeTick)
 	if err != nil {
 		return nil, err
@@ -465,12 +465,12 @@ func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	timeTickMsg := msgpb.TimeTickMsg{}
+	timeTickMsg := &msgpb.TimeTickMsg{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &timeTickMsg)
+	err = proto.Unmarshal(in, timeTickMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +482,7 @@ func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (tst *TimeTickMsg) Size() int {
-	return proto.Size(&tst.TimeTickMsg)
+	return proto.Size(tst.TimeTickMsg)
 }
 
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
@@ -490,7 +490,7 @@ func (tst *TimeTickMsg) Size() int {
 // CreateCollectionMsg is a message pack that contains create collection request
 type CreateCollectionMsg struct {
 	BaseMsg
-	msgpb.CreateCollectionRequest
+	*msgpb.CreateCollectionRequest
 }
 
 // interface implementation validation
@@ -519,7 +519,7 @@ func (cc *CreateCollectionMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createCollectionMsg := input.(*CreateCollectionMsg)
-	createCollectionRequest := &createCollectionMsg.CreateCollectionRequest
+	createCollectionRequest := createCollectionMsg.CreateCollectionRequest
 	mb, err := proto.Marshal(createCollectionRequest)
 	if err != nil {
 		return nil, err
@@ -529,12 +529,12 @@ func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	createCollectionRequest := msgpb.CreateCollectionRequest{}
+	createCollectionRequest := &msgpb.CreateCollectionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &createCollectionRequest)
+	err = proto.Unmarshal(in, createCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +546,7 @@ func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (cc *CreateCollectionMsg) Size() int {
-	return proto.Size(&cc.CreateCollectionRequest)
+	return proto.Size(cc.CreateCollectionRequest)
 }
 
 /////////////////////////////////////////DropCollection//////////////////////////////////////////
@@ -554,7 +554,7 @@ func (cc *CreateCollectionMsg) Size() int {
 // DropCollectionMsg is a message pack that contains drop collection request
 type DropCollectionMsg struct {
 	BaseMsg
-	msgpb.DropCollectionRequest
+	*msgpb.DropCollectionRequest
 }
 
 // interface implementation validation
@@ -583,7 +583,7 @@ func (dc *DropCollectionMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropCollectionMsg := input.(*DropCollectionMsg)
-	dropCollectionRequest := &dropCollectionMsg.DropCollectionRequest
+	dropCollectionRequest := dropCollectionMsg.DropCollectionRequest
 	mb, err := proto.Marshal(dropCollectionRequest)
 	if err != nil {
 		return nil, err
@@ -593,12 +593,12 @@ func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	dropCollectionRequest := msgpb.DropCollectionRequest{}
+	dropCollectionRequest := &msgpb.DropCollectionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &dropCollectionRequest)
+	err = proto.Unmarshal(in, dropCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -610,7 +610,7 @@ func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (dc *DropCollectionMsg) Size() int {
-	return proto.Size(&dc.DropCollectionRequest)
+	return proto.Size(dc.DropCollectionRequest)
 }
 
 /////////////////////////////////////////CreatePartition//////////////////////////////////////////
@@ -618,7 +618,7 @@ func (dc *DropCollectionMsg) Size() int {
 // CreatePartitionMsg is a message pack that contains create partition request
 type CreatePartitionMsg struct {
 	BaseMsg
-	msgpb.CreatePartitionRequest
+	*msgpb.CreatePartitionRequest
 }
 
 // interface implementation validation
@@ -647,7 +647,7 @@ func (cp *CreatePartitionMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (cp *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createPartitionMsg := input.(*CreatePartitionMsg)
-	createPartitionRequest := &createPartitionMsg.CreatePartitionRequest
+	createPartitionRequest := createPartitionMsg.CreatePartitionRequest
 	mb, err := proto.Marshal(createPartitionRequest)
 	if err != nil {
 		return nil, err
@@ -657,12 +657,12 @@ func (cp *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (cp *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	createPartitionRequest := msgpb.CreatePartitionRequest{}
+	createPartitionRequest := &msgpb.CreatePartitionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &createPartitionRequest)
+	err = proto.Unmarshal(in, createPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +674,7 @@ func (cp *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (cp *CreatePartitionMsg) Size() int {
-	return proto.Size(&cp.CreatePartitionRequest)
+	return proto.Size(cp.CreatePartitionRequest)
 }
 
 /////////////////////////////////////////DropPartition//////////////////////////////////////////
@@ -682,7 +682,7 @@ func (cp *CreatePartitionMsg) Size() int {
 // DropPartitionMsg is a message pack that contains drop partition request
 type DropPartitionMsg struct {
 	BaseMsg
-	msgpb.DropPartitionRequest
+	*msgpb.DropPartitionRequest
 }
 
 // interface implementation validation
@@ -711,7 +711,7 @@ func (dp *DropPartitionMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (dp *DropPartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropPartitionMsg := input.(*DropPartitionMsg)
-	dropPartitionRequest := &dropPartitionMsg.DropPartitionRequest
+	dropPartitionRequest := dropPartitionMsg.DropPartitionRequest
 	mb, err := proto.Marshal(dropPartitionRequest)
 	if err != nil {
 		return nil, err
@@ -721,12 +721,12 @@ func (dp *DropPartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	dropPartitionRequest := msgpb.DropPartitionRequest{}
+	dropPartitionRequest := &msgpb.DropPartitionRequest{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &dropPartitionRequest)
+	err = proto.Unmarshal(in, dropPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -738,7 +738,7 @@ func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (dp *DropPartitionMsg) Size() int {
-	return proto.Size(&dp.DropPartitionRequest)
+	return proto.Size(dp.DropPartitionRequest)
 }
 
 /////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
@@ -746,7 +746,7 @@ func (dp *DropPartitionMsg) Size() int {
 // DataNodeTtMsg is a message pack that contains datanode time tick
 type DataNodeTtMsg struct {
 	BaseMsg
-	msgpb.DataNodeTtMsg
+	*msgpb.DataNodeTtMsg
 }
 
 // interface implementation validation
@@ -775,7 +775,7 @@ func (m *DataNodeTtMsg) SourceID() int64 {
 // Marshal is used to serializing a message pack to byte array
 func (m *DataNodeTtMsg) Marshal(input TsMsg) (MarshalType, error) {
 	msg := input.(*DataNodeTtMsg)
-	t, err := proto.Marshal(&msg.DataNodeTtMsg)
+	t, err := proto.Marshal(msg.DataNodeTtMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -784,12 +784,12 @@ func (m *DataNodeTtMsg) Marshal(input TsMsg) (MarshalType, error) {
 
 // Unmarshal is used to deserializing a message pack from byte array
 func (m *DataNodeTtMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	msg := msgpb.DataNodeTtMsg{}
+	msg := &msgpb.DataNodeTtMsg{}
 	in, err := convertToByteArray(input)
 	if err != nil {
 		return nil, err
 	}
-	err = proto.Unmarshal(in, &msg)
+	err = proto.Unmarshal(in, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -799,5 +799,5 @@ func (m *DataNodeTtMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 func (m *DataNodeTtMsg) Size() int {
-	return proto.Size(&m.DataNodeTtMsg)
+	return proto.Size(m.DataNodeTtMsg)
 }

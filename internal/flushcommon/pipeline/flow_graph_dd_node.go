@@ -22,21 +22,23 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -62,15 +64,16 @@ type ddNode struct {
 	BaseNode
 
 	ctx          context.Context
-	collectionID util.UniqueID
+	collectionID typeutil.UniqueID
 	vChannelName string
 
 	dropMode           atomic.Value
 	compactionExecutor compaction.Executor
+	flushMsgHandler    flusher.FlushMsgHandler
 
 	// for recovery
-	growingSegInfo    map[util.UniqueID]*datapb.SegmentInfo // segmentID
-	sealedSegInfo     map[util.UniqueID]*datapb.SegmentInfo // segmentID
+	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
+	sealedSegInfo     map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
 	droppedSegmentIDs []int64
 }
 
@@ -181,11 +184,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			util.RateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			util.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
-				Add(float64(proto.Size(&imsg.InsertRequest)))
+				Add(float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
@@ -215,11 +218,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
-			util.RateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-				Add(float64(proto.Size(&dmsg.DeleteRequest)))
+				Add(float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
@@ -229,6 +232,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
+
+		case commonpb.MsgType_Flush:
+			if ddn.flushMsgHandler != nil {
+				ddn.flushMsgHandler(ddn.vChannelName, nil)
+			}
 		}
 	}
 
@@ -270,7 +278,7 @@ func (ddn *ddNode) tryToFilterSegmentInsertMessages(msg *msgstream.InsertMsg) bo
 	return false
 }
 
-func (ddn *ddNode) isDropped(segID util.UniqueID) bool {
+func (ddn *ddNode) isDropped(segID typeutil.UniqueID) bool {
 	for _, droppedSegmentID := range ddn.droppedSegmentIDs {
 		if droppedSegmentID == segID {
 			return true
@@ -283,8 +291,8 @@ func (ddn *ddNode) Close() {
 	log.Info("Flowgraph DD Node closing")
 }
 
-func newDDNode(ctx context.Context, collID util.UniqueID, vChannelName string, droppedSegmentIDs []util.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor,
+func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.FlushMsgHandler,
 ) (*ddNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -294,11 +302,12 @@ func newDDNode(ctx context.Context, collID util.UniqueID, vChannelName string, d
 		ctx:                ctx,
 		BaseNode:           baseNode,
 		collectionID:       collID,
-		sealedSegInfo:      make(map[util.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
-		growingSegInfo:     make(map[util.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
+		sealedSegInfo:      make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(sealedSegments)),
+		growingSegInfo:     make(map[typeutil.UniqueID]*datapb.SegmentInfo, len(growingSegments)),
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
 		compactionExecutor: executor,
+		flushMsgHandler:    handler,
 	}
 
 	dd.dropMode.Store(false)

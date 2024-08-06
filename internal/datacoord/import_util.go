@@ -226,13 +226,20 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}, nil
 }
 
-func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*datapb.ImportFileStats {
+func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, allDiskIndex bool) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
 		return nil
 	}
 
+	var segmentMaxSize int
+	if allDiskIndex {
+		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		segmentMaxSize = Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
+	} else {
+		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+		segmentMaxSize = Params.DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	}
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
 	if isL0Import {
 		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}
@@ -270,6 +277,10 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 
 func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) {
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return 0, nil
+	}
+	if importutilv2.SkipDiskQuotaCheck(job.GetOptions()) {
+		log.Info("skip disk quota check for import", zap.Int64("jobID", job.GetJobID()))
 		return 0, nil
 	}
 

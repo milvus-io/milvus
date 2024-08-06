@@ -24,8 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -112,55 +110,4 @@ func LoadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 
 	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
 	return result, nil
-}
-
-func LoadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema) ([]*storage.PkStatistics, error) {
-	space, err := storageCache.GetOrCreateSpace(segment.ID, syncmgr.SpaceCreatorFunc(segment.ID, schema, storageCache.ArrowSchema()))
-	if err != nil {
-		return nil, err
-	}
-
-	getResult := func(stats []*storage.PrimaryKeyStats) []*storage.PkStatistics {
-		result := make([]*storage.PkStatistics, 0, len(stats))
-		for _, stat := range stats {
-			pkStat := &storage.PkStatistics{
-				PkFilter: stat.BF,
-				MinPK:    stat.MinPk,
-				MaxPK:    stat.MaxPk,
-			}
-			result = append(result, pkStat)
-		}
-		return result
-	}
-
-	blobs := space.StatisticsBlobs()
-	deserBlobs := make([]*storage.Blob, 0)
-	for _, b := range blobs {
-		if b.Name == storage.CompoundStatsType.LogIdx() {
-			blobData := make([]byte, b.Size)
-			_, err = space.ReadBlob(b.Name, blobData)
-			if err != nil {
-				return nil, err
-			}
-			stats, err := storage.DeserializeStatsList(&storage.Blob{Value: blobData})
-			if err != nil {
-				return nil, err
-			}
-			return getResult(stats), nil
-		}
-	}
-
-	for _, b := range blobs {
-		blobData := make([]byte, b.Size)
-		_, err = space.ReadBlob(b.Name, blobData)
-		if err != nil {
-			return nil, err
-		}
-		deserBlobs = append(deserBlobs, &storage.Blob{Value: blobData})
-	}
-	stats, err := storage.DeserializeStats(deserBlobs)
-	if err != nil {
-		return nil, err
-	}
-	return getResult(stats), nil
 }

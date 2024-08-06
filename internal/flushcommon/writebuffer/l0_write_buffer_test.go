@@ -28,13 +28,12 @@ import (
 
 type L0WriteBufferSuite struct {
 	testutils.PromMetricsSuite
-	channelName  string
-	collID       int64
-	collSchema   *schemapb.CollectionSchema
-	syncMgr      *syncmgr.MockSyncManager
-	metacache    *metacache.MockMetaCache
-	allocator    *allocator.MockGIDAllocator
-	storageCache *metacache.StorageV2Cache
+	channelName string
+	collID      int64
+	collSchema  *schemapb.CollectionSchema
+	syncMgr     *syncmgr.MockSyncManager
+	metacache   *metacache.MockMetaCache
+	allocator   *allocator.MockGIDAllocator
 }
 
 func (s *L0WriteBufferSuite) SetupSuite() {
@@ -61,10 +60,6 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 		},
 	}
 	s.channelName = "by-dev-rootcoord-dml_0v0"
-
-	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
-	s.Require().NoError(err)
-	s.storageCache = storageCache
 }
 
 func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int, pkType schemapb.DataType) ([]int64, *msgstream.InsertMsg) {
@@ -103,7 +98,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 		}
 	}
 	return tss, &msgstream.InsertMsg{
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			SegmentID:  segmentID,
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 			RowIDs:     tss,
@@ -154,7 +149,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 
 func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstream.DeleteMsg {
 	delMsg := &msgstream.DeleteMsg{
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
 			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
 		},
@@ -173,7 +168,7 @@ func (s *L0WriteBufferSuite) SetupTest() {
 
 func (s *L0WriteBufferSuite) TestBufferData() {
 	s.Run("normal_run", func() {
-		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 		})
 		s.NoError(err)
@@ -202,7 +197,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 	})
 
 	s.Run("pk_type_not_match", func() {
-		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 		})
 		s.NoError(err)
@@ -225,7 +220,7 @@ func (s *L0WriteBufferSuite) TestCreateFailure() {
 	metacache := metacache.NewMockMetaCache(s.T())
 	metacache.EXPECT().Collection().Return(s.collID)
 	metacache.EXPECT().Schema().Return(&schemapb.CollectionSchema{})
-	_, err := NewL0WriteBuffer(s.channelName, metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+	_, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 		idAllocator: s.allocator,
 	})
 	s.Error(err)

@@ -33,8 +33,6 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
-#include "storage/options.h"
-#include "storage/space.h"
 
 namespace milvus::segcore {
 
@@ -48,7 +46,23 @@ void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
-    deleted_record_.Query(bitset, ins_barrier, timestamp);
+    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return;
+    }
+    auto bitmap_holder = get_deleted_bitmap(
+        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
+        return;
+    }
+    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
+    AssertInfo(
+        delete_bitset.size() == bitset.size(),
+        fmt::format(
+            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
+            delete_bitset.size(),
+            bitset.size()));
+    bitset |= delete_bitset;
 }
 
 void
@@ -149,31 +163,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     ParsePksFromFieldData(
         pks, insert_record_proto->fields_data(field_id_to_offset[field_id]));
     for (int i = 0; i < num_rows; ++i) {
-        auto exist_pk = insert_record_.insert_with_check_existence(
-            pks[i], reserved_offset + i);
-        // if pk exist duplicate record, remove last pk under current insert timestamp
-        // means last pk is invisibale for current insert timestamp
-        if (exist_pk) {
-            auto remove_timestamp = timestamps_raw[i];
-            deleted_record_.Push({pks[i]}, &remove_timestamp);
-        }
+        insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
-}
-
-void
-SegmentGrowingImpl::RemoveDuplicatePkRecords() {
-    std::unique_lock lck(mutex_);
-    //Assert(!insert_record_.timestamps_.empty());
-    // firstly find that need removed records and mark them as deleted
-    auto removed_pks = insert_record_.get_need_removed_pks();
-    deleted_record_.Push(removed_pks.first, removed_pks.second.data());
-
-    // then remove duplicated pks in pk index
-    insert_record_.remove_duplicate_pks();
 }
 
 void
@@ -280,89 +275,6 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                                              reserved_offset + num_rows);
 }
 
-void
-SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
-    // schema don't include system field
-    AssertInfo(infos.field_infos.size() == schema_->size() + 2,
-               "lost some field data when load for growing segment");
-    AssertInfo(infos.field_infos.find(TimestampFieldID.get()) !=
-                   infos.field_infos.end(),
-               "timestamps field data should be included");
-    AssertInfo(
-        infos.field_infos.find(RowFieldID.get()) != infos.field_infos.end(),
-        "rowID field data should be included");
-    auto primary_field_id =
-        schema_->get_primary_field_id().value_or(FieldId(-1));
-    AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
-    AssertInfo(infos.field_infos.find(primary_field_id.get()) !=
-                   infos.field_infos.end(),
-               "primary field data should be included");
-
-    size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
-    auto reserved_offset = PreInsert(num_rows);
-    for (auto& [id, info] : infos.field_infos) {
-        auto field_id = FieldId(id);
-        auto field_data_info = FieldDataInfo(field_id.get(), num_rows);
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        auto res = milvus_storage::Space::Open(
-            infos.url, milvus_storage::Options{nullptr, infos.storage_version});
-        AssertInfo(res.ok(), "init space failed");
-        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
-        auto load_future = pool.Submit(
-            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        auto field_data =
-            milvus::storage::CollectFieldDataChannel(field_data_info.channel);
-        if (field_id == TimestampFieldID) {
-            // step 2: sort timestamp
-            // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
-
-            // step 3: fill into Segment.ConcurrentVector
-            insert_record_.timestamps_.set_data_raw(reserved_offset,
-                                                    field_data);
-            continue;
-        }
-
-        if (field_id == RowFieldID) {
-            continue;
-        }
-
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset, field_data);
-        }
-        if (segcore_config_.get_enable_interim_segment_index()) {
-            auto offset = reserved_offset;
-            for (auto& data : field_data) {
-                auto row_count = data->get_num_rows();
-                indexing_record_.AppendingIndex(
-                    offset, row_count, field_id, data, insert_record_);
-                offset += row_count;
-            }
-        }
-        try_remove_chunks(field_id);
-
-        if (field_id == primary_field_id) {
-            insert_record_.insert_pks(field_data);
-        }
-
-        // update average row data size
-        auto field_meta = (*schema_)[field_id];
-        if (IsVariableDataType(field_meta.get_data_type())) {
-            SegmentInternalInterface::set_field_avg_size(
-                field_id,
-                num_rows,
-                storage::GetByteSizeOfFieldDatas(field_data));
-        }
-
-        // update the mem size
-        stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
-    }
-
-    // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
-}
 SegcoreError
 SegmentGrowingImpl::Delete(int64_t reserved_begin,
                            int64_t size,
@@ -404,7 +316,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     }
 
     // step 2: fill delete record
-    deleted_record_.Push(sort_pks, sort_timestamps.data());
+    deleted_record_.push(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -425,16 +337,15 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.Push(pks, timestamps);
+    deleted_record_.push(pks, timestamps);
 }
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_data_base(field_id);
-    return vec->get_span_base(chunk_id);
+    return get_insert_record().get_span_base(field_id, chunk_id);
 }
 
-std::vector<std::string_view>
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
 SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     PanicInfo(ErrorCode::NotImplemented,
               "chunk view impl not implement for growing segment");
