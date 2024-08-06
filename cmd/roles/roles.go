@@ -79,6 +79,10 @@ type component interface {
 	Stop() error
 }
 
+const (
+	TmpInvertedIndexPrefix = "/tmp/milvus/inverted-index/"
+)
+
 func cleanLocalDir(path string) {
 	_, statErr := os.Stat(path)
 	// path exist, but stat error
@@ -201,6 +205,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync
 	if len(mmapDir) > 0 {
 		cleanLocalDir(mmapDir)
 	}
+	cleanLocalDir(TmpInvertedIndexPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
@@ -230,6 +235,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
 	cleanLocalDir(indexDataLocalPath)
+	cleanLocalDir(TmpInvertedIndexPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }

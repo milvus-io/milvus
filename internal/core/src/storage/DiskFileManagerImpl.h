@@ -57,6 +57,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     GetLocalIndexObjectPrefix();
 
     std::string
+    GetIndexIdentifier();
+
+    std::string
     GetLocalRawDataObjectPrefix();
 
     std::map<std::string, int64_t>
