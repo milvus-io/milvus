@@ -273,6 +273,10 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
 		return 0, nil
 	}
+	if importutilv2.SkipDiskQuotaCheck(job.GetOptions()) {
+		log.Info("skip disk quota check for import", zap.Int64("jobID", job.GetJobID()))
+		return 0, nil
+	}
 
 	var (
 		requestedTotal       int64
