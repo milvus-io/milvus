@@ -269,6 +269,9 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			})
 		}
 		maxNode, minNode := nodesWithRowCount[len(nodesWithRowCount)-1], nodesWithRowCount[0]
+		if len(maxNode.segments) == 0 {
+			break
+		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
 		plan := SegmentAssignPlan{
 			Segment: segment,
@@ -346,6 +349,9 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			})
 		}
 		maxNode, minNode := nodesWithSegmentCount[len(nodesWithSegmentCount)-1], nodesWithSegmentCount[0]
+		if len(maxNode.segments) == 0 {
+			break
+		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
 		plan := SegmentAssignPlan{
 			Segment: segment,
@@ -399,6 +405,9 @@ func newRandomPlanGenerator(maxSteps int) *randomPlanGenerator {
 func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 	g.currClusterCost = g.calClusterCost(g.replicaNodeSegments, g.globalNodeSegments)
 	nodes := lo.Keys(g.replicaNodeSegments)
+	if len(nodes) == 0 {
+		return g.plans
+	}
 	for i := 0; i < g.maxSteps; i++ {
 		// random select two nodes and two segments
 		node1 := nodes[rand.Intn(len(nodes))]
@@ -408,6 +417,9 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 		}
 		segments1 := g.replicaNodeSegments[node1]
 		segments2 := g.replicaNodeSegments[node2]
+		if len(segments1) == 0 || len(segments2) == 0 {
+			continue
+		}
 		segment1 := segments1[rand.Intn(len(segments1))]
 		segment2 := segments2[rand.Intn(len(segments2))]
 
