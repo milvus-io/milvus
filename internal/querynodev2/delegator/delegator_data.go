@@ -668,6 +668,9 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			}
 		}
 
+		// if segment level is not L0, delete buffer could be purged safely according to target checkpoint
+		sd.deleteBuffer.TryDiscard(position.GetTimestamp())
+
 		deleteData = &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
