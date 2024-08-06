@@ -32,8 +32,8 @@ class MilvusCDCPerformance:
             "latest_ts": 0,
             "latest_count": 0
         }
-        self.start_time = None
-        self.last_report_time = None
+        self.start_time = time.time()
+        self.last_report_time = time.time()
         self.last_source_count = 0
         self.last_target_count = 0
 
