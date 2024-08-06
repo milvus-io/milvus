@@ -439,11 +439,16 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
 }
 
 std::string
+GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
+}
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version) {
     return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
-           std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
+           GenIndexPathIdentifier(build_id, index_version);
 }
 
 std::string
