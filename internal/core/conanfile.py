@@ -5,11 +5,11 @@ class MilvusConan(ConanFile):
     keep_imports = True
     settings = "os", "compiler", "build_type", "arch"
     requires = (
-        "rocksdb/6.29.5@milvus/dev#b1842a53ddff60240c5282a3da498ba1",
+        "rocksdb/6.29.5@milvus/dev",
         "boost/1.82.0#744a17160ebb5838e9115eab4d6d0c06",
         "onetbb/2021.9.0#4a223ff1b4025d02f31b65aedf5e7f4a",
         "nlohmann_json/3.11.2#ffb9e9236619f1c883e36662f944345d",
-        "zstd/1.5.4#308b8b048f9a3823ce248f9c150cc889",
+        "zstd/1.5.4",
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
