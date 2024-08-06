@@ -53,7 +53,7 @@ deepdiff==6.7.1
 prettytable==3.8.0
 pyarrow==14.0.1
 fastparquet==2023.7.0
-matplotlib==3.8.4
+matplotlib==3.7.5
 # for bf16 datatype
 jax==0.4.13
 jaxlib==0.4.13
