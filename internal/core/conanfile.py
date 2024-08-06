@@ -7,7 +7,6 @@ class MilvusConan(ConanFile):
     requires = (
         "rocksdb/6.29.5@milvus/dev",
         "boost/1.82.0",
-        "libunwind/1.7.2",
         "onetbb/2021.9.0",
         "nlohmann_json/3.11.2",
         "zstd/1.5.4",
