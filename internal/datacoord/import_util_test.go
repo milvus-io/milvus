@@ -207,7 +207,8 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 			Vchannels:    []string{"v0", "v1", "v2", "v3"},
 		},
 	}
-	groups := RegroupImportFiles(job, files)
+
+	groups := RegroupImportFiles(job, files, false)
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {

@@ -28,12 +28,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -925,4 +927,22 @@ func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 		}
 	}
 	return lo.Without(segmentIDs, indexed...)
+}
+
+func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
+	indexInfos := m.GetIndexesForCollection(collectionID, "")
+
+	vectorFields := typeutil.GetVectorFieldSchemas(schema)
+	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
+		return t.FieldID, GetIndexType(t.IndexParams)
+	})
+	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
+		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
+			return indexparamcheck.IsDiskIndex(indexType)
+		}
+		return false
+	})
+
+	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	return allDiskIndex
 }
