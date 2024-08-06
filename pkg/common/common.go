@@ -156,6 +156,10 @@ const (
 	DatabaseDiskQuotaKey        = "database.diskQuota.mb"
 	DatabaseMaxCollectionsKey   = "database.max.collections"
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
+
+	// collection level load properties
+	CollectionReplicaNumber  = "collection.replica.number"
+	CollectionResourceGroups = "collection.resource_groups"
 )
 
 // common properties
@@ -287,4 +291,39 @@ func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error)
 	}
 
 	return nil, fmt.Errorf("database property not found: %s", DatabaseResourceGroups)
+}
+
+func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
+	for _, kv := range kvs {
+		if kv.Key == CollectionReplicaNumber {
+			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			}
+
+			return replicaNum, nil
+		}
+	}
+
+	return 0, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+}
+
+func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
+	for _, kv := range kvs {
+		if kv.Key == CollectionResourceGroups {
+			invalidPropValue := fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			if len(kv.Value) == 0 {
+				return nil, invalidPropValue
+			}
+
+			rgs := strings.Split(kv.Value, ",")
+			if len(rgs) == 0 {
+				return nil, invalidPropValue
+			}
+
+			return rgs, nil
+		}
+	}
+
+	return nil, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
 }
