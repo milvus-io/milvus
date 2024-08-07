@@ -384,6 +384,7 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
+  forwardDeleteMaxBatchSize: 16777216 # the max batch size for delegator to forward streaming delete(in bytes), default 16MB
   dataSync:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
