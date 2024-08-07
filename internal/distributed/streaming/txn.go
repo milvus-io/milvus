@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 var _ Txn = (*txnImpl)(nil)
@@ -23,7 +22,9 @@ type txnImpl struct {
 }
 
 // Append writes records to the log.
-func (t *txnImpl) Append(ctx context.Context, msgs ...message.MutableMessage) error {
+func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage) error {
+	assertNoSystemMessage(msg)
+
 	t.mu.Lock()
 	if t.state != message.TxnStateInFlight {
 		t.mu.Unlock()
@@ -38,20 +39,16 @@ func (t *txnImpl) Append(ctx context.Context, msgs ...message.MutableMessage) er
 		t.mu.Unlock()
 	}()
 
-	// system message is not allowed to be sent from client.
-	assertNoSystemMessage(msgs...)
-
-	for _, msg := range msgs {
-		// assert if vchannel is equal.
-		if msg.VChannel() != t.opts.VChannel {
-			panic("vchannel not match when using transaction")
-		}
-		// setup txn context.
-		msg.WithTxnContext(*t.txnCtx)
+	// assert if vchannel is equal.
+	if msg.VChannel() != t.opts.VChannel {
+		panic("vchannel not match when using transaction")
 	}
-	// dispatch by pchannel.
-	resp := t.dispatchByPChannel(ctx, msgs...)
-	return resp.UnwrapFirstError()
+
+	// setup txn context and add to wal.
+	msg.WithTxnContext(*t.txnCtx)
+
+	_, err := t.appendToWAL(ctx, msg)
+	return err
 }
 
 // Commit commits the transaction.
@@ -77,9 +74,7 @@ func (t *txnImpl) Commit(ctx context.Context) (*types.AppendResult, error) {
 		return nil, err
 	}
 	commit = commit.WithTxnContext(*t.txnCtx)
-	resps := t.appendToPChannel(ctx, funcutil.ToPhysicalChannel(t.opts.VChannel), commit)
-	resp := resps.Responses[0]
-	return resp.AppendResult, resp.Error
+	return t.appendToWAL(ctx, commit)
 }
 
 // Rollback rollbacks the transaction.
@@ -104,6 +99,6 @@ func (t *txnImpl) Rollback(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resps := t.appendToPChannel(ctx, funcutil.ToPhysicalChannel(t.opts.VChannel), rollback)
-	return resps.UnwrapFirstError()
+	_, err = t.appendToWAL(ctx, rollback)
+	return err
 }

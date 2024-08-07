@@ -18,13 +18,13 @@ const vChannel = "by-dev-rootcoord-dml_4"
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	streaming.Init()
-	defer streaming.Release()
 	m.Run()
 }
 
 func TestStreamingProduce(t *testing.T) {
 	t.Skip()
+	streaming.Init()
+	defer streaming.Release()
 	msg, _ := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{
 			CollectionId: 1,
@@ -35,8 +35,8 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp := streaming.WAL().Append(context.Background(), msg)
-	fmt.Printf("%+v\n", resp)
+	resp, err := streaming.WAL().Append(context.Background(), msg)
+	fmt.Printf("%+v\t%+v\n", resp, err)
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
@@ -49,8 +49,8 @@ func TestStreamingProduce(t *testing.T) {
 			}).
 			WithVChannel(vChannel).
 			BuildMutable()
-		resp := streaming.WAL().Append(context.Background(), msg)
-		fmt.Printf("%+v\n", resp)
+		resp, err := streaming.WAL().Append(context.Background(), msg)
+		fmt.Printf("%+v\t%+v\n", resp, err)
 	}
 
 	for i := 0; i < 500; i++ {
@@ -92,12 +92,14 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp = streaming.WAL().Append(context.Background(), msg)
-	fmt.Printf("%+v\n", resp)
+	resp, err = streaming.WAL().Append(context.Background(), msg)
+	fmt.Printf("%+v\t%+v\n", resp, err)
 }
 
 func TestStreamingConsume(t *testing.T) {
 	t.Skip()
+	streaming.Init()
+	defer streaming.Release()
 	ch := make(message.ChanMessageHandler, 10)
 	s := streaming.WAL().Read(context.Background(), streaming.ReadOption{
 		VChannel:       vChannel,

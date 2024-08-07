@@ -73,19 +73,20 @@ type WALAccesser interface {
 	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
 	Txn(ctx context.Context, opts TxnOption) (Txn, error)
 
-	// Append writes a batch records to the log.
-	// !!! Append didn't promise the order of the message and atomic write.
-	Append(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
+	// Append writes a records to the log.
+	Append(ctx context.Context, msgs message.MutableMessage) (*types.AppendResult, error)
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
+
+	// Utility returns the utility for writing records to the log.
+	Utility() Utility
 }
 
 // Txn is the interface for writing transaction into the wal.
 type Txn interface {
 	// Append writes a record to the log.
-	// Once the error is returned, the transaction is invalid and should be rollback.
-	Append(ctx context.Context, msgs ...message.MutableMessage) error
+	Append(ctx context.Context, msg message.MutableMessage) error
 
 	// Commit commits the transaction.
 	// Commit and Rollback can be only call once, and not concurrent safe with append operation.
@@ -96,4 +97,14 @@ type Txn interface {
 	// TODO: Manually rollback is make no sense for current single wal txn.
 	// It is preserved for future cross-wal txn.
 	Rollback(ctx context.Context) error
+}
+
+type Utility interface {
+	// AppendMessages appends messages to the wal.
+	// It it a helper utility function to append messages to the wal.
+	// If the messages is belong to one vchannel, it will be sent as a transaction.
+	// Otherwise, it will be sent as individual messages.
+	// !!! This function do not promise the atomicity and deliver order of the messages appending.
+	// TODO: Remove after we support cross-wal txn.
+	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
 }

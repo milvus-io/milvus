@@ -3,6 +3,7 @@ package streaming
 import (
 	"context"
 	"sync"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -30,8 +32,11 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		handlerClient:                  handlerClient,
 		producerMutex:                  sync.Mutex{},
 		producers:                      make(map[string]*producer.ResumableProducer),
-		// TODO: make the pool size configurable.
-		appendExecutionPool: conc.NewPool[struct{}](10),
+		utility: &utility{
+			// TODO: optimize the pool size, use the streaming api but not goroutines.
+			appendExecutionPool:   conc.NewPool[struct{}](10),
+			dispatchExecutionPool: conc.NewPool[struct{}](10),
+		},
 	}
 }
 
@@ -43,25 +48,20 @@ type walAccesserImpl struct {
 	streamingCoordAssignmentClient client.Client
 	handlerClient                  handler.HandlerClient
 
-	producerMutex       sync.Mutex
-	producers           map[string]*producer.ResumableProducer
-	appendExecutionPool *conc.Pool[struct{}]
+	producerMutex sync.Mutex
+	producers     map[string]*producer.ResumableProducer
+	utility       *utility
 }
 
 // Append writes a record to the log.
-func (w *walAccesserImpl) Append(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
-	assertNoSystemMessage(msgs...)
-
+func (w *walAccesserImpl) Append(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+	assertNoSystemMessage(msg)
 	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
-		err := status.NewOnShutdownError("wal accesser closed, %s", err.Error())
-		resp := newAppendResponseN(len(msgs))
-		resp.fillAllError(err)
-		return resp
+		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
 	}
 	defer w.lifetime.Done()
 
-	// dispatch by pchannel.
-	return w.dispatchByPChannel(ctx, msgs...)
+	return w.appendToWAL(ctx, msg)
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -88,6 +88,13 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
 	}
 
+	if opts.VChannel == "" {
+		return nil, status.NewInvaildArgument("vchannel is required")
+	}
+	if opts.TTL < 1*time.Millisecond {
+		return nil, status.NewInvaildArgument("ttl must be greater than or equal to 1ms")
+	}
+
 	// Create a new transaction, send the begin txn message.
 	beginTxn, err := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel(opts.VChannel).
@@ -101,8 +108,8 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 		return nil, err
 	}
 
-	resps := w.appendToPChannel(ctx, funcutil.ToPhysicalChannel(opts.VChannel), beginTxn)
-	if err := resps.UnwrapFirstError(); err != nil {
+	appendResult, err := w.appendToWAL(ctx, beginTxn)
+	if err != nil {
 		w.lifetime.Done()
 		return nil, err
 	}
@@ -112,9 +119,18 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 		mu:              sync.Mutex{},
 		state:           message.TxnStateInFlight,
 		opts:            opts,
-		txnCtx:          resps.Responses[0].AppendResult.TxnCtx,
+		txnCtx:          appendResult.TxnCtx,
 		walAccesserImpl: w,
 	}, nil
+}
+
+// Utility returns the utility of the wal accesser.
+func (w *walAccesserImpl) Utility() Utility {
+	return &utility{
+		appendExecutionPool:   w.utility.appendExecutionPool,
+		dispatchExecutionPool: w.utility.dispatchExecutionPool,
+		walAccesserImpl:       w,
+	}
 }
 
 // Close closes all the wal accesser.
