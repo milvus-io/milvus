@@ -91,8 +91,8 @@ func (s *L0CompactionPolicySuite) TestTrigger() {
 		ID   UniqueID
 		PosT Timestamp
 
-		LogSize  int64
-		LogCount int
+		DelatLogSize  int64
+		DeltaLogCount int
 	}{
 		{500, 10000, 4 * MB, 1},
 		{501, 10000, 4 * MB, 1},
@@ -103,7 +103,7 @@ func (s *L0CompactionPolicySuite) TestTrigger() {
 	segments := make(map[int64]*SegmentInfo)
 	for _, arg := range segArgs {
 		info := genTestSegmentInfo(s.testLabel, arg.ID, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed)
-		info.Deltalogs = genTestDeltalogs(arg.LogCount, arg.LogSize)
+		info.Deltalogs = genTestBinlogs(arg.DeltaLogCount, arg.DelatLogSize)
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
@@ -150,26 +150,30 @@ func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {
 		State commonpb.SegmentState
 		PosT  Timestamp
 
-		LogSize  int64
-		LogCount int
+		InsertLogSize  int64
+		InsertLogCount int
+
+		DelatLogSize  int64
+		DeltaLogCount int
 	}{
-		{100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 4 * MB, 1},
-		{101, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 4 * MB, 1},
-		{102, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 4 * MB, 1},
-		{103, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 50000, 4 * MB, 1},
-		{200, datapb.SegmentLevel_L1, commonpb.SegmentState_Growing, 50000, 0, 0},
-		{201, datapb.SegmentLevel_L1, commonpb.SegmentState_Growing, 30000, 0, 0},
-		{300, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 10000, 0, 0},
-		{301, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 20000, 0, 0},
+		{100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 0 * MB, 0, 4 * MB, 1},
+		{101, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 0 * MB, 0, 4 * MB, 1},
+		{102, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 10000, 0 * MB, 0, 4 * MB, 1},
+		{103, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, 50000, 0 * MB, 0, 4 * MB, 1},
+		{200, datapb.SegmentLevel_L1, commonpb.SegmentState_Growing, 50000, 10 * MB, 1, 0, 0},
+		{201, datapb.SegmentLevel_L1, commonpb.SegmentState_Growing, 30000, 10 * MB, 1, 0, 0},
+		{300, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 10000, 10 * MB, 1, 0, 0},
+		{301, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 20000, 10 * MB, 1, 0, 0},
 	}
 
 	segments := make(map[int64]*SegmentInfo)
 	for _, arg := range segArgs {
 		info := genTestSegmentInfo(label, arg.ID, arg.Level, arg.State)
 		if info.Level == datapb.SegmentLevel_L0 || info.State == commonpb.SegmentState_Flushed {
-			info.Deltalogs = genTestDeltalogs(arg.LogCount, arg.LogSize)
+			info.Deltalogs = genTestBinlogs(arg.DeltaLogCount, arg.DelatLogSize)
 			info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		}
+		info.Binlogs = genTestBinlogs(arg.InsertLogCount, arg.InsertLogSize)
 		if info.State == commonpb.SegmentState_Growing {
 			info.StartPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		}
@@ -209,7 +213,7 @@ func genTestSegmentInfo(label *CompactionGroupLabel, ID UniqueID, level datapb.S
 	}
 }
 
-func genTestDeltalogs(logCount int, logSize int64) []*datapb.FieldBinlog {
+func genTestBinlogs(logCount int, logSize int64) []*datapb.FieldBinlog {
 	var binlogs []*datapb.Binlog
 
 	for i := 0; i < logCount; i++ {
