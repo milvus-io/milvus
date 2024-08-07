@@ -9,7 +9,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 )
 
-var singleton *walAccesserImpl = nil
+var singleton WALAccesser = nil
+
+func SetWAL(w WALAccesser) {
+	singleton = w
+}
 
 // Init initializes the wal accesser with the given etcd client.
 // should be called before any other operations.
@@ -19,8 +23,8 @@ func Init(c *clientv3.Client) {
 
 // Release releases the resources of the wal accesser.
 func Release() {
-	if singleton != nil {
-		singleton.Close()
+	if w, ok := singleton.(*walAccesserImpl); ok && w != nil {
+		w.Close()
 	}
 }
 
