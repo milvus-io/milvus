@@ -122,7 +122,7 @@ func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int6
 	return registry.GetInMemoryResolver().ResolveQueryNode(ctx, addr, nodeID)
 }
 
-// NewShardClientMgr creates a new shardClientMgr
+// newShardClientMgr creates a new shardClientMgr
 func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 	s := &shardClientMgrImpl{
 		clients: struct {

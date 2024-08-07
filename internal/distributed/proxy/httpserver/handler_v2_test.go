@@ -53,6 +53,7 @@ func (DefaultReq) GetBase() *commonpb.MsgBase {
 func (req *DefaultReq) GetDbName() string { return req.DbName }
 
 func TestHTTPWrapper(t *testing.T) {
+	paramtable.Init()
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
 	ginHandler := gin.Default()
@@ -1181,6 +1182,9 @@ func TestDML(t *testing.T) {
 		errCode:     65535,
 	})
 
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
@@ -1228,6 +1232,11 @@ func TestSearchV2(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Times(4)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
+
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
