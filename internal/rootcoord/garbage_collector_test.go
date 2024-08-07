@@ -26,11 +26,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -353,7 +356,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
 	})
 
 	t.Run("failed to RemovePartition", func(t *testing.T) {
@@ -393,7 +396,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
 		<-gcConfirmChan
 		assert.True(t, gcConfirmCalled)
 		<-removePartitionChan
@@ -438,7 +441,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, nil, &model.Partition{}, 100000)
 		<-gcConfirmChan
 		assert.True(t, gcConfirmCalled)
 		<-removePartitionChan
@@ -535,4 +538,25 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		gc.RemoveCreatingPartition(0, &model.Partition{}, 0)
 		<-signal
 	})
+}
+
+func TestGcPartitionData(t *testing.T) {
+	defer cleanTestEnv()
+
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
+	streaming.SetWAL(wal)
+
+	tsoAllocator := mocktso.NewAllocator(t)
+	tsoAllocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	core := newTestCore(withTsoAllocator(tsoAllocator))
+	gc := newBgGarbageCollector(core)
+	core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
+
+	_, err := gc.GcPartitionData(context.Background(), nil, []string{"ch-0", "ch-1"}, &model.Partition{})
+	assert.NoError(t, err)
 }

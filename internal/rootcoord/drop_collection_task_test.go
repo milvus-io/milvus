@@ -240,14 +240,14 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			return true
 		}
 
-		gc := newMockGarbageCollector()
+		gc := mockrootcoord.NewGarbageCollector(t)
 		deleteCollectionCalled := false
 		deleteCollectionChan := make(chan struct{}, 1)
-		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+		gc.EXPECT().GcCollectionData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
 			deleteCollectionCalled = true
 			deleteCollectionChan <- struct{}{}
 			return 0, nil
-		}
+		})
 
 		core := newTestCore(
 			withValidProxyManager(),
