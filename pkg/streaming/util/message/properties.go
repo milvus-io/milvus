@@ -55,6 +55,10 @@ func (prop propertiesImpl) Set(key, value string) {
 	prop[key] = value
 }
 
+func (prop propertiesImpl) Delete(key string) {
+	delete(prop, key)
+}
+
 func (prop propertiesImpl) ToRawMap() map[string]string {
 	return map[string]string(prop)
 }

@@ -11,7 +11,7 @@ import (
 func NewTxnBuffer(logger *log.MLogger) *TxnBuffer {
 	return &TxnBuffer{
 		logger:            logger,
-		builders:          make(map[message.TxnID]*txnBuilder),
+		builders:          make(map[message.TxnID]*message.ImmutableTxnMessageBuilder),
 		notExpiredTxnHeap: typeutil.NewHeap[*message.TxnContext](&txnContextsOrderByExpired{}),
 	}
 }
@@ -19,7 +19,7 @@ func NewTxnBuffer(logger *log.MLogger) *TxnBuffer {
 // TxnBuffer is a buffer for txn messages.
 type TxnBuffer struct {
 	logger            *log.MLogger
-	builders          map[message.TxnID]*txnBuilder
+	builders          map[message.TxnID]*message.ImmutableTxnMessageBuilder
 	notExpiredTxnHeap typeutil.Heap[*message.TxnContext]
 }
 
@@ -46,6 +46,8 @@ func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts 
 			}
 		case message.MessageTypeRollbackTxn:
 			b.handleRollbackTxn(msg)
+		default:
+			b.handleTxnBodyMessage(msg)
 		}
 	}
 	b.clearExpiredTxn(ts)
@@ -71,7 +73,7 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 		)
 		return
 	}
-	b.builders[beginMsg.TxnContext().TxnID] = newTxnBuilder(beginMsg)
+	b.builders[beginMsg.TxnContext().TxnID] = message.NewImmutableTxnMessageBuilder(beginMsg)
 	b.notExpiredTxnHeap.Push(beginMsg.TxnContext())
 }
 
@@ -135,6 +137,20 @@ func (b *TxnBuffer) handleRollbackTxn(msg message.ImmutableMessage) {
 	delete(b.builders, rollbackMsg.TxnContext().TxnID)
 }
 
+// handleTxnBodyMessage handles txn body message.
+func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
+	builder, ok := b.builders[msg.TxnContext().TxnID]
+	if !ok {
+		b.logger.Warn(
+			"txn id not exist, so ignore the body message",
+			zap.Int64("txnID", int64(msg.TxnContext().TxnID)),
+			zap.Any("messageID", msg.MessageID()),
+		)
+		return
+	}
+	builder.Add(msg)
+}
+
 // clearExpiredTxn clears the expired txn.
 func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 	for b.notExpiredTxnHeap.Len() > 0 && b.notExpiredTxnHeap.Peek().ExpiredTimeTick() <= ts {
@@ -149,33 +165,6 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 			)
 		}
 	}
-}
-
-// newTxnBuilder creates a new txn builder.
-func newTxnBuilder(begin message.ImmutableBeginTxnMessageV2) *txnBuilder {
-	return &txnBuilder{
-		begin:    begin,
-		messages: make([]message.ImmutableMessage, 0),
-	}
-}
-
-// txnBuilder is a builder for txn message.
-type txnBuilder struct {
-	begin    message.ImmutableBeginTxnMessageV2
-	messages []message.ImmutableMessage
-}
-
-// Push pushes a message into the txn builder.
-func (b *txnBuilder) Push(msg message.ImmutableMessage) {
-	b.messages = append(b.messages, msg)
-}
-
-// Build builds a txn message.
-func (b *txnBuilder) Build(commit message.ImmutableCommitTxnMessageV2) (message.ImmutableTxnMessage, error) {
-	msg, err := message.NewImmutableTxnMesasge(b.begin, b.messages, commit)
-	b.begin = nil
-	b.messages = nil
-	return msg, err
 }
 
 // txnContextsOrderByExpired is the heap array of the txnSession.

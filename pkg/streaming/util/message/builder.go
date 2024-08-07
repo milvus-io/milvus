@@ -34,31 +34,6 @@ func NewImmutableMesasge(
 	}
 }
 
-// NewImmutableTxnMesasge creates a new immutable transaction message.
-func NewImmutableTxnMesasge(
-	begin ImmutableBeginTxnMessageV2,
-	body []ImmutableMessage,
-	commit ImmutableCommitTxnMessageV2,
-) (ImmutableTxnMessage, error) {
-	// combine begin and commit messages into one.
-	msg, err := newTxnMessageBuilderV2().
-		WithHeader(&TxnMessageHeader{}).
-		WithBody(&TxnMessageBody{}).
-		WithVChannel(begin.VChannel()).
-		BuildMutable()
-	if err != nil {
-		return nil, err
-	}
-	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
-		WithLastConfirmed(commit.LastConfirmedMessageID()).
-		WithTxnContext(*commit.TxnContext()).
-		IntoImmutableMessage(commit.MessageID())
-	return &immutableTxnMessageImpl{
-		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
-		messages:             body,
-	}, nil
-}
-
 // List all type-safe mutable message builders here.
 var (
 	NewTimeTickMessageBuilderV1         = createNewMessageBuilderV1[*TimeTickMessageHeader, *msgpb.TimeTickMsg]()
@@ -182,5 +157,65 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 	return &messageImpl{
 		payload:    payload,
 		properties: b.properties,
+	}, nil
+}
+
+// NewImmutableTxnMessageBuilder creates a new txn builder.
+func NewImmutableTxnMessageBuilder(begin ImmutableBeginTxnMessageV2) *ImmutableTxnMessageBuilder {
+	return &ImmutableTxnMessageBuilder{
+		begin:    begin,
+		messages: make([]ImmutableMessage, 0),
+	}
+}
+
+// ImmutableTxnMessageBuilder is a builder for txn message.
+type ImmutableTxnMessageBuilder struct {
+	begin    ImmutableBeginTxnMessageV2
+	messages []ImmutableMessage
+}
+
+// Push pushes a message into the txn builder.
+func (b *ImmutableTxnMessageBuilder) Add(msg ImmutableMessage) *ImmutableTxnMessageBuilder {
+	b.messages = append(b.messages, msg)
+	return b
+}
+
+// Build builds a txn message.
+func (b *ImmutableTxnMessageBuilder) Build(commit ImmutableCommitTxnMessageV2) (ImmutableTxnMessage, error) {
+	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit)
+	b.begin = nil
+	b.messages = nil
+	return msg, err
+}
+
+// newImmutableTxnMesasgeFromWAL creates a new immutable transaction message.
+func newImmutableTxnMesasgeFromWAL(
+	begin ImmutableBeginTxnMessageV2,
+	body []ImmutableMessage,
+	commit ImmutableCommitTxnMessageV2,
+) (ImmutableTxnMessage, error) {
+	// combine begin and commit messages into one.
+	msg, err := newTxnMessageBuilderV2().
+		WithHeader(&TxnMessageHeader{}).
+		WithBody(&TxnMessageBody{}).
+		WithVChannel(begin.VChannel()).
+		BuildMutable()
+	if err != nil {
+		return nil, err
+	}
+	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
+	for _, m := range body {
+		m.(*immutableMessageImpl).overwriteTimeTick(commit.TimeTick())
+		m.(*immutableMessageImpl).overwriteLastConfirmedMessageID(commit.LastConfirmedMessageID())
+	}
+	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
+		WithLastConfirmed(commit.LastConfirmedMessageID()).
+		WithTxnContext(*commit.TxnContext()).
+		IntoImmutableMessage(commit.MessageID())
+	return &immutableTxnMessageImpl{
+		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
+		begin:                begin,
+		messages:             body,
+		commit:               commit,
 	}, nil
 }

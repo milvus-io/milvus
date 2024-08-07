@@ -183,17 +183,48 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 	return id
 }
 
+// overwriteTimeTick overwrites the time tick of current message.
+func (m *immutableMessageImpl) overwriteTimeTick(timetick uint64) {
+	m.properties.Delete(messageTimeTick)
+	m.WithTimeTick(timetick)
+}
+
+// overwriteLastConfirmedMessageID overwrites the last confirmed message id of current message.
+func (m *immutableMessageImpl) overwriteLastConfirmedMessageID(id MessageID) {
+	m.properties.Delete(messageLastConfirmed)
+	m.properties.Delete(messageLastConfirmedIDSameWithMessageID)
+	m.WithLastConfirmed(id)
+}
+
 // immutableTxnMessageImpl is a immutable transaction message.
 type immutableTxnMessageImpl struct {
 	immutableMessageImpl
+	begin    ImmutableMessage
 	messages []ImmutableMessage // the messages that wrapped by the transaction message.
+	commit   ImmutableMessage
+}
+
+// Begin returns the begin message of the transaction message.
+func (m *immutableTxnMessageImpl) Begin() ImmutableMessage {
+	return m.begin
 }
 
 // RangeOver iterates over the underlying messages in the transaction message.
-func (m *immutableTxnMessageImpl) RangeOver(fn func(ImmutableMessage) bool) {
+func (m *immutableTxnMessageImpl) RangeOver(fn func(ImmutableMessage) error) error {
 	for _, msg := range m.messages {
-		if !fn(msg) {
-			return
+		if err := fn(msg); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+// Commit returns the commit message of the transaction message.
+func (m *immutableTxnMessageImpl) Commit() ImmutableMessage {
+	return m.commit
+}
+
+// Size returns the number of messages in the transaction message.
+func (m *immutableTxnMessageImpl) Size() int {
+	return len(m.messages)
 }

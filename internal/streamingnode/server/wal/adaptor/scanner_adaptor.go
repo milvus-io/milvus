@@ -157,7 +157,8 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	}
 
 	// Filtering the message if needed.
-	if s.readOption.MessageFilter != nil && !s.readOption.MessageFilter(msg) {
+	// System message should never be filtered.
+	if !msg.IsSystemMessage() && (s.readOption.MessageFilter != nil && !s.readOption.MessageFilter(msg)) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.

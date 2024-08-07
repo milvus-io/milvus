@@ -100,9 +100,18 @@ type ImmutableMessage interface {
 type ImmutableTxnMessage interface {
 	ImmutableMessage
 
+	// Begin returns the begin message of the transaction.
+	Begin() ImmutableMessage
+
+	// Commit returns the commit message of the transaction.
+	Commit() ImmutableMessage
+
 	// RangeOver iterates over the underlying messages in the transaction.
-	// If visitor return false, the iteration will be stopped.
-	RangeOver(visitor func(ImmutableMessage) bool)
+	// If visitor return not nil, the iteration will be stopped.
+	RangeOver(visitor func(ImmutableMessage) error) error
+
+	// Size returns the number of messages in the transaction.
+	Size() int
 }
 
 // specializedMutableMessage is the specialized mutable message interface.
