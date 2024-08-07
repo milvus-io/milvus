@@ -390,7 +390,7 @@ class TestInsertParams(TestcaseBase):
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
         error = {ct.err_code: 999,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {int64} field should be a int64"}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
