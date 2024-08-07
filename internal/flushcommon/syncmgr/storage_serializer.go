@@ -137,6 +137,10 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		task.WithDrop()
 	}
 
+	if pack.isImport {
+		task.WithImport()
+	}
+
 	s.setTaskMeta(task, pack)
 	task.WithAllocator(s.allocator)
 
