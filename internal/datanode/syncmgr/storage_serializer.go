@@ -134,6 +134,10 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		task.WithDrop()
 	}
 
+	if pack.isImport {
+		task.WithImport()
+	}
+
 	s.setTaskMeta(task, pack)
 
 	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pack.level.String()).Observe(float64(tr.RecordSpan().Milliseconds()))

@@ -49,6 +49,7 @@ type SyncPack struct {
 	batchSize     int64 // batchSize is the row number of this sync task,not the total num of rows of segemnt
 	isFlush       bool
 	isDrop        bool
+	isImport      bool
 	// metadata
 	collectionID int64
 	partitionID  int64
@@ -111,6 +112,11 @@ func (p *SyncPack) WithFlush() *SyncPack {
 
 func (p *SyncPack) WithDrop() *SyncPack {
 	p.isDrop = true
+	return p
+}
+
+func (p *SyncPack) WithImport() *SyncPack {
+	p.isImport = true
 	return p
 }
 

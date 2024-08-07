@@ -87,6 +87,11 @@ func (t *SyncTask) WithDrop() *SyncTask {
 	return t
 }
 
+func (t *SyncTask) WithImport() *SyncTask {
+	t.isImport = true
+	return t
+}
+
 func (t *SyncTask) WithMetaCache(metacache metacache.MetaCache) *SyncTask {
 	t.metacache = metacache
 	return t
