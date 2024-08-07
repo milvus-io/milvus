@@ -2327,8 +2327,9 @@ type queryNodeConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"false"`
 
 	// delete buffer
-	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
-	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
+	MaxSegmentDeleteBuffer    ParamItem `refreshable:"false"`
+	DeleteBufferBlockSize     ParamItem `refreshable:"false"`
+	ForwardDeleteMaxBatchSize ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -2863,6 +2864,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "1048576", // 1MB
 	}
 	p.DeleteBufferBlockSize.Init(base.mgr)
+
+	p.ForwardDeleteMaxBatchSize = ParamItem{
+		Key:          "queryNode.forwardDeleteMaxBatchSize",
+		Version:      "2.4.7",
+		Doc:          "the max batch size for delegator to forward streaming delete(in bytes), default 16MB",
+		Export:       true,
+		DefaultValue: "16777216", // 16MB
+	}
+	p.ForwardDeleteMaxBatchSize.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
