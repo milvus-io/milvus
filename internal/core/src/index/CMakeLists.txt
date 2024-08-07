@@ -18,6 +18,7 @@ set(INDEX_FILES
         ScalarIndex.cpp
         ScalarIndexSort.cpp
         SkipIndex.cpp
+        BitmapIndex.cpp
         InvertedIndexTantivy.cpp
         )
 

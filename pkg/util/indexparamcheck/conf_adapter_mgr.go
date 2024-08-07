@@ -63,6 +63,7 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexINVERTED] = newINVERTEDChecker()
 	mgr.checkers[IndexSTLSORT] = newSTLSORTChecker()
 	mgr.checkers["Asceneding"] = newSTLSORTChecker()
+	mgr.checkers[IndexBitmap] = newBITMAPChecker()
 	mgr.checkers[IndexTRIE] = newTRIEChecker()
 	mgr.checkers[IndexTrie] = newTRIEChecker()
 	mgr.checkers["marisa-trie"] = newTRIEChecker()

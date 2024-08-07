@@ -132,6 +132,13 @@ StringIndexMarisa::Build(const Config& config) {
                "insert file paths is empty when build index");
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    BuildWithFieldData(field_datas);
+}
+
+void
+StringIndexMarisa::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas) {
     int64_t total_num_rows = 0;
 
     // fill key set.

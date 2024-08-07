@@ -364,6 +364,11 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    void
+    SetNotUseIndex() {
+        use_index_ = false;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;

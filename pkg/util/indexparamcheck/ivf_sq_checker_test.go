@@ -162,7 +162,7 @@ func Test_ivfSQChecker_CheckValidDataType(t *testing.T) {
 
 	c := newIVFSQChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		err := c.CheckValidDataType(&schemapb.FieldSchema{DataType: test.dType})
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

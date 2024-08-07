@@ -58,6 +58,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return data_.size();
     }
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::STLSORT;
+    }
+
     void
     Build(size_t n, const T* values) override;
 
@@ -116,7 +121,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
     void
-    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
+    LoadWithoutAssemble(const BinarySet& binary_set,
+                        const Config& config) override;
+
+    void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
  private:
     bool is_built_;

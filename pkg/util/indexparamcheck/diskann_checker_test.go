@@ -144,7 +144,7 @@ func Test_diskannChecker_CheckValidDataType(t *testing.T) {
 
 	c := newDiskannChecker()
 	for _, test := range cases {
-		err := c.CheckValidDataType(test.dType)
+		err := c.CheckValidDataType(&schemapb.FieldSchema{DataType: test.dType})
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

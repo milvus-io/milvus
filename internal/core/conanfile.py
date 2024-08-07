@@ -41,6 +41,7 @@ class MilvusConan(ConanFile):
         "google-cloud-cpp/2.5.0@milvus/2.4#b8dda0943d40adee69d7adc5fafc317d",
         "opentelemetry-cpp/1.8.3@milvus/2.4#3b8139532791a163c8ff2819c55eb4ac",
         "librdkafka/1.9.1",
+        "roaring/3.0.0",
         "abseil/20230125.3",
         "grpc/1.54.3@milvus/dev#5dfb5e1477b22c6d1e6d6b90ab5501d8",
     )
