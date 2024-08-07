@@ -472,7 +472,9 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
 }
 
 CStatus
-WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id, bool mmap_enabled) {
+WarmupChunkCache(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 bool mmap_enabled) {
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);

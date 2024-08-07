@@ -119,7 +119,7 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
                                         false);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
-        .GetChunkManager();
+                   .GetChunkManager();
     auto data = dataset.get_col<float>(fake_id);
     auto data_slices = std::vector<void*>{data.data()};
     auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
@@ -133,8 +133,7 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
 
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
     const auto& column = cc->Read(file_name, descriptor, field_meta, false);
-    std::cout << "byteSize=" << column->ByteSize() << ", expect=" << dim * N * 4 << std::endl;
-    Assert(column->DataSize() == dim * N * 4);
+    Assert(column->ByteSize() == dim * N * 4);
 
     auto actual = (float*)column->Data();
     for (auto i = 0; i < N; i++) {

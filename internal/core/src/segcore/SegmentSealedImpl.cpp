@@ -153,7 +153,8 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id, bool mmap_enabled) {
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_, field_meta, mmap_enabled);
+        auto column =
+            cc->Read(data_path, mmap_descriptor_, field_meta, mmap_enabled);
     }
 }
 
@@ -831,7 +832,8 @@ std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
     const storage::MmapChunkDescriptorPtr& descriptor) {
     // TODO: add Load() interface for chunk cache, make Read() raise error if cache miss
     // for mmap mode, field_meta is unused, so just construct a fake field meta
-    auto fm = FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE, false);
+    auto fm =
+        FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE, false);
     auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
     return {data_path, column};

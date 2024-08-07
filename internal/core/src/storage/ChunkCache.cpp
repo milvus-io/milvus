@@ -22,7 +22,9 @@
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
-                 const MmapChunkDescriptorPtr& descriptor, const FieldMeta& field_meta, bool mmap_enabled) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -54,7 +56,8 @@ ChunkCache::Read(const std::string& filepath,
     // release lock and perform download and decode
     // other thread request same path shall get the future.
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-    auto column = Mmap(field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
+    auto column =
+        Mmap(field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
 
     // set promise value to notify the future
     lck.lock();
@@ -99,7 +102,9 @@ ChunkCache::Prefetch(const std::string& filepath) {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const FieldDataPtr& field_data,
-                 const MmapChunkDescriptorPtr& descriptor, const FieldMeta& field_meta, bool mmap_enabled) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled) {
     auto dim = field_data->get_dim();
     auto data_type = field_data->get_data_type();
 
@@ -135,7 +140,8 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
                                               descriptor,
                                               field_data->IsNullable());
         } else {
-            column = std::make_shared<Column>(field_data->get_num_rows(), field_meta);
+            column = std::make_shared<Column>(field_data->get_num_rows(),
+                                              field_meta);
         }
     }
     column->AppendBatch(field_data);
