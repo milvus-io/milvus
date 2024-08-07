@@ -192,6 +192,10 @@ func (s *L0ImportSuite) TestL0Import() {
 	deltaLog := actual.GetBinlogs()[0]
 	s.Equal(int64(s.delCnt), deltaLog.GetEntriesNum())
 	s.Equal(s.deleteData.Size(), deltaLog.GetMemorySize())
+
+	segment, ok := l0Task.metaCaches[s.channel].GetSegmentByID(s.segmentID)
+	s.True(ok)
+	s.Equal(commonpb.SegmentState_Flushed, segment.State())
 }
 
 func TestL0Import(t *testing.T) {
