@@ -195,17 +195,16 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	return false, 0
 }
 
-func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
+func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
-		segmentIDs = append(segmentIDs, s.ID)
 	}
 	clusteringMaxSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat()
 	clusteringPreferSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
 
 	maxRows, err := calBySegmentSizePolicy(coll.Schema, expectedSegmentSize)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return 0, 0, 0, err
 	}
 	maxSegmentRows = int64(float64(maxRows) * clusteringMaxSegmentSizeRatio)
 	preferSegmentRows = int64(float64(maxRows) * clusteringPreferSegmentSizeRatio)
@@ -224,7 +223,7 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 			log.Info("New data is larger than threshold, do compaction", zap.Int64("newDataSize", newDataSize))
 			return true, nil
 		}
-		log.Info("No partition stats and no enough new data, skip compaction")
+		log.Info("No partition stats and no enough new data, skip compaction", zap.Int64("newDataSize", newDataSize))
 		return false, nil
 	}
 
@@ -284,7 +283,6 @@ func (v *ClusteringSegmentsView) GetSegmentsView() []*SegmentView {
 	if v == nil {
 		return nil
 	}
-
 	return v.segments
 }
 
@@ -305,11 +303,9 @@ func (v *ClusteringSegmentsView) String() string {
 }
 
 func (v *ClusteringSegmentsView) Trigger() (CompactionView, string) {
-	// todo set reason
 	return v, ""
 }
 
 func (v *ClusteringSegmentsView) ForceTrigger() (CompactionView, string) {
-	// TODO implement me
 	panic("implement me")
 }
