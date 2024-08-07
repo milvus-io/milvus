@@ -3,8 +3,7 @@ package channel
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
@@ -43,7 +42,7 @@ func (c *PChannelMeta) Name() string {
 
 // ChannelInfo returns the channel info.
 func (c *PChannelMeta) ChannelInfo() types.PChannelInfo {
-	return typeconverter.NewPChannelInfoFromProto(c.inner.Channel)
+	return types.NewPChannelInfoFromProto(c.inner.Channel)
 }
 
 // Term returns the current term of the channel.
@@ -60,8 +59,8 @@ func (c *PChannelMeta) CurrentServerID() int64 {
 // CurrentAssignment returns the current assignment of the channel.
 func (c *PChannelMeta) CurrentAssignment() types.PChannelInfoAssigned {
 	return types.PChannelInfoAssigned{
-		Channel: typeconverter.NewPChannelInfoFromProto(c.inner.Channel),
-		Node:    typeconverter.NewStreamingNodeInfoFromProto(c.inner.Node),
+		Channel: types.NewPChannelInfoFromProto(c.inner.Channel),
+		Node:    types.NewStreamingNodeInfoFromProto(c.inner.Node),
 	}
 }
 
@@ -74,7 +73,7 @@ func (c *PChannelMeta) AssignHistories() []types.PChannelInfoAssigned {
 				Name: c.inner.GetChannel().GetName(),
 				Term: h.Term,
 			},
-			Node: typeconverter.NewStreamingNodeInfoFromProto(h.Node),
+			Node: types.NewStreamingNodeInfoFromProto(h.Node),
 		})
 	}
 	return history
@@ -122,7 +121,7 @@ func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeI
 
 	// otherwise update the channel into assgining state.
 	m.inner.Channel.Term++
-	m.inner.Node = typeconverter.NewProtoFromStreamingNodeInfo(streamingNode)
+	m.inner.Node = types.NewProtoFromStreamingNodeInfo(streamingNode)
 	m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING
 	return true
 }

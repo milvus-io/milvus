@@ -1,8 +1,39 @@
 syntax = "proto3";
 
-package milvus.proto.message;
+package milvus.proto.messages;
 
-option go_package = "github.com/milvus-io/milvus/pkg/streaming/util/message/messagepb";
+option go_package = "github.com/milvus-io/milvus/pkg/streaming/proto/messagespb";
+
+// MessageID is the unique identifier of a message.
+message MessageID {
+    string id = 1;
+}
+
+// Message is the basic unit of communication between publisher and consumer.
+message Message {
+    bytes payload                  = 1;  // message body
+    map<string, string> properties = 2;  // message properties
+}
+
+// ImmutableMessage is the message that can not be modified anymore.
+message ImmutableMessage {
+    MessageID id                   = 1;
+    bytes payload                  = 2;  // message body
+    map<string, string> properties = 3;  // message properties
+}
+
+// MessageType is the type of message.
+enum MessageType {
+    Unknown          = 0;
+    TimeTick         = 1;
+    Insert           = 2;
+    Delete           = 3;
+    Flush            = 4;
+    CreateCollection = 5;
+    DropCollection   = 6;
+    CreatePartition  = 7;
+    DropPartition    = 8;
+}
 
 ///
 /// Message Payload Definitions

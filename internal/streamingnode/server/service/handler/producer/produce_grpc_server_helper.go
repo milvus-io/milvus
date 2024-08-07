@@ -1,7 +1,7 @@
 package producer
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 // produceGrpcServerHelper is a wrapped producer server of log messages.

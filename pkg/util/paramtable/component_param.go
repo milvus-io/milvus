@@ -1702,6 +1702,8 @@ type queryCoordConfig struct {
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
+	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
+	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2238,6 +2240,24 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.ClusterLevelLoadReplicaNumber = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadReplicaNumber",
+		Version:      "2.4.7",
+		DefaultValue: "0",
+		Doc:          "the cluster level default value for load replica number",
+		Export:       false,
+	}
+	p.ClusterLevelLoadReplicaNumber.Init(base.mgr)
+
+	p.ClusterLevelLoadResourceGroups = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadResourceGroups",
+		Version:      "2.4.7",
+		DefaultValue: "",
+		Doc:          "resource group names for load collection should be at least equal to queryCoord.clusterLevelLoadReplicaNumber, separate with commas",
+		Export:       false,
+	}
+	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

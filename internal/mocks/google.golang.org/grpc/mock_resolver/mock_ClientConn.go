@@ -55,39 +55,6 @@ func (_c *MockClientConn_NewAddress_Call) RunAndReturn(run func([]resolver.Addre
 	return _c
 }
 
-// NewServiceConfig provides a mock function with given fields: serviceConfig
-func (_m *MockClientConn) NewServiceConfig(serviceConfig string) {
-	_m.Called(serviceConfig)
-}
-
-// MockClientConn_NewServiceConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewServiceConfig'
-type MockClientConn_NewServiceConfig_Call struct {
-	*mock.Call
-}
-
-// NewServiceConfig is a helper method to define mock.On call
-//   - serviceConfig string
-func (_e *MockClientConn_Expecter) NewServiceConfig(serviceConfig interface{}) *MockClientConn_NewServiceConfig_Call {
-	return &MockClientConn_NewServiceConfig_Call{Call: _e.mock.On("NewServiceConfig", serviceConfig)}
-}
-
-func (_c *MockClientConn_NewServiceConfig_Call) Run(run func(serviceConfig string)) *MockClientConn_NewServiceConfig_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockClientConn_NewServiceConfig_Call) Return() *MockClientConn_NewServiceConfig_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockClientConn_NewServiceConfig_Call) RunAndReturn(run func(string)) *MockClientConn_NewServiceConfig_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ParseServiceConfig provides a mock function with given fields: serviceConfigJSON
 func (_m *MockClientConn) ParseServiceConfig(serviceConfigJSON string) *serviceconfig.ParseResult {
 	ret := _m.Called(serviceConfigJSON)

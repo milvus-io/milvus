@@ -1287,7 +1287,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Key:          "minio.useVirtualHost",
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
-		PanicIfEmpty: true,
+		PanicIfEmpty: false,
 		Doc:          "Whether use virtual host mode for bucket",
 		Export:       true,
 	}

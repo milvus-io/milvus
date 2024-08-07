@@ -45,18 +45,27 @@ func (m *messageImpl) EstimateSize() int {
 
 // WithVChannel sets the virtual channel of current message.
 func (m *messageImpl) WithVChannel(vChannel string) MutableMessage {
+	if m.properties.Exist(messageVChannel) {
+		panic("vchannel already set in properties of message")
+	}
 	m.properties.Set(messageVChannel, vChannel)
 	return m
 }
 
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
+	if m.properties.Exist(messageTimeTick) {
+		panic("time tick already set in properties of message")
+	}
 	m.properties.Set(messageTimeTick, EncodeUint64(tt))
 	return m
 }
 
 // WithLastConfirmed sets the last confirmed message id of current message.
 func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
+	if m.properties.Exist(messageLastConfirmed) {
+		panic("last confirmed message already set in properties of message")
+	}
 	m.properties.Set(messageLastConfirmed, id.Marshal())
 	return m
 }

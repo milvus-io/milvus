@@ -2,25 +2,15 @@ syntax = "proto3";
 
 package milvus.proto.streaming;
 
-option go_package = "github.com/milvus-io/milvus/internal/proto/streamingpb";
+option go_package = "github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb";
 
+import "messages.proto";
 import "milvus.proto";
 import "google/protobuf/empty.proto";
 
 //
 // Common
 //
-
-// MessageID is the unique identifier of a message.
-message MessageID {
-    string id = 1;
-}
-
-// Message is the basic unit of communication between publisher and consumer.
-message Message {
-    bytes payload                  = 1;  // message body
-    map<string, string> properties = 2;  // message properties
-}
 
 // PChannelInfo is the information of a pchannel info, should only keep the
 // basic info of a pchannel. It's used in many rpc and meta, so keep it simple.
@@ -153,9 +143,9 @@ message DeliverPolicy {
     oneof policy {
         google.protobuf.Empty all    = 1;  // deliver all messages.
         google.protobuf.Empty latest = 2;  // deliver the latest message.
-        MessageID start_from =
+        messages.MessageID start_from =
             3;  // deliver message from this message id. [startFrom, ...]
-        MessageID start_after =
+        messages.MessageID start_after =
             4;  // deliver message after this message id. (startAfter, ...]
     }
 }
@@ -253,8 +243,8 @@ message CreateProducerRequest {
 
 // ProduceMessageRequest is the request of the Produce RPC.
 message ProduceMessageRequest {
-    int64 request_id = 1;  // request id for reply.
-    Message message  = 2;  // message to be sent.
+    int64 request_id         = 1;  // request id for reply.
+    messages.Message message = 2;  // message to be sent.
 }
 
 // CloseProducerRequest is the request of the CloseProducer RPC.
@@ -291,7 +281,8 @@ message ProduceMessageResponse {
 // ProduceMessageResponseResult is the result of the produce message streaming
 // RPC.
 message ProduceMessageResponseResult {
-    MessageID id = 1;  // the offset of the message in the channel
+    messages.MessageID id = 1;  // the offset of the message in the channel.
+    uint64 timetick       = 2;  // the timetick of that message sent.
 }
 
 // CloseProducerResponse is the result of the CloseProducer RPC.
@@ -331,8 +322,7 @@ message CreateConsumerResponse {
 }
 
 message ConsumeMessageReponse {
-    MessageID id    = 1;  // message id of message.
-    Message message = 2;  // message to be consumed.
+    messages.ImmutableMessage message = 1;
 }
 
 message CloseConsumerResponse {}

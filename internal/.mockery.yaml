@@ -40,17 +40,6 @@ packages:
   google.golang.org/grpc:
     interfaces:
       ClientStream:
-  github.com/milvus-io/milvus/internal/proto/streamingpb:
-    interfaces:
-      StreamingNodeHandlerService_ConsumeServer:
-      StreamingNodeHandlerService_ProduceServer:
-      StreamingCoordAssignmentServiceClient:
-      StreamingCoordAssignmentService_AssignmentDiscoverClient:
-      StreamingCoordAssignmentService_AssignmentDiscoverServer:
-      StreamingNodeManagerServiceClient:
-      StreamingNodeHandlerServiceClient:
-      StreamingNodeHandlerService_ConsumeClient:
-      StreamingNodeHandlerService_ProduceClient:
   github.com/milvus-io/milvus/internal/streamingnode/server/walmanager:
     interfaces:
       Manager:

@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
 )
@@ -54,10 +54,10 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
 		MessageChannel:              receiveChannel,
 	}
-	switch opt.DeliverPolicy.Policy() {
-	case options.DeliverPolicyTypeAll:
+	switch opt.DeliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_All:
 		consumerOption.SubscriptionInitialPosition = common.SubscriptionPositionEarliest
-	case options.DeliverPolicyTypeLatest:
+	case *streamingpb.DeliverPolicy_Latest:
 		consumerOption.SubscriptionInitialPosition = common.SubscriptionPositionLatest
 	}
 
@@ -76,15 +76,21 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 
 	// Seek the MQ consumer.
 	var exclude *rmqID
-	switch opt.DeliverPolicy.Policy() {
-	case options.DeliverPolicyTypeStartFrom:
-		id := opt.DeliverPolicy.MessageID().(rmqID)
+	switch t := opt.DeliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_StartFrom:
+		id, err := unmarshalMessageID(t.StartFrom.GetId())
+		if err != nil {
+			return nil, err
+		}
 		// Do a inslusive seek.
 		if err = consumer.Seek(int64(id)); err != nil {
 			return nil, err
 		}
-	case options.DeliverPolicyTypeStartAfter:
-		id := opt.DeliverPolicy.MessageID().(rmqID)
+	case *streamingpb.DeliverPolicy_StartAfter:
+		id, err := unmarshalMessageID(t.StartAfter.GetId())
+		if err != nil {
+			return nil, err
+		}
 		exclude = &id
 		if err = consumer.Seek(int64(id)); err != nil {
 			return nil, err

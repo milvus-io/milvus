@@ -7,15 +7,14 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 )
@@ -143,7 +142,7 @@ func (c *managerClientImpl) Assign(ctx context.Context, pchannel types.PChannelI
 	// Select a log node to assign the wal instance.
 	ctx = contextutil.WithPickServerID(ctx, pchannel.Node.ServerID)
 	_, err = manager.Assign(ctx, &streamingpb.StreamingNodeManagerAssignRequest{
-		Pchannel: typeconverter.NewProtoFromPChannelInfo(pchannel.Channel),
+		Pchannel: types.NewProtoFromPChannelInfo(pchannel.Channel),
 	})
 	return err
 }
@@ -164,7 +163,7 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 	// Select a streaming node to remove the wal instance.
 	ctx = contextutil.WithPickServerID(ctx, pchannel.Node.ServerID)
 	_, err = manager.Remove(ctx, &streamingpb.StreamingNodeManagerRemoveRequest{
-		Pchannel: typeconverter.NewProtoFromPChannelInfo(pchannel.Channel),
+		Pchannel: types.NewProtoFromPChannelInfo(pchannel.Channel),
 	})
 	// The following error can be treated as success.
 	// 1. err is nil, a real remove operation at streaming node has been happened.

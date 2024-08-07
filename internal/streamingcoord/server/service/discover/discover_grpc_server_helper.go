@@ -1,8 +1,7 @@
 package discover
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -18,12 +17,12 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(v typeutil.VersionInt64Pai
 	for _, relation := range relations {
 		if assignmentsMap[relation.Node.ServerID] == nil {
 			assignmentsMap[relation.Node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     typeconverter.NewProtoFromStreamingNodeInfo(relation.Node),
+				Node:     types.NewProtoFromStreamingNodeInfo(relation.Node),
 				Channels: make([]*streamingpb.PChannelInfo, 0),
 			}
 		}
 		assignmentsMap[relation.Node.ServerID].Channels = append(
-			assignmentsMap[relation.Node.ServerID].Channels, typeconverter.NewProtoFromPChannelInfo(relation.Channel))
+			assignmentsMap[relation.Node.ServerID].Channels, types.NewProtoFromPChannelInfo(relation.Channel))
 	}
 
 	assignments := make([]*streamingpb.StreamingNodeAssignment, 0, len(assignmentsMap))

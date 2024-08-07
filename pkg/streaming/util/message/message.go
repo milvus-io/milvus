@@ -45,11 +45,11 @@ type MutableMessage interface {
 	BasicMessage
 
 	// WithLastConfirmed sets the last confirmed message id of current message.
-	// !!! preserved for streaming system internal usage, don't call it outside of log system.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmed(id MessageID) MutableMessage
 
 	// WithTimeTick sets the time tick of current message.
-	// !!! preserved for streaming system internal usage, don't call it outside of log system.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithTimeTick(tt uint64) MutableMessage
 
 	// IntoImmutableMessage converts the mutable message to immutable message.

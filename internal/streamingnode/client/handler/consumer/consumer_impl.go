@@ -8,11 +8,10 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -83,18 +82,10 @@ func createConsumeRequest(ctx context.Context, opts *ConsumerOptions) (context.C
 	// select server to consume.
 	ctx = contextutil.WithPickServerID(ctx, opts.Assignment.Node.ServerID)
 	// create the consumer request.
-	deliverPolicy, err := typeconverter.NewProtoFromDeliverPolicy(opts.DeliverPolicy)
-	if err != nil {
-		return nil, errors.Wrap(err, "at convert deliver policy")
-	}
-	deliverFilters, err := typeconverter.NewProtosFromDeliverFilters(opts.DeliverFilters)
-	if err != nil {
-		return nil, errors.Wrap(err, "at convert deliver filters")
-	}
 	return contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
-		Pchannel:       typeconverter.NewProtoFromPChannelInfo(opts.Assignment.Channel),
-		DeliverPolicy:  deliverPolicy,
-		DeliverFilters: deliverFilters,
+		Pchannel:       types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
+		DeliverPolicy:  opts.DeliverPolicy,
+		DeliverFilters: opts.DeliverFilters,
 	}), nil
 }
 
@@ -162,7 +153,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 		}
 		switch resp := resp.Response.(type) {
 		case *streamingpb.ConsumeResponse_Consume:
-			msgID, err := message.UnmarshalMessageID(c.walName, resp.Consume.GetId().GetId())
+			msgID, err := message.UnmarshalMessageID(c.walName, resp.Consume.GetMessage().GetId().GetId())
 			if err != nil {
 				return err
 			}
