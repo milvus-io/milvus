@@ -61,8 +61,11 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}
 	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
+		// force set disk ann memory cost to 128 MB, limit by DEFAULT_FIELD_MAX_MEMORY_LIMIT in DiskFileManagerImpl::CacheIndexToDisk
+		// neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
+		neededMemSize := int64(128 * 1024 * 1024)
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
+
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 	if indexType == indexparamcheck.IndexINVERTED {
