@@ -19,8 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -28,8 +26,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
