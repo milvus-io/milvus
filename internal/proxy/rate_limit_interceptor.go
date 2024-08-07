@@ -36,7 +36,7 @@ import (
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		collectionIDs, rt, n, err := getRequestInfo(req)
+		collectionIDs, rt, n, err := GetRequestInfo(req)
 		if err != nil {
 			return handler(ctx, req)
 		}
@@ -46,7 +46,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
 		if err != nil {
 			metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
-			rsp := getFailedResponse(req, err)
+			rsp := GetFailedResponse(req, err)
 			if rsp != nil {
 				return rsp, nil
 			}
@@ -56,8 +56,8 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	}
 }
 
-// getRequestInfo returns collection name and rateType of request and return tokens needed.
-func getRequestInfo(req interface{}) ([]int64, internalpb.RateType, int, error) {
+// GetRequestInfo returns collection name and rateType of request and return tokens needed.
+func GetRequestInfo(req interface{}) ([]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
@@ -132,8 +132,8 @@ func failedMutationResult(err error) *milvuspb.MutationResult {
 	}
 }
 
-// getFailedResponse returns failed response.
-func getFailedResponse(req any, err error) any {
+// GetFailedResponse returns failed response.
+func GetFailedResponse(req any, err error) any {
 	switch req.(type) {
 	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest:
 		return failedMutationResult(err)

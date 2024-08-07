@@ -454,6 +454,9 @@ func (h *HandlersV1) query(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
+		return
+	}
 	response, err := h.proxy.Query(ctx, &req)
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -521,6 +524,9 @@ func (h *HandlersV1) get(c *gin.Context) {
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 			HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
 		return
 	}
 	req.Expr = filter
@@ -593,6 +599,9 @@ func (h *HandlersV1) delete(c *gin.Context) {
 			return
 		}
 		req.Expr = filter
+	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
+		return
 	}
 	response, err := h.proxy.Delete(ctx, &req)
 	if err == nil {
@@ -667,6 +676,9 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
 		return
 	}
 	response, err := h.proxy.Insert(ctx, &req)
@@ -765,6 +777,9 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		})
 		return
 	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
+		return
+	}
 	response, err := h.proxy.Upsert(ctx, &req)
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -857,6 +872,9 @@ func (h *HandlersV1) search(c *gin.Context) {
 		return
 	}
 	if !h.checkDatabase(ctx, c, req.DbName) {
+		return
+	}
+	if _, err := CheckLimiter(req, h.proxy); err != nil {
 		return
 	}
 	response, err := h.proxy.Search(ctx, &req)
