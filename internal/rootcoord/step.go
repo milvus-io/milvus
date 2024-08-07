@@ -21,9 +21,12 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type stepPriority int
@@ -232,6 +235,7 @@ func (s *waitForTsSyncedStep) Execute(ctx context.Context) ([]nestedStep, error)
 		// time.Sleep(Params.ProxyCfg.TimeTickInterval)
 		return nil, fmt.Errorf("ts not synced yet, channel: %s, synced: %d, want: %d", s.channel, syncedTs, s.ts)
 	}
+	log.Info("target ts has been synced into mq", zap.String("channel", s.channel), zap.Uint64("ts", s.ts))
 	return nil, nil
 }
 

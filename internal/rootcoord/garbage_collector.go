@@ -19,9 +19,12 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
@@ -190,7 +193,8 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	if err := c.s.chanTimeTick.broadcastDmlChannels(coll.PhysicalChannelNames, &msgPack); err != nil {
 		return 0, err
 	}
-
+	log.Info("Sent dropMsg into dml channel success", zap.Int64("colID", coll.CollectionID),
+		zap.Strings("channels", coll.PhysicalChannelNames), zap.Uint64("ts", ts))
 	return ts, nil
 }
 
