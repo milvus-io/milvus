@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 )
@@ -29,6 +30,8 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		handlerClient:                  handlerClient,
 		producerMutex:                  sync.Mutex{},
 		producers:                      make(map[string]*producer.ResumableProducer),
+		// TODO: make the pool size configurable.
+		appendExecutionPool: conc.NewPool[struct{}](10),
 	}
 }
 
@@ -40,8 +43,9 @@ type walAccesserImpl struct {
 	streamingCoordAssignmentClient client.Client
 	handlerClient                  handler.HandlerClient
 
-	producerMutex sync.Mutex
-	producers     map[string]*producer.ResumableProducer
+	producerMutex       sync.Mutex
+	producers           map[string]*producer.ResumableProducer
+	appendExecutionPool *conc.Pool[struct{}]
 }
 
 // Append writes a record to the log.

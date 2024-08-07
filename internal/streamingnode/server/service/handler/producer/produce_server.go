@@ -9,15 +9,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -33,7 +34,7 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create producer request is required")
 	}
-	l, err := walManager.GetAvailableWAL(typeconverter.NewPChannelInfoFromProto(createReq.GetPchannel()))
+	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
@@ -125,9 +126,10 @@ func (p *ProduceServer) sendLoop() (err error) {
 func (p *ProduceServer) getWaitAppendChan() <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
+		p.appendWG.Wait()
 		close(ch)
 	}()
-	return p.wal.Available()
+	return ch
 }
 
 // recvLoop receives the message from client.
@@ -222,7 +224,7 @@ func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err
 	} else {
 		resp.Response = &streamingpb.ProduceMessageResponse_Result{
 			Result: &streamingpb.ProduceMessageResponseResult{
-				Id: &streamingpb.MessageID{
+				Id: &messagespb.MessageID{
 					Id: id.Marshal(),
 				},
 			},

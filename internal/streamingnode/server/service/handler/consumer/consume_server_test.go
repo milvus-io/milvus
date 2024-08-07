@@ -11,16 +11,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/internal/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_walmanager"
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -48,7 +49,7 @@ func TestNewMessageFilter(t *testing.T) {
 			},
 		},
 	}
-	filterFunc, err := newMessageFilter(filters)
+	filterFunc, err := options.GetFilterFunc(filters)
 	assert.NoError(t, err)
 
 	msg := mock_message.NewMockImmutableMessage(t)
@@ -82,7 +83,7 @@ func TestNewMessageFilter(t *testing.T) {
 			},
 		},
 	}
-	filterFunc, err = newMessageFilter(filters)
+	filterFunc, err = options.GetFilterFunc(filters)
 	assert.NoError(t, err)
 
 	msg = mock_message.NewMockImmutableMessage(t)

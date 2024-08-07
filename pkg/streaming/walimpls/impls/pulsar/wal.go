@@ -6,8 +6,8 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
 )
@@ -45,16 +45,24 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		ReceiverQueueSize: opt.ReadAheadBufferSize,
 	}
 
-	switch opt.DeliverPolicy.Policy() {
-	case options.DeliverPolicyTypeAll:
+	switch t := opt.DeliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_All:
 		readerOpt.StartMessageID = pulsar.EarliestMessageID()
-	case options.DeliverPolicyTypeLatest:
+	case *streamingpb.DeliverPolicy_Latest:
 		readerOpt.StartMessageID = pulsar.LatestMessageID()
-	case options.DeliverPolicyTypeStartFrom:
-		readerOpt.StartMessageID = opt.DeliverPolicy.MessageID().(pulsarID).MessageID
+	case *streamingpb.DeliverPolicy_StartFrom:
+		id, err := unmarshalMessageID(t.StartFrom.GetId())
+		if err != nil {
+			return nil, err
+		}
+		readerOpt.StartMessageID = id
 		readerOpt.StartMessageIDInclusive = true
-	case options.DeliverPolicyTypeStartAfter:
-		readerOpt.StartMessageID = opt.DeliverPolicy.MessageID().(pulsarID).MessageID
+	case *streamingpb.DeliverPolicy_StartAfter:
+		id, err := unmarshalMessageID(t.StartAfter.GetId())
+		if err != nil {
+			return nil, err
+		}
+		readerOpt.StartMessageID = id
 		readerOpt.StartMessageIDInclusive = false
 	}
 	reader, err := w.c.CreateReader(readerOpt)

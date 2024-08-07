@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 // NewStreamingServiceUnaryServerInterceptor returns a new unary server interceptor for error handling, metric...

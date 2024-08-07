@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -40,6 +41,22 @@ type VersionedStreamingNodeAssignments struct {
 type StreamingNodeAssignment struct {
 	NodeInfo StreamingNodeInfo
 	Channels map[string]PChannelInfo
+}
+
+// NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.
+func NewStreamingNodeInfoFromProto(proto *streamingpb.StreamingNodeInfo) StreamingNodeInfo {
+	return StreamingNodeInfo{
+		ServerID: proto.ServerId,
+		Address:  proto.Address,
+	}
+}
+
+// NewProtoFromStreamingNodeInfo creates a proto from StreamingNodeInfo.
+func NewProtoFromStreamingNodeInfo(info StreamingNodeInfo) *streamingpb.StreamingNodeInfo {
+	return &streamingpb.StreamingNodeInfo{
+		ServerId: info.ServerID,
+		Address:  info.Address,
+	}
 }
 
 // StreamingNodeInfo is the relation between server and channels.

@@ -7,10 +7,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
@@ -78,7 +77,7 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 		}
 		switch req := req.Command.(type) {
 		case *streamingpb.AssignmentDiscoverRequest_ReportError:
-			channel := typeconverter.NewPChannelInfoFromProto(req.ReportError.GetPchannel())
+			channel := types.NewPChannelInfoFromProto(req.ReportError.GetPchannel())
 			// mark the channel as unavailable and trigger a recover right away.
 			s.balancer.MarkAsUnavailable(s.ctx, []types.PChannelInfo{channel})
 		case *streamingpb.AssignmentDiscoverRequest_Close:

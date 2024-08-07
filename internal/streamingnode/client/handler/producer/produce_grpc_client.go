@@ -1,7 +1,8 @@
 package producer
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
@@ -16,7 +17,7 @@ func (p *produceGrpcClient) SendProduceMessage(requestID int64, msg message.Muta
 		Request: &streamingpb.ProduceRequest_Produce{
 			Produce: &streamingpb.ProduceMessageRequest{
 				RequestId: requestID,
-				Message: &streamingpb.Message{
+				Message: &messagespb.Message{
 					Payload:    msg.Payload(),
 					Properties: msg.Properties().ToRawMap(),
 				},
