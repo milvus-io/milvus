@@ -85,7 +85,7 @@ func NewSyncTask(ctx context.Context,
 		WithSegmentID(segmentID).
 		WithTimeRange(ts, ts).
 		WithBatchSize(int64(insertData.GetRowNum())).
-		WithFlush()
+		WithImport()
 
 	return serializer.EncodeBuffer(ctx, syncPack)
 }

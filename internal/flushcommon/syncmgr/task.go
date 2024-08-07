@@ -63,8 +63,9 @@ type SyncTask struct {
 	tsFrom typeutil.Timestamp
 	tsTo   typeutil.Timestamp
 
-	isFlush bool
-	isDrop  bool
+	isFlush  bool
+	isDrop   bool
+	isImport bool
 
 	metacache  metacache.MetaCache
 	metaWriter MetaWriter
@@ -172,7 +173,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchSize)}
-	if t.isFlush {
+	if t.isFlush || t.isImport {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
