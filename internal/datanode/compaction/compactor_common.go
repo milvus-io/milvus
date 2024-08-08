@@ -166,29 +166,34 @@ func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *
 	return
 }
 
-func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter, finalRowCount int64) (*datapb.FieldBinlog, error) {
+func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) (*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
-	sblob, err := writer.Finish(finalRowCount)
+	sblob, err := writer.Finish(writer.GetRowNum())
 	if err != nil {
 		return nil, err
 	}
 
+	return uploadStatsBlobs(ctx, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), writer.GetPkID(), writer.GetRowNum(), io, allocator, sblob)
+}
+
+func uploadStatsBlobs(ctx context.Context, collectionID, partitionID, segmentID, pkID, numRows int64,
+	io io.BinlogIO, allocator allocator.Interface, blob *storage.Blob) (*datapb.FieldBinlog, error) {
 	logID, err := allocator.AllocOne()
 	if err != nil {
 		return nil, err
 	}
 
-	key, _ := binlog.BuildLogPath(storage.StatsBinlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), writer.GetPkID(), logID)
-	kvs := map[string][]byte{key: sblob.GetValue()}
+	key, _ := binlog.BuildLogPath(storage.StatsBinlog, collectionID, partitionID, segmentID, pkID, logID)
+	kvs := map[string][]byte{key: blob.GetValue()}
 	statFieldLog := &datapb.FieldBinlog{
-		FieldID: writer.GetPkID(),
+		FieldID: pkID,
 		Binlogs: []*datapb.Binlog{
 			{
-				LogSize:    int64(len(sblob.GetValue())),
-				MemorySize: int64(len(sblob.GetValue())),
+				LogSize:    int64(len(blob.GetValue())),
+				MemorySize: int64(len(blob.GetValue())),
 				LogPath:    key,
-				EntriesNum: finalRowCount,
+				EntriesNum: numRows,
 			},
 		},
 	}
