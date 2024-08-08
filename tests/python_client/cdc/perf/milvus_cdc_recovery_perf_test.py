@@ -47,18 +47,18 @@ def create_interactive_plot(data, count_data):
                   row=2, col=1)
 
     # Plot 3: Latency
-    fig.add_trace(go.Scatter(x=data['datetime'], y=data['avg_latency'],
-                             mode='lines', name='Average Latency'),
-                  row=3, col=1)
+    # fig.add_trace(go.Scatter(x=data['datetime'], y=data['avg_latency'],
+    #                          mode='lines', name='Average Latency'),
+    #               row=3, col=1)
     fig.add_trace(go.Scatter(x=data['datetime'], y=data['real_time_latency'],
                              mode='lines', name='Real-time Latency'),
                   row=3, col=1)
-
-    # Calculate and plot p99 latency
-    p99_latency = [np.percentile(data['avg_latency'][:i + 1], 99) for i in range(len(data['avg_latency']))]
-    fig.add_trace(go.Scatter(x=data['datetime'], y=p99_latency,
-                             mode='lines', name='P99 Latency'),
-                  row=3, col=1)
+    #
+    # # Calculate and plot p99 latency
+    # p99_latency = [np.percentile(data['avg_latency'][:i + 1], 99) for i in range(len(data['avg_latency']))]
+    # fig.add_trace(go.Scatter(x=data['datetime'], y=p99_latency,
+    #                          mode='lines', name='P99 Latency'),
+    #               row=3, col=1)
 
     # Update layout
     fig.update_layout(height=1200, width=1000, title_text="Milvus CDC Performance Metrics")
@@ -435,10 +435,11 @@ if __name__ == "__main__":
     parser.add_argument('--target_uri', type=str, default='http://10.104.34.103:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
     parser.add_argument('--cdc_host', type=str, default='10.104.4.90', help='cdc host')
+    parser.add_argument('--test_duration', type=int, default=600, help='cdc test duration in seconds')
 
     args = parser.parse_args()
 
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
     cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
-    cdc_test.run_all_tests(duration=600, batch_size=1000, max_concurrency=10)
+    cdc_test.run_all_tests(duration=args.test_duration, batch_size=1000, max_concurrency=10)
