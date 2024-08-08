@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -172,8 +174,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	var segmentID int64 = 1001
 	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
 	s.Require().NoError(err)
-
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
@@ -189,24 +190,153 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
-			SegmentID:    100,
+			SegmentID:    segmentID,
 			FieldBinlogs: lo.Values(fBinlogs),
 		},
 	}
 
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
-	s.task.plan.PreferSegmentRows = 100
-	s.task.plan.MaxSegmentRows = 200
+	s.task.plan.PreferSegmentRows = 2048
+	s.task.plan.MaxSegmentRows = 2048
 	s.task.plan.PreAllocatedSegments = &datapb.IDRange{
 		Begin: time.Now().UnixMilli(),
 		End:   time.Now().UnixMilli() + 1000,
 	}
 
+	// 8+8+8+4+7+4*4=51
+	// 51*1024 = 52224
+	// writer will automatically flush after 1024 rows.
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
-	s.Equal(10, len(s.task.clusterBuffers))
-	s.Equal(10, len(compactionResult.GetSegments()))
+	s.Equal(5, len(s.task.clusterBuffers))
+	s.Equal(5, len(compactionResult.GetSegments()))
+	totalBinlogNum := 0
+	totalRowNum := int64(0)
+	for _, fb := range compactionResult.GetSegments()[0].GetInsertLogs() {
+		for _, b := range fb.GetBinlogs() {
+			totalBinlogNum++
+			if fb.GetFieldID() == 100 {
+				totalRowNum += b.GetEntriesNum()
+			}
+		}
+	}
+	statsBinlogNum := 0
+	statsRowNum := int64(0)
+	for _, sb := range compactionResult.GetSegments()[0].GetField2StatslogPaths() {
+		for _, b := range sb.GetBinlogs() {
+			statsBinlogNum++
+			statsRowNum += b.GetEntriesNum()
+		}
+	}
+	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(1, statsBinlogNum)
+	s.Equal(totalRowNum, statsRowNum)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestCheckBuffersAfterCompaction() {
+	s.Run("no leak", func() {
+		task := &clusteringCompactionTask{clusterBuffers: []*ClusterBuffer{{}}}
+
+		s.NoError(task.checkBuffersAfterCompaction())
+	})
+
+	s.Run("leak binlog", func() {
+		task := &clusteringCompactionTask{
+			clusterBuffers: []*ClusterBuffer{
+				{
+					flushedBinlogs: map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog{
+						1: {
+							101: {
+								FieldID: 101,
+								Binlogs: []*datapb.Binlog{{LogID: 1000}},
+							},
+						},
+					},
+				},
+			},
+		}
+		s.Error(task.checkBuffersAfterCompaction())
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+	}
+	s.Run("num rows zero", func() {
+		task := &clusteringCompactionTask{
+			primaryKeyField: pkField,
+		}
+		binlogs, err := task.generatePkStats(context.Background(), 1, 0, nil)
+		s.Error(err)
+		s.Nil(binlogs)
+	})
+
+	s.Run("download binlogs failed", func() {
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		task := &clusteringCompactionTask{
+			binlogIO:        s.mockBinlogIO,
+			primaryKeyField: pkField,
+		}
+		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
+		s.Error(err)
+		s.Nil(binlogs)
+	})
+
+	s.Run("NewInsertBinlogIterator failed", func() {
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{[]byte("mock")}, nil)
+		task := &clusteringCompactionTask{
+			binlogIO:        s.mockBinlogIO,
+			primaryKeyField: pkField,
+		}
+		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
+		s.Error(err)
+		s.Nil(binlogs)
+	})
+
+	s.Run("upload failed", func() {
+		schema := genCollectionSchema()
+		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
+		s.Require().NoError(err)
+		for i := 0; i < 2000; i++ {
+			v := storage.Value{
+				PK:        storage.NewInt64PrimaryKey(int64(i)),
+				Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+				Value:     genRow(int64(i)),
+			}
+			err = segWriter.Write(&v)
+			s.Require().NoError(err)
+		}
+		segWriter.writer.Flush()
+
+		kvs, _, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
+		s.NoError(err)
+		mockBinlogIO := io.NewMockBinlogIO(s.T())
+		mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		task := &clusteringCompactionTask{
+			collectionID: CollectionID,
+			partitionID:  PartitionID,
+			plan: &datapb.CompactionPlan{
+				Schema: genCollectionSchema(),
+			},
+			binlogIO:        mockBinlogIO,
+			primaryKeyField: pkField,
+			logIDAlloc:      s.mockAlloc,
+		}
+
+		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
+		s.Error(err)
+		s.Nil(binlogs)
+	})
 }
 
 func genRow(magic int64) map[int64]interface{} {
