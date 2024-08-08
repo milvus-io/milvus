@@ -8,9 +8,69 @@ import requests
 from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
 from loguru import logger
 import matplotlib.pyplot as plt
+import plotly.io as pio
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
 import sys
 logger.remove()
 logger.add(sink=sys.stdout, level="DEBUG")
+
+
+def create_interactive_plot(data, count_data):
+    # Convert timestamps to relative time
+    start_time = min(data['timestamp'][0], count_data['timestamp'][0])
+    data['relative_time'] = data['timestamp'] - start_time
+    count_data['relative_time'] = count_data['timestamp'] - start_time
+
+    # Create subplots
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=("Source and Target Collection Count over Time",
+                                        "Insert and Sync Throughput over Time",
+                                        "Latency over Time"))
+
+    # Plot 1: Source and Target Collection Count
+    fig.add_trace(go.Scatter(x=count_data['relative_time'], y=count_data['source_count'],
+                             mode='lines', name='Source Count'),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=count_data['relative_time'], y=count_data['target_count'],
+                             mode='lines', name='Target Count'),
+                  row=1, col=1)
+
+    # Plot 2: Insert and Sync Throughput
+    fig.add_trace(go.Scatter(x=data['relative_time'], y=data['insert_throughput'],
+                             mode='lines', name='Insert Throughput'),
+                  row=2, col=1)
+    fig.add_trace(go.Scatter(x=data['relative_time'], y=data['sync_throughput'],
+                             mode='lines', name='Sync Throughput'),
+                  row=2, col=1)
+
+    # Plot 3: Latency
+    fig.add_trace(go.Scatter(x=data['relative_time'], y=data['avg_latency'],
+                             mode='lines', name='Average Latency'),
+                  row=3, col=1)
+
+    # Calculate and plot real-time latency
+    fig.add_trace(go.Scatter(x=data['relative_time'], y=data['avg_latency'],
+                             mode='lines', name='Real-time Latency'),
+                  row=3, col=1)
+
+    # Calculate and plot p99 latency
+    p99_latency = [np.percentile(data['avg_latency'][:i + 1], 99) for i in range(len(data['avg_latency']))]
+    fig.add_trace(go.Scatter(x=data['relative_time'], y=p99_latency,
+                             mode='lines', name='P99 Latency'),
+                  row=3, col=1)
+
+    # Update layout
+    fig.update_layout(height=900, width=1000, title_text="Milvus CDC Performance Metrics")
+    fig.update_xaxes(title_text="Time (seconds)", row=3, col=1)
+    fig.update_yaxes(title_text="Entity Count", row=1, col=1)
+    fig.update_yaxes(title_text="Throughput (entities/second)", row=2, col=1)
+    fig.update_yaxes(title_text="Latency (seconds)", row=3, col=1)
+
+    return fig
+
+
 class MilvusCDCPerformance:
     def __init__(self, source_alias, target_alias, cdc_host):
         self.source_alias = source_alias
@@ -42,7 +102,8 @@ class MilvusCDCPerformance:
             'timestamp': [],
             'insert_throughput': [],
             'sync_throughput': [],
-            'avg_latency': []
+            'avg_latency': [],
+            'real_time_latency': []  # Add this line
         }
         self.count_series_data = {
             'timestamp': [],
@@ -84,39 +145,20 @@ class MilvusCDCPerformance:
 
     def continuous_monitoring(self, interval=5):
         while not self.stop_query:
+            real_time_latency = self.latencies[-1] if self.latencies else 0
+            self.time_series_data['real_time_latency'].append(real_time_latency)
             self.report_realtime_metrics()
+
             time.sleep(interval)
 
     def plot_time_series_data(self):
-        fig, (ax0, ax1, ax2) = plt.subplots(3, 1, figsize=(12, 10))
-        # Plot count
-        ax0.plot(self.count_series_data['timestamp'], self.count_series_data['source_count'], label='Source Count')
-        ax0.plot(self.count_series_data['timestamp'], self.count_series_data['target_count'], label='Target Count')
-        ax0.set_xlabel('Time (seconds)')
-        ax0.set_ylabel('Entity Count')
-        ax0.set_title('Source and Target Collection Count over Time')
-        ax0.legend()
-        ax0.grid(True)
-        # Plot throughput
-        ax1.plot(self.time_series_data['timestamp'], self.time_series_data['insert_throughput'],
-                 label='Insert Throughput')
-        ax1.plot(self.time_series_data['timestamp'], self.time_series_data['sync_throughput'], label='Sync Throughput')
-        ax1.set_xlabel('Time (seconds)')
-        ax1.set_ylabel('Throughput (entities/second)')
-        ax1.set_title('Insert and Sync Throughput over Time')
-        ax1.legend()
-        ax1.grid(True)
+        df = pd.DataFrame(self.time_series_data)
+        count_df = pd.DataFrame(self.count_series_data)
+        fig = create_interactive_plot(df, count_df)
+        pio.write_html(fig, file='milvus_cdc_performance.html', auto_open=True)
+        logger.info("Interactive performance plot saved as 'milvus_cdc_performance.html'")
 
-        # Plot latency
-        ax2.plot(self.time_series_data['timestamp'], self.time_series_data['avg_latency'])
-        ax2.set_xlabel('Time (seconds)')
-        ax2.set_ylabel('Average Latency (seconds)')
-        ax2.set_title('Average Latency over Time')
-        ax2.grid(True)
 
-        plt.tight_layout()
-        plt.savefig('milvus_cdc_performance.png')
-        logger.info("Performance plot saved as 'milvus_cdc_performance.png'")
     def list_cdc_tasks(self):
         url = f"http://{self.cdc_host}:8444/cdc"
         payload = json.dumps({"request_type": "list"})
