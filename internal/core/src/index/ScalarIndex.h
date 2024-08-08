@@ -94,6 +94,11 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
+    virtual bool
+    SupportPatternMatch() const {
+        return false;
+    }
+
     virtual int64_t
     Size() = 0;
 
