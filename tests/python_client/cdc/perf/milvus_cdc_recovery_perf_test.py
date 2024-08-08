@@ -245,7 +245,7 @@ class MilvusCDCPerformance:
 
     def continuous_count(self):
 
-        def count_target(self):
+        def count_target():
             try:
                 t0 = time.time()
                 results = self.target_collection.query(
@@ -259,7 +259,7 @@ class MilvusCDCPerformance:
                 logger.error(f"Target count failed: {e}")
                 self.target_count = self.last_target_count
 
-        def count_source(self):
+        def count_source():
             try:
                 t0 = time.time()
                 results = self.source_collection.query(
