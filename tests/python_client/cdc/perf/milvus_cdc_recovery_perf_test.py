@@ -12,6 +12,7 @@ import plotly.io as pio
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import pandas as pd
 import sys
 logger.remove()
 logger.add(sink=sys.stdout, level="DEBUG")
@@ -437,4 +438,4 @@ if __name__ == "__main__":
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
     cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
-    cdc_test.run_all_tests(duration=600, batch_size=1000, max_concurrency=10)
+    cdc_test.run_all_tests(duration=100, batch_size=1000, max_concurrency=10)
