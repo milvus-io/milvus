@@ -146,6 +146,13 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 			continue
 		}
 
+		txnSem := segment.TxnSem()
+		if txnSem > 0 {
+			undone = append(undone, segment)
+			q.logger.Info("segment has been sealed, but there are flying txns, delay it", zap.Int64("segmentID", segment.GetSegmentID()), zap.Int32("txnSem", txnSem))
+			continue
+		}
+
 		// collect all sealed segments and no flying ack segment.
 		if _, ok := sealedSegments[segment.GetCollectionID()]; !ok {
 			sealedSegments[segment.GetCollectionID()] = make(map[string][]*segmentAllocManager)

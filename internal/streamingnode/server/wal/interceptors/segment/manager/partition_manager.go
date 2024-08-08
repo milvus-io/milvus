@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -56,11 +55,11 @@ func (m *partitionSegmentManager) CollectionID() int64 {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-func (m *partitionSegmentManager) AssignSegment(ctx context.Context, insert stats.InsertMetrics) (*AssignSegmentResult, error) {
+func (m *partitionSegmentManager) AssignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.assignSegment(ctx, insert)
+	return m.assignSegment(ctx, req)
 }
 
 // CollectShouldBeSealed try to collect all segments that should be sealed.
@@ -215,10 +214,10 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 }
 
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
-func (m *partitionSegmentManager) assignSegment(ctx context.Context, insert stats.InsertMetrics) (*AssignSegmentResult, error) {
+func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// Alloc segment for insert at previous segments.
 	for _, segment := range m.segments {
-		inserted, ack := segment.AllocRows(ctx, insert)
+		inserted, ack := segment.AllocRows(ctx, req)
 		if inserted {
 			return &AssignSegmentResult{SegmentID: segment.GetSegmentID(), Acknowledge: ack}, nil
 		}
@@ -229,8 +228,8 @@ func (m *partitionSegmentManager) assignSegment(ctx context.Context, insert stat
 	if err != nil {
 		return nil, err
 	}
-	if inserted, ack := newGrowingSegment.AllocRows(ctx, insert); inserted {
+	if inserted, ack := newGrowingSegment.AllocRows(ctx, req); inserted {
 		return &AssignSegmentResult{SegmentID: newGrowingSegment.GetSegmentID(), Acknowledge: ack}, nil
 	}
-	return nil, errors.Errorf("too large insert message, cannot hold in empty growing segment, stats: %+v", insert)
+	return nil, errors.Errorf("too large insert message, cannot hold in empty growing segment, stats: %+v", req.InsertMetrics)
 }

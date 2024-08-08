@@ -63,7 +63,7 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, beginTSO uint64, ttl time.
 		},
 		inFlightCount: 0,
 		state:         message.TxnStateBegin,
-		commitedWait:  nil,
+		doneWait:      nil,
 		rollback:      false,
 	}
 	session.expiredTimeTick = session.txnContext.ExpiredTimeTick()
@@ -80,6 +80,9 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 
 	for m.sessionHeap.Len() > 0 && m.sessionHeap.Peek().IsExpiredOrDone(ts) {
 		session := m.sessionHeap.Pop()
+		// Cleanup the session from the manager,
+		// the expired session's cleanup will be called by the manager.
+		session.Cleanup()
 		delete(m.sessions, session.TxnContext().TxnID)
 	}
 

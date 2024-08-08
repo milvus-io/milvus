@@ -201,8 +201,12 @@ enum TxnState {
     TxnBegin = 1;
     // the transaction is in flight.
     TxnInFlight = 2;
+    // the transaction is on commit.
+    TxnOnCommit = 3;
     // the transaction is committed.
-    TxnCommitted = 3;
+    TxnCommitted = 4;
+    // the transaction is on rollback.
+    TxnOnRollback = 5;
     // the transaction is rollbacked.
-    TxnRollbacked = 4;
+    TxnRollbacked = 6;
 }

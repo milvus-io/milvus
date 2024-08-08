@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -47,6 +48,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 100,
 		},
+		TimeTick: 0,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -59,6 +61,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1024 * 1024,
 			BinarySize: 1024 * 1024, // 1MB setting at paramtable.
 		},
+		TimeTick: 0,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result2)
@@ -76,6 +79,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1,
 			BinarySize: 1,
 		},
+		TimeTick: 0,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result3)
@@ -87,6 +91,36 @@ func TestSegmentAllocManager(t *testing.T) {
 	result3.Ack()
 	m.TryToSealWaitedSegment(ctx)
 	assert.True(t, m.IsNoWaitSeal()) // result2 is acked, so new seal segment will be sealed right away.
+
+	// interactive with txn
+	txnManager := txn.NewTxnManager()
+	txn, err := txnManager.BeginNewTxn(context.Background(), 0, time.Second)
+	assert.NoError(t, err)
+	txn.BeginDone()
+
+	for i := 0; i < 3; i++ {
+		result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
+			CollectionID: 1,
+			PartitionID:  1,
+			InsertMetrics: stats.InsertMetrics{
+				Rows:       1024 * 1024,
+				BinarySize: 1024 * 1024, // 1MB setting at paramtable.
+			},
+			TxnSession: txn,
+			TimeTick:   0,
+		})
+		assert.NoError(t, err)
+		result.Ack()
+	}
+	// because of there's a txn session uncommited, so the segment will not be sealed.
+	m.TryToSealSegments(ctx)
+	assert.False(t, m.IsNoWaitSeal())
+
+	err = txn.RequestCommitAndWait(context.Background(), 0)
+	assert.NoError(t, err)
+	txn.CommitDone()
+	m.TryToSealSegments(ctx)
+	assert.True(t, m.IsNoWaitSeal())
 
 	// Try to seal a partition.
 	m.TryToSealSegments(ctx, stats.SegmentBelongs{

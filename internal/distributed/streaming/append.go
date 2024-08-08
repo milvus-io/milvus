@@ -42,3 +42,12 @@ func assertNoSystemMessage(msgs ...message.MutableMessage) {
 		}
 	}
 }
+
+// We only support delete and insert message for txn now.
+func assertIsDmlMessage(msgs ...message.MutableMessage) {
+	for _, msg := range msgs {
+		if msg.MessageType() == message.MessageTypeInsert && msg.MessageType() != message.MessageTypeDelete {
+			panic("only insert and delete message is allowed in txn")
+		}
+	}
+}

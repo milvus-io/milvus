@@ -15,7 +15,9 @@ type (
 const (
 	TxnStateBegin      TxnState = messagespb.TxnState_TxnBegin
 	TxnStateInFlight   TxnState = messagespb.TxnState_TxnInFlight
+	TxnStateOnCommit   TxnState = messagespb.TxnState_TxnOnCommit
 	TxnStateCommited   TxnState = messagespb.TxnState_TxnCommitted
+	TxnStateOnRollback TxnState = messagespb.TxnState_TxnOnRollback
 	TxnStateRollbacked TxnState = messagespb.TxnState_TxnRollbacked
 
 	NonTxnID = TxnID(-1)

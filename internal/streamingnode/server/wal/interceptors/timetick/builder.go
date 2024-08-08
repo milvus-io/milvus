@@ -3,7 +3,7 @@ package timetick
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 )
 
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)

@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 )
 
 func TestMain(m *testing.M) {
@@ -29,6 +30,7 @@ func TestSession(t *testing.T) {
 	assert.NotNil(t, session)
 	assert.NoError(t, err)
 
+	// Test Begin
 	assert.Equal(t, message.TxnStateBegin, session.state)
 	assert.False(t, session.IsExpiredOrDone(0))
 	expiredTs := tsoutil.AddPhysicalDurationOnTs(0, 10*time.Millisecond)
@@ -42,47 +44,54 @@ func TestSession(t *testing.T) {
 	assert.Equal(t, message.TxnStateInFlight, session.state)
 	assert.False(t, session.IsExpiredOrDone(0))
 
-	// Add a expired message
+	// Test add new message
 	err = session.AddNewMessage(ctx, expiredTs)
 	assert.Error(t, err)
 	serr := status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
-	// Add a not expired message
+	err = session.AddNewMessage(ctx, 0)
+	assert.NoError(t, err)
+	session.AddNewMessageDone()
+
+	// Test Commit.
+	err = session.RequestCommitAndWait(ctx, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, message.TxnStateOnCommit, session.state)
+	session.CommitDone()
+	assert.Equal(t, message.TxnStateCommited, session.state)
+
+	// Test Commit timeout.
+	session, err = m.BeginNewTxn(ctx, 0, 10*time.Millisecond)
+	session.BeginDone()
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
-	//  should be timeout, because there's a message not done.
 	err = session.RequestCommitAndWait(ctx, 0)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
-	// should expired.
+	// Test Commit Expired
 	err = session.RequestCommitAndWait(ctx, expiredTs)
 	assert.Error(t, err)
 	serr = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
-	session.AddNewMessageDone()
-	// session is on commited, so new message will be rejected.
-	err = session.AddNewMessage(ctx, 0)
-	assert.Error(t, err)
-	serr = status.AsStreamingError(err)
-	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, serr.Code)
-
-	// test rollbacked
+	// Test Rollback
 	session, _ = m.BeginNewTxn(context.Background(), 0, 10*time.Millisecond)
 	session.BeginDone()
-	err = session.RequestRollback(expiredTs)
+	// Rollback expired.
+	err = session.RequestRollback(context.Background(), expiredTs)
 	assert.Error(t, err)
 	serr = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
-	err = session.RequestRollback(0)
+	// Rollback success
+	err = session.RequestRollback(context.Background(), 0)
 	assert.NoError(t, err)
-	assert.Equal(t, message.TxnStateRollbacked, session.state)
+	assert.Equal(t, message.TxnStateOnRollback, session.state)
 }
 
 func TestManager(t *testing.T) {
@@ -92,6 +101,7 @@ func TestManager(t *testing.T) {
 	wg := &sync.WaitGroup{}
 
 	wg.Add(20)
+	count := atomic.NewInt32(20)
 	for i := 0; i < 20; i++ {
 		go func(i int) {
 			defer wg.Done()
@@ -103,12 +113,18 @@ func TestManager(t *testing.T) {
 			session, err = m.GetSessionOfTxn(session.TxnContext().TxnID)
 			assert.NoError(t, err)
 			assert.NotNil(t, session)
+
+			session.RegisterCleanup(func() {
+				count.Dec()
+			}, 0)
 			if i%3 == 0 {
 				err := session.RequestCommitAndWait(context.Background(), 0)
+				session.CommitDone()
 				assert.NoError(t, err)
 			} else if i%3 == 1 {
-				err := session.RequestRollback(0)
+				err := session.RequestRollback(context.Background(), 0)
 				assert.NoError(t, err)
+				session.RollbackDone()
 			}
 		}(i)
 	}
@@ -140,4 +156,14 @@ func TestManager(t *testing.T) {
 	case <-time.After(10 * time.Millisecond):
 		t.Errorf("manager should be closed")
 	}
+
+	assert.Equal(t, int32(0), count.Load())
+}
+
+func TestWithCo(t *testing.T) {
+	session := &TxnSession{}
+	ctx := WithTxnSession(context.Background(), session)
+
+	session = GetTxnSessionFromContext(ctx)
+	assert.NotNil(t, session)
 }

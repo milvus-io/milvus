@@ -99,7 +99,7 @@ func (m *PChannelSegmentAllocManager) AssignSegment(ctx context.Context, req *As
 	if err != nil {
 		return nil, err
 	}
-	return manager.AssignSegment(ctx, req.InsertMetrics)
+	return manager.AssignSegment(ctx, req)
 }
 
 // RemoveCollection removes the specified collection.

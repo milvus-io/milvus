@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
@@ -59,23 +59,36 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
-		txnSession, msg, err = impl.handleBegin(ctx, msg)
+		if txnSession, msg, err = impl.handleBegin(ctx, msg); err != nil {
+			return nil, err
+		}
 	case message.MessageTypeCommitTxn:
-		txnSession, err = impl.handleCommit(ctx, msg)
+		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer txnSession.CommitDone()
 	case message.MessageTypeRollbackTxn:
-		txnSession, err = impl.handleRollback(msg)
+		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer txnSession.RollbackDone()
 	case message.MessageTypeTimeTick:
 		// cleanup the expired transaction sessions and the already done transaction.
 		impl.txnManager.CleanupTxnUntil(msg.TimeTick())
 	default:
 		// handle the transaction body message.
 		if msg.TxnContext() != nil {
-			txnSession, err = impl.handleTxnMessage(ctx, msg)
-			if err != nil {
+			if txnSession, err = impl.handleTxnMessage(ctx, msg); err != nil {
 				return nil, err
 			}
 			defer txnSession.AddNewMessageDone()
 		}
+	}
+
+	// Attach the txn session to the context.
+	// So the all interceptors of append operation can see it.
+	if txnSession != nil {
+		ctx = txn.WithTxnSession(ctx, txnSession)
 	}
 	msgID, err = impl.appendMsg(ctx, msg, append)
 	return
@@ -140,7 +153,7 @@ func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg mes
 }
 
 // handleRollback handle the rollback transaction message.
-func (impl *timeTickAppendInterceptor) handleRollback(msg message.MutableMessage) (session *txn.TxnSession, err error) {
+func (impl *timeTickAppendInterceptor) handleRollback(ctx context.Context, msg message.MutableMessage) (session *txn.TxnSession, err error) {
 	rollbackTxnMsg, err := message.AsMutableRollbackTxnMessageV2(msg)
 	if err != nil {
 		return nil, err
@@ -151,7 +164,7 @@ func (impl *timeTickAppendInterceptor) handleRollback(msg message.MutableMessage
 	}
 
 	// Start commit the message.
-	if err = session.RequestRollback(msg.TimeTick()); err != nil {
+	if err = session.RequestRollback(ctx, msg.TimeTick()); err != nil {
 		return nil, err
 	}
 	return session, nil

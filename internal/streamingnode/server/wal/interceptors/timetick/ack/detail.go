@@ -3,7 +3,7 @@ package ack
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 

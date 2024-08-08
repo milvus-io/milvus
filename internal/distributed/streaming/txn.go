@@ -24,6 +24,7 @@ type txnImpl struct {
 // Append writes records to the log.
 func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage) error {
 	assertNoSystemMessage(msg)
+	assertIsDmlMessage(msg)
 
 	t.mu.Lock()
 	if t.state != message.TxnStateInFlight {
