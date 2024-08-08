@@ -114,6 +114,11 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
+    virtual bool
+    SupportPatternMatch() const {
+        return false;
+    }
+
     virtual const TargetBitmap
     PatternMatch(const std::string& pattern) {
         PanicInfo(Unsupported, "pattern match is not supported");

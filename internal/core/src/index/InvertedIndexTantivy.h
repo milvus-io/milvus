@@ -155,8 +155,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
+    bool
     SupportRegexQuery() const override {
-        return true;
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap
