@@ -396,6 +396,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	segments := m.segments.GetSegments()
 	var total int64
+	metrics.DataCoordStoredBinlogSize.Reset()
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {

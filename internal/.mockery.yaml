@@ -5,6 +5,9 @@ dir: 'internal/mocks/{{trimPrefix .PackagePath "github.com/milvus-io/milvus/inte
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
 packages:
+  github.com/milvus-io/milvus/internal/distributed/streaming:
+    interfaces:
+      WALAccesser:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:

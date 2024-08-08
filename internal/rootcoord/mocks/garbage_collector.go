@@ -52,8 +52,8 @@ type GarbageCollector_GcCollectionData_Call struct {
 }
 
 // GcCollectionData is a helper method to define mock.On call
-//   - ctx context.Context
-//   - coll *model.Collection
+//  - ctx context.Context
+//  - coll *model.Collection
 func (_e *GarbageCollector_Expecter) GcCollectionData(ctx interface{}, coll interface{}) *GarbageCollector_GcCollectionData_Call {
 	return &GarbageCollector_GcCollectionData_Call{Call: _e.mock.On("GcCollectionData", ctx, coll)}
 }
@@ -75,23 +75,23 @@ func (_c *GarbageCollector_GcCollectionData_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// GcPartitionData provides a mock function with given fields: ctx, pChannels, partition
-func (_m *GarbageCollector) GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (uint64, error) {
-	ret := _m.Called(ctx, pChannels, partition)
+// GcPartitionData provides a mock function with given fields: ctx, pChannels, vchannels, partition
+func (_m *GarbageCollector) GcPartitionData(ctx context.Context, pChannels []string, vchannels []string, partition *model.Partition) (uint64, error) {
+	ret := _m.Called(ctx, pChannels, vchannels, partition)
 
 	var r0 uint64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, []string, *model.Partition) (uint64, error)); ok {
-		return rf(ctx, pChannels, partition)
+	if rf, ok := ret.Get(0).(func(context.Context, []string, []string, *model.Partition) (uint64, error)); ok {
+		return rf(ctx, pChannels, vchannels, partition)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, []string, *model.Partition) uint64); ok {
-		r0 = rf(ctx, pChannels, partition)
+	if rf, ok := ret.Get(0).(func(context.Context, []string, []string, *model.Partition) uint64); ok {
+		r0 = rf(ctx, pChannels, vchannels, partition)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, []string, *model.Partition) error); ok {
-		r1 = rf(ctx, pChannels, partition)
+	if rf, ok := ret.Get(1).(func(context.Context, []string, []string, *model.Partition) error); ok {
+		r1 = rf(ctx, pChannels, vchannels, partition)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -105,16 +105,17 @@ type GarbageCollector_GcPartitionData_Call struct {
 }
 
 // GcPartitionData is a helper method to define mock.On call
-//   - ctx context.Context
-//   - pChannels []string
-//   - partition *model.Partition
-func (_e *GarbageCollector_Expecter) GcPartitionData(ctx interface{}, pChannels interface{}, partition interface{}) *GarbageCollector_GcPartitionData_Call {
-	return &GarbageCollector_GcPartitionData_Call{Call: _e.mock.On("GcPartitionData", ctx, pChannels, partition)}
+//  - ctx context.Context
+//  - pChannels []string
+//  - vchannels []string
+//  - partition *model.Partition
+func (_e *GarbageCollector_Expecter) GcPartitionData(ctx interface{}, pChannels interface{}, vchannels interface{}, partition interface{}) *GarbageCollector_GcPartitionData_Call {
+	return &GarbageCollector_GcPartitionData_Call{Call: _e.mock.On("GcPartitionData", ctx, pChannels, vchannels, partition)}
 }
 
-func (_c *GarbageCollector_GcPartitionData_Call) Run(run func(ctx context.Context, pChannels []string, partition *model.Partition)) *GarbageCollector_GcPartitionData_Call {
+func (_c *GarbageCollector_GcPartitionData_Call) Run(run func(ctx context.Context, pChannels []string, vchannels []string, partition *model.Partition)) *GarbageCollector_GcPartitionData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]string), args[2].(*model.Partition))
+		run(args[0].(context.Context), args[1].([]string), args[2].([]string), args[3].(*model.Partition))
 	})
 	return _c
 }
@@ -124,7 +125,7 @@ func (_c *GarbageCollector_GcPartitionData_Call) Return(ddlTs uint64, err error)
 	return _c
 }
 
-func (_c *GarbageCollector_GcPartitionData_Call) RunAndReturn(run func(context.Context, []string, *model.Partition) (uint64, error)) *GarbageCollector_GcPartitionData_Call {
+func (_c *GarbageCollector_GcPartitionData_Call) RunAndReturn(run func(context.Context, []string, []string, *model.Partition) (uint64, error)) *GarbageCollector_GcPartitionData_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -140,8 +141,8 @@ type GarbageCollector_ReDropCollection_Call struct {
 }
 
 // ReDropCollection is a helper method to define mock.On call
-//   - collMeta *model.Collection
-//   - ts uint64
+//  - collMeta *model.Collection
+//  - ts uint64
 func (_e *GarbageCollector_Expecter) ReDropCollection(collMeta interface{}, ts interface{}) *GarbageCollector_ReDropCollection_Call {
 	return &GarbageCollector_ReDropCollection_Call{Call: _e.mock.On("ReDropCollection", collMeta, ts)}
 }
@@ -163,9 +164,9 @@ func (_c *GarbageCollector_ReDropCollection_Call) RunAndReturn(run func(*model.C
 	return _c
 }
 
-// ReDropPartition provides a mock function with given fields: dbID, pChannels, partition, ts
-func (_m *GarbageCollector) ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts uint64) {
-	_m.Called(dbID, pChannels, partition, ts)
+// ReDropPartition provides a mock function with given fields: dbID, pChannels, vchannels, partition, ts
+func (_m *GarbageCollector) ReDropPartition(dbID int64, pChannels []string, vchannels []string, partition *model.Partition, ts uint64) {
+	_m.Called(dbID, pChannels, vchannels, partition, ts)
 }
 
 // GarbageCollector_ReDropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReDropPartition'
@@ -174,17 +175,18 @@ type GarbageCollector_ReDropPartition_Call struct {
 }
 
 // ReDropPartition is a helper method to define mock.On call
-//   - dbID int64
-//   - pChannels []string
-//   - partition *model.Partition
-//   - ts uint64
-func (_e *GarbageCollector_Expecter) ReDropPartition(dbID interface{}, pChannels interface{}, partition interface{}, ts interface{}) *GarbageCollector_ReDropPartition_Call {
-	return &GarbageCollector_ReDropPartition_Call{Call: _e.mock.On("ReDropPartition", dbID, pChannels, partition, ts)}
+//  - dbID int64
+//  - pChannels []string
+//  - vchannels []string
+//  - partition *model.Partition
+//  - ts uint64
+func (_e *GarbageCollector_Expecter) ReDropPartition(dbID interface{}, pChannels interface{}, vchannels interface{}, partition interface{}, ts interface{}) *GarbageCollector_ReDropPartition_Call {
+	return &GarbageCollector_ReDropPartition_Call{Call: _e.mock.On("ReDropPartition", dbID, pChannels, vchannels, partition, ts)}
 }
 
-func (_c *GarbageCollector_ReDropPartition_Call) Run(run func(dbID int64, pChannels []string, partition *model.Partition, ts uint64)) *GarbageCollector_ReDropPartition_Call {
+func (_c *GarbageCollector_ReDropPartition_Call) Run(run func(dbID int64, pChannels []string, vchannels []string, partition *model.Partition, ts uint64)) *GarbageCollector_ReDropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]string), args[2].(*model.Partition), args[3].(uint64))
+		run(args[0].(int64), args[1].([]string), args[2].([]string), args[3].(*model.Partition), args[4].(uint64))
 	})
 	return _c
 }
@@ -194,7 +196,7 @@ func (_c *GarbageCollector_ReDropPartition_Call) Return() *GarbageCollector_ReDr
 	return _c
 }
 
-func (_c *GarbageCollector_ReDropPartition_Call) RunAndReturn(run func(int64, []string, *model.Partition, uint64)) *GarbageCollector_ReDropPartition_Call {
+func (_c *GarbageCollector_ReDropPartition_Call) RunAndReturn(run func(int64, []string, []string, *model.Partition, uint64)) *GarbageCollector_ReDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -210,7 +212,7 @@ type GarbageCollector_RemoveCreatingCollection_Call struct {
 }
 
 // RemoveCreatingCollection is a helper method to define mock.On call
-//   - collMeta *model.Collection
+//  - collMeta *model.Collection
 func (_e *GarbageCollector_Expecter) RemoveCreatingCollection(collMeta interface{}) *GarbageCollector_RemoveCreatingCollection_Call {
 	return &GarbageCollector_RemoveCreatingCollection_Call{Call: _e.mock.On("RemoveCreatingCollection", collMeta)}
 }
@@ -243,9 +245,9 @@ type GarbageCollector_RemoveCreatingPartition_Call struct {
 }
 
 // RemoveCreatingPartition is a helper method to define mock.On call
-//   - dbID int64
-//   - partition *model.Partition
-//   - ts uint64
+//  - dbID int64
+//  - partition *model.Partition
+//  - ts uint64
 func (_e *GarbageCollector_Expecter) RemoveCreatingPartition(dbID interface{}, partition interface{}, ts interface{}) *GarbageCollector_RemoveCreatingPartition_Call {
 	return &GarbageCollector_RemoveCreatingPartition_Call{Call: _e.mock.On("RemoveCreatingPartition", dbID, partition, ts)}
 }
