@@ -236,9 +236,11 @@ type deleteRunner struct {
 
 	idAllocator     allocator.Interface
 	tsoAllocatorIns tsoAllocator
+	limiter         types.Limiter
 
 	// delete info
 	schema           *schemaInfo
+	dbID             UniqueID
 	collectionID     UniqueID
 	partitionID      UniqueID
 	partitionKeyMode bool
@@ -434,7 +436,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		taskCh := make(chan *deleteTask, 256)
-		go dr.receiveQueryResult(ctx, client, taskCh)
+		go dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
 		var allQueryCnt int64
 		// wait all task finish
 		for task := range taskCh {
@@ -455,7 +457,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) {
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) {
 	defer func() {
 		close(taskCh)
 	}()
@@ -476,6 +478,15 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			dr.err = err
 			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
 			return
+		}
+
+		if dr.limiter != nil {
+			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			if err != nil {
+				dr.err = err
+				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
+				return
+			}
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())

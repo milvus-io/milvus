@@ -80,7 +80,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -98,7 +98,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -131,7 +131,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			queryCoord: qc,
 			dataCoord:  dataCoordMock,
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -148,7 +148,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			queryCoord: qc,
 		}
-		node.simpleLimiter = NewSimpleLimiter()
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -243,7 +243,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
@@ -335,7 +335,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
@@ -936,7 +936,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -996,7 +996,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1055,7 +1055,7 @@ func TestProxyListDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1111,7 +1111,7 @@ func TestProxyAlterDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1164,7 +1164,7 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1287,6 +1287,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
