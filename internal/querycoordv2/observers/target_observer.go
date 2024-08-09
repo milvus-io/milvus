@@ -466,14 +466,21 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	channel := ob.targetMgr.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
 
-	return &querypb.SyncAction{
+	action := &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
 		GrowingInTarget: growingSegments.Collect(),
 		SealedInTarget:  lo.Keys(sealedSegments),
 		DroppedInTarget: droppedSegments,
 		TargetVersion:   targetVersion,
 	}
+
+	if channel != nil {
+		action.Checkpoint = channel.GetSeekPosition()
+	}
+
+	return action
 }
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {

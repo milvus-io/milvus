@@ -1392,7 +1392,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				pipeline.ExcludedSegments(droppedInfos)
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		default:
 			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}
