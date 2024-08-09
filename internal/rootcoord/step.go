@@ -19,18 +19,18 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
 type stepPriority int
@@ -382,6 +382,7 @@ func (s *addPartitionMetaStep) Desc() string {
 
 type broadcastCreatePartitionMsgStep struct {
 	baseStep
+	vchannels []string
 	partition *model.Partition
 }
 
@@ -394,32 +395,31 @@ func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nested
 			commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
 			commonpbutil.WithTimeStamp(0), // ts is given by streamingnode.
 		),
-		PartitionName: partition.PartitionName,
-		CollectionID:  partition.CollectionID,
-		PartitionID:   partition.PartitionID,
+		PartitionName: s.partition.PartitionName,
+		CollectionID:  s.partition.CollectionID,
+		PartitionID:   s.partition.PartitionID,
 	}
 
-	msgs := make([]message.MutableMessage, 0, len(vchannels))
-	for _, vchannel := range vchannels {
-		msg, err := message.NewDropPartitionMessageBuilderV1().
+	msgs := make([]message.MutableMessage, 0, len(s.vchannels))
+	for _, vchannel := range s.vchannels {
+		msg, err := message.NewCreatePartitionMessageBuilderV1().
 			WithVChannel(vchannel).
-			WithHeader(&message.DropPartitionMessageHeader{
-				CollectionId: partition.CollectionID,
-				PartitionId:  partition.PartitionID,
+			WithHeader(&message.CreatePartitionMessageHeader{
+				CollectionId: s.partition.CollectionID,
+				PartitionId:  s.partition.PartitionID,
 			}).
 			WithBody(req).
 			BuildMutable()
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		msgs = append(msgs, msg)
 	}
 	resp := streaming.WAL().Append(ctx, msgs...)
 	if err := resp.IsAnyError(); err != nil {
-		return 0, err
+		return nil, err
 	}
-	// TODO: sheep, return resp.MaxTimeTick(), nil
-	return c.s.tsoAllocator.GenerateTSO(1)
+	return nil, nil
 }
 
 func (s *broadcastCreatePartitionMsgStep) Desc() string {
