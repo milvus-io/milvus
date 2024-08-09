@@ -46,6 +46,6 @@ func getPipelineParams(chunkManager storage.ChunkManager) *util.PipelineParams {
 		WriteBufferManager: wbMgr,
 		CheckpointUpdater:  cpUpdater,
 		Allocator:          idalloc.NewMAllocator(rsc.IDAllocator()),
-		FlushMsgHandler:    flushMsgHandlerImpl(wbMgr),
+		FlushMsgHandler:    newFlushMsgHandler(wbMgr),
 	}
 }

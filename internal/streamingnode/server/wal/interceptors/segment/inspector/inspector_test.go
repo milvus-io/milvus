@@ -52,6 +52,7 @@ func TestSealedInspector(t *testing.T) {
 				VChannel:     "vv1",
 				CollectionID: 12,
 				PartitionID:  1,
+				SegmentID:    2,
 			})
 			time.Sleep(5 * time.Millisecond)
 		}

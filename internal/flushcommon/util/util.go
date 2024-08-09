@@ -40,7 +40,7 @@ type PipelineParams struct {
 	Ctx                context.Context
 	Broker             broker.Broker
 	SyncMgr            syncmgr.SyncManager
-	TimeTickSender     *TimeTickSender     // reference to TimeTickSender
+	TimeTickSender     StatsUpdater        // reference to TimeTickSender
 	CompactionExecutor compaction.Executor // reference to compaction executor
 	MsgStreamFactory   dependency.Factory
 	DispClient         msgdispatcher.Client

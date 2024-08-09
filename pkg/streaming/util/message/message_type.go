@@ -14,6 +14,7 @@ const (
 	MessageTypeInsert           MessageType = MessageType(messagespb.MessageType_Insert)
 	MessageTypeDelete           MessageType = MessageType(messagespb.MessageType_Delete)
 	MessageTypeFlush            MessageType = MessageType(messagespb.MessageType_Flush)
+	MessageTypeManualFlush      MessageType = MessageType(messagespb.MessageType_ManualFlush)
 	MessageTypeCreateCollection MessageType = MessageType(messagespb.MessageType_CreateCollection)
 	MessageTypeDropCollection   MessageType = MessageType(messagespb.MessageType_DropCollection)
 	MessageTypeCreatePartition  MessageType = MessageType(messagespb.MessageType_CreatePartition)
@@ -30,6 +31,7 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeInsert:           "INSERT",
 	MessageTypeDelete:           "DELETE",
 	MessageTypeFlush:            "FLUSH",
+	MessageTypeManualFlush:      "MANUAL_FLUSH",
 	MessageTypeCreateCollection: "CREATE_COLLECTION",
 	MessageTypeDropCollection:   "DROP_COLLECTION",
 	MessageTypeCreatePartition:  "CREATE_PARTITION",

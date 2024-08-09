@@ -19,18 +19,36 @@ package flusherimpl
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-// TODO: func(vchannel string, msg FlushMsg)
-func flushMsgHandlerImpl(wbMgr writebuffer.BufferManager) func(vchannel string, segmentIDs []int64) {
-	return func(vchannel string, segmentIDs []int64) {
-		err := wbMgr.SealSegments(context.Background(), vchannel, segmentIDs)
-		if err != nil {
-			log.Warn("failed to seal segments", zap.Error(err))
-		}
+func newFlushMsgHandler(wbMgr writebuffer.BufferManager) *flushMsgHandlerImpl {
+	return &flushMsgHandlerImpl{
+		wbMgr: wbMgr,
 	}
+}
+
+type flushMsgHandlerImpl struct {
+	wbMgr writebuffer.BufferManager
+}
+
+func (impl *flushMsgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
+	body, err := flushMsg.Body()
+	if err != nil {
+		return errors.Wrap(err, "failed to get flush message body")
+	}
+	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, body.GetSegmentId()); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
+	return nil
+}
+
+func (impl *flushMsgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
 }

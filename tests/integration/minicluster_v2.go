@@ -44,11 +44,14 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	grpcrootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -56,18 +59,6 @@ import (
 )
 
 var params *paramtable.ComponentParam = paramtable.Get()
-
-type ClusterConfig struct {
-	// ProxyNum int
-	// todo coord num can be more than 1 if enable Active-Standby
-	// RootCoordNum int
-	// DataCoordNum int
-	// IndexCoordNum int
-	// QueryCoordNum int
-	QueryNodeNum int
-	DataNodeNum  int
-	IndexNodeNum int
-}
 
 func DefaultParams() map[string]string {
 	testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
@@ -83,21 +74,12 @@ func DefaultParams() map[string]string {
 	}
 }
 
-func DefaultClusterConfig() ClusterConfig {
-	return ClusterConfig{
-		QueryNodeNum: 1,
-		DataNodeNum:  1,
-		IndexNodeNum: 1,
-	}
-}
-
 type MiniClusterV2 struct {
 	ctx context.Context
 
 	mu sync.RWMutex
 
-	params        map[string]string
-	clusterConfig ClusterConfig
+	params map[string]string
 
 	factory      dependency.Factory
 	ChunkManager storage.ChunkManager
@@ -118,16 +100,18 @@ type MiniClusterV2 struct {
 	QueryNodeClient types.QueryNodeClient
 	IndexNodeClient types.IndexNodeClient
 
-	DataNode  *grpcdatanode.Server
-	QueryNode *grpcquerynode.Server
-	IndexNode *grpcindexnode.Server
+	DataNode      *grpcdatanode.Server
+	StreamingNode *streamingnode.Server
+	QueryNode     *grpcquerynode.Server
+	IndexNode     *grpcindexnode.Server
 
-	MetaWatcher MetaWatcher
-	ptmu        sync.Mutex
-	querynodes  []*grpcquerynode.Server
-	qnid        atomic.Int64
-	datanodes   []*grpcdatanode.Server
-	dnid        atomic.Int64
+	MetaWatcher    MetaWatcher
+	ptmu           sync.Mutex
+	querynodes     []*grpcquerynode.Server
+	qnid           atomic.Int64
+	datanodes      []*grpcdatanode.Server
+	dnid           atomic.Int64
+	streamingnodes []*streamingnode.Server
 
 	Extension *ReportChanExtension
 }
@@ -144,7 +128,6 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	cluster.Extension = InitReportExtension()
 
 	cluster.params = DefaultParams()
-	cluster.clusterConfig = DefaultClusterConfig()
 	for _, opt := range opts {
 		opt(cluster)
 	}
@@ -165,6 +148,10 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		return nil, err
 	}
 	cluster.EtcdCli = etcdCli
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		streaming.Init()
+	}
 
 	cluster.MetaWatcher = &EtcdMetaWatcher{
 		rootPath: etcdConfig.RootPath.GetValue(),
@@ -239,6 +226,12 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	cluster.DataNode, err = grpcdatanode.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
+	}
+	if streamingutil.IsStreamingServiceEnabled() {
+		cluster.StreamingNode, err = streamingnode.NewServer(cluster.factory)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cluster.QueryNode, err = grpcquerynode.NewServer(ctx, cluster.factory)
 	if err != nil {
@@ -315,6 +308,22 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	return node
 }
 
+func (cluster *MiniClusterV2) AddStreamingNode() {
+	cluster.ptmu.Lock()
+	defer cluster.ptmu.Unlock()
+
+	node, err := streamingnode.NewServer(cluster.factory)
+	if err != nil {
+		panic(err)
+	}
+	err = node.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	cluster.streamingnodes = append(cluster.streamingnodes, node)
+}
+
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
 	err := cluster.RootCoord.Run()
@@ -363,6 +372,14 @@ func (cluster *MiniClusterV2) Start() error {
 	if !healthy {
 		return errors.New("minicluster is not healthy after 120s")
 	}
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		err = cluster.StreamingNode.Run()
+		if err != nil {
+			return err
+		}
+	}
+
 	log.Info("minicluster started")
 	return nil
 }
@@ -379,7 +396,13 @@ func (cluster *MiniClusterV2) Stop() error {
 	log.Info("mini cluster proxy stopped")
 
 	cluster.StopAllDataNodes()
+	cluster.StopAllStreamingNodes()
 	cluster.StopAllQueryNodes()
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		streaming.Release()
+	}
+
 	cluster.IndexNode.Stop()
 	log.Info("mini cluster indexNode stopped")
 
@@ -427,6 +450,18 @@ func (cluster *MiniClusterV2) StopAllDataNodes() {
 	}
 	cluster.datanodes = nil
 	log.Info(fmt.Sprintf("mini cluster stopped %d extra datanode", numExtraDN))
+}
+
+func (cluster *MiniClusterV2) StopAllStreamingNodes() {
+	if cluster.StreamingNode != nil {
+		cluster.StreamingNode.Stop()
+		log.Info("mini cluster main streamingnode stopped")
+	}
+	for _, node := range cluster.streamingnodes {
+		node.Stop()
+	}
+	log.Info(fmt.Sprintf("mini cluster stopped %d streaming nodes", len(cluster.streamingnodes)))
+	cluster.streamingnodes = nil
 }
 
 func (cluster *MiniClusterV2) GetContext() context.Context {

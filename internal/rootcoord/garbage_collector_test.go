@@ -546,9 +546,9 @@ func TestGcPartitionData(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
-	wal := mock_streaming.NewMockWALAccesser(t)
 	u := mock_streaming.NewMockUtility(t)
-	u.EXPECT().AppendMessagesWithOption(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
+	u.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
+	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().Utility().Return(u)
 	streaming.SetWALForTest(wal)
 

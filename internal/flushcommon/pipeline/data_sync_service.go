@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
@@ -61,8 +62,8 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender *util.TimeTickSender // reference to TimeTickSender
-	compactor      compaction.Executor  // reference to compaction executor
+	timetickSender util.StatsUpdater   // reference to TimeTickSender
+	compactor      compaction.Executor // reference to compaction executor
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
@@ -159,7 +160,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					return nil, err
 				}
 				segmentPks.Insert(segment.GetID(), pkoracle.NewBloomFilterSet(stats...))
-				if tickler != nil {
+				if !streamingutil.IsStreamingServiceEnabled() {
 					tickler.Inc()
 				}
 

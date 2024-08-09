@@ -63,3 +63,25 @@ func wrapError(err *error, method string) {
 		*err = errors.Wrapf(*err, "in method: %s", method)
 	}
 }
+
+var _ Factory = &nopFactory{}
+
+func NewNopFactory() Factory {
+	return &nopFactory{}
+}
+
+type nopFactory struct{}
+
+func (f *nopFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	return &nopMsgStream{}, nil
+}
+
+func (f *nopFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	return &nopMsgStream{}, nil
+}
+
+func (f *nopFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return func([]string, string) error {
+		return nil
+	}
+}

@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -77,6 +78,7 @@ type MiniClusterSuite struct {
 
 func (s *MiniClusterSuite) SetupSuite() {
 	s.Require().NoError(s.SetupEmbedEtcd())
+	streamingutil.SetStreamingServiceEnabled() // TODO: sheep, remove this
 }
 
 func (s *MiniClusterSuite) TearDownSuite() {

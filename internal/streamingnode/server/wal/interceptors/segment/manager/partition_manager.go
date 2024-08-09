@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -95,6 +96,22 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 	defer m.mu.Unlock()
 
 	return m.collectShouldBeSealedWithPolicy(m.hitSealPolicy)
+}
+
+// CollectionMustSealed seals the specified segment.
+func (m *partitionSegmentManager) CollectionMustSealed(segmentID int64) *segmentAllocManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var target *segmentAllocManager
+	m.segments = lo.Filter(m.segments, func(segment *segmentAllocManager, _ int) bool {
+		if segment.inner.GetSegmentId() == segmentID {
+			target = segment
+			return false
+		}
+		return true
+	})
+	return target
 }
 
 // collectShouldBeSealedWithPolicy collects all segments that should be sealed by policy.

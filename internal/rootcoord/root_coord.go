@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -716,10 +717,13 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(3)
+	c.wg.Add(2)
 	go c.startTimeTickLoop()
 	go c.tsLoop()
-	go c.chanTimeTick.startWatch(&c.wg)
+	if !streamingutil.IsStreamingServiceEnabled() {
+		c.wg.Add(1)
+		go c.chanTimeTick.startWatch(&c.wg)
+	}
 }
 
 // Start starts RootCoord.

@@ -167,6 +167,10 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 }
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		return c.notifyCollectionGcByStreamingService(ctx, coll)
+	}
+
 	ts, err := c.s.tsoAllocator.GenerateTSO(1)
 	if err != nil {
 		return 0, err
@@ -180,15 +184,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropCollectionRequest: &msgpb.DropCollectionRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
-				commonpbutil.WithTimeStamp(ts),
-				commonpbutil.WithSourceID(c.s.session.ServerID),
-			),
-			CollectionName: coll.Name,
-			CollectionID:   coll.CollectionID,
-		},
+		DropCollectionRequest: c.generateDropRequest(coll, ts),
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	if err := c.s.chanTimeTick.broadcastDmlChannels(coll.PhysicalChannelNames, &msgPack); err != nil {
@@ -196,6 +192,42 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	}
 
 	return ts, nil
+}
+
+func (c *bgGarbageCollector) generateDropRequest(coll *model.Collection, ts uint64) *msgpb.DropCollectionRequest {
+	return &msgpb.DropCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
+			commonpbutil.WithTimeStamp(ts),
+			commonpbutil.WithSourceID(c.s.session.ServerID),
+		),
+		CollectionName: coll.Name,
+		CollectionID:   coll.CollectionID,
+	}
+}
+
+func (c *bgGarbageCollector) notifyCollectionGcByStreamingService(ctx context.Context, coll *model.Collection) (uint64, error) {
+	req := c.generateDropRequest(coll, 0) // ts is given by streamingnode.
+
+	msgs := make([]message.MutableMessage, 0, len(coll.VirtualChannelNames))
+	for _, vchannel := range coll.VirtualChannelNames {
+		msg, err := message.NewDropCollectionMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.DropCollectionMessageHeader{
+				CollectionId: coll.CollectionID,
+			}).
+			WithBody(req).
+			BuildMutable()
+		if err != nil {
+			return 0, err
+		}
+		msgs = append(msgs, msg)
+	}
+	resp := streaming.WAL().Utility().AppendMessages(ctx, msgs...)
+	if err := resp.UnwrapFirstError(); err != nil {
+		return 0, err
+	}
+	return resp.MaxTimeTick(), nil
 }
 
 func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error) {

@@ -45,6 +45,7 @@ var (
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
 	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
+	NewManualFlushMessageBuilderV2      = createNewMessageBuilderV2[*ManualFlushMessageHeader, *ManualFlushMessageBody]()
 	NewBeginTxnMessageBuilderV2         = createNewMessageBuilderV2[*BeginTxnMessageHeader, *BeginTxnMessageBody]()
 	NewCommitTxnMessageBuilderV2        = createNewMessageBuilderV2[*CommitTxnMessageHeader, *CommitTxnMessageBody]()
 	NewRollbackTxnMessageBuilderV2      = createNewMessageBuilderV2[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]()

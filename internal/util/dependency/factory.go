@@ -84,6 +84,11 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 	metrics.RegisterMQType(mqType)
 	log.Info("try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
 
+	// if streamingutil.IsStreamingServiceEnabled() {
+	// 	f.msgStreamFactory = msgstream.NewNopFactory()
+	// 	return nil
+	// }
+
 	switch mqType {
 	case mqTypeNatsmq:
 		f.msgStreamFactory = msgstream.NewNatsmqFactory()

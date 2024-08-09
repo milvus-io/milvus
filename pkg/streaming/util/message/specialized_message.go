@@ -22,6 +22,7 @@ type (
 	CreatePartitionMessageHeader  = messagespb.CreatePartitionMessageHeader
 	DropPartitionMessageHeader    = messagespb.DropPartitionMessageHeader
 	FlushMessageHeader            = messagespb.FlushMessageHeader
+	ManualFlushMessageHeader      = messagespb.ManualFlushMessageHeader
 	BeginTxnMessageHeader         = messagespb.BeginTxnMessageHeader
 	CommitTxnMessageHeader        = messagespb.CommitTxnMessageHeader
 	RollbackTxnMessageHeader      = messagespb.RollbackTxnMessageHeader
@@ -30,10 +31,15 @@ type (
 
 type (
 	FlushMessageBody       = messagespb.FlushMessageBody
+	ManualFlushMessageBody = messagespb.ManualFlushMessageBody
 	BeginTxnMessageBody    = messagespb.BeginTxnMessageBody
 	CommitTxnMessageBody   = messagespb.CommitTxnMessageBody
 	RollbackTxnMessageBody = messagespb.RollbackTxnMessageBody
 	TxnMessageBody         = messagespb.TxnMessageBody
+)
+
+type (
+	ManualFlushExtraResponse = messagespb.ManualFlushExtraResponse
 )
 
 // messageTypeMap maps the proto message type to the message type.
@@ -46,6 +52,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&CreatePartitionMessageHeader{}):  MessageTypeCreatePartition,
 	reflect.TypeOf(&DropPartitionMessageHeader{}):    MessageTypeDropPartition,
 	reflect.TypeOf(&FlushMessageHeader{}):            MessageTypeFlush,
+	reflect.TypeOf(&ManualFlushMessageHeader{}):      MessageTypeManualFlush,
 	reflect.TypeOf(&BeginTxnMessageHeader{}):         MessageTypeBeginTxn,
 	reflect.TypeOf(&CommitTxnMessageHeader{}):        MessageTypeCommitTxn,
 	reflect.TypeOf(&RollbackTxnMessageHeader{}):      MessageTypeRollbackTxn,
@@ -83,6 +90,7 @@ type (
 	ImmutableCreatePartitionMessageV1  = specializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	ImmutableDropPartitionMessageV1    = specializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	ImmutableFlushMessageV2            = specializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	ImmutableManualFlushMessageV2      = specializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 	ImmutableBeginTxnMessageV2         = specializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	ImmutableCommitTxnMessageV2        = specializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	ImmutableRollbackTxnMessageV2      = specializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
@@ -98,6 +106,7 @@ var (
 	AsMutableCreatePartitionMessageV1  = asSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsMutableDropPartitionMessageV1    = asSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	AsMutableFlushMessageV2            = asSpecializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	AsMutableManualFlushMessageV2      = asSpecializedMutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 	AsMutableBeginTxnMessageV2         = asSpecializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	AsMutableCommitTxnMessageV2        = asSpecializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsMutableRollbackTxnMessageV2      = asSpecializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
@@ -110,6 +119,7 @@ var (
 	AsImmutableCreatePartitionMessageV1  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsImmutableDropPartitionMessageV1    = asSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
 	AsImmutableFlushMessageV2            = asSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	AsImmutableManualFlushMessageV2      = asSpecializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 	AsImmutableBeginTxnMessageV2         = asSpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	AsImmutableCommitTxnMessageV2        = asSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsImmutableRollbackTxnMessageV2      = asSpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]

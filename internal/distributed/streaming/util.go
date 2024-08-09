@@ -169,6 +169,16 @@ type AppendResponses struct {
 	Responses []AppendResponse
 }
 
+func (a AppendResponses) MaxTimeTick() uint64 {
+	var maxTimeTick uint64
+	for _, r := range a.Responses {
+		if r.AppendResult != nil && r.AppendResult.TimeTick > maxTimeTick {
+			maxTimeTick = r.AppendResult.TimeTick
+		}
+	}
+	return maxTimeTick
+}
+
 // UnwrapFirstError returns the first error in the responses.
 func (a AppendResponses) UnwrapFirstError() error {
 	for _, r := range a.Responses {

@@ -59,11 +59,11 @@ etcd:
     dir: default.etcd # Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/
   auth:
     enabled: false # Whether to enable authentication
-    userName:  # username for etcd authentication
-    password:  # password for etcd authentication
+    userName: # username for etcd authentication
+    password: # password for etcd authentication
 
 metastore:
-  type: etcd # Default value: etcd, Valid values: [etcd, tikv] 
+  type: etcd # Default value: etcd, Valid values: [etcd, tikv]
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
@@ -77,9 +77,9 @@ tikv:
   snapshotScanSize: 256 # batch size of tikv snapshot scan
   ssl:
     enabled: false # Whether to support TiKV secure connection mode
-    tlsCert:  # path to your cert file
-    tlsKey:  # path to your key file
-    tlsCACert:  # path to your CACert file
+    tlsCert: # path to your cert file
+    tlsKey: # path to your key file
+    tlsCACert: # path to your CACert file
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
@@ -140,12 +140,12 @@ minio:
   cloudProvider: aws
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: 
+  iamEndpoint:
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
-  region:  # Specify minio storage system location region
+  region: # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  # The maximum number of objects requested per batch in minio ListObjects rpc, 
+  # The maximum number of objects requested per batch in minio ListObjects rpc,
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
@@ -157,7 +157,7 @@ minio:
 mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
-  type: default
+  type: pulsar
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
@@ -190,11 +190,11 @@ pulsar:
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
-#   brokerList: 
-#   saslUsername: 
-#   saslPassword: 
-#   saslMechanisms: 
-#   securityProtocol: 
+#   brokerList:
+#   saslUsername:
+#   saslPassword:
+#   saslMechanisms:
+#   securityProtocol:
 #   ssl:
 #     enabled: false # whether to enable ssl mode
 #     tlsCert:  # path to client's public key (PEM) used for authentication
@@ -234,8 +234,8 @@ natsmq:
       logSizeLimit: 536870912 # Size in bytes after the log file rolls over to a new one
     retention:
       maxAge: 4320 # Maximum age of any message in the P-channel
-      maxBytes:  # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
-      maxMsgs:  # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
+      maxBytes: # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
+      maxMsgs: # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -304,7 +304,7 @@ proxy:
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
-    port:  # high-level restful api
+    port: # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
   ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
@@ -400,9 +400,9 @@ queryNode:
   cache:
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable. 
-    # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
+    # options: async, sync, disable.
+    # Specifies the necessity for warming up the chunk cache.
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
@@ -518,11 +518,11 @@ dataCoord:
     compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   sealPolicy:
     channel:
-      # The size threshold in MB, if the total size of growing segments of each shard 
+      # The size threshold in MB, if the total size of growing segments of each shard
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
@@ -703,11 +703,15 @@ msgChannel:
     # It is recommended to change this parameter before starting Milvus for the first time.
     dataNodeSubNamePrefix: dataNode
 
+streamingNode:
+  ip: # if not specified, use the first unicastable address
+  port: 22222
+
 # Configures the system log output.
 log:
   # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: info
+  level: debug
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
@@ -773,7 +777,7 @@ common:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: 
+    superUsers:
     defaultRootPassword: Milvus # default password for root user
     tlsMode: 0
   session:
@@ -1018,7 +1022,7 @@ trace:
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
   jaeger:
-    url:  # when exporter is jaeger should set the jaeger's URL
+    url: # when exporter is jaeger should set the jaeger's URL
   otlp:
     endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
     method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default

@@ -977,3 +977,53 @@ func (ms *MqTtMsgStream) Chan() <-chan *MsgPack {
 
 	return ms.receiveBuf
 }
+
+var _ MsgStream = (*nopMsgStream)(nil)
+
+// nopMsgStream is a msgstream that does nothing.
+// For streaming service.
+type nopMsgStream struct{}
+
+func (ms *nopMsgStream) SetRepackFunc(RepackFunc) {}
+
+func (ms *nopMsgStream) Close() {}
+
+func (ms *nopMsgStream) AsProducer(channels []string) {
+	// will be called on startup, so do noting directly.
+}
+
+func (ms *nopMsgStream) EnableProduce(can bool) {
+	// will be called on startup, so do noting directly.
+}
+
+func (ms *nopMsgStream) Produce(msgPack *MsgPack) error {
+	panic("should not be called")
+}
+
+func (ms *nopMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, error) {
+	panic("should not be called")
+}
+
+func (ms *nopMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	return nil
+}
+
+func (ms *nopMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, includeCurrentMsg bool) error {
+	return nil
+}
+
+func (ms *nopMsgStream) Chan() <-chan *MsgPack {
+	panic("should not be called")
+}
+
+func (ms *nopMsgStream) GetProduceChannels() []string {
+	panic("should not be called")
+}
+
+func (ms *nopMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
+	panic("should not be called")
+}
+
+func (ms *nopMsgStream) CheckTopicValid(channel string) error {
+	panic("should not be called")
+}

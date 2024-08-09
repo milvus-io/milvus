@@ -103,5 +103,8 @@ func (m *TxnManager) GracefulClose() {
 	}
 	m.mu.Unlock()
 
-	<-m.closed.CloseCh()
+	select {
+	case <-m.closed.CloseCh():
+	case <-time.After(5 * time.Second):
+	}
 }

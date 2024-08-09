@@ -24,10 +24,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -39,6 +44,7 @@ type StreamPipeline interface {
 type streamPipeline struct {
 	pipeline   *pipeline
 	input      <-chan *msgstream.MsgPack
+	scanner    streaming.Scanner
 	dispatcher msgdispatcher.Client
 	startOnce  sync.Once
 	vChannel   string
@@ -68,6 +74,30 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 	if position == nil {
 		log.Error("seek stream to nil position")
 		return ErrNilPosition
+	}
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID())
+		log.Info(
+			"stream pipeline seeks from position with scanner",
+			zap.String("channel", position.GetChannelName()),
+			zap.Any("startFromMessageID", startFrom),
+			zap.Uint64("timestamp", position.GetTimestamp()),
+		)
+		handler := adaptor.NewMsgPackAdaptorHandler()
+		p.scanner = streaming.WAL().Read(context.Background(), streaming.ReadOption{
+			VChannel:      position.GetChannelName(),
+			DeliverPolicy: options.DeliverPolicyStartFrom(startFrom),
+			DeliverFilters: []options.DeliverFilter{
+				// only consume messages with timestamp >= position timestamp
+				options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
+				// only consume insert and delete messages
+				options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete),
+			},
+			MessageHandler: handler,
+		})
+		p.input = handler.Chan()
+		return nil
 	}
 
 	start := time.Now()
@@ -105,6 +135,9 @@ func (p *streamPipeline) Close() {
 	p.closeOnce.Do(func() {
 		close(p.closeCh)
 		p.closeWg.Wait()
+		if p.scanner != nil {
+			p.scanner.Close()
+		}
 		p.dispatcher.Deregister(p.vChannel)
 		p.pipeline.Close()
 	})

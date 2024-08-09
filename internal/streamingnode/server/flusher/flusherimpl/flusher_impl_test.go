@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type FlusherSuite struct {
@@ -58,7 +59,6 @@ type FlusherSuite struct {
 
 func (s *FlusherSuite) SetupSuite() {
 	paramtable.Init()
-	tickDuration = 10 * time.Millisecond
 
 	s.pchannel = "by-dev-rootcoord-dml_0"
 	s.vchannels = []string{
@@ -106,23 +106,24 @@ func (s *FlusherSuite) SetupSuite() {
 }
 
 func (s *FlusherSuite) SetupTest() {
-	handlers := make([]wal.MessageHandler, 0, len(s.vchannels))
+	handlers := typeutil.NewConcurrentSet[wal.MessageHandler]()
 	scanner := mock_wal.NewMockScanner(s.T())
 
 	w := mock_wal.NewMockWAL(s.T())
 	w.EXPECT().WALName().Return("rocksmq")
 	w.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, option wal.ReadOption) (wal.Scanner, error) {
-			handlers = append(handlers, option.MesasgeHandler)
+			handlers.Insert(option.MesasgeHandler)
 			return scanner, nil
 		})
 
 	once := sync.Once{}
 	scanner.EXPECT().Close().RunAndReturn(func() error {
 		once.Do(func() {
-			for _, handler := range handlers {
-				handler.Close()
-			}
+			handlers.Range(func(h wal.MessageHandler) bool {
+				h.Close()
+				return true
+			})
 		})
 		return nil
 	})
@@ -164,6 +165,7 @@ func (s *FlusherSuite) TestFlusher_RegisterPChannel() {
 	s.flusher.UnregisterPChannel(s.pchannel)
 	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
 	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())
+	s.Equal(0, s.flusher.(*flusherImpl).tasks.Len())
 }
 
 func (s *FlusherSuite) TestFlusher_RegisterVChannel() {
@@ -181,6 +183,35 @@ func (s *FlusherSuite) TestFlusher_RegisterVChannel() {
 	}
 	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
 	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())
+	s.Equal(0, s.flusher.(*flusherImpl).tasks.Len())
+}
+
+func (s *FlusherSuite) TestFlusher_Concurrency() {
+	wg := &sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		for _, vchannel := range s.vchannels {
+			wg.Add(1)
+			go func(vchannel string) {
+				s.flusher.RegisterVChannel(vchannel, s.wal)
+				wg.Done()
+			}(vchannel)
+		}
+		for _, vchannel := range s.vchannels {
+			wg.Add(1)
+			go func(vchannel string) {
+				s.flusher.UnregisterVChannel(vchannel)
+				wg.Done()
+			}(vchannel)
+		}
+	}
+	wg.Wait()
+
+	for _, vchannel := range s.vchannels {
+		s.flusher.UnregisterVChannel(vchannel)
+	}
+	s.Equal(0, s.flusher.(*flusherImpl).fgMgr.GetFlowgraphCount())
+	s.Equal(0, s.flusher.(*flusherImpl).scanners.Len())
+	s.Equal(0, s.flusher.(*flusherImpl).tasks.Len())
 }
 
 func TestFlusherSuite(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -63,6 +64,8 @@ type deleteTask struct {
 	// result
 	count       int64
 	allQueryCnt int64
+
+	sessionTS Timestamp
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -142,28 +145,19 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	hashValues := typeutil.HashPK2Channels(dt.primaryKeys, dt.vChannels)
-	// repack delete msg by dmChannel
-	result := make(map[uint32]msgstream.TsMsg)
-	numRows := int64(0)
-	for index, key := range hashValues {
-		vchannel := dt.vChannels[key]
-		_, ok := result[key]
-		if !ok {
-			deleteMsg, err := dt.newDeleteMsg(ctx)
-			if err != nil {
-				return err
-			}
-			deleteMsg.ShardName = vchannel
-			result[key] = deleteMsg
-		}
-		curMsg := result[key].(*msgstream.DeleteMsg)
-		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
-		curMsg.Timestamps = append(curMsg.Timestamps, dt.ts)
-
-		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.primaryKeys, index)
-		curMsg.NumRows++
-		numRows++
+	result, numRows, err := repackDeleteMsgByHash(
+		ctx,
+		dt.primaryKeys,
+		dt.vChannels,
+		dt.idAllocator,
+		dt.ts,
+		dt.collectionID,
+		dt.req.GetCollectionName(),
+		dt.partitionID,
+		dt.req.GetPartitionName(),
+	)
+	if err != nil {
+		return err
 	}
 
 	// send delete request to log broker
@@ -189,6 +183,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	dt.sessionTS = dt.ts
 	dt.count += numRows
 	return nil
 }
@@ -197,30 +192,84 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, error) {
-	msgid, err := dt.idAllocator.AllocOne()
+func repackDeleteMsgByHash(
+	ctx context.Context,
+	primaryKeys *schemapb.IDs,
+	vChannels []string,
+	idAllocator allocator.Interface,
+	ts uint64,
+	collectionID int64,
+	collectionName string,
+	partitionID int64,
+	partitionName string,
+) (map[uint32]*msgstream.DeleteMsg, int64, error) {
+	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	// repack delete msg by dmChannel
+	result := make(map[uint32]*msgstream.DeleteMsg)
+	numRows := int64(0)
+	for index, key := range hashValues {
+		vchannel := vChannels[key]
+		_, ok := result[key]
+		if !ok {
+			deleteMsg, err := newDeleteMsg(
+				ctx,
+				idAllocator,
+				ts,
+				collectionID,
+				collectionName,
+				partitionID,
+				partitionName,
+			)
+			if err != nil {
+				return nil, 0, err
+			}
+			deleteMsg.ShardName = vchannel
+			result[key] = deleteMsg
+		}
+		curMsg := result[key]
+		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
+		curMsg.Timestamps = append(curMsg.Timestamps, ts)
+
+		typeutil.AppendIDs(curMsg.PrimaryKeys, primaryKeys, index)
+		curMsg.NumRows++
+		numRows++
+	}
+	return result, numRows, nil
+}
+
+func newDeleteMsg(
+	ctx context.Context,
+	idAllocator allocator.Interface,
+	ts uint64,
+	collectionID int64,
+	collectionName string,
+	partitionID int64,
+	partitionName string,
+) (*msgstream.DeleteMsg, error) {
+	msgid, err := idAllocator.AllocOne()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
+	}
+	sliceRequest := &msgpb.DeleteRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+			// msgid of delete msg must be set
+			// or it will be seen as duplicated msg in mq
+			commonpbutil.WithMsgID(msgid),
+			commonpbutil.WithTimeStamp(ts),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		CollectionName: collectionName,
+		PartitionName:  partitionName,
+		PrimaryKeys:    &schemapb.IDs{},
 	}
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			Ctx: ctx,
 		},
-		DeleteRequest: &msgpb.DeleteRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-				// msgid of delete msg must be set
-				// or it will be seen as duplicated msg in mq
-				commonpbutil.WithMsgID(msgid),
-				commonpbutil.WithTimeStamp(dt.ts),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			CollectionID:   dt.collectionID,
-			PartitionID:    dt.partitionID,
-			CollectionName: dt.req.GetCollectionName(),
-			PartitionName:  dt.req.GetPartitionName(),
-			PrimaryKeys:    &schemapb.IDs{},
-		},
+		DeleteRequest: sliceRequest,
 	}, nil
 }
 
@@ -254,6 +303,7 @@ type deleteRunner struct {
 	queue *dmTaskQueue
 
 	allQueryCnt atomic.Int64
+	sessionTS   atomic.Uint64
 }
 
 func (dr *deleteRunner) Init(ctx context.Context) error {
@@ -346,7 +396,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 }
 
 func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) (*deleteTask, error) {
-	task := &deleteTask{
+	dt := &deleteTask{
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		req:              dr.req,
@@ -359,13 +409,17 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 		vChannels:        dr.vChannels,
 		primaryKeys:      primaryKeys,
 	}
+	var enqueuedTask task = dt
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &deleteTaskByStreamingService{deleteTask: dt}
+	}
 
-	if err := dr.queue.Enqueue(task); err != nil {
+	if err := dr.queue.Enqueue(enqueuedTask); err != nil {
 		log.Error("Failed to enqueue delete task: " + err.Error())
 		return nil, err
 	}
 
-	return task, nil
+	return dt, nil
 }
 
 // getStreamingQueryAndDelteFunc return query function used by LBPolicy
@@ -447,6 +501,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}()
 		var allQueryCnt int64
 		// wait all task finish
+		var sessionTS uint64
 		for task := range taskCh {
 			err := task.WaitToFinish()
 			if err != nil {
@@ -454,6 +509,9 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			}
 			dr.count.Add(task.count)
 			allQueryCnt += task.allQueryCnt
+			if sessionTS < task.sessionTS {
+				sessionTS = task.sessionTS
+			}
 		}
 
 		// query or produce task failed
@@ -461,6 +519,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			return receiveErr
 		}
 		dr.allQueryCnt.Add(allQueryCnt)
+		dr.sessionTS.Store(sessionTS)
 		return nil
 	}
 }
@@ -523,6 +582,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		exec:           dr.getStreamingQueryAndDelteFunc(plan),
 	})
 	dr.result.DeleteCnt = dr.count.Load()
+	dr.result.Timestamp = dr.sessionTS.Load()
 	if err != nil {
 		log.Warn("fail to execute complex delete",
 			zap.Int64("deleteCnt", dr.result.GetDeleteCnt()),
@@ -550,6 +610,7 @@ func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	err = task.WaitToFinish()
 	if err == nil {
 		dr.result.DeleteCnt = task.count
+		dr.result.Timestamp = task.sessionTS
 	}
 	return err
 }

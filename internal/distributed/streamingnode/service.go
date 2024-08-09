@@ -76,21 +76,22 @@ type Server struct {
 	grpcServer *grpc.Server
 	lis        net.Listener
 
+	factory dependency.Factory
+
 	// component client
 	etcdCli      *clientv3.Client
 	tikvCli      *txnkv.Client
 	rootCoord    types.RootCoordClient
 	dataCoord    types.DataCoordClient
 	chunkManager storage.ChunkManager
-	f            dependency.Factory
 }
 
 // NewServer create a new StreamingNode server.
 func NewServer(f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
+		factory:        f,
 		grpcServerChan: make(chan struct{}),
-		f:              f,
 	}, nil
 }
 
@@ -180,6 +181,9 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initMeta(); err != nil {
 		return err
 	}
+	if err := s.initChunkManager(ctx); err != nil {
+		return err
+	}
 	if err := s.allocateAddress(); err != nil {
 		return err
 	}
@@ -192,14 +196,12 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initDataCoord(ctx); err != nil {
 		return err
 	}
-	if err := s.initChunkManager(ctx); err != nil {
-		return err
-	}
 	s.initGRPCServer()
 
 	// Create StreamingNode service.
 	s.streamingnode = streamingnodeserver.NewServerBuilder().
 		WithETCD(s.etcdCli).
+		WithChunkManager(s.chunkManager).
 		WithGRPCServer(s.grpcServer).
 		WithRootCoordClient(s.rootCoord).
 		WithDataCoordClient(s.dataCoord).
@@ -305,8 +307,8 @@ func (s *Server) initDataCoord(ctx context.Context) (err error) {
 
 func (s *Server) initChunkManager(ctx context.Context) (err error) {
 	log.Info("StreamingNode init chunk manager...")
-	s.f.Init(paramtable.Get())
-	manager, err := s.f.NewPersistentStorageChunkManager(ctx)
+	s.factory.Init(paramtable.Get())
+	manager, err := s.factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new chunk manager failed")
 	}

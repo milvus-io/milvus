@@ -33,6 +33,7 @@ enum MessageType {
     DropCollection   = 6;
     CreatePartition  = 7;
     DropPartition    = 8;
+    ManualFlush      = 9;
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -71,10 +72,13 @@ enum MessageType {
 
 // FlushMessageBody is the body of flush message.
 message FlushMessageBody {
-    int64 collection_id =
-        1;  // indicate which the collection that segment belong to.
+    // indicate which the collection that segment belong to.
+    int64 collection_id       = 1;
     repeated int64 segment_id = 2;  // indicate which segment to flush.
 }
+
+// ManualFlushMessageBody is the body of manual flush message.
+message ManualFlushMessageBody {}
 
 // BeginTxnMessageBody is the body of begin transaction message.
 // Just do nothing now.
@@ -134,6 +138,11 @@ message DeleteMessageHeader {
 // FlushMessageHeader just nothing.
 message FlushMessageHeader {}
 
+message ManualFlushMessageHeader {
+    int64 collection_id = 1;
+    uint64 flush_ts     = 2;
+}
+
 // CreateCollectionMessageHeader is the header of create collection message.
 message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
@@ -178,6 +187,17 @@ message RollbackTxnMessageHeader {}
 // TxnMessageHeader is the header of transaction message.
 // Just do nothing now.
 message TxnMessageHeader {}
+
+///
+/// Message Extra Response
+/// Used to add extra information when response to the client.
+///
+///
+
+// ManualFlushExtraResponse is the extra response of manual flush message.
+message ManualFlushExtraResponse {
+    repeated int64 segment_ids = 1;
+}
 
 // TxnContext is the context of transaction.
 // It will be carried by every message in a transaction.

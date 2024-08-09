@@ -38,6 +38,12 @@ func (b *ServerBuilder) WithETCD(e *clientv3.Client) *ServerBuilder {
 	return b
 }
 
+// WithChunkManager sets chunk manager to the server builder.
+func (b *ServerBuilder) WithChunkManager(cm storage.ChunkManager) *ServerBuilder {
+	b.chunkManager = cm
+	return b
+}
+
 // WithGRPCServer sets grpc server to the server builder.
 func (b *ServerBuilder) WithGRPCServer(svr *grpc.Server) *ServerBuilder {
 	b.grpcServer = svr
@@ -68,27 +74,21 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 	return b
 }
 
-// WithChunkManager sets chunk manager to the server builder.
-func (b *ServerBuilder) WithChunkManager(chunkManager storage.ChunkManager) *ServerBuilder {
-	b.chunkManager = chunkManager
-	return b
-}
-
 // Build builds a streaming node server.
-func (s *ServerBuilder) Build() *Server {
+func (b *ServerBuilder) Build() *Server {
 	resource.Apply(
-		resource.OptETCD(s.etcdClient),
-		resource.OptRootCoordClient(s.rc),
-		resource.OptDataCoordClient(s.dc),
-		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(s.kv)),
+		resource.OptETCD(b.etcdClient),
+		resource.OptRootCoordClient(b.rc),
+		resource.OptDataCoordClient(b.dc),
+		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
 	resource.Apply(
-		resource.OptFlusher(flusherimpl.NewFlusher(s.chunkManager)),
+		resource.OptFlusher(flusherimpl.NewFlusher(b.chunkManager)),
 	)
 	resource.Done()
 	return &Server{
-		session:               s.session,
-		grpcServer:            s.grpcServer,
+		session:               b.session,
+		grpcServer:            b.grpcServer,
 		componentStateService: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 	}
 }
