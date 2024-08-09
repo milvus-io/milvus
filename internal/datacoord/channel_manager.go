@@ -395,10 +395,10 @@ func (m *ChannelManagerImpl) FindWatcher(channel string) (UniqueID, error) {
 	bufferInfo := m.store.GetBufferChannelInfo()
 	_, ok := bufferInfo.Channels[channel]
 	if ok {
-		return bufferID, errChannelInBuffer
+		return bufferID, merr.WrapErrChannelInBuffer(channel)
 	}
 
-	return 0, errChannelNotWatched
+	return 0, merr.WrapErrChannelNotWatched(channel)
 }
 
 // unsafe innter func
