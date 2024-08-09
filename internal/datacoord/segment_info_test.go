@@ -97,6 +97,46 @@ func TestCompactionTo(t *testing.T) {
 	assert.Nil(t, s)
 }
 
+func TestGetSegmentSize(t *testing.T) {
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID:      1,
+							MemorySize: 1,
+						},
+					},
+				},
+			},
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID:      1,
+							MemorySize: 1,
+						},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID:      1,
+							MemorySize: 1,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, int64(3), segment.getSegmentSize())
+	assert.Equal(t, int64(3), segment.getSegmentSize())
+}
+
 func TestIsDeltaLogExists(t *testing.T) {
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
