@@ -26,6 +26,7 @@ import (
 type CompactionTask interface {
 	Process() bool
 	BuildCompactionRequest() (*datapb.CompactionPlan, error)
+	Clean() bool
 
 	GetTriggerID() UniqueID
 	GetPlanID() UniqueID

@@ -78,6 +78,9 @@ type compactionPlanHandler struct {
 	executingGuard lock.RWMutex
 	executingTasks map[int64]CompactionTask // planID -> task
 
+	cleaningGuard lock.RWMutex
+	cleaningTasks map[int64]CompactionTask // planID -> task
+
 	meta             CompactionMeta
 	allocator        allocator
 	chManager        ChannelManager
@@ -180,13 +183,14 @@ func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm Chann
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       make(map[int64]CompactionTask),
+		executingTasks:   make(map[int64]CompactionTask),
+		cleaningTasks:    make(map[int64]CompactionTask),
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
 		allocator:        allocator,
 		stopCh:           make(chan struct{}),
 		cluster:          cluster,
-		executingTasks:   make(map[int64]CompactionTask),
 		taskNumber:       atomic.NewInt32(0),
 		analyzeScheduler: analyzeScheduler,
 		handler:          handler,
@@ -392,6 +396,18 @@ func (c *compactionPlanHandler) loopClean() {
 }
 
 func (c *compactionPlanHandler) Clean() {
+	c.cleaningGuard.RLock()
+	cleanedTasks := make([]CompactionTask, 0)
+	for _, t := range c.cleaningTasks {
+		clean := t.Clean()
+		if clean {
+			cleanedTasks = append(cleanedTasks, t)
+		}
+	}
+	for _, t := range cleanedTasks {
+		delete(c.cleaningTasks, t.GetPlanID())
+	}
+	c.cleaningGuard.RUnlock()
 	c.cleanCompactionTaskMeta()
 	c.cleanPartitionStats()
 }
@@ -669,6 +685,15 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	}
 	c.executingGuard.Unlock()
 	c.taskNumber.Sub(int32(len(finishedTasks)))
+
+	// insert task need to clean
+	c.cleaningGuard.Lock()
+	for _, t := range finishedTasks {
+		if t.GetState() == datapb.CompactionTaskState_failed || t.GetState() == datapb.CompactionTaskState_failed {
+			c.cleaningTasks[t.GetPlanID()] = t
+		}
+	}
+	c.cleaningGuard.Unlock()
 	return nil
 }
 

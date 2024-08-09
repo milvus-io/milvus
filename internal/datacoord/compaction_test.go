@@ -884,6 +884,99 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.Equal(0, len(s.handler.getTasksByState(datapb.CompactionTaskState_completed)))
 }
 
+func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			&mixCompactionTask{
+				CompactionTask: &datapb.CompactionTask{
+					PlanID:        1,
+					TriggerID:     1,
+					Type:          datapb.CompactionType_MixCompaction,
+					State:         datapb.CompactionTaskState_failed,
+					NodeID:        1,
+					InputSegments: []UniqueID{1, 2},
+				},
+				sessions: s.mockSessMgr,
+				meta:     s.mockMeta,
+			},
+		},
+		{
+			&l0CompactionTask{
+				CompactionTask: &datapb.CompactionTask{
+					PlanID:        1,
+					TriggerID:     1,
+					Type:          datapb.CompactionType_Level0DeleteCompaction,
+					State:         datapb.CompactionTaskState_failed,
+					NodeID:        1,
+					InputSegments: []UniqueID{1, 2},
+				},
+				sessions: s.mockSessMgr,
+				meta:     s.mockMeta,
+			},
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return().Once()
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().GetCompactionTasks().Return(nil)
+		s.mockMeta.EXPECT().GetPartitionStatsMeta().Return(nil)
+
+		s.handler.executingTasks[1] = task
+		s.Equal(1, len(s.handler.executingTasks))
+		s.handler.checkCompaction()
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.Clean()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			&clusteringCompactionTask{
+				CompactionTask: &datapb.CompactionTask{
+					PlanID:        1,
+					TriggerID:     1,
+					Type:          datapb.CompactionType_ClusteringCompaction,
+					State:         datapb.CompactionTaskState_failed,
+					NodeID:        1,
+					InputSegments: []UniqueID{1, 2},
+				},
+				sessions: s.mockSessMgr,
+				meta:     s.mockMeta,
+			},
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything).Return().Once()
+		//s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().GetCompactionTasks().Return(nil)
+		s.mockMeta.EXPECT().GetPartitionStatsMeta().Return(nil)
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil)
+
+		s.handler.executingTasks[1] = task
+		s.Equal(1, len(s.handler.executingTasks))
+		s.handler.checkCompaction()
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.Clean()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
+}
+
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: fieldID,
