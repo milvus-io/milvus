@@ -1251,6 +1251,17 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
+
+		// try to init channel checkpoint, if failed, we will log it and continue
+		startPos := toMsgPosition(channelName, req.GetStartPositions())
+		if startPos != nil {
+			startPos.Timestamp = req.GetCreateTimestamp()
+			if err := s.meta.UpdateChannelCheckpoint(channelName, startPos); err != nil {
+				log.Warn("failed to init channel checkpoint, meta update error", zap.String("channel", channelName), zap.Error(err))
+			}
+		} else {
+			log.Info("skip to init channel checkpoint for nil startPosition", zap.String("channel", channelName))
+		}
 	}
 
 	return resp, nil
