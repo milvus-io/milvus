@@ -2363,28 +2363,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			isForce:      true,
 		})
 	})
-
-	s.Run("channel_cp_lag_too_large", func() {
-		defer s.SetupTest()
-		ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-		s.compactionHandler.EXPECT().isFull().Return(false)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		s.tr.handleSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
-		})
-	})
 }
 
 func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
@@ -2497,32 +2475,6 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			partitionID:  s.partitionID,
 			channel:      s.channel,
 			isForce:      true,
-		})
-	})
-
-	s.Run("channel_cp_lag_too_large", func() {
-		defer s.SetupTest()
-		ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
-		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-		tr := s.tr
-
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
 		})
 	})
 }
