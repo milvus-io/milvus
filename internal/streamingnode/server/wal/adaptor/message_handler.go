@@ -1,35 +1,36 @@
 package adaptor
 
 import (
-	"context"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
+var (
+	_ wal.MessageHandler = defaultMessageHandler(nil)
+	_ wal.MessageHandler = (*MsgPackAdaptorHandler)(nil)
 )
 
 type defaultMessageHandler chan message.ImmutableMessage
 
-func (d defaultMessageHandler) Handle(ctx context.Context, upstream <-chan message.ImmutableMessage, msg message.ImmutableMessage) (incoming message.ImmutableMessage, ok bool, err error) {
+func (h defaultMessageHandler) Handle(param wal.HandleParam) wal.HandleResult {
 	var sendingCh chan message.ImmutableMessage
-	if msg != nil {
-		sendingCh = d
+	if param.Message != nil {
+		sendingCh = h
 	}
 	select {
-	case <-ctx.Done():
-		return nil, false, ctx.Err()
-	case msg, ok := <-upstream:
+	case <-param.Ctx.Done():
+		return wal.HandleResult{Error: param.Ctx.Err()}
+	case msg, ok := <-param.Upstream:
 		if !ok {
-			return nil, false, wal.ErrUpstreamClosed
+			return wal.HandleResult{Error: wal.ErrUpstreamClosed}
 		}
-		return msg, false, nil
-	case sendingCh <- msg:
-		return nil, true, nil
+		return wal.HandleResult{Incoming: msg}
+	case sendingCh <- param.Message:
+		return wal.HandleResult{MessageHandled: true}
+	case <-param.TimeTickChan:
+		return wal.HandleResult{TimeTickUpdated: true}
 	}
 }
 
@@ -40,92 +41,67 @@ func (d defaultMessageHandler) Close() {
 // NewMsgPackAdaptorHandler create a new message pack adaptor handler.
 func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 	return &MsgPackAdaptorHandler{
-		logger:         log.With(),
-		channel:        make(chan *msgstream.MsgPack),
-		pendings:       make([]message.ImmutableMessage, 0),
-		pendingMsgPack: typeutil.NewMultipartQueue[*msgstream.MsgPack](),
+		base: adaptor.NewBaseMsgPackAdaptorHandler(),
 	}
 }
 
-// MsgPackAdaptorHandler is the handler for message pack.
 type MsgPackAdaptorHandler struct {
-	logger         *log.MLogger
-	channel        chan *msgstream.MsgPack
-	pendings       []message.ImmutableMessage                   // pendings hold the vOld message which has same time tick.
-	pendingMsgPack *typeutil.MultipartQueue[*msgstream.MsgPack] // pendingMsgPack hold unsent msgPack.
+	base *adaptor.BaseMsgPackAdaptorHandler
 }
 
 // Chan is the channel for message.
 func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.MsgPack {
-	return m.channel
+	return m.base.Channel
 }
 
 // Handle is the callback for handling message.
-func (m *MsgPackAdaptorHandler) Handle(ctx context.Context, upstream <-chan message.ImmutableMessage, msg message.ImmutableMessage) (incoming message.ImmutableMessage, ok bool, err error) {
+func (m *MsgPackAdaptorHandler) Handle(param wal.HandleParam) wal.HandleResult {
+	messageHandled := false
 	// not handle new message if there are pending msgPack.
-	if msg != nil && m.pendingMsgPack.Len() == 0 {
-		m.generateMsgPack(msg)
-		ok = true
+	if param.Message != nil && m.base.PendingMsgPack.Len() == 0 {
+		m.base.GenerateMsgPack(param.Message)
+		messageHandled = true
 	}
 
 	for {
 		var sendCh chan<- *msgstream.MsgPack
-		if m.pendingMsgPack.Len() != 0 {
-			sendCh = m.channel
+		if m.base.PendingMsgPack.Len() != 0 {
+			sendCh = m.base.Channel
 		}
 
 		select {
-		case <-ctx.Done():
-			return nil, ok, ctx.Err()
-		case msg, notClose := <-upstream:
-			if !notClose {
-				return nil, ok, wal.ErrUpstreamClosed
+		case <-param.Ctx.Done():
+			return wal.HandleResult{
+				MessageHandled: messageHandled,
+				Error:          param.Ctx.Err(),
 			}
-			return msg, ok, nil
-		case sendCh <- m.pendingMsgPack.Next():
-			m.pendingMsgPack.UnsafeAdvance()
-			if m.pendingMsgPack.Len() > 0 {
+		case msg, notClose := <-param.Upstream:
+			if !notClose {
+				return wal.HandleResult{
+					MessageHandled: messageHandled,
+					Error:          wal.ErrUpstreamClosed,
+				}
+			}
+			return wal.HandleResult{
+				Incoming:       msg,
+				MessageHandled: messageHandled,
+			}
+		case sendCh <- m.base.PendingMsgPack.Next():
+			m.base.PendingMsgPack.UnsafeAdvance()
+			if m.base.PendingMsgPack.Len() > 0 {
 				continue
 			}
-			return nil, ok, nil
-		}
-	}
-}
-
-// generateMsgPack generate msgPack from message.
-func (m *MsgPackAdaptorHandler) generateMsgPack(msg message.ImmutableMessage) {
-	switch msg.Version() {
-	case message.VersionOld:
-		if len(m.pendings) != 0 {
-			if msg.TimeTick() > m.pendings[0].TimeTick() {
-				m.addMsgPackIntoPending(m.pendings...)
-				m.pendings = nil
+			return wal.HandleResult{MessageHandled: messageHandled}
+		case <-param.TimeTickChan:
+			return wal.HandleResult{
+				MessageHandled:  messageHandled,
+				TimeTickUpdated: true,
 			}
 		}
-		m.pendings = append(m.pendings, msg)
-	case message.VersionV1:
-		if len(m.pendings) != 0 { // all previous message should be vOld.
-			m.addMsgPackIntoPending(m.pendings...)
-			m.pendings = nil
-		}
-		m.addMsgPackIntoPending(msg)
-	default:
-		panic("unsupported message version")
-	}
-}
-
-// addMsgPackIntoPending add message into pending msgPack.
-func (m *MsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableMessage) {
-	newPack, err := adaptor.NewMsgPackFromMessage(msgs...)
-	if err != nil {
-		m.logger.Warn("failed to convert message to msgpack", zap.Error(err))
-	}
-	if newPack != nil {
-		m.pendingMsgPack.AddOne(newPack)
 	}
 }
 
 // Close closes the handler.
 func (m *MsgPackAdaptorHandler) Close() {
-	close(m.channel)
+	close(m.base.Channel)
 }

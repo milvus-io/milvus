@@ -27,19 +27,19 @@ func (_m *MockWAL) EXPECT() *MockWAL_Expecter {
 }
 
 // Append provides a mock function with given fields: ctx, msg
-func (_m *MockWAL) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+func (_m *MockWAL) Append(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
 	ret := _m.Called(ctx, msg)
 
-	var r0 message.MessageID
+	var r0 *types.AppendResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) (message.MessageID, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) (*types.AppendResult, error)); ok {
 		return rf(ctx, msg)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) message.MessageID); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage) *types.AppendResult); ok {
 		r0 = rf(ctx, msg)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(message.MessageID)
+			r0 = ret.Get(0).(*types.AppendResult)
 		}
 	}
 
@@ -71,18 +71,18 @@ func (_c *MockWAL_Append_Call) Run(run func(ctx context.Context, msg message.Mut
 	return _c
 }
 
-func (_c *MockWAL_Append_Call) Return(_a0 message.MessageID, _a1 error) *MockWAL_Append_Call {
+func (_c *MockWAL_Append_Call) Return(_a0 *types.AppendResult, _a1 error) *MockWAL_Append_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockWAL_Append_Call) RunAndReturn(run func(context.Context, message.MutableMessage) (message.MessageID, error)) *MockWAL_Append_Call {
+func (_c *MockWAL_Append_Call) RunAndReturn(run func(context.Context, message.MutableMessage) (*types.AppendResult, error)) *MockWAL_Append_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // AppendAsync provides a mock function with given fields: ctx, msg, cb
-func (_m *MockWAL) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(message.MessageID, error)) {
+func (_m *MockWAL) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*types.AppendResult, error)) {
 	_m.Called(ctx, msg, cb)
 }
 
@@ -94,14 +94,14 @@ type MockWAL_AppendAsync_Call struct {
 // AppendAsync is a helper method to define mock.On call
 //   - ctx context.Context
 //   - msg message.MutableMessage
-//   - cb func(message.MessageID , error)
+//   - cb func(*types.AppendResult , error)
 func (_e *MockWAL_Expecter) AppendAsync(ctx interface{}, msg interface{}, cb interface{}) *MockWAL_AppendAsync_Call {
 	return &MockWAL_AppendAsync_Call{Call: _e.mock.On("AppendAsync", ctx, msg, cb)}
 }
 
-func (_c *MockWAL_AppendAsync_Call) Run(run func(ctx context.Context, msg message.MutableMessage, cb func(message.MessageID, error))) *MockWAL_AppendAsync_Call {
+func (_c *MockWAL_AppendAsync_Call) Run(run func(ctx context.Context, msg message.MutableMessage, cb func(*types.AppendResult, error))) *MockWAL_AppendAsync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.MutableMessage), args[2].(func(message.MessageID, error)))
+		run(args[0].(context.Context), args[1].(message.MutableMessage), args[2].(func(*types.AppendResult, error)))
 	})
 	return _c
 }
@@ -111,7 +111,7 @@ func (_c *MockWAL_AppendAsync_Call) Return() *MockWAL_AppendAsync_Call {
 	return _c
 }
 
-func (_c *MockWAL_AppendAsync_Call) RunAndReturn(run func(context.Context, message.MutableMessage, func(message.MessageID, error))) *MockWAL_AppendAsync_Call {
+func (_c *MockWAL_AppendAsync_Call) RunAndReturn(run func(context.Context, message.MutableMessage, func(*types.AppendResult, error))) *MockWAL_AppendAsync_Call {
 	_c.Call.Return(run)
 	return _c
 }

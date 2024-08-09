@@ -2,11 +2,12 @@ package streaming
 
 import (
 	"context"
+	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 var singleton WALAccesser = nil
@@ -17,7 +18,8 @@ func SetWAL(w WALAccesser) {
 
 // Init initializes the wal accesser with the given etcd client.
 // should be called before any other operations.
-func Init(c *clientv3.Client) {
+func Init() {
+	c, _ := kvfactory.GetEtcdAndPath()
 	singleton = newWALAccesser(c)
 }
 
@@ -31,6 +33,22 @@ func Release() {
 // WAL is the entrance to interact with the milvus write ahead log.
 func WAL() WALAccesser {
 	return singleton
+}
+
+// AppendOption is the option for append operation.
+type AppendOption struct {
+	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
+	// Must be allocated from tso, otherwise undetermined behaviour.
+}
+
+type TxnOption struct {
+	// VChannel is the target vchannel to write.
+	// TODO: support cross-wal txn in future.
+	VChannel string
+
+	// TTL is the time to live of the transaction.
+	// Only make sense when ttl is greater than 1ms.
+	TTL time.Duration
 }
 
 type ReadOption struct {
@@ -61,10 +79,42 @@ type Scanner interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
-	// Append writes a record to the log.
-	// !!! Append didn't promise the order of the message and atomic write.
-	Append(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
+	// Txn returns a transaction for writing records to the log.
+	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
+	Txn(ctx context.Context, opts TxnOption) (Txn, error)
+
+	// Append writes a records to the log.
+	Append(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
+
+	// Utility returns the utility for writing records to the log.
+	Utility() Utility
+}
+
+// Txn is the interface for writing transaction into the wal.
+type Txn interface {
+	// Append writes a record to the log.
+	Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) error
+
+	// Commit commits the transaction.
+	// Commit and Rollback can be only call once, and not concurrent safe with append operation.
+	Commit(ctx context.Context) (*types.AppendResult, error)
+
+	// Rollback rollbacks the transaction.
+	// Commit and Rollback can be only call once, and not concurrent safe with append operation.
+	// TODO: Manually rollback is make no sense for current single wal txn.
+	// It is preserved for future cross-wal txn.
+	Rollback(ctx context.Context) error
+}
+
+type Utility interface {
+	// AppendMessages appends messages to the wal.
+	// It it a helper utility function to append messages to the wal.
+	// If the messages is belong to one vchannel, it will be sent as a transaction.
+	// Otherwise, it will be sent as individual messages.
+	// !!! This function do not promise the atomicity and deliver order of the messages appending.
+	// TODO: Remove after we support cross-wal txn.
+	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
@@ -78,7 +79,10 @@ func TestOpenerAdaptor(t *testing.T) {
 			assert.NotNil(t, wal)
 
 			for {
-				msgID, err := wal.Append(context.Background(), nil)
+				msg := mock_message.NewMockMutableMessage(t)
+				msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
+
+				msgID, err := wal.Append(context.Background(), msg)
 				time.Sleep(time.Millisecond * 10)
 				if err != nil {
 					assert.Nil(t, msgID)

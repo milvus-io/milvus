@@ -208,6 +208,34 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 	return pm.CollectAllCanBeSealedAndClear()
 }
 
+// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick.
+func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collectionInfos[collectionID]
+	if !ok {
+		m.logger.Warn("collection not exists when Flush in segment assignment service", zap.Int64("collectionID", collectionID))
+		return nil, errors.New("collection not found")
+	}
+
+	sealedSegments := make([]*segmentAllocManager, 0)
+	// collect all partitions
+	for _, partition := range collectionInfo.Partitions {
+		// Seal all segments and fence assign to the partition manager.
+		pm, ok := m.managers.Get(partition.PartitionId)
+		if !ok {
+			m.logger.Warn("partition not found when Flush in segment assignment service, it's may be a bug in system",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partition.PartitionId))
+			return nil, errors.New("partition not found")
+		}
+		newSealedSegments := pm.SealAllSegmentsAndFenceUntil(timetick)
+		sealedSegments = append(sealedSegments, newSealedSegments...)
+	}
+	return sealedSegments, nil
+}
+
 // Range ranges the partition managers.
 func (m *partitionSegmentManagers) Range(f func(pm *partitionSegmentManager)) {
 	m.managers.Range(func(_ int64, pm *partitionSegmentManager) bool {

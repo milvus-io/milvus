@@ -39,9 +39,11 @@ import (
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/storage"
 	streamingnodeserver "github.com/milvus-io/milvus/internal/streamingnode/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
@@ -75,28 +77,35 @@ type Server struct {
 	lis        net.Listener
 
 	// component client
-	etcdCli   *clientv3.Client
-	tikvCli   *txnkv.Client
-	rootCoord types.RootCoordClient
-	dataCoord types.DataCoordClient
+	etcdCli      *clientv3.Client
+	tikvCli      *txnkv.Client
+	rootCoord    types.RootCoordClient
+	dataCoord    types.DataCoordClient
+	chunkManager storage.ChunkManager
+	f            dependency.Factory
 }
 
 // NewServer create a new StreamingNode server.
-func NewServer() (*Server, error) {
+func NewServer(f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
 		grpcServerChan: make(chan struct{}),
+		f:              f,
 	}, nil
 }
 
 // Run runs the server.
 func (s *Server) Run() error {
-	if err := s.init(); err != nil {
+	// TODO: We should set a timeout for the process startup.
+	// But currently, we don't implement.
+	ctx := context.Background()
+
+	if err := s.init(ctx); err != nil {
 		return err
 	}
 	log.Info("streamingnode init done ...")
 
-	if err := s.start(); err != nil {
+	if err := s.start(ctx); err != nil {
 		return err
 	}
 	log.Info("streamingnode start done ...")
@@ -156,7 +165,7 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 	return s.streamingnode.Health(ctx)
 }
 
-func (s *Server) init() (err error) {
+func (s *Server) init(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			log.Error("StreamingNode init failed", zap.Error(err))
@@ -174,13 +183,16 @@ func (s *Server) init() (err error) {
 	if err := s.allocateAddress(); err != nil {
 		return err
 	}
-	if err := s.initSession(); err != nil {
+	if err := s.initSession(ctx); err != nil {
 		return err
 	}
-	if err := s.initRootCoord(); err != nil {
+	if err := s.initRootCoord(ctx); err != nil {
 		return err
 	}
-	if err := s.initDataCoord(); err != nil {
+	if err := s.initDataCoord(ctx); err != nil {
+		return err
+	}
+	if err := s.initChunkManager(ctx); err != nil {
 		return err
 	}
 	s.initGRPCServer()
@@ -193,14 +205,15 @@ func (s *Server) init() (err error) {
 		WithDataCoordClient(s.dataCoord).
 		WithSession(s.session).
 		WithMetaKV(s.metaKV).
+		WithChunkManager(s.chunkManager).
 		Build()
-	if err := s.streamingnode.Init(context.Background()); err != nil {
+	if err := s.streamingnode.Init(ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode service init failed")
 	}
 	return nil
 }
 
-func (s *Server) start() (err error) {
+func (s *Server) start(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			log.Error("StreamingNode start failed", zap.Error(err))
@@ -213,7 +226,7 @@ func (s *Server) start() (err error) {
 	s.streamingnode.Start()
 
 	// Start grpc server.
-	if err := s.startGPRCServer(); err != nil {
+	if err := s.startGPRCServer(ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode start gRPC server fail")
 	}
 
@@ -222,8 +235,8 @@ func (s *Server) start() (err error) {
 	return nil
 }
 
-func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(context.Background())
+func (s *Server) initSession(ctx context.Context) error {
+	s.session = sessionutil.NewSession(ctx)
 	if s.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
@@ -260,33 +273,44 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initRootCoord() (err error) {
+func (s *Server) initRootCoord(ctx context.Context) (err error) {
 	log.Info("StreamingNode connect to rootCoord...")
-	s.rootCoord, err = rcc.NewClient(context.Background())
+	s.rootCoord, err = rcc.NewClient(ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
 	}
 
 	log.Info("StreamingNode try to wait for RootCoord ready")
-	err = componentutil.WaitForComponentHealthy(context.Background(), s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
 	}
 	return nil
 }
 
-func (s *Server) initDataCoord() (err error) {
+func (s *Server) initDataCoord(ctx context.Context) (err error) {
 	log.Info("StreamingNode connect to dataCoord...")
-	s.dataCoord, err = dcc.NewClient(context.Background())
+	s.dataCoord, err = dcc.NewClient(ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
 	}
 
 	log.Info("StreamingNode try to wait for DataCoord ready")
-	err = componentutil.WaitForComponentHealthy(context.Background(), s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
 	}
+	return nil
+}
+
+func (s *Server) initChunkManager(ctx context.Context) (err error) {
+	log.Info("StreamingNode init chunk manager...")
+	s.f.Init(paramtable.Get())
+	manager, err := s.f.NewPersistentStorageChunkManager(ctx)
+	if err != nil {
+		return errors.Wrap(err, "StreamingNode try to new chunk manager failed")
+	}
+	s.chunkManager = manager
 	return nil
 }
 
@@ -357,7 +381,7 @@ func (s *Server) getAddress() (string, error) {
 }
 
 // startGRPCServer starts the grpc server.
-func (s *Server) startGPRCServer() error {
+func (s *Server) startGPRCServer(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(s.grpcServerChan)
@@ -372,7 +396,7 @@ func (s *Server) startGPRCServer() error {
 			}
 		}
 	}()
-	funcutil.CheckGrpcReady(context.Background(), errCh)
+	funcutil.CheckGrpcReady(ctx, errCh)
 	return <-errCh
 }
 

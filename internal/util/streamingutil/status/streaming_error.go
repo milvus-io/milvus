@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/redact"
 
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 var _ error = (*StreamingError)(nil)
@@ -57,6 +58,11 @@ func NewInvalidRequestSeq(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_REQUEST_SEQ, format, args...)
 }
 
+// NewChannelFenced creates a new StreamingError with code STREAMING_CODE_CHANNEL_FENCED.
+func NewChannelFenced(channel string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED, "%s fenced", channel)
+}
+
 // NewChannelNotExist creates a new StreamingError with code STREAMING_CODE_CHANNEL_NOT_EXIST.
 func NewChannelNotExist(channel string) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST, "%s not exist", channel)
@@ -80,6 +86,16 @@ func NewInner(format string, args ...interface{}) *StreamingError {
 // NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
 func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
+}
+
+// NewTransactionExpired creates a new StreamingError with code STREAMING_CODE_TRANSACTION_EXPIRED.
+func NewTransactionExpired(expiredAt uint64, current uint64) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, "transaction expired at %d, current %d", expiredAt, current)
+}
+
+// NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.
+func NewInvalidTransactionState(operation string, expectState message.TxnState, currentState message.TxnState) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, "invalid transaction state for operation %s, expect %s, current %s", operation, expectState, currentState)
 }
 
 // New creates a new StreamingError with the given code and cause.

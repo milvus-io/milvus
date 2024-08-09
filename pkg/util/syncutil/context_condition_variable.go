@@ -33,6 +33,15 @@ func (cv *ContextCond) LockAndBroadcast() {
 	}
 }
 
+// UnsafeBroadcast performs a broadcast without locking.
+// !!! Must be called with the lock held !!!
+func (cv *ContextCond) UnsafeBroadcast() {
+	if cv.ch != nil {
+		close(cv.ch)
+		cv.ch = nil
+	}
+}
+
 // Wait waits for a broadcast or context timeout.
 // It blocks until either a broadcast is received or the context is canceled or times out.
 // Returns an error if the context is canceled or times out.

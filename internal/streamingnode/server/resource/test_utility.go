@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
+	sinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 )
 
 // InitForTest initializes the singleton of resources for test.
@@ -26,5 +27,6 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
 	r.segmentAssignStatsManager = stats.NewStatsManager()
-	r.segmentSealedInspector = inspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
+	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
+	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 }

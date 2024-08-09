@@ -31,7 +31,7 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 type interceptorBuilder struct{}
 
 // Build implements Builder.
-func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.BasicInterceptor {
+func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	interceptor := &ddlAppendInterceptor{
 		wal: param.WAL,
 	}

@@ -22,7 +22,7 @@ func TestChainInterceptor(t *testing.T) {
 func TestChainReady(t *testing.T) {
 	count := 5
 	channels := make([]chan struct{}, 0, count)
-	ips := make([]interceptors.BasicInterceptor, 0, count)
+	ips := make([]interceptors.Interceptor, 0, count)
 	for i := 0; i < count; i++ {
 		ch := make(chan struct{})
 		channels = append(channels, ch)
@@ -79,7 +79,7 @@ func testChainInterceptor(t *testing.T, count int) {
 	}
 
 	appendInterceptorRecords := make([]record, 0, count)
-	ips := make([]interceptors.BasicInterceptor, 0, count)
+	ips := make([]interceptors.Interceptor, 0, count)
 	for i := 0; i < count; i++ {
 		j := i
 		appendInterceptorRecords = append(appendInterceptorRecords, record{})

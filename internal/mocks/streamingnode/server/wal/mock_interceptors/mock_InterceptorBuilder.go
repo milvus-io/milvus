@@ -21,15 +21,15 @@ func (_m *MockInterceptorBuilder) EXPECT() *MockInterceptorBuilder_Expecter {
 }
 
 // Build provides a mock function with given fields: param
-func (_m *MockInterceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.BasicInterceptor {
+func (_m *MockInterceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	ret := _m.Called(param)
 
-	var r0 interceptors.BasicInterceptor
-	if rf, ok := ret.Get(0).(func(interceptors.InterceptorBuildParam) interceptors.BasicInterceptor); ok {
+	var r0 interceptors.Interceptor
+	if rf, ok := ret.Get(0).(func(interceptors.InterceptorBuildParam) interceptors.Interceptor); ok {
 		r0 = rf(param)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interceptors.BasicInterceptor)
+			r0 = ret.Get(0).(interceptors.Interceptor)
 		}
 	}
 
@@ -54,12 +54,12 @@ func (_c *MockInterceptorBuilder_Build_Call) Run(run func(param interceptors.Int
 	return _c
 }
 
-func (_c *MockInterceptorBuilder_Build_Call) Return(_a0 interceptors.BasicInterceptor) *MockInterceptorBuilder_Build_Call {
+func (_c *MockInterceptorBuilder_Build_Call) Return(_a0 interceptors.Interceptor) *MockInterceptorBuilder_Build_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockInterceptorBuilder_Build_Call) RunAndReturn(run func(interceptors.InterceptorBuildParam) interceptors.BasicInterceptor) *MockInterceptorBuilder_Build_Call {
+func (_c *MockInterceptorBuilder_Build_Call) RunAndReturn(run func(interceptors.InterceptorBuildParam) interceptors.Interceptor) *MockInterceptorBuilder_Build_Call {
 	_c.Call.Return(run)
 	return _c
 }

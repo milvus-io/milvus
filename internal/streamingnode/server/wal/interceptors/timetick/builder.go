@@ -1,12 +1,9 @@
 package timetick
 
 import (
-	"context"
-	"time"
-
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 )
 
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
@@ -22,20 +19,13 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 type interceptorBuilder struct{}
 
 // Build implements Builder.
-func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.BasicInterceptor {
-	ctx, cancel := context.WithCancel(context.Background())
-	interceptor := &timeTickAppendInterceptor{
-		ctx:        ctx,
-		cancel:     cancel,
-		ready:      make(chan struct{}),
-		ackManager: ack.NewAckManager(),
-		ackDetails: &ackDetails{},
-		sourceID:   paramtable.GetNodeID(),
+func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
+	operator := newTimeTickSyncOperator(param)
+	// initialize operation can be async to avoid block the build operation.
+	go operator.initialize()
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+	return &timeTickAppendInterceptor{
+		operator:   operator,
+		txnManager: txn.NewTxnManager(),
 	}
-	go interceptor.executeSyncTimeTick(
-		// TODO: move the configuration to streamingnode.
-		paramtable.Get().ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond),
-		param,
-	)
-	return interceptor
 }

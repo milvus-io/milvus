@@ -9,6 +9,8 @@ import (
 
 var _ Producer = (*producerImpl)(nil)
 
+type ProduceResult = types.AppendResult
+
 // Producer is the interface that wraps the basic produce method on grpc stream.
 // Producer is work on a single stream on grpc,
 // so Producer cannot recover from failure because of the stream is broken.
@@ -17,7 +19,8 @@ type Producer interface {
 	Assignment() types.PChannelInfoAssigned
 
 	// Produce sends the produce message to server.
-	Produce(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
+	// TODO: Support Batch produce here.
+	Produce(ctx context.Context, msg message.MutableMessage) (*ProduceResult, error)
 
 	// Check if a producer is available.
 	IsAvailable() bool

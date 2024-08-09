@@ -25,33 +25,28 @@ type InterceptorBuildParam struct {
 type InterceptorBuilder interface {
 	// Build build a interceptor with wal that interceptor will work on.
 	// the wal object will be sent to the interceptor builder when the wal is constructed with all interceptors.
-	Build(param InterceptorBuildParam) BasicInterceptor
-}
-
-type BasicInterceptor interface {
-	// Close the interceptor release the resources.
-	Close()
+	Build(param InterceptorBuildParam) Interceptor
 }
 
 type Interceptor interface {
-	AppendInterceptor
-
-	BasicInterceptor
-}
-
-// AppendInterceptor is the interceptor for Append functions.
-// All wal extra operations should be done by these function, such as
-// 1. time tick setup.
-// 2. unique primary key filter and build.
-// 3. index builder.
-// 4. cache sync up.
-// AppendInterceptor should be lazy initialized and fast execution.
-type AppendInterceptor interface {
+	// AppendInterceptor is the interceptor for Append functions.
+	// All wal extra operations should be done by these function, such as
+	// 1. time tick setup.
+	// 2. unique primary key filter and build.
+	// 3. index builder.
+	// 4. cache sync up.
+	// AppendInterceptor should be lazy initialized and fast execution.
 	// Execute the append operation with interceptor.
 	DoAppend(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error)
+
+	// Close the interceptor release all the resources.
+	Close()
 }
 
-type InterceptorReady interface {
+// Some interceptor may need to wait for some resource to be ready or recovery process.
+type InterceptorWithReady interface {
+	Interceptor
+
 	// Ready check if interceptor is ready.
 	// Close of Interceptor would not notify the ready (closed interceptor is not ready).
 	// So always apply timeout when waiting for ready.
@@ -62,9 +57,11 @@ type InterceptorReady interface {
 	Ready() <-chan struct{}
 }
 
-// Some interceptor may need to wait for some resource to be ready or recovery process.
-type InterceptorWithReady interface {
+// Some interceptor may need to perform a graceful close operation.
+type InterceptorWithGracefulClose interface {
 	Interceptor
 
-	InterceptorReady
+	// GracefulClose will be called when the wal begin to close.
+	// The interceptor can do some operations before the wal rejects all incoming append operations.
+	GracefulClose()
 }
