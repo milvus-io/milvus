@@ -351,9 +351,9 @@ class SegmentExpr : public Expr {
             for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
                 const Index& index =
                     segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                // 1, index support regex query, then index handles the query;
+                // 1, index support pattern match, then index handles the query;
                 // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-                if (!index.SupportRegexQuery() && !index.HasRawData()) {
+                if (!index.SupportPatternMatch() && !index.HasRawData()) {
                     return false;
                 }
                 // all chunks have same index.
