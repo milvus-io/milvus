@@ -458,7 +458,7 @@ func (_c *MockBroker_GetRecoveryInfoV2_Call) RunAndReturn(run func(context.Conte
 }
 
 // GetSegmentInfo provides a mock function with given fields: ctx, segmentID
-func (_m *MockBroker) GetSegmentInfo(ctx context.Context, segmentID ...int64) (*datapb.GetSegmentInfoResponse, error) {
+func (_m *MockBroker) GetSegmentInfo(ctx context.Context, segmentID ...int64) ([]*datapb.SegmentInfo, error) {
 	_va := make([]interface{}, len(segmentID))
 	for _i := range segmentID {
 		_va[_i] = segmentID[_i]
@@ -468,16 +468,16 @@ func (_m *MockBroker) GetSegmentInfo(ctx context.Context, segmentID ...int64) (*
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
-	var r0 *datapb.GetSegmentInfoResponse
+	var r0 []*datapb.SegmentInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, ...int64) (*datapb.GetSegmentInfoResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) ([]*datapb.SegmentInfo, error)); ok {
 		return rf(ctx, segmentID...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, ...int64) *datapb.GetSegmentInfoResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) []*datapb.SegmentInfo); ok {
 		r0 = rf(ctx, segmentID...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.GetSegmentInfoResponse)
+			r0 = ret.Get(0).([]*datapb.SegmentInfo)
 		}
 	}
 
@@ -516,12 +516,12 @@ func (_c *MockBroker_GetSegmentInfo_Call) Run(run func(ctx context.Context, segm
 	return _c
 }
 
-func (_c *MockBroker_GetSegmentInfo_Call) Return(_a0 *datapb.GetSegmentInfoResponse, _a1 error) *MockBroker_GetSegmentInfo_Call {
+func (_c *MockBroker_GetSegmentInfo_Call) Return(_a0 []*datapb.SegmentInfo, _a1 error) *MockBroker_GetSegmentInfo_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockBroker_GetSegmentInfo_Call) RunAndReturn(run func(context.Context, ...int64) (*datapb.GetSegmentInfoResponse, error)) *MockBroker_GetSegmentInfo_Call {
+func (_c *MockBroker_GetSegmentInfo_Call) RunAndReturn(run func(context.Context, ...int64) ([]*datapb.SegmentInfo, error)) *MockBroker_GetSegmentInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

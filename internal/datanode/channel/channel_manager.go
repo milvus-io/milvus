@@ -410,6 +410,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		defer finishWaiter.Done()
 		fg, err := r.watchFunc(ctx, r.pipelineParams, info, tickler)
 		if err != nil {
+			log.Warn("failed to watch channel", zap.Error(err))
 			opState.state = datapb.ChannelWatchState_WatchFailure
 		} else {
 			opState.state = datapb.ChannelWatchState_WatchSuccess
