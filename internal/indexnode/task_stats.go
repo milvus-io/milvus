@@ -24,8 +24,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/common"
-
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -38,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storage/io"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	_ "github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -460,7 +459,7 @@ func (st *statsTask) isExpiredEntity(ts typeutil.Timestamp) bool {
 	}
 
 	entityT, _ := tsoutil.ParseTS(ts)
-	nowT, _ := tsoutil.ParseTS(uint64(now))
+	nowT, _ := tsoutil.ParseTS(now)
 
 	return entityT.Add(time.Duration(st.req.GetCollectionTtl())).Before(nowT)
 }
@@ -550,7 +549,8 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	partitionID int64,
 	segmentID int64,
 	version int64,
-	insertBinlogs []*datapb.FieldBinlog) ([]*datapb.FieldStatsLog, error) {
+	insertBinlogs []*datapb.FieldBinlog,
+) ([]*datapb.FieldStatsLog, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),

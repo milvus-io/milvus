@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -140,6 +141,24 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Equal(s.taskID, st.GetTaskID())
 
+	s.Run("queue time", func() {
+		t := time.Now()
+		st.SetQueueTime(t)
+		s.Equal(t, st.GetQueueTime())
+	})
+
+	s.Run("start time", func() {
+		t := time.Now()
+		st.SetStartTime(t)
+		s.Equal(t, st.GetStartTime())
+	})
+
+	s.Run("end time", func() {
+		t := time.Now()
+		st.SetEndTime(t)
+		s.Equal(t, st.GetEndTime())
+	})
+
 	s.Run("CheckTaskHealthy", func() {
 		s.True(st.CheckTaskHealthy(s.mt))
 
@@ -169,6 +188,21 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
 			s.Error(st.UpdateVersion(context.Background(), s.mt))
+		})
+	})
+
+	s.Run("UpdateMetaBuildingState", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+
+		s.Run("normal case", func() {
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
+			s.NoError(st.UpdateMetaBuildingState(1, s.mt))
+		})
+
+		s.Run("update error", func() {
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
+			s.Error(st.UpdateMetaBuildingState(1, s.mt))
 		})
 	})
 
