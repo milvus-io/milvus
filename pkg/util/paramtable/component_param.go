@@ -208,7 +208,6 @@ type commonConfig struct {
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
 	DataCoordSubName      ParamItem `refreshable:"false"`
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
-	DataCoordTicklePath   ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
@@ -398,14 +397,6 @@ func (p *commonConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.DataCoordWatchSubPath.Init(base.mgr)
-
-	p.DataCoordTicklePath = ParamItem{
-		Key:          "msgChannel.subNamePrefix.dataCoordWatchSubPath",
-		Version:      "2.2.3",
-		DefaultValue: "tickle",
-		PanicIfEmpty: true,
-	}
-	p.DataCoordTicklePath.Init(base.mgr)
 
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
