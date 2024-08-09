@@ -30,6 +30,18 @@
 namespace milvus {
 namespace index {
 
+struct IndexInfo {
+    int64_t build_index_id_;
+    int64_t index_version_;
+    int64_t partition_id_;
+    int64_t segment_id_;
+};
+
+struct BitmapInfo {
+    size_t offset_;
+    size_t size_;
+};
+
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,
@@ -140,6 +152,10 @@ class BitmapIndex : public ScalarIndex<T> {
  public:
     int64_t
     Cardinality() {
+        if (is_mmap_) {
+            return bitmap_info_map_.size();
+        }
+
         if (build_mode_ == BitmapIndexBuildMode::ROARING) {
             return data_.size();
         } else {
@@ -167,6 +183,9 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeIndexMeta(const uint8_t* data_ptr, size_t data_size);
 
     void
+    DeserializeIndexDataForMmap(const char* data_ptr, size_t index_length);
+
+    void
     DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
 
     void
@@ -185,6 +204,9 @@ class BitmapIndex : public ScalarIndex<T> {
     RangeForBitset(T value, OpType op);
 
     TargetBitmap
+    RangeForMmap(T value, OpType op);
+
+    TargetBitmap
     RangeForRoaring(T lower_bound_value,
                     bool lb_inclusive,
                     T upper_bound_value,
@@ -196,12 +218,35 @@ class BitmapIndex : public ScalarIndex<T> {
                    T upper_bound_value,
                    bool ub_inclusive);
 
+    TargetBitmap
+    RangeForMmap(T lower_bound_value,
+                 bool lb_inclusive,
+                 T upper_bound_value,
+                 bool ub_inclusive);
+
+    void
+    ExtractIndexInfo(const Config& config, IndexInfo& index_info);
+
+    void
+    MMapIndexData(const std::string& filepath,
+                  const uint8_t* data,
+                  size_t data_size,
+                  size_t index_length);
+
+    roaring::Roaring
+    AccessBitmap(const BitmapInfo& info) const {
+        return roaring::Roaring::read(mmap_data_ + info.offset_, info.size_);
+    }
+
  public:
     bool is_built_{false};
-    Config config_;
+    IndexInfo index_info_;
     BitmapIndexBuildMode build_mode_;
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
+    bool is_mmap_{false};
+    char* mmap_data_;
+    std::map<T, BitmapInfo> bitmap_info_map_;
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;

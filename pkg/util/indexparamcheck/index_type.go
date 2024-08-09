@@ -60,7 +60,8 @@ func IsMmapSupported(indexType IndexType) bool {
 		indexType == IndexHNSW ||
 		indexType == IndexScaNN ||
 		indexType == IndexSparseInverted ||
-		indexType == IndexSparseWand
+		indexType == IndexSparseWand ||
+		indexType == IndexBitmap
 }
 
 func IsDiskIndex(indexType IndexType) bool {
