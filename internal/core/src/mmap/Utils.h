@@ -150,6 +150,7 @@ WriteFieldData(File& file,
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
                 for (size_t i = 0; i < data->get_num_rows(); ++i) {
+                    indices.push_back(total_written);
                     auto vec =
                         static_cast<const knowhere::sparse::SparseRow<float>*>(
                             data->RawValue(i));
