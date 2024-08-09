@@ -228,6 +228,8 @@ type alterDatabaseTask struct {
 	ctx       context.Context
 	rootCoord types.RootCoordClient
 	result    *commonpb.Status
+
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *alterDatabaseTask) TraceCtx() context.Context {
@@ -291,6 +293,7 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterDatabaseRequest)
 	t.result = ret
 	return nil
 }

@@ -420,6 +420,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		Condition:            NewTaskCondition(ctx),
 		AlterDatabaseRequest: request,
 		rootCoord:            node.rootCoord,
+		replicateMsgStream:   node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -4865,6 +4866,9 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
+	}
 	return result, err
 }
 
@@ -4933,6 +4937,9 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
+	}
 	return result, err
 }
 
@@ -4958,6 +4965,9 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 		log.Error("delete credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, err
 }
@@ -5014,6 +5024,9 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 		log.Warn("fail to create role", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
+	}
 	return result, nil
 }
 
@@ -5042,6 +5055,9 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
+	}
 	return result, nil
 }
 
@@ -5066,6 +5082,9 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	if err != nil {
 		log.Warn("fail to operate user role", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5201,6 +5220,9 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 				return result, nil
 			}
 		}
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
