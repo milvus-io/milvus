@@ -130,7 +130,7 @@ FailureCStatus(const std::exception* ex) {
 
 #define AssertInfo(expr, info, args...)                              \
     do {                                                             \
-        auto _expr_res = bool(expr);                                 \
+        auto _expr_res = static_cast<bool>(expr);                    \
         /* call func only when needed */                             \
         if (!_expr_res) {                                            \
             milvus::impl::EasyAssertInfo(_expr_res,                  \
