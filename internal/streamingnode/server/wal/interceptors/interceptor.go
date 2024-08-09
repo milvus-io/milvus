@@ -57,14 +57,6 @@ type InterceptorWithReady interface {
 	Ready() <-chan struct{}
 }
 
-// Some interceptor may need to unwrap the message id from the append result.
-type InterceptorWithUnwrapMessageID interface {
-	Interceptor
-
-	// UnwrapMessageID the message id from the append result.
-	UnwrapMessageID(*wal.AppendResult)
-}
-
 // Some interceptor may need to perform a graceful close operation.
 type InterceptorWithGracefulClose interface {
 	Interceptor

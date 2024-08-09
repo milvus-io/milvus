@@ -54,13 +54,14 @@ type walAccesserImpl struct {
 }
 
 // Append writes a record to the log.
-func (w *walAccesserImpl) Append(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+func (w *walAccesserImpl) Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertNoSystemMessage(msg)
 	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
 		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
 	}
 	defer w.lifetime.Done()
 
+	msg = applyOpt(msg, opts...)
 	return w.appendToWAL(ctx, msg)
 }
 

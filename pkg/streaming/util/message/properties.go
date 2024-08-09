@@ -6,6 +6,7 @@ const (
 	messageWALTerm                          = "_wt"  // wal term of a message, always increase by MessageID order, should never rollback.
 	messageTypeKey                          = "_t"   // message type key.
 	messageTimeTick                         = "_tt"  // message time tick.
+	messageBarrierTimeTick                  = "_btt" // message barrier time tick.
 	messageLastConfirmed                    = "_lc"  // message last confirmed message id.
 	messageLastConfirmedIDSameWithMessageID = "_lcs" // message last confirmed message id is the same with message id.
 	messageVChannel                         = "_vc"  // message virtual channel.

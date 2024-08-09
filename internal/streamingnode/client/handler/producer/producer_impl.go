@@ -298,6 +298,7 @@ func (p *producerImpl) recvLoop() (err error) {
 						MessageID: msgID,
 						TimeTick:  produceResp.Result.GetTimetick(),
 						TxnCtx:    message.NewTxnContextFromProto(produceResp.Result.GetTxnContext()),
+						Extra:     produceResp.Result.GetExtra(),
 					},
 				}
 			case *streamingpb.ProduceMessageResponse_Error:

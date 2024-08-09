@@ -31,6 +31,12 @@ func WAL() WALAccesser {
 	return singleton
 }
 
+// AppendOption is the option for append operation.
+type AppendOption struct {
+	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
+	// Must be allocated from tso, otherwise undetermined behaviour.
+}
+
 type TxnOption struct {
 	// VChannel is the target vchannel to write.
 	// TODO: support cross-wal txn in future.
@@ -74,7 +80,7 @@ type WALAccesser interface {
 	Txn(ctx context.Context, opts TxnOption) (Txn, error)
 
 	// Append writes a records to the log.
-	Append(ctx context.Context, msgs message.MutableMessage) (*types.AppendResult, error)
+	Append(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
@@ -86,7 +92,7 @@ type WALAccesser interface {
 // Txn is the interface for writing transaction into the wal.
 type Txn interface {
 	// Append writes a record to the log.
-	Append(ctx context.Context, msg message.MutableMessage) error
+	Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) error
 
 	// Commit commits the transaction.
 	// Commit and Rollback can be only call once, and not concurrent safe with append operation.

@@ -52,6 +52,15 @@ func (m *messageImpl) EstimateSize() int {
 	return len(m.payload) + m.properties.EstimateSize()
 }
 
+// WithBarrierTimeTick sets the barrier time tick of current message.
+func (m *messageImpl) WithBarrierTimeTick(tt uint64) MutableMessage {
+	if m.properties.Exist(messageBarrierTimeTick) {
+		panic("barrier time tick already set in properties of message")
+	}
+	m.properties.Set(messageBarrierTimeTick, EncodeUint64(tt))
+	return m
+}
+
 // WithWALTerm sets the wal term of current message.
 func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 	if m.properties.Exist(messageWALTerm) {
@@ -138,6 +147,19 @@ func (m *messageImpl) TimeTick() uint64 {
 	tt, err := DecodeUint64(value)
 	if err != nil {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty timetick %s in properties of message", value))
+	}
+	return tt
+}
+
+// BarrierTimeTick returns the barrier time tick of current message.
+func (m *messageImpl) BarrierTimeTick() uint64 {
+	value, ok := m.properties.Get(messageBarrierTimeTick)
+	if !ok {
+		return 0
+	}
+	tt, err := DecodeUint64(value)
+	if err != nil {
+		panic(fmt.Sprintf("there's a bug in the message codes, dirty barrier timetick %s in properties of message", value))
 	}
 	return tt
 }

@@ -20,6 +20,47 @@ func (_m *MockMutableMessage) EXPECT() *MockMutableMessage_Expecter {
 	return &MockMutableMessage_Expecter{mock: &_m.Mock}
 }
 
+// BarrierTimeTick provides a mock function with given fields:
+func (_m *MockMutableMessage) BarrierTimeTick() uint64 {
+	ret := _m.Called()
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_BarrierTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BarrierTimeTick'
+type MockMutableMessage_BarrierTimeTick_Call struct {
+	*mock.Call
+}
+
+// BarrierTimeTick is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) BarrierTimeTick() *MockMutableMessage_BarrierTimeTick_Call {
+	return &MockMutableMessage_BarrierTimeTick_Call{Call: _e.mock.On("BarrierTimeTick")}
+}
+
+func (_c *MockMutableMessage_BarrierTimeTick_Call) Run(run func()) *MockMutableMessage_BarrierTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_BarrierTimeTick_Call) Return(_a0 uint64) *MockMutableMessage_BarrierTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_BarrierTimeTick_Call) RunAndReturn(run func() uint64) *MockMutableMessage_BarrierTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // EstimateSize provides a mock function with given fields:
 func (_m *MockMutableMessage) EstimateSize() int {
 	ret := _m.Called()
@@ -435,6 +476,50 @@ func (_c *MockMutableMessage_Version_Call) Return(_a0 message.Version) *MockMuta
 }
 
 func (_c *MockMutableMessage_Version_Call) RunAndReturn(run func() message.Version) *MockMutableMessage_Version_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithBarrierTimeTick provides a mock function with given fields: tt
+func (_m *MockMutableMessage) WithBarrierTimeTick(tt uint64) message.MutableMessage {
+	ret := _m.Called(tt)
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func(uint64) message.MutableMessage); ok {
+		r0 = rf(tt)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithBarrierTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithBarrierTimeTick'
+type MockMutableMessage_WithBarrierTimeTick_Call struct {
+	*mock.Call
+}
+
+// WithBarrierTimeTick is a helper method to define mock.On call
+//   - tt uint64
+func (_e *MockMutableMessage_Expecter) WithBarrierTimeTick(tt interface{}) *MockMutableMessage_WithBarrierTimeTick_Call {
+	return &MockMutableMessage_WithBarrierTimeTick_Call{Call: _e.mock.On("WithBarrierTimeTick", tt)}
+}
+
+func (_c *MockMutableMessage_WithBarrierTimeTick_Call) Run(run func(tt uint64)) *MockMutableMessage_WithBarrierTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithBarrierTimeTick_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithBarrierTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithBarrierTimeTick_Call) RunAndReturn(run func(uint64) message.MutableMessage) *MockMutableMessage_WithBarrierTimeTick_Call {
 	_c.Call.Return(run)
 	return _c
 }

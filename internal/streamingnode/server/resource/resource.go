@@ -45,6 +45,8 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 func OptRootCoordClient(rootCoordClient types.RootCoordClient) optResourceInit {
 	return func(r *resourceImpl) {
 		r.rootCoordClient = rootCoordClient
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
 }
 
@@ -72,8 +74,6 @@ func Apply(opts ...optResourceInit) {
 
 // Done finish all initialization of resources.
 func Done() {
-	r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()

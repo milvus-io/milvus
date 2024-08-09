@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -91,14 +92,20 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	msg = msg.WithWALTerm(w.Channel().Term)
 
 	// Execute the interceptor and wal append.
+	var extraAppendResult utility.ExtraAppendResult
+	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg, w.inner.Append)
 	if err != nil {
 		return nil, err
 	}
 
 	// unwrap the messageID if needed.
-	r := &wal.AppendResult{MessageID: messageID}
-	w.interceptorBuildResult.UnwrapMessageIDFunc(r)
+	r := &wal.AppendResult{
+		MessageID: messageID,
+		TimeTick:  extraAppendResult.TimeTick,
+		TxnCtx:    extraAppendResult.TxnCtx,
+		Extra:     extraAppendResult.Extra,
+	}
 	return r, nil
 }
 
@@ -176,9 +183,8 @@ func (w *walAdaptorImpl) Close() {
 }
 
 type interceptorBuildResult struct {
-	Interceptor         interceptors.InterceptorWithReady
-	GracefulCloseFunc   gracefulCloseFunc
-	UnwrapMessageIDFunc unwrapMessageIDFunc
+	Interceptor       interceptors.InterceptorWithReady
+	GracefulCloseFunc gracefulCloseFunc
 }
 
 func (r interceptorBuildResult) Close() {
@@ -192,21 +198,8 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param intercep
 	for _, b := range builders {
 		builtIterceptors = append(builtIterceptors, b.Build(param))
 	}
-
-	unwrapMessageIDFuncs := make([]func(*wal.AppendResult), 0)
-	for _, i := range builtIterceptors {
-		if r, ok := i.(interceptors.InterceptorWithUnwrapMessageID); ok {
-			unwrapMessageIDFuncs = append(unwrapMessageIDFuncs, r.UnwrapMessageID)
-		}
-	}
-
 	return interceptorBuildResult{
 		Interceptor: interceptors.NewChainedInterceptor(builtIterceptors...),
-		UnwrapMessageIDFunc: func(result *wal.AppendResult) {
-			for _, f := range unwrapMessageIDFuncs {
-				f(result)
-			}
-		},
 		GracefulCloseFunc: func() {
 			for _, i := range builtIterceptors {
 				if c, ok := i.(interceptors.InterceptorWithGracefulClose); ok {

@@ -42,6 +42,10 @@ type BasicMessage interface {
 	// Otherwise, it will panic.
 	TimeTick() uint64
 
+	// BarrierTimeTick returns the barrier time tick of current message.
+	// 0 by default, no fence.
+	BarrierTimeTick() uint64
+
 	// TxnContext returns the transaction context of current message.
 	TxnContext() *TxnContext
 }
@@ -50,6 +54,12 @@ type BasicMessage interface {
 // Message can be modified before it is persistent by wal.
 type MutableMessage interface {
 	BasicMessage
+
+	// WithBarrierTimeTick sets the barrier time tick of current message.
+	// these time tick is used to promised the message will be sent after that time tick.
+	// and the message which timetick is less than it will never concurrent append with it.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithBarrierTimeTick(tt uint64) MutableMessage
 
 	// WithWALTerm sets the wal term of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.

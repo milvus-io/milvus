@@ -7,18 +7,15 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-var (
-	_ interceptors.InterceptorWithReady           = (*timeTickAppendInterceptor)(nil)
-	_ interceptors.InterceptorWithUnwrapMessageID = (*timeTickAppendInterceptor)(nil)
-)
+var _ interceptors.InterceptorWithReady = (*timeTickAppendInterceptor)(nil)
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {
@@ -37,9 +34,16 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
-		if acker, err = impl.operator.AckManager().Allocate(ctx); err != nil {
-			return nil, errors.Wrap(err, "allocate timestamp failed")
+		if msg.BarrierTimeTick() == 0 {
+			if acker, err = impl.operator.AckManager().Allocate(ctx); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp failed")
+			}
+		} else {
+			if acker, err = impl.operator.AckManager().AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
+			}
 		}
+
 		// Assign timestamp to message and call the append method.
 		msg = msg.
 			WithTimeTick(acker.Timestamp()).                  // message assigned with these timetick.
@@ -51,7 +55,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 				return
 			}
 			acker.Ack(
-				ack.OptMessageID(msgID.(wrappedMessageID).MessageID),
+				ack.OptMessageID(msgID),
 				ack.OptTxnSession(txnSession),
 			)
 		}()
@@ -104,13 +108,6 @@ func (impl *timeTickAppendInterceptor) GracefulClose() {
 func (impl *timeTickAppendInterceptor) Close() {
 	resource.Resource().TimeTickInspector().UnregisterSyncOperator(impl.operator)
 	impl.operator.Close()
-}
-
-func (impl *timeTickAppendInterceptor) UnwrapMessageID(r *wal.AppendResult) {
-	m := r.MessageID.(wrappedMessageID)
-	r.MessageID = m.MessageID
-	r.TimeTick = m.timetick
-	r.TxnCtx = m.txnContext
 }
 
 // handleBegin handle the begin transaction message.
@@ -194,15 +191,8 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 	if err != nil {
 		return nil, err
 	}
-	return wrappedMessageID{
-		MessageID:  msgID,
-		timetick:   msg.TimeTick(),
-		txnContext: msg.TxnContext(),
-	}, nil
-}
 
-type wrappedMessageID struct {
-	message.MessageID
-	timetick   uint64
-	txnContext *message.TxnContext
+	utility.AttachAppendResultTimeTick(ctx, msg.TimeTick())
+	utility.AttachAppendResultTxnContext(ctx, msg.TxnContext())
+	return msgID, nil
 }

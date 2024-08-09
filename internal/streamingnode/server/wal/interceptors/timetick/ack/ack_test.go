@@ -20,7 +20,7 @@ func TestAck(t *testing.T) {
 	rc := idalloc.NewMockRootCoordClient(t)
 	resource.InitForTest(t, resource.OptRootCoordClient(rc))
 
-	ackManager := NewAckManager(nil)
+	ackManager := NewAckManager(0, nil)
 
 	ackers := map[uint64]*Acker{}
 	for i := 0; i < 10; i++ {

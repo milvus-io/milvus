@@ -226,6 +226,7 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 				},
 				Timetick:   appendResult.TimeTick,
 				TxnContext: appendResult.TxnCtx.IntoProto(),
+				Extra:      appendResult.Extra,
 			},
 		}
 	}

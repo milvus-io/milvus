@@ -22,7 +22,7 @@ type txnImpl struct {
 }
 
 // Append writes records to the log.
-func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage) error {
+func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) error {
 	assertNoSystemMessage(msg)
 	assertIsDmlMessage(msg)
 
@@ -48,6 +48,7 @@ func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage) error 
 	// setup txn context and add to wal.
 	msg.WithTxnContext(*t.txnCtx)
 
+	applyOpt(msg, opts...)
 	_, err := t.appendToWAL(ctx, msg)
 	return err
 }

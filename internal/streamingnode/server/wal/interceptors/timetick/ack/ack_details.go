@@ -62,7 +62,10 @@ func (ad *AckDetails) IsNoPersistedMessage() bool {
 // LastAllAcknowledgedTimestamp returns the last timestamp which all timestamps before it have been acknowledged.
 // panic if no timestamp has been acknowledged.
 func (ad *AckDetails) LastAllAcknowledgedTimestamp() uint64 {
-	return ad.detail[len(ad.detail)-1].BeginTimestamp
+	if len(ad.detail) > 0 {
+		return ad.detail[len(ad.detail)-1].BeginTimestamp
+	}
+	return 0
 }
 
 // EarliestLastConfirmedMessageID returns the last confirmed message id.

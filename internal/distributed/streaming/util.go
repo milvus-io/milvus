@@ -188,3 +188,14 @@ func (a *AppendResponses) fillAllResponse(resp AppendResponse) {
 		a.Responses[i] = resp
 	}
 }
+
+// applyOpt applies the append options to the message.
+func applyOpt(msg message.MutableMessage, opts ...AppendOption) message.MutableMessage {
+	if len(opts) == 0 {
+		return nil
+	}
+	if opts[0].BarrierTimeTick > 0 {
+		msg = msg.WithBarrierTimeTick(opts[0].BarrierTimeTick)
+	}
+	return msg
+}

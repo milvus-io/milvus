@@ -6,36 +6,57 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 )
 
 // AckManager manages the timestampAck.
 type AckManager struct {
-	mu                    sync.Mutex
-	lastAllocatedTimeTick uint64
-	notAckHeap            typeutil.Heap[*Acker] // a minimum heap of timestampAck to search minimum allocated timestamp in list.
-	ackHeap               typeutil.Heap[*Acker] // a minimum heap of timestampAck to search minimum ack timestamp in list.
-	acknowledgedDetails   sortedDetails
-	lastConfirmedManager  *lastConfirmedManager
+	cond                  *syncutil.ContextCond
+	lastAllocatedTimeTick uint64                // The last allocated time tick, the latest timestamp allocated by the allocator.
+	lastConfirmedTimeTick uint64                // The last confirmed time tick, the message which time tick less than lastConfirmedTimeTick has been committed into wal.
+	notAckHeap            typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum allocated but not ack timestamp in list.
+	ackHeap               typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum ack timestamp in list.
+	// It is used to detect the concurrent operation to find the last confirmed message id.
+	acknowledgedDetails  sortedDetails         // All ack details which time tick less than lastConfirmedTimeTick will be temporarily kept here until sync operation happens.
+	lastConfirmedManager *lastConfirmedManager // The last confirmed message id manager.
 }
 
 // NewAckManager creates a new timestampAckHelper.
-func NewAckManager(lastConfirmedMessageID message.MessageID) *AckManager {
+func NewAckManager(
+	lastConfirmedTimeTick uint64,
+	lastConfirmedMessageID message.MessageID,
+) *AckManager {
 	return &AckManager{
-		mu:                    sync.Mutex{},
+		cond:                  syncutil.NewContextCond(&sync.Mutex{}),
 		lastAllocatedTimeTick: 0,
 		notAckHeap:            typeutil.NewHeap[*Acker](&ackersOrderByTimestamp{}),
 		ackHeap:               typeutil.NewHeap[*Acker](&ackersOrderByEndTimestamp{}),
+		lastConfirmedTimeTick: lastConfirmedTimeTick,
 		lastConfirmedManager:  newLastConfirmedManager(lastConfirmedMessageID),
 	}
+}
+
+// AllocateWithBarrier allocates a timestamp with a barrier.
+func (ta *AckManager) AllocateWithBarrier(ctx context.Context, barrierTimeTick uint64) (*Acker, error) {
+	// wait until the lastConfirmedTimeTick is greater than barrierTimeTick.
+	ta.cond.L.Lock()
+	if ta.lastConfirmedTimeTick <= barrierTimeTick {
+		if err := ta.cond.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	ta.cond.L.Unlock()
+
+	return ta.Allocate(ctx)
 }
 
 // Allocate allocates a timestamp.
 // Concurrent safe to call with Sync and Allocate.
 func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
 	// allocate one from underlying allocator first.
 	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
@@ -69,8 +90,9 @@ func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail,
 	}
 	tsWithAck.Ack(OptSync())
 
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
+
 	details := ta.acknowledgedDetails
 	ta.acknowledgedDetails = make(sortedDetails, 0, 5)
 	return details, nil
@@ -78,8 +100,8 @@ func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail,
 
 // ack marks the timestamp as acknowledged.
 func (ta *AckManager) ack(acker *Acker) {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
 	acker.detail.EndTimestamp = ta.lastAllocatedTimeTick
 	ta.ackHeap.Push(acker)
@@ -98,18 +120,21 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 		return
 	}
 
-	// update last confirmed message id.
-	lastConfirmedTimeTick := acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
+	// broadcast to notify the last confirmed timetick updated.
+	ta.cond.UnsafeBroadcast()
+
+	// update last confirmed time tick.
+	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
 
 	// pop all EndTimestamp is less than lastConfirmedTimeTick.
 	// The message which EndTimetick less than lastConfirmedTimeTick has all been commited into wal.
 	// So the MessageID of the messages is dense and continuous.
 	confirmedDetails := make(sortedDetails, 0, 5)
-	for ta.ackHeap.Len() > 0 && ta.ackHeap.Peek().detail.EndTimestamp < lastConfirmedTimeTick {
+	for ta.ackHeap.Len() > 0 && ta.ackHeap.Peek().detail.EndTimestamp < ta.lastConfirmedTimeTick {
 		ack := ta.ackHeap.Pop()
 		confirmedDetails = append(confirmedDetails, ack.ackDetail())
 	}
-	ta.lastConfirmedManager.AddConfirmedDetails(confirmedDetails, lastConfirmedTimeTick)
+	ta.lastConfirmedManager.AddConfirmedDetails(confirmedDetails, ta.lastConfirmedTimeTick)
 	// TODO: cache update operation is also performed here.
 
 	ta.acknowledgedDetails = append(ta.acknowledgedDetails, acknowledgedDetails...)

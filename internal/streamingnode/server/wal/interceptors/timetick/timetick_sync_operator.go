@@ -142,7 +142,7 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 			continue
 		}
 		// initialize ack manager.
-		impl.ackManager = ack.NewAckManager(msgID)
+		impl.ackManager = ack.NewAckManager(ts, msgID)
 		break
 	}
 	// interceptor is ready now.
