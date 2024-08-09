@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -233,15 +235,14 @@ func fillSubChannelRequest(
 		return nil
 	}
 
-	resp, err := broker.GetSegmentInfo(ctx, segmentIDs.Collect()...)
+	segmentInfos, err := broker.GetSegmentInfo(ctx, segmentIDs.Collect()...)
 	if err != nil {
 		return err
 	}
-	segmentInfos := make(map[int64]*datapb.SegmentInfo)
-	for _, info := range resp.GetInfos() {
-		segmentInfos[info.GetID()] = info
-	}
-	req.SegmentInfos = segmentInfos
+
+	req.SegmentInfos = lo.SliceToMap(segmentInfos, func(info *datapb.SegmentInfo) (int64, *datapb.SegmentInfo) {
+		return info.GetID(), info
+	})
 	return nil
 }
 

@@ -392,9 +392,9 @@ func (s *CoordinatorBrokerDataCoordSuite) TestSegmentInfo() {
 				}),
 			}, nil)
 
-		resp, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
+		infos, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
 		s.NoError(err)
-		s.ElementsMatch(segmentIDs, lo.Map(resp.GetInfos(), func(info *datapb.SegmentInfo, _ int) int64 {
+		s.ElementsMatch(segmentIDs, lo.Map(infos, func(info *datapb.SegmentInfo, _ int) int64 {
 			return info.GetID()
 		}))
 		s.resetMock()
