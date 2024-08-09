@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -31,6 +32,7 @@ func genTestData(clientInfo *commonpb.ClientInfo, identifier int64) []*TestData 
 		},
 		resp: &milvuspb.QueryResults{
 			CollectionName: "test1",
+			Status:         merr.Status(merr.WrapErrParameterInvalid("testA", "testB", "stack: 1\n 2\n")),
 		},
 		err: nil,
 	})
@@ -42,6 +44,7 @@ func genTestData(clientInfo *commonpb.ClientInfo, identifier int64) []*TestData 
 		},
 		resp: &milvuspb.SearchResults{
 			CollectionName: "test2",
+			Status:         merr.Status(nil),
 		},
 		err: nil,
 	})
@@ -52,6 +55,7 @@ func genTestData(clientInfo *commonpb.ClientInfo, identifier int64) []*TestData 
 		},
 		resp: &milvuspb.ConnectResponse{
 			Identifier: identifier,
+			Status:     merr.Status(nil),
 		},
 		err: nil,
 	})

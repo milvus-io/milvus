@@ -98,6 +98,11 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	result = Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
+	// replace line breaks
+	s.info.resp = merr.Status(fmt.Errorf("test error. stack: 1:\n 2:\n 3:\n"))
+	result = Get(s.info, "$error_msg")
+	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
+
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
 	result = Get(s.info, "$error_msg")
 	s.Equal("rpc error: code = Unavailable desc = mock", result[0])
