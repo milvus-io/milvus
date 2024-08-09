@@ -123,9 +123,6 @@ type Server struct {
 	enableActiveStandBy bool
 	activateFunc        func() error
 
-	nodeUpEventChan chan int64
-	notifyNodeUp    chan struct{}
-
 	// proxy client manager
 	proxyCreator       proxyutil.ProxyCreator
 	proxyWatcher       proxyutil.ProxyWatcherInterface
@@ -135,11 +132,9 @@ type Server struct {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:             ctx,
-		cancel:          cancel,
-		nodeUpEventChan: make(chan int64, 10240),
-		notifyNodeUp:    make(chan struct{}),
-		balancerMap:     make(map[string]balance.Balance),
+		ctx:         ctx,
+		cancel:      cancel,
+		balancerMap: make(map[string]balance.Balance),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -461,8 +456,7 @@ func (s *Server) startQueryCoord() error {
 		s.handleNodeUp(node.ServerID)
 	}
 
-	s.wg.Add(2)
-	go s.handleNodeUpLoop()
+	s.wg.Add(1)
 	go s.watchNodes(revision)
 
 	// check whether old node exist, if yes suspend auto balance until all old nodes down
@@ -685,11 +679,7 @@ func (s *Server) watchNodes(revision int64) {
 					Hostname: event.Session.HostName,
 					Version:  event.Session.Version,
 				}))
-				s.nodeUpEventChan <- nodeID
-				select {
-				case s.notifyNodeUp <- struct{}{}:
-				default:
-				}
+				s.handleNodeUp(nodeID)
 
 			case sessionutil.SessionUpdateEvent:
 				nodeID := event.Session.ServerID
@@ -709,49 +699,6 @@ func (s *Server) watchNodes(revision int64) {
 				s.handleNodeDown(nodeID)
 				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
-		}
-	}
-}
-
-func (s *Server) handleNodeUpLoop() {
-	defer s.wg.Done()
-	ticker := time.NewTicker(Params.QueryCoordCfg.CheckHealthInterval.GetAsDuration(time.Millisecond))
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.ctx.Done():
-			log.Info("handle node up loop exit due to context done")
-			return
-		case <-s.notifyNodeUp:
-			s.tryHandleNodeUp()
-		case <-ticker.C:
-			s.tryHandleNodeUp()
-		}
-	}
-}
-
-func (s *Server) tryHandleNodeUp() {
-	log := log.Ctx(s.ctx).WithRateGroup("qcv2.Server", 1, 60)
-	ctx, cancel := context.WithTimeout(s.ctx, Params.QueryCoordCfg.CheckHealthRPCTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-	reasons, err := s.checkNodeHealth(ctx)
-	if err != nil {
-		log.RatedWarn(10, "unhealthy node exist, node up will be delayed",
-			zap.Int("delayedNodeUpEvents", len(s.nodeUpEventChan)),
-			zap.Int("unhealthyNodeNum", len(reasons)),
-			zap.Strings("unhealthyReason", reasons))
-		return
-	}
-	for len(s.nodeUpEventChan) > 0 {
-		nodeID := <-s.nodeUpEventChan
-		if s.nodeMgr.Get(nodeID) != nil {
-			// only if all nodes are healthy, node up event will be handled
-			s.handleNodeUp(nodeID)
-			s.metricsCacheManager.InvalidateSystemInfoMetrics()
-			s.checkerController.Check()
-		} else {
-			log.Warn("node already down",
-				zap.Int64("nodeID", nodeID))
 		}
 	}
 }
