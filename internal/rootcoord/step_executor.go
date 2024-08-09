@@ -66,6 +66,8 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 		if !retry.IsRecoverable(err) {
 			if !skipLog {
 				log.Warn("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			} else {
+				log.RatedWarn(60, "failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
 			return nil
 		}
@@ -73,6 +75,8 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			s.steps = nil // let s can be collected.
 			if !skipLog {
 				log.Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			} else {
+				log.RatedWarn(60, "failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
 			return &stepStack{steps: steps}
 		}
