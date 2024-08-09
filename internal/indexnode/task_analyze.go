@@ -18,6 +18,7 @@ package indexnode
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -32,19 +34,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
+var _ task = (*analyzeTask)(nil)
+
 type analyzeTask struct {
 	ident  string
 	ctx    context.Context
 	cancel context.CancelFunc
-	req    *indexpb.AnalyzeRequest
+	req    *workerpb.AnalyzeRequest
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	node     *IndexNode
 	analyze  analyzecgowrapper.CodecAnalyze
+}
 
-	startTime int64
-	endTime   int64
+func newAnalyzeTask(ctx context.Context,
+	cancel context.CancelFunc,
+	req *workerpb.AnalyzeRequest,
+	node *IndexNode,
+) *analyzeTask {
+	return &analyzeTask{
+		ident:  fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:    ctx,
+		cancel: cancel,
+		req:    req,
+		node:   node,
+		tr:     timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+	}
 }
 
 func (at *analyzeTask) Ctx() context.Context {
@@ -58,7 +74,7 @@ func (at *analyzeTask) Name() string {
 func (at *analyzeTask) PreExecute(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 	log.Info("Begin to prepare analyze task")
 
@@ -70,7 +86,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	var err error
 
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 
 	log.Info("Begin to build analyze task")
@@ -148,7 +164,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 
 func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 	gc := func() {
 		if err := at.analyze.Delete(); err != nil {
@@ -164,7 +180,6 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	}
 	log.Info("analyze result", zap.String("centroidsFile", centroidsFile))
 
-	at.endTime = time.Now().UnixMicro()
 	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
 		centroidsFile)
@@ -176,9 +191,9 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 	at.queueDur = 0
 	at.tr.RecordSpan()
-	at.startTime = time.Now().UnixMicro()
+
 	log.Ctx(ctx).Info("IndexNode analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("taskID", at.req.GetTaskID()))
+		zap.Int64("TaskID", at.req.GetTaskID()))
 	return nil
 }
 
@@ -198,6 +213,4 @@ func (at *analyzeTask) Reset() {
 	at.tr = nil
 	at.queueDur = 0
 	at.node = nil
-	at.startTime = 0
-	at.endTime = 0
 }

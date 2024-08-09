@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -25,7 +26,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -46,7 +46,7 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 }
 
 func TestIndexNodeManager_PickClient(t *testing.T) {
-	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
+	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
 		return ic
@@ -58,32 +58,32 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx: context.TODO(),
 			nodeClients: map[UniqueID]types.IndexNodeClient{
-				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
-				2: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				2: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
-				3: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				3: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
-				4: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				4: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
-				5: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				5: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, nil),
-				6: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				6: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, nil),
-				7: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				7: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, nil),
-				8: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				8: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					TaskSlots: 1,
 					Status:    merr.Success(),
 				}, nil),
-				9: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				9: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					TaskSlots: 10,
 					Status:    merr.Success(),
 				}, nil),
@@ -97,7 +97,7 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 }
 
 func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
-	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
+	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
 		return ic
@@ -110,7 +110,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
-				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
 					JobInfos:   nil,
@@ -128,7 +128,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
-				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
 					JobInfos:   nil,
@@ -170,7 +170,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
 			nodeClients: map[UniqueID]types.IndexNodeClient{
-				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
+				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Status(err),
 					TaskSlots:  0,
 					JobInfos:   nil,

@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -126,7 +126,7 @@ func (nm *IndexNodeManager) PickClient() (UniqueID, types.IndexNodeClient) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+				resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
 				if err != nil {
 					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 					return
@@ -181,7 +181,7 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+			resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return

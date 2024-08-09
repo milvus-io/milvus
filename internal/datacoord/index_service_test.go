@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -232,7 +234,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.indexNodeManager.lock.Lock()
 		s.indexNodeManager.nodeClients[1001] = mockNode
 		s.indexNodeManager.lock.Unlock()
-		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
+		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
 			Status:     merr.Success(),
 			EnableDisk: true,
 		}, nil)

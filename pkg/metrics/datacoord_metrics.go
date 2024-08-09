@@ -321,6 +321,15 @@ var (
 			taskTypeLabel,
 			statusLabelName,
 		})
+
+	// TaskNum records the number of tasks of each type.
+	TaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_count",
+			Help:      "number of index tasks of each type",
+		}, []string{collectionIDLabelName, taskTypeLabel, taskStateLabel})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -349,6 +358,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
+	registry.MustRegister(TaskNum)
 }
 
 func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {

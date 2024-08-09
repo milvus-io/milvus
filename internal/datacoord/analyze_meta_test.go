@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 )
 
 type AnalyzeMetaSuite struct {
@@ -153,7 +154,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	})
 
 	s.Run("FinishTask", func() {
-		err := am.FinishTask(1, &indexpb.AnalyzeResult{
+		err := am.FinishTask(1, &workerpb.AnalyzeResult{
 			TaskID: 1,
 			State:  indexpb.JobState_JobStateFinished,
 		})
@@ -239,7 +240,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		err := am.FinishTask(777, nil)
 		s.Error(err)
 
-		err = am.FinishTask(1, &indexpb.AnalyzeResult{
+		err = am.FinishTask(1, &workerpb.AnalyzeResult{
 			TaskID: 1,
 			State:  indexpb.JobState_JobStateFinished,
 		})

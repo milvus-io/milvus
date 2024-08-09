@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -36,19 +37,19 @@ func TestAbnormalIndexNode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, in.Stop())
 	ctx := context.TODO()
-	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
+	status, err := in.CreateJob(ctx, &workerpb.CreateJobRequest{})
 	assert.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 
-	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
+	qresp, err := in.QueryJobs(ctx, &workerpb.QueryJobsRequest{})
 	assert.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(qresp.GetStatus()), merr.ErrServiceNotReady)
 
-	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
+	status, err = in.DropJobs(ctx, &workerpb.DropJobsRequest{})
 	assert.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 
-	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+	jobNumRsp, err := in.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
 	assert.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
 
@@ -127,19 +128,19 @@ func (suite *IndexNodeServiceSuite) Test_AbnormalIndexNode() {
 	suite.Nil(in.Stop())
 
 	ctx := context.TODO()
-	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
+	status, err := in.CreateJob(ctx, &workerpb.CreateJobRequest{})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 
-	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
+	qresp, err := in.QueryJobs(ctx, &workerpb.QueryJobsRequest{})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(qresp.GetStatus()), merr.ErrServiceNotReady)
 
-	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
+	status, err = in.DropJobs(ctx, &workerpb.DropJobsRequest{})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 
-	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+	jobNumRsp, err := in.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
 
@@ -151,15 +152,15 @@ func (suite *IndexNodeServiceSuite) Test_AbnormalIndexNode() {
 	err = merr.CheckRPCCall(configurationResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	status, err = in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{})
+	status, err = in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{})
 	err = merr.CheckRPCCall(status, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	queryAnalyzeResultResp, err := in.QueryJobsV2(ctx, &indexpb.QueryJobsV2Request{})
+	queryAnalyzeResultResp, err := in.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{})
 	err = merr.CheckRPCCall(queryAnalyzeResultResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	dropAnalyzeTasksResp, err := in.DropJobsV2(ctx, &indexpb.DropJobsV2Request{})
+	dropAnalyzeTasksResp, err := in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{})
 	err = merr.CheckRPCCall(dropAnalyzeTasksResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 }
@@ -173,7 +174,7 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 	in.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.Run("CreateJobV2", func() {
-		req := &indexpb.AnalyzeRequest{
+		req := &workerpb.AnalyzeRequest{
 			ClusterID:    suite.cluster,
 			TaskID:       suite.taskID,
 			CollectionID: suite.collectionID,
@@ -190,11 +191,11 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 			StorageConfig: nil,
 		}
 
-		resp, err := in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+		resp, err := in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 			ClusterID: suite.cluster,
 			TaskID:    suite.taskID,
 			JobType:   indexpb.JobType_JobTypeAnalyzeJob,
-			Request: &indexpb.CreateJobV2Request_AnalyzeRequest{
+			Request: &workerpb.CreateJobV2Request_AnalyzeRequest{
 				AnalyzeRequest: req,
 			},
 		})
@@ -203,7 +204,7 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 	})
 
 	suite.Run("QueryJobsV2", func() {
-		req := &indexpb.QueryJobsV2Request{
+		req := &workerpb.QueryJobsV2Request{
 			ClusterID: suite.cluster,
 			TaskIDs:   []int64{suite.taskID},
 			JobType:   indexpb.JobType_JobTypeIndexJob,
@@ -215,7 +216,7 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 	})
 
 	suite.Run("DropJobsV2", func() {
-		req := &indexpb.DropJobsV2Request{
+		req := &workerpb.DropJobsV2Request{
 			ClusterID: suite.cluster,
 			TaskIDs:   []int64{suite.taskID},
 			JobType:   indexpb.JobType_JobTypeIndexJob,

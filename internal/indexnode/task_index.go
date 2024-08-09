@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -51,7 +52,7 @@ type indexBuildTask struct {
 
 	cm             storage.ChunkManager
 	index          indexcgowrapper.CodecIndex
-	req            *indexpb.CreateJobRequest
+	req            *workerpb.CreateJobRequest
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
@@ -61,7 +62,7 @@ type indexBuildTask struct {
 
 func newIndexBuildTask(ctx context.Context,
 	cancel context.CancelFunc,
-	req *indexpb.CreateJobRequest,
+	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	node *IndexNode,
 ) *indexBuildTask {
@@ -198,7 +199,8 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
-		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()))
+		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
+		zap.Int64("currentIndexVersion", it.req.GetIndexVersion()))
 	return nil
 }
 

@@ -71,13 +71,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
 	}
-	s.taskScheduler.enqueue(&indexBuildTask{
-		taskID: buildID,
-		taskInfo: &indexpb.IndexTaskInfo{
-			BuildID: buildID,
-			State:   commonpb.IndexState_Unissued,
-		},
-	})
+	s.taskScheduler.enqueue(newIndexBuildTask(buildID))
 	return nil
 }
 

@@ -31,15 +31,15 @@ type BufferBase struct {
 	endPos   *msgpb.MsgPosition
 }
 
-func (b *BufferBase) UpdateStatistics(entryNum, size int64, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
+func (b *BufferBase) UpdateStatistics(entryNum, size int64, tr storage.TimeRange, startPos, endPos *msgpb.MsgPosition) {
 	b.rows += entryNum
 	b.size += size
 
-	if tr.timestampMin < b.TimestampFrom {
-		b.TimestampFrom = tr.timestampMin
+	if tr.TimestampMin < b.TimestampFrom {
+		b.TimestampFrom = tr.TimestampMin
 	}
-	if tr.timestampMax > b.TimestampTo {
-		b.TimestampTo = tr.timestampMax
+	if tr.TimestampMax > b.TimestampTo {
+		b.TimestampTo = tr.TimestampMax
 	}
 
 	if b.startPos == nil || startPos.Timestamp < b.startPos.Timestamp {
@@ -66,8 +66,8 @@ func (b *BufferBase) MinTimestamp() typeutil.Timestamp {
 	return b.startPos.GetTimestamp()
 }
 
-func (b *BufferBase) GetTimeRange() *TimeRange {
-	return NewTimeRange(b.TimestampFrom, b.TimestampTo)
+func (b *BufferBase) GetTimeRange() *storage.TimeRange {
+	return storage.NewTimeRange(b.TimestampFrom, b.TimestampTo)
 }
 
 type InsertBuffer struct {
@@ -103,7 +103,7 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	return ib, nil
 }
 
-func (ib *InsertBuffer) buffer(inData *storage.InsertData, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
+func (ib *InsertBuffer) buffer(inData *storage.InsertData, tr storage.TimeRange, startPos, endPos *msgpb.MsgPosition) {
 	// buffer := ib.currentBuffer()
 	// storage.MergeInsertData(buffer.buffer, inData)
 	ib.buffers = append(ib.buffers, inData)
@@ -130,18 +130,18 @@ func (ib *InsertBuffer) Buffer(inData *inData, startPos, endPos *msgpb.MsgPositi
 	return bufferedSize
 }
 
-func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {
-	tr := TimeRange{
-		timestampMin: math.MaxUint64,
-		timestampMax: 0,
+func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) storage.TimeRange {
+	tr := storage.TimeRange{
+		TimestampMin: math.MaxUint64,
+		TimestampMax: 0,
 	}
 
 	for _, data := range tsData.Data {
-		if uint64(data) < tr.timestampMin {
-			tr.timestampMin = typeutil.Timestamp(data)
+		if uint64(data) < tr.TimestampMin {
+			tr.TimestampMin = typeutil.Timestamp(data)
 		}
-		if uint64(data) > tr.timestampMax {
-			tr.timestampMax = typeutil.Timestamp(data)
+		if uint64(data) > tr.TimestampMax {
+			tr.TimestampMax = typeutil.Timestamp(data)
 		}
 	}
 	return tr

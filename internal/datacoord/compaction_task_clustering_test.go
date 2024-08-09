@@ -80,7 +80,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 
 	s.session = NewMockSessionManager(s.T())
 
-	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil)
+	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
 	s.analyzeScheduler = scheduler
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -317,4 +318,34 @@ func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
 		}
 	}
 	return nil
+}
+
+func createStorageConfig() *indexpb.StorageConfig {
+	var storageConfig *indexpb.StorageConfig
+
+	if Params.CommonCfg.StorageType.GetValue() == "local" {
+		storageConfig = &indexpb.StorageConfig{
+			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
+			StorageType: Params.CommonCfg.StorageType.GetValue(),
+		}
+	} else {
+		storageConfig = &indexpb.StorageConfig{
+			Address:          Params.MinioCfg.Address.GetValue(),
+			AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+			SslCACert:        Params.MinioCfg.SslCACert.GetValue(),
+			BucketName:       Params.MinioCfg.BucketName.GetValue(),
+			RootPath:         Params.MinioCfg.RootPath.GetValue(),
+			UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:      Params.CommonCfg.StorageType.GetValue(),
+			Region:           Params.MinioCfg.Region.GetValue(),
+			UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		}
+	}
+
+	return storageConfig
 }

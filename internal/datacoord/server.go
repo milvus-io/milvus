@@ -427,7 +427,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
-	s.taskScheduler.Start()
+	s.startTaskScheduler()
 	s.startServerLoop()
 
 	// http.Register(&http.Handler{
@@ -670,7 +670,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
 	}
 }
 
@@ -721,11 +721,17 @@ func (s *Server) startServerLoop() {
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
-	s.startIndexService(s.serverLoopCtx)
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 	s.syncSegmentsScheduler.Start()
+}
+
+func (s *Server) startTaskScheduler() {
+	s.taskScheduler.Start()
+
+	s.startIndexService(s.serverLoopCtx)
+	s.startStatsTasksCheckLoop(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
