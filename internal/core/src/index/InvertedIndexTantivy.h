@@ -193,5 +193,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
+
+    // all data need to be built to align the offset
+    // so need to store valid_data in inverted index additionally
+    FixedVector<bool> valid_data{};
 };
 }  // namespace milvus::index

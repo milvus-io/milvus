@@ -69,8 +69,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     ssize_t byte_count = (element_count + 7) / 8;
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
-    if (valid_data == nullptr) {
-        valid_data_.resize(byte_count, 0xFF);
+    if (!valid_data) {
+        valid_data_.assign(byte_count, 0xFF);
     } else {
         std::copy_n(valid_data, byte_count, valid_data_.data());
     }

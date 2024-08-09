@@ -72,6 +72,7 @@ class HybridIndexTestV1 : public testing::Test {
          int64_t index_build_id,
          int64_t index_version) {
         proto::schema::FieldSchema field_schema;
+        field_schema.set_nullable(nullable_);
         if constexpr (std::is_same_v<int8_t, T>) {
             field_schema.set_data_type(proto::schema::DataType::Int8);
         } else if constexpr (std::is_same_v<int16_t, T>) {
@@ -98,8 +99,26 @@ class HybridIndexTestV1 : public testing::Test {
             data_.push_back(x);
         }
 
-        auto field_data = storage::CreateFieldData(type_);
-        field_data->FillFieldData(data_.data(), data_.size());
+        auto field_data = storage::CreateFieldData(type_, nullable_);
+        if (nullable_) {
+            valid_data_.reserve(nb_);
+            uint8_t* ptr = new uint8_t[(nb_ + 7) / 8];
+            for (int i = 0; i < nb_; i++) {
+                int byteIndex = i / 8;
+                int bitIndex = i % 8;
+                if (i % 2 == 0) {
+                    valid_data_.push_back(true);
+                    ptr[byteIndex] |= (1 << bitIndex);
+                } else {
+                    valid_data_.push_back(false);
+                    ptr[byteIndex] &= ~(1 << bitIndex);
+                }
+            }
+            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            delete[] ptr;
+        } else {
+            field_data->FillFieldData(data_.data(), data_.size());
+        }
         storage::InsertData insert_data(field_data);
         insert_data.SetFieldDataMeta(field_meta);
         insert_data.SetTimestamps(0, 100);
@@ -149,6 +168,7 @@ class HybridIndexTestV1 : public testing::Test {
     SetParam() {
         nb_ = 10000;
         cardinality_ = 30;
+        nullable_ = false;
     }
     void
     SetUp() override {
@@ -204,7 +224,11 @@ class HybridIndexTestV1 : public testing::Test {
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->In(test_data.size(), test_data.data());
         for (size_t i = 0; i < bitset.size(); i++) {
-            ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
+            if (nullable_ && !valid_data_[i]) {
+                ASSERT_EQ(bitset[i], false);
+            } else {
+                ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
+            }
         }
     }
 
@@ -221,7 +245,11 @@ class HybridIndexTestV1 : public testing::Test {
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
         for (size_t i = 0; i < bitset.size(); i++) {
-            ASSERT_EQ(bitset[i], s.find(data_[i]) == s.end());
+            if (nullable_ && !valid_data_[i]) {
+                ASSERT_EQ(bitset[i], true);
+            } else {
+                ASSERT_NE(bitset[i], s.find(data_[i]) != s.end());
+            }
         }
     }
 
@@ -250,9 +278,15 @@ class HybridIndexTestV1 : public testing::Test {
                 for (size_t i = 0; i < bitset.size(); i++) {
                     auto ans = bitset[i];
                     auto should = ref(i);
-                    ASSERT_EQ(ans, should)
-                        << "op: " << op << ", @" << i << ", ans: " << ans
-                        << ", ref: " << should;
+                    if (nullable_ && !valid_data_[i]) {
+                        ASSERT_EQ(ans, false)
+                            << "op: " << op << ", @" << i << ", ans: " << ans
+                            << ", ref: " << should;
+                    } else {
+                        ASSERT_EQ(ans, should)
+                            << "op: " << op << ", @" << i << ", ans: " << ans
+                            << ", ref: " << should;
+                    }
                 }
             }
         }
@@ -309,10 +343,17 @@ class HybridIndexTestV1 : public testing::Test {
                 for (size_t i = 0; i < bitset.size(); i++) {
                     auto ans = bitset[i];
                     auto should = test_case.ref(i);
-                    ASSERT_EQ(ans, should)
-                        << "lower:" << test_case.lower_val
-                        << "upper:" << test_case.upper_val << ", @" << i
-                        << ", ans: " << ans << ", ref: " << should;
+                    if (nullable_ && !valid_data_[i]) {
+                        ASSERT_EQ(ans, false)
+                            << "lower:" << test_case.lower_val
+                            << "upper:" << test_case.upper_val << ", @" << i
+                            << ", ans: " << ans << ", ref: " << false;
+                    } else {
+                        ASSERT_EQ(ans, should)
+                            << "lower:" << test_case.lower_val
+                            << "upper:" << test_case.upper_val << ", @" << i
+                            << ", ans: " << ans << ", ref: " << should;
+                    }
                 }
             }
         }
@@ -325,6 +366,8 @@ class HybridIndexTestV1 : public testing::Test {
     size_t cardinality_;
     boost::container::vector<T> data_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    bool nullable_;
+    FixedVector<bool> valid_data_;
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV1);
@@ -371,6 +414,7 @@ class HybridIndexTestV2 : public HybridIndexTestV1<T> {
     SetParam() override {
         this->nb_ = 10000;
         this->cardinality_ = 2000;
+        this->nullable_ = false;
     }
 
     virtual ~HybridIndexTestV2() {
@@ -400,6 +444,43 @@ TYPED_TEST_P(HybridIndexTestV2, TestRangeCompareFuncTest) {
     this->TestRangeCompareFunc();
 }
 
+template <typename T>
+class HybridIndexTestNullable : public HybridIndexTestV1<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->nullable_ = true;
+    }
+
+    virtual ~HybridIndexTestNullable() {
+    }
+};
+
+TYPED_TEST_SUITE_P(HybridIndexTestNullable);
+
+TYPED_TEST_P(HybridIndexTestNullable, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+TYPED_TEST_P(HybridIndexTestNullable, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestNullable, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestNullable, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestNullable, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
@@ -410,6 +491,17 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV2,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
 
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestNullable,
+                            CountFuncTest,
+                            INFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
+
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
+                               BitmapType);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_Nullable,
+                               HybridIndexTestNullable,
                                BitmapType);
