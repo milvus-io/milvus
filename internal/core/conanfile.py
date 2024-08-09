@@ -73,6 +73,8 @@ class MilvusConan(ConanFile):
         "boost:without_locale": False,
         "glog:with_gflags": True,
         "glog:shared": True,
+        "openssl:shared": True,
+        "libunwind:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
