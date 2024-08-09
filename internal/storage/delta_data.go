@@ -132,18 +132,30 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Pks      []PrimaryKey // primary keys
-	Tss      []Timestamp  // timestamps
-	RowCount int64
-	memSize  int64
+	Pks        []PrimaryKey // primary keys
+	Tss        []Timestamp  // timestamps
+	Serialized []string
+	RowCount   int64
+	memSize    int64
 }
 
 func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
 	return &DeleteData{
-		Pks:      pks,
-		Tss:      tss,
-		RowCount: int64(len(pks)),
-		memSize:  lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
+		Pks:        pks,
+		Tss:        tss,
+		RowCount:   int64(len(pks)),
+		Serialized: make([]string, 0),
+		memSize:    lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
+	}
+}
+
+func NewEmptyDeleteData() *DeleteData {
+	return &DeleteData{
+		Pks:        make([]PrimaryKey, 0),
+		Tss:        make([]Timestamp, 0),
+		RowCount:   0,
+		Serialized: make([]string, 0),
+		memSize:    0,
 	}
 }
 
@@ -163,9 +175,19 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 	data.memSize += lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 }
 
+// Append append 1 pk,ts,serialized pair to DeleteData
+func (data *DeleteData) AppendWithSerialized(pk PrimaryKey, ts Timestamp, serialized string) {
+	data.Pks = append(data.Pks, pk)
+	data.Tss = append(data.Tss, ts)
+	data.Serialized = append(data.Serialized, serialized)
+	data.RowCount++
+	data.memSize += pk.Size() + int64(8) + int64(len(serialized))
+}
+
 func (data *DeleteData) Merge(other *DeleteData) {
 	data.Pks = append(data.Pks, other.Pks...)
 	data.Tss = append(data.Tss, other.Tss...)
+	data.Serialized = append(data.Serialized, other.Serialized...)
 	data.RowCount += other.RowCount
 	data.memSize += other.Size()
 
@@ -173,6 +195,7 @@ func (data *DeleteData) Merge(other *DeleteData) {
 	other.Tss = nil
 	other.RowCount = 0
 	other.memSize = 0
+	other.Serialized = nil
 }
 
 func (data *DeleteData) Size() int64 {
