@@ -1114,6 +1114,26 @@ class TestQueryVector(TestBase):
         assert rsp['code'] == 200
         assert rsp['data'][0]['count(*)'] == 3000
 
+    @pytest.mark.parametrize("filter_expr", ["", None])
+    def test_query_vector_with_count_simple(self, filter_expr):
+        """
+        Query a vector with a simple payload
+        """
+        name = gen_collection_name()
+        self.name = name
+        self.init_collection(name, nb=3000)
+        # query for "count(*)"
+        payload = {
+            "collectionName": name,
+            "filter": filter_expr,
+            "outputFields": ["count(*)"]
+        }
+        if filter_expr is None:
+            payload.pop("filter")
+        rsp = self.vector_client.vector_query(payload)
+        assert rsp['code'] == 0
+        assert rsp['data'][0]['count(*)'] == 3000
+
     @pytest.mark.xfail(reason="query by id is not supported")
     def test_query_vector_by_id(self):
         """
