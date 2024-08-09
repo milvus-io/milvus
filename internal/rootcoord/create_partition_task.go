@@ -96,6 +96,12 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		ts:           t.GetTs(),
 	})
 
+	undoTask.AddStep(&prodcue{
+		baseStep:     baseStep{core: t.core},
+		collectionID: t.collMeta.CollectionID,
+		partitionID:  partID,
+	}, &nullStep{})
+
 	undoTask.AddStep(&nullStep{}, &releasePartitionsStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
