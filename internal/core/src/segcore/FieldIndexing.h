@@ -282,14 +282,14 @@ class IndexingRecord {
                 //Small-Index enabled, create index for vector field only
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
                     index_meta_->HasFiled(field_id)) {
-                    auto vec_filed_meta =
+                    auto vec_field_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
                     //Disable growing index for flat
-                    if (!vec_filed_meta.IsFlatIndex()) {
+                    if (!vec_field_meta.IsFlatIndex()) {
                         field_indexings_.try_emplace(
                             field_id,
                             CreateIndex(field_meta,
-                                        vec_filed_meta,
+                                        vec_field_meta,
                                         index_meta_->GetIndexMaxRowCount(),
                                         segcore_config_));
                     }
