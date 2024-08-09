@@ -30,4 +30,7 @@ func TestVersion(t *testing.T) {
 	})
 	v = newMessageVersionFromString("1")
 	assert.Equal(t, VersionV1, v)
+
+	assert.True(t, VersionV1.GT(VersionOld))
+	assert.True(t, VersionV2.GT(VersionV1))
 }

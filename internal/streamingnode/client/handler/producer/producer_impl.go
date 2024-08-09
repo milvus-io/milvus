@@ -115,8 +115,8 @@ type produceRequest struct {
 }
 
 type produceResponse struct {
-	id  message.MessageID
-	err error
+	result *ProduceResult
+	err    error
 }
 
 // Assignment returns the assignment of the producer.
@@ -125,7 +125,7 @@ func (p *producerImpl) Assignment() types.PChannelInfoAssigned {
 }
 
 // Produce sends the produce message to server.
-func (p *producerImpl) Produce(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+func (p *producerImpl) Produce(ctx context.Context, msg message.MutableMessage) (*ProduceResult, error) {
 	if p.lifetime.Add(lifetime.IsWorking) != nil {
 		return nil, status.NewOnShutdownError("producer client is shutting down")
 	}
@@ -154,7 +154,7 @@ func (p *producerImpl) Produce(ctx context.Context, msg message.MutableMessage) 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case resp := <-respCh:
-		return resp.id, resp.err
+		return resp.result, resp.err
 	}
 }
 
@@ -294,7 +294,10 @@ func (p *producerImpl) recvLoop() (err error) {
 					return err
 				}
 				result = produceResponse{
-					id: msgID,
+					result: &ProduceResult{
+						MessageID: msgID,
+						TimeTick:  produceResp.Result.GetTimetick(),
+					},
 				}
 			case *streamingpb.ProduceMessageResponse_Error:
 				result = produceResponse{

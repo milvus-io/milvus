@@ -187,12 +187,12 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	// Concurrent append request can be executed concurrently.
 	messageSize := msg.EstimateSize()
 	now := time.Now()
-	p.wal.AppendAsync(p.produceServer.Context(), msg, func(id message.MessageID, err error) {
+	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
 			p.appendWG.Done()
 			p.updateMetrics(messageSize, time.Since(now).Seconds(), err)
 		}()
-		p.sendProduceResult(req.RequestId, id, err)
+		p.sendProduceResult(req.RequestId, appendResult, err)
 	})
 }
 
@@ -212,7 +212,7 @@ func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 }
 
 // sendProduceResult sends the produce result to client.
-func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err error) {
+func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendResult, err error) {
 	resp := &streamingpb.ProduceMessageResponse{
 		RequestId: reqID,
 	}
@@ -225,8 +225,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err
 		resp.Response = &streamingpb.ProduceMessageResponse_Result{
 			Result: &streamingpb.ProduceMessageResponseResult{
 				Id: &messagespb.MessageID{
-					Id: id.Marshal(),
+					Id: appendResult.MessageID.Marshal(),
 				},
+				Timetick: appendResult.TimeTick,
 			},
 		}
 	}
@@ -235,9 +236,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, id message.MessageID, err
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.produceMessageCh <- resp:
-		p.logger.Debug("send produce message response to client", zap.Int64("requestID", reqID), zap.Any("messageID", id), zap.Error(err))
+		p.logger.Debug("send produce message response to client", zap.Int64("requestID", reqID), zap.Any("appendResult", appendResult), zap.Error(err))
 	case <-p.produceServer.Context().Done():
-		p.logger.Warn("stream closed before produce message response sent", zap.Int64("requestID", reqID), zap.Any("messageID", id))
+		p.logger.Warn("stream closed before produce message response sent", zap.Int64("requestID", reqID), zap.Any("appendResult", appendResult), zap.Error(err))
 		return
 	}
 }
