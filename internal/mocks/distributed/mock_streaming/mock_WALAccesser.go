@@ -81,6 +81,38 @@ func (_c *MockWALAccesser_Append_Call) RunAndReturn(run func(context.Context, ..
 	return _c
 }
 
+// Close provides a mock function with given fields:
+func (_m *MockWALAccesser) Close() {
+	_m.Called()
+}
+
+// MockWALAccesser_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockWALAccesser_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) Close() *MockWALAccesser_Close_Call {
+	return &MockWALAccesser_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockWALAccesser_Close_Call) Run(run func()) *MockWALAccesser_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_Close_Call) Return() *MockWALAccesser_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWALAccesser_Close_Call) RunAndReturn(run func()) *MockWALAccesser_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Read provides a mock function with given fields: ctx, opts
 func (_m *MockWALAccesser) Read(ctx context.Context, opts streaming.ReadOption) streaming.Scanner {
 	ret := _m.Called(ctx, opts)
