@@ -40,17 +40,17 @@ func PruneSegments(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	sealedSegments []SnapshotItem,
 	info PruneInfo,
-) {
+) (int, int) {
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
 	defer span.End()
 	if partitionStats == nil {
-		return
+		return 0, 0
 	}
 	// 1. select collection, partitions and expr
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
 		// no need to prune
-		return
+		return 0, 0
 	}
 	tr := timerecord.NewTimeRecorder("PruneSegments")
 	var collectionID int64
@@ -74,17 +74,17 @@ func PruneSegments(ctx context.Context,
 		var vectorsHolder commonpb.PlaceholderGroup
 		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
-			return
+			return 0, 0
 		}
 		vectorsBytes := vectorsHolder.GetPlaceholders()[0].GetValues()
 		// parse dim
 		dimStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.DimKey, clusteringKeyField.GetTypeParams())
 		if err != nil {
-			return
+			return 0, 0
 		}
 		dimValue, err := strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
-			return
+			return 0, 0
 		}
 		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
@@ -96,19 +96,19 @@ func PruneSegments(ctx context.Context,
 		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to unmarshall serialized expr from bytes, failed the operation")
-			return
+			return 0, 0
 		}
 		exprPb, err := exprutil.ParseExprFromPlan(&plan)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to parse expr from plan, failed the operation")
-			return
+			return 0, 0
 		}
 
 		// 1. parse expr for prune
 		expr, err := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
 		if err != nil {
 			log.Ctx(ctx).RatedWarn(10, "failed to parse expr for segment prune, fallback to common search/query", zap.Error(err))
-			return
+			return 0, 0
 		}
 
 		// 2. prune segments by scalar field
@@ -139,9 +139,9 @@ func PruneSegments(ctx context.Context,
 	}
 
 	// 2. remove filtered segments from sealed segment list
+	totalSegNum := 0
+	realFilteredSegments := 0
 	if len(filteredSegments) > 0 {
-		realFilteredSegments := 0
-		totalSegNum := 0
 		minSegmentCount := math.MaxInt
 		maxSegmentCount := 0
 		for idx, item := range sealedSegments {
@@ -196,6 +196,7 @@ func PruneSegments(ctx context.Context,
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Ctx(ctx).Debug("Pruned segment for search/query",
 		zap.Duration("duration", tr.ElapseSpan()))
+	return realFilteredSegments, totalSegNum
 }
 
 type segmentDisStruct struct {

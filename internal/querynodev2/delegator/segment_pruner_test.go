@@ -415,6 +415,24 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(2, len(testSegments[1].Segments))
 	}
+
+	{
+		// test for multiple ranges connected with or operator
+		testSegments := make([]SnapshotItem, len(sps.sealedSegments))
+		copy(testSegments, sps.sealedSegments)
+		exprStr := "age > 600 or info < 'aaa'"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(sps.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr)
+		sps.NoError(err)
+		serializedPlan, _ := proto.Marshal(planNode)
+		queryReq := &internalpb.RetrieveRequest{
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       targetPartitions,
+		}
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		sps.Equal(2, len(testSegments[0].Segments))
+		sps.Equal(2, len(testSegments[1].Segments))
+	}
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
