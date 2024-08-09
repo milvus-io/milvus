@@ -53,18 +53,36 @@ ChunkCache::Read(const std::string& filepath,
 
     // release lock and perform download and decode
     // other thread request same path shall get the future.
-    auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-    auto column = Mmap(field_data->GetFieldData(), descriptor);
-
-    // set promise value to notify the future
-    lck.lock();
+    std::unique_ptr<DataCodec> field_data;
+    std::shared_ptr<ColumnBase> column;
+    bool allocate_success = false;
+    ErrorCode err_code = Success;
+    std::string err_msg = "";
+    try {
+        field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
+        column = Mmap(field_data->GetFieldData(), descriptor);
+        allocate_success = true;
+    } catch(const SegcoreError& e) {
+        err_code = e.get_error_code();
+        err_msg = fmt::format(
+                "failed to read for chunkCache, seg_core_err:{}",
+                e.what());
+    }
+    std::unique_lock mmap_lck(mutex_);
     it = columns_.find(filepath);
     if (it != columns_.end()) {
         // check pair exists then set value
         it->second.first.set_value(column);
+        if(allocate_success) {
+            AssertInfo(column, "unexpected null column, file={}", filepath);
+        }
+    } else {
+        PanicInfo(UnexpectedError, "Wrong code, the thread to download for cache should get the target entry");
     }
-    lck.unlock();
-    AssertInfo(column, "unexpected null column, file={}", filepath);
+    if(err_code != Success) {
+        columns_.erase(filepath);
+        throw SegcoreError(err_code, err_msg);
+    }
     return column;
 }
 
