@@ -221,6 +221,10 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         auto& index_params = load_index_info->index_params;
         auto field_type = load_index_info->field_type;
+        for (auto& pair : index_params) {
+            std::cout << "key: " << pair.first << "value:" << pair.second
+                      << std::endl;
+        }
 
         auto engine_version = load_index_info->index_engine_version;
 

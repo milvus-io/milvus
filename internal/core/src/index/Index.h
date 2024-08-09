@@ -76,7 +76,9 @@ class IndexBase {
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
                index_type_ ==
                    knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND ||
+               // support mmap for bitmap
+               index_type_ == milvus::index::BITMAP_INDEX_TYPE;
     }
 
     const IndexType&
