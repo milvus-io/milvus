@@ -228,7 +228,7 @@ func (lc *BatchLocationsCache) Locations(k uint, bfType bloomfilter.BFType) [][]
 			})
 		}
 
-		return lc.basicLocations
+		return lo.Map(lc.basicLocations, func(locations []uint64, _ int) []uint64 { return locations[:k] })
 	case bloomfilter.BlockedBF:
 		// for block bf, we only need cache the hash result, which is a uint and only compute once for any k value
 		if len(lc.blockLocations) != len(lc.pks) {
