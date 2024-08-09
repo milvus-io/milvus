@@ -142,6 +142,7 @@ func (stm *statsTaskMeta) RemoveStatsTask(taskID, segmentID int64) error {
 
 	delete(stm.tasks, taskID)
 	delete(stm.segmentStatsTaskIndex, segmentID)
+	stm.updateMetrics()
 
 	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", taskID))
 	return nil
