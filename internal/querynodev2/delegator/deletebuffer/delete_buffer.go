@@ -33,7 +33,9 @@ type timed interface {
 // DeleteBuffer is the interface for delete buffer.
 type DeleteBuffer[T timed] interface {
 	Put(T)
-	ListAfter(uint64) []T
+	// return all elements after ts, and the safe ts.
+	// Notice: if the returned ts is smaller than given ts, which means some delete need to be consume from stream
+	ListAfter(uint64) ([]T, uint64)
 	SafeTs() uint64
 	TryDiscard(uint64)
 }
@@ -74,7 +76,7 @@ func (c *doubleCacheBuffer[T]) Put(entry T) {
 }
 
 // ListAfter implements DeleteBuffer.
-func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) []T {
+func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) ([]T, uint64) {
 	c.mut.RLock()
 	defer c.mut.RUnlock()
 	var result []T
@@ -84,7 +86,7 @@ func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) []T {
 	if c.head != nil {
 		result = append(result, c.head.ListAfter(ts)...)
 	}
-	return result
+	return result, c.ts
 }
 
 // evict sets head as tail and evicts tail.

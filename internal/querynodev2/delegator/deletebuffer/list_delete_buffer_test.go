@@ -60,8 +60,10 @@ func (s *ListDeleteBufferSuite) TestCache() {
 		},
 	})
 
-	s.Equal(2, len(buffer.ListAfter(11)))
-	s.Equal(1, len(buffer.ListAfter(12)))
+	deleteRecords, _ := buffer.ListAfter(11)
+	s.Equal(2, len(deleteRecords))
+	deleteRecords, _ = buffer.ListAfter(12)
+	s.Equal(1, len(deleteRecords))
 }
 
 func (s *ListDeleteBufferSuite) TestTryDiscard() {
@@ -94,19 +96,24 @@ func (s *ListDeleteBufferSuite) TestTryDiscard() {
 		},
 	})
 
-	s.Equal(2, len(buffer.ListAfter(10)))
+	deleteRecords, _ := buffer.ListAfter(10)
+	s.Equal(2, len(deleteRecords))
 
 	buffer.TryDiscard(10)
-	s.Equal(2, len(buffer.ListAfter(10)), "equal ts shall not discard block")
+	deleteRecords, _ = buffer.ListAfter(10)
+	s.Equal(2, len(deleteRecords), "equal ts shall not discard block")
 
 	buffer.TryDiscard(9)
-	s.Equal(2, len(buffer.ListAfter(10)), "history ts shall not discard any block")
+	deleteRecords, _ = buffer.ListAfter(9)
+	s.Equal(2, len(deleteRecords), "history ts shall not discard any block")
 
 	buffer.TryDiscard(20)
-	s.Equal(1, len(buffer.ListAfter(10)), "first block shall be discarded")
+	deleteRecords, _ = buffer.ListAfter(10)
+	s.Equal(1, len(deleteRecords), "first block shall be discarded")
 
 	buffer.TryDiscard(20)
-	s.Equal(1, len(buffer.ListAfter(10)), "discard will not happen if there is only one block")
+	deleteRecords, _ = buffer.ListAfter(10)
+	s.Equal(1, len(deleteRecords), "discard will not happen if there is only one block")
 }
 
 func TestListDeleteBuffer(t *testing.T) {
