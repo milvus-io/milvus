@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -933,4 +934,26 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 	v.apply(opts...)
 
 	return v
+}
+
+// TODO fubang only the vector data or index can't be changed when autoindex?
+func ValidateAutoIndexMmapConfig(typeParams map[string]string) error {
+	if !Params.AutoIndexConfig.Enable.GetAsBool() {
+		return nil
+	}
+
+	var ok bool
+	_, ok = typeParams[common.MmapDataKey]
+	if ok {
+		return fmt.Errorf("mmap data is not supported in auto index mode")
+	}
+	_, ok = typeParams[common.MmapIndexKey]
+	if ok {
+		return fmt.Errorf("mmap index is not supported in auto index mode")
+	}
+	_, ok = typeParams[common.MmapEnabledKey]
+	if ok {
+		return fmt.Errorf("the mmap.enabled key has deprecated, and it is not supported in auto index mode")
+	}
+	return nil
 }

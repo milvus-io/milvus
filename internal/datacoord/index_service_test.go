@@ -639,7 +639,9 @@ func TestServer_AlterIndex(t *testing.T) {
 			Timestamp:    createTS,
 		})
 		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
-		assert.True(t, common.IsMmapEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...), "indexInfo: %+v", describeResp.IndexInfos[0])
+		enableMmap, ok := common.IsMmapDataEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.True(t, enableMmap, "indexInfo: %+v", describeResp.IndexInfos[0])
+		assert.True(t, ok)
 	})
 }
 

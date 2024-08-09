@@ -83,7 +83,9 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	s.Equal(task.ReplicaID(), req.ReplicaID)
 	s.Equal(action.Node(), req.GetDstNodeID())
 	for _, field := range req.GetSchema().GetFields() {
-		s.False(common.IsMmapEnabled(field.GetTypeParams()...))
+		mmapEnable, ok := common.IsMmapDataEnabled(field.GetTypeParams()...)
+		s.False(mmapEnable)
+		s.True(ok)
 	}
 }
 
@@ -136,7 +138,9 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestMmap() {
 	s.Equal(task.ReplicaID(), req.ReplicaID)
 	s.Equal(action.Node(), req.GetDstNodeID())
 	for _, field := range req.GetSchema().GetFields() {
-		s.True(common.IsMmapEnabled(field.GetTypeParams()...))
+		mmapEnable, ok := common.IsMmapDataEnabled(field.GetTypeParams()...)
+		s.True(mmapEnable)
+		s.True(ok)
 	}
 }
 

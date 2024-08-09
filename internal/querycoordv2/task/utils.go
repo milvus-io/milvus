@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -133,12 +134,14 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled := common.IsMmapEnabled(collectionProperties...)
+	// TODO fubang checkout it, use the MmapDataKey or MmapIndex or both
+	// can't using it or not?
+	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
-		if collectionMmapEnabled {
+		if exist {
 			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: "true",
+				Key:   common.MmapDataKey,
+				Value: strconv.FormatBool(collectionMmapEnabled),
 			})
 		}
 	}

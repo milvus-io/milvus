@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -381,6 +382,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			if err = validateMaxCapacityPerRow(t.schema.Name, field); err != nil {
 				return err
 			}
+		}
+		typeParams := funcutil.KeyValuePair2Map(field.GetTypeParams())
+		if err = ValidateAutoIndexMmapConfig(typeParams); err != nil {
+			return err
 		}
 	}
 
