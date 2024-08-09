@@ -307,6 +307,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(p.ServerMaxSendSize.GetAsInt()),
+		grpc.MaxConcurrentStreams(p.MaxConcurrentStreams.GetAsUint32()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
 			RateLimitInterceptor(s.simpleLimiter),
