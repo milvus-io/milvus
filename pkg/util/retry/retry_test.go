@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/lingdor/stackerror"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -87,7 +86,7 @@ func TestAllError(t *testing.T) {
 	ctx := context.Background()
 
 	testFn := func() error {
-		return stackerror.New("some error")
+		return errors.New("some error")
 	}
 
 	err := Do(ctx, testFn, Attempts(3))
