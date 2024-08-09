@@ -338,15 +338,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		return nil
 	}
 
-	channelCheckpointOK := make(map[string]bool)
-	isChannelCPOK := func(channelName string) bool {
-		cached, ok := channelCheckpointOK[channelName]
-		if ok {
-			return cached
-		}
-		return t.isChannelCheckpointHealthy(channelName)
-	}
-
 	for _, group := range partSegments {
 		log := log.With(zap.Int64("collectionID", group.collectionID),
 			zap.Int64("partitionID", group.partitionID),
@@ -354,10 +345,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full")
 			break
-		}
-		if !isChannelCPOK(group.channelName) && !signal.isForce {
-			log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
-			continue
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
@@ -439,11 +426,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
 		log.Warn("compaction plan skipped due to handler full")
-		return
-	}
-
-	if !t.isChannelCheckpointHealthy(signal.channel) {
-		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
 		return
 	}
 

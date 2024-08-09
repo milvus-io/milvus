@@ -2527,55 +2527,6 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 	})
 }
 
-func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
-	ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-	s.Run("ok", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.True(result, "ok case, check shall return true")
-	})
-
-	s.Run("cp_healthzcheck_disabled", func() {
-		paramtable.Get().Save(ptKey, "0")
-		defer paramtable.Get().Reset(ptKey)
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.True(result, "channel cp always healthy when config disable this check")
-	})
-
-	s.Run("checkpoint_not_exist", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		delete(s.meta.channelCPs.checkpoints, s.channel)
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.False(result, "check shall fail when checkpoint not exist in meta")
-	})
-
-	s.Run("checkpoint_lag", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.False(result, "check shall fail when checkpoint lag larger than config")
-	})
-}
-
 func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 	expectedSize := int64(70000)
 	smallsegments := []*SegmentInfo{
