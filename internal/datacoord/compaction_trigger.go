@@ -189,20 +189,6 @@ func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	return enabled
 }
 
-func (t *compactionTrigger) isChannelCheckpointHealthy(vchanName string) bool {
-	if paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsInt64() <= 0 {
-		return true
-	}
-	checkpoint := t.meta.GetChannelCheckpoint(vchanName)
-	if checkpoint == nil {
-		log.Warn("channel checkpoint not found", zap.String("channel", vchanName))
-		return false
-	}
-
-	cpTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
-	return time.Since(cpTime) < paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second)
-}
-
 func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
 	collectionTTL, err := getCollectionTTL(coll.Properties)
 	if err != nil {
