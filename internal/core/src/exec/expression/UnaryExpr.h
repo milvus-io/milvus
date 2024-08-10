@@ -206,7 +206,7 @@ struct UnaryIndexFuncForMatch {
                       !std::is_same_v<T, std::string>) {
             PanicInfo(Unsupported, "regex query is only supported on string");
         } else {
-            if (index->SupportRegexQuery()) {
+            if (index->SupportPatternMatch()) {
                 return index->PatternMatch(val);
             }
             if (!index->HasRawData()) {

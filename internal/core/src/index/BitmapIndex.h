@@ -130,6 +130,11 @@ class BitmapIndex : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
     const TargetBitmap
     PatternMatch(const std::string& pattern) override {
         PatternMatchTranslator translator;
@@ -139,7 +144,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     bool
     SupportRegexQuery() const override {
-        return true;
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap

@@ -570,9 +570,8 @@ class VariableColumn : public ColumnBase {
                    const DataType& data_type,
                    storage::MmapChunkManagerPtr mcm,
                    storage::MmapChunkDescriptorPtr descriptor,
-                   bool nullable,
                    size_t block_size)
-        : ColumnBase(reserve, dim, data_type, mcm, descriptor, nullable),
+        : ColumnBase(reserve, dim, data_type, mcm, descriptor),
           block_size_(block_size) {
     }
 
