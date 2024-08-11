@@ -986,7 +986,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 //	output_fields=["*",C]    ==> [A,B,C,D]
 func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, error) {
 	var primaryFieldName string
-	allFieldNameMap := make(map[string]bool)
+	allFieldNameMap := make(map[string]int64)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 	userOutputFieldsMap := make(map[string]bool)
@@ -996,18 +996,21 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
 		}
-		allFieldNameMap[field.Name] = true
+		allFieldNameMap[field.Name] = field.GetFieldID()
 	}
 
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
 		if outputFieldName == "*" {
-			for fieldName := range allFieldNameMap {
-				resultFieldNameMap[fieldName] = true
-				userOutputFieldsMap[fieldName] = true
+			for fieldName, fieldID := range allFieldNameMap {
+				// skip Cold field
+				if schema.IsFieldLoaded(fieldID) {
+					resultFieldNameMap[fieldName] = true
+					userOutputFieldsMap[fieldName] = true
+				}
 			}
 		} else {
-			if _, ok := allFieldNameMap[outputFieldName]; ok {
+			if fieldID, ok := allFieldNameMap[outputFieldName]; ok && schema.IsFieldLoaded(fieldID) {
 				resultFieldNameMap[outputFieldName] = true
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
@@ -1026,7 +1029,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 					resultFieldNameMap[common.MetaFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {
-					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, fmt.Errorf("field %s not exist or not loaded", outputFieldName)
 				}
 			}
 		}

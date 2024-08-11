@@ -410,6 +410,7 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.targetObserver,
 		s.checkerController,
+		s.proxyClientManager,
 	)
 
 	s.replicaObserver = observers.NewReplicaObserver(

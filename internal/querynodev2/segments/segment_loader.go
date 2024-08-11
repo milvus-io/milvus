@@ -206,6 +206,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Info("no segment to load")
 		return nil, nil
 	}
+	coll := loader.manager.Collection.Get(collectionID)
+	// filter field schema which need to be loaded
+	for _, info := range segments {
+		info.BinlogPaths = lo.Filter(info.GetBinlogPaths(), func(fbl *datapb.FieldBinlog, _ int) bool {
+			return coll.loadFields.Contain(fbl.GetFieldID()) || common.IsSystemField(fbl.GetFieldID())
+		})
+	}
+
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
@@ -220,7 +228,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	var err error
 	var requestResourceResult requestResourceResult
-	coll := loader.manager.Collection.Get(collectionID)
+
 	if !isLazyLoad(coll, segmentType) {
 		// Check memory & storage limit
 		// no need to check resource for lazy load here
