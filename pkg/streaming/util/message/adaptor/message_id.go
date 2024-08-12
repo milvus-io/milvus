@@ -52,3 +52,21 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 		return nil, fmt.Errorf("unsupported mq type %s", walName)
 	}
 }
+
+func MustGetMessageIDFromMQWrapperIDBytes(walName string, msgIDBytes []byte) message.MessageID {
+	var commonMsgID common.MessageID
+	switch walName {
+	case "rocksmq":
+		id := server.DeserializeRmqID(msgIDBytes)
+		commonMsgID = &server.RmqID{MessageID: id}
+	case "pulsar":
+		msgID, err := mqpulsar.DeserializePulsarMsgID(msgIDBytes)
+		if err != nil {
+			panic(err)
+		}
+		commonMsgID = mqpulsar.NewPulsarID(msgID)
+	default:
+		panic("unsupported now")
+	}
+	return MustGetMessageIDFromMQWrapperID(commonMsgID)
+}

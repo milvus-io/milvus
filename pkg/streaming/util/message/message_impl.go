@@ -70,6 +70,12 @@ func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
 	return m
 }
 
+// WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
+func (m *messageImpl) WithLastConfirmedUseMessageID() MutableMessage {
+	m.properties.Set(messageLastConfirmed, messageLastConfirmedValueUseMessageID)
+	return m
+}
+
 // IntoImmutableMessage converts current message to immutable message.
 func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	return &immutableMessageImpl{
@@ -92,10 +98,11 @@ func (m *messageImpl) TimeTick() uint64 {
 }
 
 // VChannel returns the vchannel of current message.
+// If the message is broadcasted, the vchannel will be empty.
 func (m *messageImpl) VChannel() string {
 	value, ok := m.properties.Get(messageVChannel)
 	if !ok {
-		panic("there's a bug in the message codes, vchannel lost in properties of message")
+		return ""
 	}
 	return value
 }
@@ -119,6 +126,9 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 	value, ok := m.properties.Get(messageLastConfirmed)
 	if !ok {
 		panic(fmt.Sprintf("there's a bug in the message codes, last confirmed message lost in properties of message, id: %+v", m.id))
+	}
+	if value == messageLastConfirmedValueUseMessageID {
+		return m.MessageID()
 	}
 	id, err := UnmarshalMessageID(m.id.WALName(), value)
 	if err != nil {
