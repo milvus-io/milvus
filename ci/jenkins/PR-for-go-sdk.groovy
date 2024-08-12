@@ -69,7 +69,7 @@ pipeline {
                         }
                         steps {
                             container('main') {
-                                scripts{
+                                script{
                                       sh 'sleep 3600'
                 }
                             }
