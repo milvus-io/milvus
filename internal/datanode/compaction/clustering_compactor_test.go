@@ -304,7 +304,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 
 	s.Run("upload failed", func() {
 		schema := genCollectionSchema()
-		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
+		segWriter, err := storage.NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
 		s.Require().NoError(err)
 		for i := 0; i < 2000; i++ {
 			v := storage.Value{
@@ -315,7 +315,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 			err = segWriter.Write(&v)
 			s.Require().NoError(err)
 		}
-		segWriter.writer.Flush()
+		segWriter.FlushAndIsFull()
 
 		kvs, _, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 		s.NoError(err)
