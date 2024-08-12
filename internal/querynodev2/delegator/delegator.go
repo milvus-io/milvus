@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -70,7 +71,7 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)
+	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
 
 	// control
@@ -505,7 +506,8 @@ func organizeSubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, g
 
 func executeSubTasks[T any, R interface {
 	GetStatus() *commonpb.Status
-}](ctx context.Context, tasks []subTask[T], execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger) ([]R, error) {
+}](ctx context.Context, tasks []subTask[T], execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger,
+) ([]R, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -674,8 +676,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		return nil, fmt.Errorf("collection(%d) not found in manager", collectionID)
 	}
 
-	maxSegmentDeleteBuffer := paramtable.Get().QueryNodeCfg.MaxSegmentDeleteBuffer.GetAsInt64()
-	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
+	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
+	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
 		collectionID:   collectionID,
@@ -687,7 +689,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
 		distribution:   NewDistribution(),
-		deleteBuffer:   deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](startTs, maxSegmentDeleteBuffer),
+		deleteBuffer:   deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
 		pkOracle:       pkoracle.NewPkOracle(),
 		tsafeManager:   tsafeManager,
 		latestTsafe:    atomic.NewUint64(startTs),

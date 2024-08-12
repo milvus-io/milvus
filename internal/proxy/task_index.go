@@ -47,11 +47,12 @@ const (
 	GetIndexStateTaskName         = "GetIndexStateTask"
 	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
 
-	AutoIndexName = "AUTOINDEX"
+	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
 )
 
 type createIndexTask struct {
+	baseTask
 	Condition
 	req       *milvuspb.CreateIndexRequest
 	ctx       context.Context
@@ -66,8 +67,9 @@ type createIndexTask struct {
 	newTypeParams  []*commonpb.KeyValuePair
 	newExtraParams []*commonpb.KeyValuePair
 
-	collectionID UniqueID
-	fieldSchema  *schemapb.FieldSchema
+	collectionID                     UniqueID
+	fieldSchema                      *schemapb.FieldSchema
+	userAutoIndexMetricTypeSpecified bool
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -106,6 +108,8 @@ func (cit *createIndexTask) OnEnqueue() error {
 	if cit.req.Base == nil {
 		cit.req.Base = commonpbutil.NewMsgBase()
 	}
+	cit.req.Base.MsgType = commonpb.MsgType_CreateIndex
+	cit.req.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -183,6 +187,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			if metricTypeExist {
 				// make the users' metric type first class citizen.
 				indexParamsMap[common.MetricTypeKey] = metricType
+				cit.userAutoIndexMetricTypeSpecified = true
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
 			autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -222,6 +227,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 					useAutoIndex()
 					// make the users' metric type first class citizen.
 					indexParamsMap[common.MetricTypeKey] = metricType
+					cit.userAutoIndexMetricTypeSpecified = true
 				}
 
 				return nil
@@ -359,9 +365,6 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 }
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
-	cit.req.Base.MsgType = commonpb.MsgType_CreateIndex
-	cit.req.Base.SourceID = paramtable.GetNodeID()
-
 	collName := cit.req.GetCollectionName()
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, cit.req.GetDbName(), collName)
@@ -397,14 +400,15 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 
 	var err error
 	req := &indexpb.CreateIndexRequest{
-		CollectionID:    cit.collectionID,
-		FieldID:         cit.fieldSchema.GetFieldID(),
-		IndexName:       cit.req.GetIndexName(),
-		TypeParams:      cit.newTypeParams,
-		IndexParams:     cit.newIndexParams,
-		IsAutoIndex:     cit.isAutoIndex,
-		UserIndexParams: cit.newExtraParams,
-		Timestamp:       cit.BeginTs(),
+		CollectionID:                     cit.collectionID,
+		FieldID:                          cit.fieldSchema.GetFieldID(),
+		IndexName:                        cit.req.GetIndexName(),
+		TypeParams:                       cit.newTypeParams,
+		IndexParams:                      cit.newIndexParams,
+		IsAutoIndex:                      cit.isAutoIndex,
+		UserIndexParams:                  cit.newExtraParams,
+		Timestamp:                        cit.BeginTs(),
+		UserAutoindexMetricTypeSpecified: cit.userAutoIndexMetricTypeSpecified,
 	}
 	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
 	if err != nil {
@@ -422,6 +426,7 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 }
 
 type describeIndexTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeIndexRequest
 	ctx       context.Context
@@ -465,13 +470,12 @@ func (dit *describeIndexTask) SetTs(ts Timestamp) {
 
 func (dit *describeIndexTask) OnEnqueue() error {
 	dit.Base = commonpbutil.NewMsgBase()
+	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
+	dit.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
-	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
-	dit.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -545,6 +549,7 @@ func (dit *describeIndexTask) PostExecute(ctx context.Context) error {
 }
 
 type getIndexStatisticsTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexStatisticsRequest
 	ctx       context.Context
@@ -589,13 +594,12 @@ func (dit *getIndexStatisticsTask) SetTs(ts Timestamp) {
 
 func (dit *getIndexStatisticsTask) OnEnqueue() error {
 	dit.Base = commonpbutil.NewMsgBase()
+	dit.Base.MsgType = commonpb.MsgType_GetIndexStatistics
+	dit.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
-	dit.Base.MsgType = commonpb.MsgType_GetIndexStatistics
-	dit.Base.SourceID = dit.nodeID
-
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
@@ -661,6 +665,7 @@ func (dit *getIndexStatisticsTask) PostExecute(ctx context.Context) error {
 }
 
 type dropIndexTask struct {
+	baseTask
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
@@ -709,13 +714,12 @@ func (dit *dropIndexTask) OnEnqueue() error {
 	if dit.Base == nil {
 		dit.Base = commonpbutil.NewMsgBase()
 	}
+	dit.Base.MsgType = commonpb.MsgType_DropIndex
+	dit.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
-	dit.Base.MsgType = commonpb.MsgType_DropIndex
-	dit.Base.SourceID = paramtable.GetNodeID()
-
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -781,6 +785,7 @@ func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 
 // Deprecated: use describeIndexTask instead
 type getIndexBuildProgressTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
 	ctx       context.Context
@@ -825,13 +830,12 @@ func (gibpt *getIndexBuildProgressTask) SetTs(ts Timestamp) {
 
 func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 	gibpt.Base = commonpbutil.NewMsgBase()
+	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
+	gibpt.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
-	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
-	gibpt.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
@@ -870,6 +874,7 @@ func (gibpt *getIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 
 // Deprecated: use describeIndexTask instead
 type getIndexStateTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexStateRequest
 	ctx       context.Context
@@ -914,13 +919,12 @@ func (gist *getIndexStateTask) SetTs(ts Timestamp) {
 
 func (gist *getIndexStateTask) OnEnqueue() error {
 	gist.Base = commonpbutil.NewMsgBase()
+	gist.Base.MsgType = commonpb.MsgType_GetIndexState
+	gist.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
-	gist.Base.MsgType = commonpb.MsgType_GetIndexState
-	gist.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
 	}

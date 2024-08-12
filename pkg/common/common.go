@@ -95,6 +95,7 @@ const (
 	DimKey         = "dim"
 	MaxLengthKey   = "max_length"
 	MaxCapacityKey = "max_capacity"
+	AutoIndexName  = "AUTOINDEX"
 )
 
 //  Collection properties key

@@ -72,21 +72,21 @@ Check the requirements first.
 
 Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
-go: >= 1.18
+go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
-go: >= 1.18
+go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 ```bash
-go: >= 1.18 (Arch=ARM64)
+go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
 ```
@@ -118,7 +118,7 @@ See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus2
 <table>
   <tr>
     <td width="30%">
-      <a href="https://milvus.io/milvus-demos">
+     <a href="https://milvus.io/milvus-demos">
         <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
       </a>
     </td>

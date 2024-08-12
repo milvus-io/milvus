@@ -12,6 +12,7 @@ import (
 )
 
 type createDatabaseTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateDatabaseRequest
 	ctx       context.Context
@@ -80,6 +81,7 @@ func (cdt *createDatabaseTask) PostExecute(ctx context.Context) error {
 }
 
 type dropDatabaseTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropDatabaseRequest
 	ctx       context.Context
@@ -150,6 +152,7 @@ func (ddt *dropDatabaseTask) PostExecute(ctx context.Context) error {
 }
 
 type listDatabaseTask struct {
+	baseTask
 	Condition
 	*milvuspb.ListDatabasesRequest
 	ctx       context.Context

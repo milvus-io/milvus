@@ -208,7 +208,7 @@ func (lc *BatchLocationsCache) Locations(k uint) [][]uint64 {
 		})
 	}
 
-	return lc.locations
+	return lo.Map(lc.locations, func(locations []uint64, _ int) []uint64 { return locations[:k] })
 }
 
 func NewBatchLocationsCache(pks []PrimaryKey) *BatchLocationsCache {

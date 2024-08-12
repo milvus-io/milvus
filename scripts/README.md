@@ -4,7 +4,7 @@
 
 ```
 OS: Ubuntu 20.04
-go：1.18
+go：1.21
 cmake: >=3.18
 gcc： 7.5
 ```
@@ -59,6 +59,7 @@ $ sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docke
 $ sudo chmod +x /usr/local/bin/docker-compose
 $ sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
 $ docker-compose --version
+$ docker compose --version
 ```
 
 ## Start service
@@ -68,6 +69,7 @@ Start third-party service:
 ```shell
 $ cd [milvus project path]/deployments/docker/cluster
 $ docker-compose up -d
+$ docker compose up -d
 ```
 
 Start milvus cluster:

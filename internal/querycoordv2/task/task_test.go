@@ -1443,6 +1443,9 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	suite.target.UpdateCollectionCurrentTarget(collectionID)
 	suite.target.UpdateCollectionNextTarget(collectionID)
 
+	suite.nodeMgr.Add(session.NewNodeInfo(0, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
 	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
 		ID:           2,
 		CollectionID: collectionID,

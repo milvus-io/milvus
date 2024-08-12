@@ -96,6 +96,7 @@ func newMockIDAllocatorInterface() allocator.Interface {
 }
 
 type mockTask struct {
+	baseTask
 	*TaskCondition
 	id    UniqueID
 	name  string

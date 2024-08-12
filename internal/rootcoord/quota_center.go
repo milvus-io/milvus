@@ -36,11 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -144,10 +146,24 @@ func (q *QuotaCenter) Start() {
 	go q.run()
 }
 
+func (q *QuotaCenter) watchQuotaAndLimit() {
+	pt := paramtable.Get()
+	pt.Watch(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, config.NewHandler(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, func(event *config.Event) {
+		metrics.QueryNodeMemoryHighWaterLevel.Set(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuota.Key, config.NewHandler(pt.QuotaConfig.DiskQuota.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "cluster").Set(pt.QuotaConfig.DiskQuota.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuotaPerCollection.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerCollection.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "collection").Set(pt.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	}))
+}
+
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
 	defer q.wg.Done()
 	log.Info("Start QuotaCenter", zap.Float64("collectInterval/s", Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat()))
+	q.watchQuotaAndLimit()
 	ticker := time.NewTicker(time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat() * float64(time.Second)))
 
 	defer ticker.Stop()
@@ -922,6 +938,7 @@ func (q *QuotaCenter) recordMetrics() {
 			for _, state := range states {
 				if state == errorCode {
 					hasException = 1
+					metrics.RootCoordForceDenyWritingCounter.Inc()
 				}
 			}
 			metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), dbm.Name).Set(hasException)

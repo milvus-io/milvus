@@ -61,7 +61,7 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 Linux systems (Recommend Ubuntu 20.04 or later):
 
 ```bash
-go: >= 1.18
+go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
 ```
@@ -69,7 +69,7 @@ gcc: 7.5
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 
 ```bash
-go: >= 1.18
+go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
 ```
@@ -77,7 +77,7 @@ llvm: >= 15
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 
 ```bash
-go: >= 1.18 (Arch=ARM64)
+go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
 ```
@@ -118,7 +118,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan
 
 ```shell
-pip install conan==1.61.0
+pip install conan==1.64.1
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.58.
@@ -132,8 +132,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-
-Note: go >= 1.18 is required to build Milvus.
+Note: go >= 1.21 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -182,7 +181,7 @@ For Apple Silicon users (Apple M1):
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose -f docker-compose-apple-silicon.yml up -d
+$ docker compose -f docker-compose-apple-silicon.yml up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -191,7 +190,7 @@ For others:
 
 ```shell
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ make unittest
 ```
@@ -253,13 +252,13 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 ```shell
 # Running Milvus cluster
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_cluster.sh
 
 # Or running Milvus standalone
 $ cd deployments/docker/dev
-$ docker-compose up -d
+$ docker compose up -d
 $ cd ../../../
 $ ./scripts/start_standalone.sh
 ```

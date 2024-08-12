@@ -4,7 +4,7 @@
 set -e
 
 log_dir=${1:-"logs"}
-array=($(docker-compose ps -a|awk 'NR == 1 {next} {print $1}'))
+array=($(docker compose ps -a|awk 'NR == 1 {next} {print $1}'))
 echo ${array[@]}
 if [ ! -d $log_dir ];
 then

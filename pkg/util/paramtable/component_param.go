@@ -1384,6 +1384,8 @@ type queryCoordConfig struct {
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
+	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1554,6 +1556,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GrowingRowCountWeight.Init(base.mgr)
+
+	p.DelegatorMemoryOverloadFactor = ParamItem{
+		Key:          "queryCoord.delegatorMemoryOverloadFactor",
+		Version:      "2.3.19",
+		DefaultValue: "0.1",
+		PanicIfEmpty: true,
+		Doc:          "the factor of delegator overloaded memory",
+		Export:       true,
+	}
+	p.DelegatorMemoryOverloadFactor.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
@@ -1852,12 +1864,13 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
-	ChunkRows                 ParamItem `refreshable:"false"`
-	EnableInterimSegmentIndex ParamItem `refreshable:"false"`
-	InterimIndexNlist         ParamItem `refreshable:"false"`
-	InterimIndexNProbe        ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize        ParamItem `refreshable:"false"`
+	ChunkRows                     ParamItem `refreshable:"false"`
+	EnableInterimSegmentIndex     ParamItem `refreshable:"false"`
+	InterimIndexNlist             ParamItem `refreshable:"false"`
+	InterimIndexNProbe            ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -1897,6 +1910,7 @@ type queryNodeConfig struct {
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
+	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// loader
 	IoPoolSize ParamItem `refreshable:"false"`
@@ -2021,6 +2035,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.InterimIndexMemExpandRate.Init(base.mgr)
+
+	p.InterimIndexBuildParallelRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.buildParallelRate",
+		Version:      "2.3.19",
+		DefaultValue: "0.5",
+		Doc:          "the ratio of building interim index parallel matched with cpu num",
+		Export:       true,
+	}
+	p.InterimIndexBuildParallelRate.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
@@ -2283,6 +2306,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "10000000",
 	}
 	p.MaxSegmentDeleteBuffer.Init(base.mgr)
+
+	p.DeleteBufferBlockSize = ParamItem{
+		Key:          "queryNode.deleteBufferBlockSize",
+		Version:      "2.3.5",
+		Doc:          "delegator delete buffer block size when using list delete buffer",
+		DefaultValue: "1048576", // 1MB
+	}
+	p.DeleteBufferBlockSize.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",

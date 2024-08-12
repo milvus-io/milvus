@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -2508,8 +2509,26 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	return it.result, nil
 }
 
-// Search search the most similar records of requests.
+// Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	var err error
+	rsp := &milvuspb.SearchResults{
+		Status: merr.Success(),
+	}
+	err2 := retry.Handle(ctx, func() (bool, error) {
+		rsp, err = node.search(ctx, request)
+		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
+			return true, merr.Error(rsp.GetStatus())
+		}
+		return false, nil
+	})
+	if err2 != nil {
+		rsp.Status = merr.Status(err2)
+	}
+	return rsp, err
+}
+
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	receiveSize := proto.Size(request)
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),

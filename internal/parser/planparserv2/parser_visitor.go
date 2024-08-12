@@ -336,14 +336,19 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 	if leftValue != nil && rightValue != nil {
+		var ret *ExprWithType
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserEQ:
-			return Equal(leftValue, rightValue)
+			ret = Equal(leftValue, rightValue)
 		case parser.PlanParserNE:
-			return NotEqual(leftValue, rightValue)
+			ret = NotEqual(leftValue, rightValue)
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}
+		if ret == nil {
+			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+		}
+		return ret
 	}
 
 	var leftExpr *ExprWithType
@@ -385,18 +390,23 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 
 	if leftValue != nil && rightValue != nil {
+		var ret *ExprWithType
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserLT:
-			return Less(leftValue, rightValue)
+			ret = Less(leftValue, rightValue)
 		case parser.PlanParserLE:
-			return LessEqual(leftValue, rightValue)
+			ret = LessEqual(leftValue, rightValue)
 		case parser.PlanParserGT:
-			return Greater(leftValue, rightValue)
+			ret = Greater(leftValue, rightValue)
 		case parser.PlanParserGE:
-			return GreaterEqual(leftValue, rightValue)
+			ret = GreaterEqual(leftValue, rightValue)
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}
+		if ret == nil {
+			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+		}
+		return ret
 	}
 
 	var leftExpr *ExprWithType

@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,7 +40,10 @@ func TestCompactionExecutor(t *testing.T) {
 		ex := newCompactionExecutor()
 		mc := newMockCompactor(true)
 		ex.executeWithState(mc)
-		ex.stopTask(UniqueID(1))
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go ex.stopTask(wg, UniqueID(1))
+		wg.Wait()
 	})
 
 	t.Run("Test start", func(t *testing.T) {

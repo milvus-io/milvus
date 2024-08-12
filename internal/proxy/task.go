@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -107,6 +108,20 @@ type task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
+	SetOnEnqueueTime()
+	GetDurationInQueue() time.Duration
+}
+
+type baseTask struct {
+	onEnqueueTime time.Time
+}
+
+func (bt *baseTask) SetOnEnqueueTime() {
+	bt.onEnqueueTime = time.Now()
+}
+
+func (bt *baseTask) GetDurationInQueue() time.Duration {
+	return time.Since(bt.onEnqueueTime)
 }
 
 type dmlTask interface {
@@ -118,6 +133,7 @@ type dmlTask interface {
 type BaseInsertTask = msgstream.InsertMsg
 
 type createCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateCollectionRequest
 	ctx       context.Context
@@ -317,6 +333,7 @@ func (t *createCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type dropCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropCollectionRequest
 	ctx       context.Context
@@ -362,13 +379,12 @@ func (t *dropCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DropCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DropCollection
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -386,6 +402,7 @@ func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type hasCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.HasCollectionRequest
 	ctx       context.Context
@@ -426,14 +443,15 @@ func (t *hasCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *hasCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_HasCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_HasCollection
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -460,6 +478,7 @@ func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type describeCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
 	ctx       context.Context
@@ -500,14 +519,15 @@ func (t *describeCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (t *describeCollectionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_DescribeCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DescribeCollection
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	if t.CollectionID != 0 && len(t.CollectionName) == 0 {
 		return nil
 	}
@@ -594,6 +614,7 @@ func (t *describeCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type showCollectionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ShowCollectionsRequest
 	ctx        context.Context
@@ -636,12 +657,12 @@ func (t *showCollectionsTask) SetTs(ts Timestamp) {
 
 func (t *showCollectionsTask) OnEnqueue() error {
 	t.Base = commonpbutil.NewMsgBase()
+	t.Base.MsgType = commonpb.MsgType_ShowCollections
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_ShowCollections
-	t.Base.SourceID = paramtable.GetNodeID()
 	if t.GetType() == milvuspb.ShowType_InMemory {
 		for _, collectionName := range t.CollectionNames {
 			if err := validateCollectionName(collectionName); err != nil {
@@ -753,6 +774,7 @@ func (t *showCollectionsTask) PostExecute(ctx context.Context) error {
 }
 
 type alterCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
 	ctx       context.Context
@@ -796,13 +818,12 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_AlterCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterCollection
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -817,6 +838,7 @@ func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type createPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreatePartitionRequest
 	ctx       context.Context
@@ -860,13 +882,12 @@ func (t *createPartitionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_CreatePartition
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *createPartitionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_CreatePartition
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -904,6 +925,7 @@ func (t *createPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type dropPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropPartitionRequest
 	ctx        context.Context
@@ -948,13 +970,12 @@ func (t *dropPartitionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DropPartition
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DropPartition
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1018,6 +1039,7 @@ func (t *dropPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type hasPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.HasPartitionRequest
 	ctx       context.Context
@@ -1058,14 +1080,15 @@ func (t *hasPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (t *hasPartitionTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_HasPartition
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *hasPartitionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_HasPartition
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1094,6 +1117,7 @@ func (t *hasPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type showPartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ShowPartitionsRequest
 	ctx        context.Context
@@ -1135,14 +1159,15 @@ func (t *showPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (t *showPartitionsTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_ShowPartitions
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *showPartitionsTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_ShowPartitions
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -1256,6 +1281,7 @@ func (t *showPartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type flushTask struct {
+	baseTask
 	Condition
 	*milvuspb.FlushRequest
 	ctx       context.Context
@@ -1301,12 +1327,12 @@ func (t *flushTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_Flush
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *flushTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_Flush
-	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -1360,6 +1386,7 @@ func (t *flushTask) PostExecute(ctx context.Context) error {
 }
 
 type loadCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.LoadCollectionRequest
 	ctx        context.Context
@@ -1407,14 +1434,14 @@ func (t *loadCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_LoadCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("loadCollectionTask PreExecute",
 		zap.String("role", typeutil.ProxyRole))
-	t.Base.MsgType = commonpb.MsgType_LoadCollection
-	t.Base.SourceID = paramtable.GetNodeID()
 
 	collName := t.CollectionName
 
@@ -1512,6 +1539,7 @@ func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type releaseCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.ReleaseCollectionRequest
 	ctx        context.Context
@@ -1558,13 +1586,12 @@ func (t *releaseCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_ReleaseCollection
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *releaseCollectionTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_ReleaseCollection
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1605,6 +1632,7 @@ func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type loadPartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.LoadPartitionsRequest
 	ctx        context.Context
@@ -1652,13 +1680,12 @@ func (t *loadPartitionsTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_LoadPartitions
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_LoadPartitions
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1755,6 +1782,7 @@ func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type releasePartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ReleasePartitionsRequest
 	ctx        context.Context
@@ -1801,13 +1829,12 @@ func (t *releasePartitionsTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_ReleasePartitions
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *releasePartitionsTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_ReleasePartitions
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -1862,6 +1889,7 @@ func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type CreateResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateResourceGroupRequest
 	ctx        context.Context
@@ -1905,13 +1933,12 @@ func (t *CreateResourceGroupTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_CreateResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *CreateResourceGroupTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_CreateResourceGroup
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -1926,6 +1953,7 @@ func (t *CreateResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type DropResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropResourceGroupRequest
 	ctx        context.Context
@@ -1969,13 +1997,12 @@ func (t *DropResourceGroupTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_DropResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *DropResourceGroupTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DropResourceGroup
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -1990,6 +2017,7 @@ func (t *DropResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type DescribeResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeResourceGroupRequest
 	ctx        context.Context
@@ -2030,14 +2058,15 @@ func (t *DescribeResourceGroupTask) SetTs(ts Timestamp) {
 }
 
 func (t *DescribeResourceGroupTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_DescribeResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *DescribeResourceGroupTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DescribeResourceGroup
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -2111,6 +2140,7 @@ func (t *DescribeResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type TransferNodeTask struct {
+	baseTask
 	Condition
 	*milvuspb.TransferNodeRequest
 	ctx        context.Context
@@ -2154,13 +2184,12 @@ func (t *TransferNodeTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_TransferNode
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *TransferNodeTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_TransferNode
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -2175,6 +2204,7 @@ func (t *TransferNodeTask) PostExecute(ctx context.Context) error {
 }
 
 type TransferReplicaTask struct {
+	baseTask
 	Condition
 	*milvuspb.TransferReplicaRequest
 	ctx        context.Context
@@ -2218,13 +2248,12 @@ func (t *TransferReplicaTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
+	t.Base.MsgType = commonpb.MsgType_TransferReplica
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *TransferReplicaTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_TransferReplica
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 
@@ -2248,6 +2277,7 @@ func (t *TransferReplicaTask) PostExecute(ctx context.Context) error {
 }
 
 type ListResourceGroupsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ListResourceGroupsRequest
 	ctx        context.Context
@@ -2288,14 +2318,15 @@ func (t *ListResourceGroupsTask) SetTs(ts Timestamp) {
 }
 
 func (t *ListResourceGroupsTask) OnEnqueue() error {
-	t.Base = commonpbutil.NewMsgBase()
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_ListResourceGroups
+	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *ListResourceGroupsTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_ListResourceGroups
-	t.Base.SourceID = paramtable.GetNodeID()
-
 	return nil
 }
 

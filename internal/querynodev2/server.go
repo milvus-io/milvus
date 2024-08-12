@@ -219,6 +219,14 @@ func (node *QueryNode) InitSegcore() error {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
+	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
+	if knowhereBuildPoolSize < uint32(1) {
+		knowhereBuildPoolSize = uint32(1)
+	}
+	log.Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
+	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
+	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 

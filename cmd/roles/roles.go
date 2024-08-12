@@ -397,6 +397,9 @@ func (mr *MilvusRoles) Run(serverType string) {
 		if len(role) == 0 || componentMap[role] == nil {
 			return fmt.Errorf("stop component [%s] in [%s] is not supported", role, serverType)
 		}
+
+		log.Info("unregister component before stop", zap.String("role", role))
+		healthz.UnRegister(role)
 		return componentMap[role].Stop()
 	})
 

@@ -8,7 +8,7 @@ For better tracking and debugging Milvus, the script `export-milvus-log.sh` is p
 >
 >For milvus installed with helm-chart, if `log.persistence.enabled` is set to true (default false), the tool cannot be used to export milvus logs and the log files can be found directly under the path specified by `log.persistence.mountPath`.
 >
-> For Milvus installed with docker-compose, you can use `docker-compose logs > milvus.log` to export the logs.
+> For Milvus installed with docker-compose, you can use `docker compose logs > milvus.log` to export the logs.
 
 ## Parameter Description
 

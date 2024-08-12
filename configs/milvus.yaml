@@ -267,6 +267,7 @@ queryCoord:
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
   checkInterval: 1000
+  delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
@@ -312,6 +313,7 @@ queryNode:
       nlist: 128 # segment index nlist
       nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
+      buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -749,4 +751,4 @@ trace:
 
 autoIndex:
   params:
-    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
+    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}'

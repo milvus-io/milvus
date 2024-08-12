@@ -20,7 +20,7 @@ prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
-default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
+default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE"}
 
 # copied from pymilvus
 uid = "test_index"

@@ -51,7 +51,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu20.04'
       - name: Code Check
@@ -59,6 +59,11 @@ jobs:
           OS_NAME: 'ubuntu20.04'
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu20.04'
 
   amazonlinux:
     name: Code Checker Amazonlinux 2023
@@ -78,10 +83,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'amazonlinux2023'
       - name: Code Check
         run: |
           sed -i 's/ubuntu20.04/amazonlinux2023/g' .env
           ./build/builder.sh /bin/bash -c "make install"
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'amazonlinux2023'
+

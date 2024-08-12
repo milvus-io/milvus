@@ -566,13 +566,13 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	// Compatible with the old version <= 2.3.0
-	t.Run("create Asceneding index on Arithmetic field", func(t *testing.T) {
+	t.Run("create Ascending index on Arithmetic field", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: "Asceneding",
+						Value: "Ascending",
 					},
 				},
 				IndexName: "",
@@ -772,6 +772,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
@@ -789,6 +790,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -807,6 +809,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		}
 		err := task.parseIndexParams()
 		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -823,6 +826,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 
@@ -837,6 +841,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 
@@ -852,6 +857,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			},
 		}
 		err := task.parseIndexParams()
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.Error(t, err)
 	})
 }

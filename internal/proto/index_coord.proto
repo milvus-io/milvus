@@ -134,6 +134,7 @@ message CreateIndexRequest {
   uint64 timestamp = 6;
   bool  is_auto_index = 7;
   repeated common.KeyValuePair user_index_params = 8;
+  bool user_autoindex_metric_type_specified = 9;
 }
 
 message GetIndexInfoRequest {

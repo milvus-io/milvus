@@ -51,7 +51,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.IndexParams = ParamItem{
 		Key:          "autoIndex.params.build",
 		Version:      "2.2.0",
-		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}`,
+		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
 	}
 	p.IndexParams.Init(base.mgr)
 

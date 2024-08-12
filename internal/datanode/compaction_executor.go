@@ -113,11 +113,13 @@ func (c *compactionExecutor) executeTask(task compactor) {
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
 }
 
-func (c *compactionExecutor) stopTask(planID UniqueID) {
+func (c *compactionExecutor) stopTask(wg *sync.WaitGroup, planID UniqueID) {
+	defer wg.Done()
 	task, loaded := c.executing.GetAndRemove(planID)
 	if loaded {
-		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.getChannelName()))
+		log.Warn("executor stopping compaction task...", zap.Int64("planID", planID), zap.String("vChannelName", task.getChannelName()))
 		task.stop()
+		log.Warn("compaction task stopped", zap.Int64("planID", planID), zap.String("vChannelName", task.getChannelName()))
 	}
 }
 
@@ -135,12 +137,15 @@ func (c *compactionExecutor) discardPlan(channel string) {
 	c.resultGuard.Lock()
 	defer c.resultGuard.Unlock()
 
+	wg := &sync.WaitGroup{}
 	c.executing.Range(func(planID int64, task compactor) bool {
 		if task.getChannelName() == channel {
-			c.stopTask(planID)
+			wg.Add(1)
+			go c.stopTask(wg, planID)
 		}
 		return true
 	})
+	wg.Wait()
 
 	// remove all completed plans for channel
 	c.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
