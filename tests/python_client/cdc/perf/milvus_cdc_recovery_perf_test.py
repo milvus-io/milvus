@@ -37,11 +37,31 @@ def create_interactive_plot(data, count_data, cdc_events):
     fig.add_trace(go.Scatter(x=count_data['datetime'], y=count_data['target_count'],
                              mode='lines', name='Target Count'),
                   row=1, col=1)
-    # Add CDC pause and resume events
+    # Add CDC pause and resume events as annotations
     for event in cdc_events:
         event_time = pd.to_datetime(event['timestamp'], unit='s')
-        fig.add_vline(x=event_time, line_dash="dash", line_color="red" if event['action'] == 'pause' else "green",
-                      annotation_text=f"CDC {event['action'].capitalize()}", row=1, col=1)
+        color = "red" if event['action'] == 'pause' else "green"
+        fig.add_annotation(
+            x=event_time,
+            y=1,
+            yref="paper",
+            text=f"CDC {event['action'].capitalize()}<br>{event_time.strftime('%Y-%m-%d %H:%M:%S')}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=2,
+            arrowcolor=color,
+            ax=0,
+            ay=-60,
+            bordercolor=color,
+            borderwidth=2,
+            borderpad=4,
+            bgcolor="white",
+            opacity=0.8,
+            font=dict(size=10),
+            align="center",
+            row=1, col=1
+        )
 
     # Plot 2: Insert and Sync Throughput
     fig.add_trace(go.Scatter(x=data['datetime'], y=data['insert_throughput'],
@@ -189,8 +209,10 @@ class MilvusCDCPerformance:
             response = requests.post(url, data=payload)
             result = response.json()
             logger.info(f"Pause CDC task {task_id} response: {result}")
+            if result["code"] == 200:
+                self.cdc_events.append({'timestamp': time.time(), 'action': 'pause'})  # Record pause event
         self.cdc_paused = True
-        self.cdc_events.append({'timestamp': time.time(), 'action': 'pause'})  # Record pause event
+
         logger.info("All CDC tasks paused")
 
     def resume_cdc_tasks(self):
@@ -205,8 +227,10 @@ class MilvusCDCPerformance:
             response = requests.post(url, data=payload)
             result = response.json()
             logger.info(f"Resume CDC task {task_id} response: {result}")
+            if result["code"] == 200:
+                self.cdc_events.append({'timestamp': time.time(), 'action': 'resume'})  # Record resume event
         self.cdc_paused = False
-        self.cdc_events.append({'timestamp': time.time(), 'action': 'resume'})  # Record resume event
+
         logger.info("All CDC tasks resumed")
 
     def pause_and_resume_cdc_tasks(self, duration):
@@ -438,12 +462,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='cdc perf test')
-    parser.add_argument('--source_uri', type=str, default='http://10.104.14.232:19530', help='source uri')
+    parser.add_argument('--source_uri', type=str, default='http://10.104.33.28:19530', help='source uri')
     parser.add_argument('--source_token', type=str, default='root:Milvus', help='source token')
-    parser.add_argument('--target_uri', type=str, default='http://10.104.34.103:19530', help='target uri')
+    parser.add_argument('--target_uri', type=str, default='http://10.104.32.189:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
-    parser.add_argument('--cdc_host', type=str, default='10.104.4.90', help='cdc host')
-    parser.add_argument('--test_duration', type=int, default=600, help='cdc test duration in seconds')
+    parser.add_argument('--cdc_host', type=str, default='10.104.9.165', help='cdc host')
+    parser.add_argument('--test_duration', type=int, default=30, help='cdc test duration in seconds')
 
     args = parser.parse_args()
 
