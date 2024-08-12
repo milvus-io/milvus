@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -96,11 +97,13 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		ts:           t.GetTs(),
 	})
 
-	undoTask.AddStep(&broadcastCreatePartitionMsgStep{
-		baseStep:  baseStep{core: t.core},
-		vchannels: t.collMeta.VirtualChannelNames,
-		partition: partition,
-	}, &nullStep{})
+	if streamingutil.IsStreamingServiceEnabled() {
+		undoTask.AddStep(&broadcastCreatePartitionMsgStep{
+			baseStep:  baseStep{core: t.core},
+			vchannels: t.collMeta.VirtualChannelNames,
+			partition: partition,
+		}, &nullStep{})
+	}
 
 	undoTask.AddStep(&nullStep{}, &releasePartitionsStep{
 		baseStep:     baseStep{core: t.core},
