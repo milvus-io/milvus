@@ -195,6 +195,9 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -245,6 +248,8 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -277,6 +282,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -327,6 +333,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -360,6 +367,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -376,6 +384,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -398,6 +407,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -452,6 +462,7 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -805,6 +816,7 @@ func TestMetaCache_Database(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &mocks.MockQueryCoordClient{}
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.NoError(t, err)
