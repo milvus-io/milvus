@@ -276,6 +276,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
+	metrics.DataCoordStoredBinlogSize.Reset()
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
 		if isSegmentHealthy(segment) {
