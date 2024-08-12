@@ -28,8 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -49,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"

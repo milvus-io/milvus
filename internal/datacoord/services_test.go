@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +26,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"

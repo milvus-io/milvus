@@ -29,8 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -52,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"

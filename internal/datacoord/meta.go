@@ -25,8 +25,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -39,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
