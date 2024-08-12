@@ -295,21 +295,13 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	fieldStatsLogs := make(map[int64]*datapb.FieldStatsLog)
-	for fieldID, textIndexLog := range textIndexStatsLogs {
-		fieldStatsLogs[fieldID] = &datapb.FieldStatsLog{
-			FieldID:        fieldID,
-			TextIndexStats: textIndexLog,
-		}
-	}
-
 	st.node.storeStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs, fieldStatsLogs)
+		int64(len(values)), insertLogs, statsLogs, textIndexStatsLogs)
 
 	return nil
 }

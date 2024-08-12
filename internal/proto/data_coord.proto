@@ -354,8 +354,8 @@ message SegmentInfo {
   // used to indicate whether the segment is sorted by primary key.
   bool is_sorted = 25;
 
-  // fieldStats is used to record information such as the tokenization index for fields.
-  map<int64, FieldStatsLog>  fieldStatslogs = 26;
+  // textStatsLogs is used to record tokenization index for fields.
+  map<int64, TextIndexStats> textStatsLogs = 26;
 }
 
 message SegmentStartPosition {
@@ -425,7 +425,7 @@ message SegmentBinlogs {
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
   string insert_channel = 6;
-  map<int64, FieldStatsLog> fieldStatsLogs = 7;
+  map<int64, TextIndexStats> textStatsLogs = 7;
 }
 
 message FieldBinlog{
@@ -434,16 +434,11 @@ message FieldBinlog{
 }
 
 message TextIndexStats {
-  int64 version = 1;
-  repeated string files = 2;
-  int64 log_size = 3;
-  int64 memory_size = 4;
-}
-
-message FieldStatsLog {
   int64 fieldID = 1;
-  TextIndexStats textIndexStats = 2;
-  // BM25Stats bm25Stats = 3;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
 }
 
 message Binlog {
@@ -971,7 +966,7 @@ message CompactionTask{
   int64 analyzeVersion = 24;
   int64 lastStateStartTime = 25;
   int64 max_size = 26;
-  repeated int64 targetSegments = 27;
+  repeated int64 tmpSegments = 27;
 }
 
 message PartitionStatsInfo {

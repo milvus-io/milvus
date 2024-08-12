@@ -49,10 +49,9 @@ type taskScheduler struct {
 	collectMetricsDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
-	tasks        map[int64]Task
-	notifyChan   chan struct{}
-	taskLock     *lock.KeyLock[int64]
-	failTaskChan chan UniqueID
+	tasks      map[int64]Task
+	notifyChan chan struct{}
+	taskLock   *lock.KeyLock[int64]
 
 	meta *meta
 
@@ -169,8 +168,15 @@ func (s *taskScheduler) enqueue(task Task) {
 	}
 }
 
-func (s *taskScheduler) FailTask(taskID int64) {
-	s.failTaskChan <- taskID
+func (s *taskScheduler) AbortTask(taskID int64) {
+	s.RLock()
+	task, ok := s.tasks[taskID]
+	s.RUnlock()
+	if ok {
+		s.taskLock.Lock(taskID)
+		task.SetState(indexpb.JobState_JobStateFailed, "canceled")
+		s.taskLock.Unlock(taskID)
+	}
 }
 
 func (s *taskScheduler) schedule() {
@@ -204,14 +210,6 @@ func (s *taskScheduler) getTask(taskID UniqueID) Task {
 }
 
 func (s *taskScheduler) run() {
-	// must be serial with task scheduling
-	select {
-	case taskID := <-s.failTaskChan:
-		task := s.getTask(taskID)
-		task.SetState(indexpb.JobState_JobStateFailed, "canceled")
-	default:
-	}
-
 	// schedule policy
 	s.RLock()
 	taskIDs := make([]UniqueID, 0, len(s.tasks))
@@ -259,94 +257,14 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 		s.removeTask(taskID)
 
 	case indexpb.JobState_JobStateInit:
-		// 0. pre check task
-		// Determine whether the task can be performed or if it is truly necessary.
-		// for example: flat index doesn't need to actually build. checkPass is false.
-		checkPass := task.PreCheck(s.ctx, s)
-		if !checkPass {
-			return true
-		}
-
-		// 1. pick an indexNode client
-		nodeID, client := s.nodeManager.PickClient()
-		if client == nil {
-			log.Ctx(s.ctx).Debug("pick client failed")
-			return false
-		}
-		log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
-
-		// 2. update version
-		if err := task.UpdateVersion(s.ctx, s.meta); err != nil {
-			log.Ctx(s.ctx).Warn("update task version failed", zap.Int64("taskID", taskID), zap.Error(err))
-			return false
-		}
-		log.Ctx(s.ctx).Info("update task version success", zap.Int64("taskID", taskID))
-
-		// 3. assign task to indexNode
-		success := task.AssignTask(s.ctx, client)
-		if !success {
-			log.Ctx(s.ctx).Warn("assign task to client failed", zap.Int64("taskID", taskID),
-				zap.String("new state", task.GetState().String()), zap.String("fail reason", task.GetFailReason()))
-			// If the problem is caused by the task itself, subsequent tasks will not be skipped.
-			// If etcd fails or fails to send tasks to the node, the subsequent tasks will be skipped.
-			return false
-		}
-		log.Ctx(s.ctx).Info("assign task to client success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
-
-		// 4. update meta state
-		if err := task.UpdateMetaBuildingState(nodeID, s.meta); err != nil {
-			log.Ctx(s.ctx).Warn("update meta building state failed", zap.Int64("taskID", taskID), zap.Error(err))
-			task.SetState(indexpb.JobState_JobStateRetry, "update meta building state failed")
-			return false
-		}
-		task.SetStartTime(time.Now())
-		queueingTime := task.GetStartTime().Sub(task.GetQueueTime())
-		if queueingTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Warn("task queueing time is too long", zap.Int64("taskID", taskID),
-				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
-		}
-		metrics.DataCoordTaskExecuteLatency.
-			WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
-		log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", taskID),
-			zap.Int64("nodeID", nodeID))
+		return s.processInit(task)
 	case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
-		if err := task.SetJobInfo(s.meta); err != nil {
-			log.Ctx(s.ctx).Warn("update task info failed", zap.Error(err))
-			return true
-		}
-		task.SetEndTime(time.Now())
-		runningTime := task.GetEndTime().Sub(task.GetStartTime())
-		if runningTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Warn("task running time is too long", zap.Int64("taskID", taskID),
-				zap.Int64("running time(ms)", runningTime.Milliseconds()))
-		}
-		metrics.DataCoordTaskExecuteLatency.
-			WithLabelValues(task.GetTaskType(), metrics.Executing).Observe(float64(runningTime.Milliseconds()))
-		client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
-		if exist {
-			if !task.DropTaskOnWorker(s.ctx, client) {
-				return true
-			}
-		}
-		s.removeTask(taskID)
+		return s.processFinished(task)
 	case indexpb.JobState_JobStateRetry:
-		client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
-		if exist {
-			if !task.DropTaskOnWorker(s.ctx, client) {
-				return true
-			}
-		}
-		task.SetState(indexpb.JobState_JobStateInit, "")
-		task.ResetTask(s.meta)
-
+		return s.processRetry(task)
 	default:
 		// state: in_progress
-		client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
-		if exist {
-			task.QueryResult(s.ctx, client)
-			return true
-		}
-		task.SetState(indexpb.JobState_JobStateRetry, "node does not exist")
+		return s.processInProgress(task)
 	}
 	return true
 }
@@ -425,4 +343,106 @@ func (s *taskScheduler) collectTaskMetrics() {
 			}
 		}
 	}
+}
+
+func (s *taskScheduler) processInit(task Task) bool {
+	// 0. pre check task
+	// Determine whether the task can be performed or if it is truly necessary.
+	// for example: flat index doesn't need to actually build. checkPass is false.
+	checkPass := task.PreCheck(s.ctx, s)
+	if !checkPass {
+		return true
+	}
+
+	// 1. pick an indexNode client
+	nodeID, client := s.nodeManager.PickClient()
+	if client == nil {
+		log.Ctx(s.ctx).Debug("pick client failed")
+		return false
+	}
+	log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
+
+	// 2. update version
+	if err := task.UpdateVersion(s.ctx, s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("update task version failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
+		return false
+	}
+	log.Ctx(s.ctx).Info("update task version success", zap.Int64("taskID", task.GetTaskID()))
+
+	// 3. assign task to indexNode
+	success := task.AssignTask(s.ctx, client)
+	if !success {
+		log.Ctx(s.ctx).Warn("assign task to client failed", zap.Int64("taskID", task.GetTaskID()),
+			zap.String("new state", task.GetState().String()), zap.String("fail reason", task.GetFailReason()))
+		// If the problem is caused by the task itself, subsequent tasks will not be skipped.
+		// If etcd fails or fails to send tasks to the node, the subsequent tasks will be skipped.
+		return false
+	}
+	log.Ctx(s.ctx).Info("assign task to client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
+
+	// 4. update meta state
+	if err := task.UpdateMetaBuildingState(nodeID, s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("update meta building state failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
+		task.SetState(indexpb.JobState_JobStateRetry, "update meta building state failed")
+		return false
+	}
+	task.SetStartTime(time.Now())
+	queueingTime := task.GetStartTime().Sub(task.GetQueueTime())
+	if queueingTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+		log.Warn("task queueing time is too long", zap.Int64("taskID", task.GetTaskID()),
+			zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
+	}
+	metrics.DataCoordTaskExecuteLatency.
+		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
+	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("nodeID", nodeID))
+	return s.processInProgress(task)
+}
+
+func (s *taskScheduler) processFinished(task Task) bool {
+	if err := task.SetJobInfo(s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("update task info failed", zap.Error(err))
+		return true
+	}
+	task.SetEndTime(time.Now())
+	runningTime := task.GetEndTime().Sub(task.GetStartTime())
+	if runningTime > Params.DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
+		log.Warn("task running time is too long", zap.Int64("taskID", task.GetTaskID()),
+			zap.Int64("running time(ms)", runningTime.Milliseconds()))
+	}
+	metrics.DataCoordTaskExecuteLatency.
+		WithLabelValues(task.GetTaskType(), metrics.Executing).Observe(float64(runningTime.Milliseconds()))
+	client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
+	if exist {
+		if !task.DropTaskOnWorker(s.ctx, client) {
+			return true
+		}
+	}
+	s.removeTask(task.GetTaskID())
+	return true
+}
+
+func (s *taskScheduler) processRetry(task Task) bool {
+	client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
+	if exist {
+		if !task.DropTaskOnWorker(s.ctx, client) {
+			return true
+		}
+	}
+	task.SetState(indexpb.JobState_JobStateInit, "")
+	task.ResetTask(s.meta)
+	return true
+}
+
+func (s *taskScheduler) processInProgress(task Task) bool {
+	client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
+	if exist {
+		task.QueryResult(s.ctx, client)
+		if task.GetState() == indexpb.JobState_JobStateFinished || task.GetState() == indexpb.JobState_JobStateFailed {
+			return s.processFinished(task)
+		}
+		return true
+	}
+	task.SetState(indexpb.JobState_JobStateRetry, "node does not exist")
+	return true
 }

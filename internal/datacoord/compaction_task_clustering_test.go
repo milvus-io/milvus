@@ -500,7 +500,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			IndexID:      3,
 		}
 
-		task.TargetSegments = []int64{10, 11}
+		task.ResultSegments = []int64{10, 11}
 		err := s.meta.indexMeta.CreateIndex(index)
 		s.NoError(err)
 

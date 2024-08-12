@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,12 +34,13 @@ import (
 )
 
 func (s *Server) startStatsTasksCheckLoop(ctx context.Context) {
-	s.serverLoopWg.Add(1)
+	s.serverLoopWg.Add(2)
 	go s.checkStatsTaskLoop(ctx)
+	go s.cleanupStatsTasksLoop(ctx)
 }
 
 func (s *Server) checkStatsTaskLoop(ctx context.Context) {
-	log.Info("start check stats task for segment loop...")
+	log.Info("start checkStatsTaskLoop...")
 	defer s.serverLoopWg.Done()
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
@@ -46,7 +48,7 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn("DataCoord context done, exit...")
+			log.Warn("DataCoord context done, exit checkStatsTaskLoop...")
 			return
 		case <-ticker.C:
 			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
@@ -86,6 +88,35 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 	}
 }
 
+// cleanupStatsTasks clean up the finished/failed stats tasks
+func (s *Server) cleanupStatsTasksLoop(ctx context.Context) {
+	log.Info("start cleanupStatsTasksLoop...")
+	defer s.serverLoopWg.Done()
+
+	ticker := time.NewTicker(Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Warn("DataCoord context done, exit cleanupStatsTasksLoop...")
+			return
+		case <-ticker.C:
+			start := time.Now()
+			log.Info("start cleanupUnusedStatsTasks...", zap.Time("startAt", start))
+
+			taskIDs := s.meta.statsTaskMeta.CanCleanedTasks()
+			for _, taskID := range taskIDs {
+				if err := s.meta.statsTaskMeta.RemoveStatsTaskByTaskID(taskID); err != nil {
+					// ignore err, if remove failed, wait next GC
+					log.Warn("clean up stats task failed", zap.Int64("taskID", taskID), zap.Error(err))
+				}
+			}
+			log.Info("recycleUnusedStatsTasks done", zap.Duration("timeCost", time.Since(start)))
+		}
+	}
+}
+
 func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
 	if segment.GetIsSorted() || segment.GetIsImporting() {
 		// TODO @xiaocai2333: allow importing segment stats
@@ -109,6 +140,9 @@ func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
 		TargetSegmentID: start + 1,
 	}
 	if err = s.meta.statsTaskMeta.AddStatsTask(t); err != nil {
+		if errors.Is(err, merr.ErrTaskDuplicate) {
+			return nil
+		}
 		return err
 	}
 	s.taskScheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), s.buildIndexCh))
@@ -379,7 +413,8 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	}
 
 	metricMutation.commit()
-	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
+		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()))
 
 	if st.buildIndexCh != nil {
 		select {

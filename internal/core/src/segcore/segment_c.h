@@ -33,7 +33,8 @@ CStatus
 NewSegment(CCollection collection,
            SegmentType seg_type,
            int64_t segment_id,
-           CSegmentInterface* newSegment);
+           CSegmentInterface* newSegment,
+           bool is_sorted_by_pk);
 
 void
 DeleteSegment(CSegmentInterface c_segment);

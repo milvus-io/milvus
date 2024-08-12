@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -145,7 +147,10 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(2, len(segments))
+	flushedSegment := lo.Filter(segments, func(info *datapb.SegmentInfo, i int) bool {
+		return info.GetState() == commonpb.SegmentState_Flushed || info.GetState() == commonpb.SegmentState_Flushing
+	})
+	s.Equal(2, len(flushedSegment))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load

@@ -58,29 +58,26 @@ func (r *SegmentDeserializeReader) initDeserializeReader() error {
 	return nil
 }
 
-func (r *SegmentDeserializeReader) Next() error {
+func (r *SegmentDeserializeReader) Next() (*storage.Value, error) {
 	if r.reader == nil {
 		if err := r.initDeserializeReader(); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := r.reader.Next(); err != nil {
 		if err == io.EOF {
 			r.reader.Close()
 			if err := r.initDeserializeReader(); err != nil {
-				return err
+				return nil, err
 			}
-			return r.reader.Next()
+			err = r.reader.Next()
+			return r.reader.Value(), err
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return r.reader.Value(), nil
 }
 
 func (r *SegmentDeserializeReader) Close() {
 	r.reader.Close()
-}
-
-func (r *SegmentDeserializeReader) Value() *storage.Value {
-	return r.reader.Value()
 }

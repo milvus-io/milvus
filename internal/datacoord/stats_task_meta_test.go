@@ -216,14 +216,13 @@ func (s *statsTaskMetaSuite) Test_Method() {
 				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 9}}},
 			},
 			DeltaLogs: nil,
-			FieldStatsLogs: map[int64]*datapb.FieldStatsLog{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				100: {
-					TextIndexStats: &datapb.TextIndexStats{
-						Version:    1,
-						Files:      []string{"file1", "file2", "file3"},
-						LogSize:    100,
-						MemorySize: 100,
-					},
+					FieldID:    100,
+					Version:    1,
+					Files:      []string{"file1", "file2", "file3"},
+					LogSize:    100,
+					MemorySize: 100,
 				},
 			},
 			NumRows: 2048,
@@ -277,18 +276,29 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 	s.Run("RemoveStatsTask", func() {
 		s.Run("failed case", func() {
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Twice()
 
-			s.Error(m.RemoveStatsTask(1, s.segmentID))
+			s.Error(m.RemoveStatsTaskByTaskID(1))
 			_, ok := m.tasks[1]
+			s.True(ok)
+
+			s.Error(m.RemoveStatsTaskBySegmentID(s.segmentID))
+			_, ok = m.segmentStatsTaskIndex[s.segmentID]
 			s.True(ok)
 		})
 
 		s.Run("normal case", func() {
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Twice()
 
-			s.NoError(m.RemoveStatsTask(1, s.segmentID))
+			s.NoError(m.RemoveStatsTaskByTaskID(1))
 			_, ok := m.tasks[1]
+			s.False(ok)
+
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
+			s.NoError(m.AddStatsTask(t))
+
+			s.NoError(m.RemoveStatsTaskBySegmentID(s.segmentID))
+			_, ok = m.segmentStatsTaskIndex[s.segmentID]
 			s.False(ok)
 		})
 	})

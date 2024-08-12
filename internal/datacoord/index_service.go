@@ -53,6 +53,10 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
+	if !segment.GetIsSorted() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
+		log.Info("segment not sorted, skip create index", zap.Int64("segmentID", segment.GetID()))
+		return nil
+	}
 	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
 	buildID, err := s.allocator.AllocID(context.Background())
 	if err != nil {

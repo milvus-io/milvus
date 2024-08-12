@@ -503,18 +503,18 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 			info := i.getStatsTaskInfo(req.GetClusterID(), taskID)
 			if info != nil {
 				results = append(results, &workerpb.StatsResult{
-					TaskID:         taskID,
-					State:          info.state,
-					FailReason:     info.failReason,
-					CollectionID:   info.collID,
-					PartitionID:    info.partID,
-					SegmentID:      info.segID,
-					Channel:        info.insertChannel,
-					InsertLogs:     info.insertLogs,
-					StatsLogs:      info.statsLogs,
-					DeltaLogs:      nil,
-					FieldStatsLogs: info.fieldStatsLogs,
-					NumRows:        info.numRows,
+					TaskID:        taskID,
+					State:         info.state,
+					FailReason:    info.failReason,
+					CollectionID:  info.collID,
+					PartitionID:   info.partID,
+					SegmentID:     info.segID,
+					Channel:       info.insertChannel,
+					InsertLogs:    info.insertLogs,
+					StatsLogs:     info.statsLogs,
+					DeltaLogs:     nil,
+					TextStatsLogs: info.textStatsLogs,
+					NumRows:       info.numRows,
 				})
 			}
 		}

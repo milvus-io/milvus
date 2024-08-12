@@ -473,7 +473,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		log.Info("GC segment start...", zap.Int("insert_logs", len(segment.GetBinlogs())),
 			zap.Int("delta_logs", len(segment.GetDeltalogs())),
 			zap.Int("stats_logs", len(segment.GetStatslogs())),
-			zap.Int("text_logs", len(segment.GetFieldStatslogs())))
+			zap.Int("text_logs", len(segment.GetTextStatsLogs())))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			continue
@@ -569,8 +569,8 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 
 func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	textLogs := make(map[string]struct{})
-	for _, flog := range sinfo.GetFieldStatslogs() {
-		for _, file := range flog.GetTextIndexStats().GetFiles() {
+	for _, flog := range sinfo.GetTextStatsLogs() {
+		for _, file := range flog.GetFiles() {
 			textLogs[file] = struct{}{}
 		}
 	}
@@ -845,16 +845,16 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 	defer func() { log.Info("recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start))) }()
 
 	hasTextIndexSegments := gc.meta.SelectSegments(SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return len(info.GetFieldStatslogs()) != 0
+		return len(info.GetTextStatsLogs()) != 0
 	}))
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
 
 	for _, seg := range hasTextIndexSegments {
-		for _, fieldStats := range seg.GetFieldStatslogs() {
+		for _, fieldStats := range seg.GetTextStatsLogs() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
-			for i := int64(1); i < fieldStats.GetTextIndexStats().GetVersion(); i++ {
+			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.TextIndexPath,
 					seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fieldStats.GetFieldID(), i)
 				futures := make([]*conc.Future[struct{}], 0)

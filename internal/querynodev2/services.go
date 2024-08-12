@@ -410,6 +410,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("segmentID", segment.GetSegmentID()),
 		zap.String("level", segment.GetLevel().String()),
 		zap.Int64("currentNodeID", node.GetNodeID()),
+		zap.Bool("isSorted", segment.GetIsSorted()),
 	)
 
 	log.Info("received load segments request",

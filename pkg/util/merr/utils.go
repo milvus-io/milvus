@@ -811,7 +811,7 @@ func WrapErrIndexDuplicate(indexName string, msg ...string) error {
 }
 
 func WrapErrTaskDuplicate(taskType string, msg ...string) error {
-	err := wrapFields(ErrIndexDuplicate, value("taskType", taskType))
+	err := wrapFields(ErrTaskDuplicate, value("taskType", taskType))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

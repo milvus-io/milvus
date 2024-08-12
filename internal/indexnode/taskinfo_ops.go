@@ -312,17 +312,17 @@ func (i *IndexNode) waitTaskFinish() {
 }
 
 type statsTaskInfo struct {
-	cancel         context.CancelFunc
-	state          indexpb.JobState
-	failReason     string
-	collID         UniqueID
-	partID         UniqueID
-	segID          UniqueID
-	insertChannel  string
-	numRows        int64
-	insertLogs     []*datapb.FieldBinlog
-	statsLogs      []*datapb.FieldBinlog
-	fieldStatsLogs map[int64]*datapb.FieldStatsLog
+	cancel        context.CancelFunc
+	state         indexpb.JobState
+	failReason    string
+	collID        UniqueID
+	partID        UniqueID
+	segID         UniqueID
+	insertChannel string
+	numRows       int64
+	insertLogs    []*datapb.FieldBinlog
+	statsLogs     []*datapb.FieldBinlog
+	textStatsLogs map[int64]*datapb.TextIndexStats
 }
 
 func (i *IndexNode) loadOrStoreStatsTask(clusterID string, taskID UniqueID, info *statsTaskInfo) *statsTaskInfo {
@@ -370,7 +370,7 @@ func (i *IndexNode) storeStatsResult(
 	numRows int64,
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
-	fieldStatsLogs map[int64]*datapb.FieldStatsLog,
+	fieldStatsLogs map[int64]*datapb.TextIndexStats,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
 	i.stateLock.Lock()
@@ -383,7 +383,7 @@ func (i *IndexNode) storeStatsResult(
 		info.numRows = numRows
 		info.insertLogs = insertLogs
 		info.statsLogs = statsLogs
-		info.fieldStatsLogs = fieldStatsLogs
+		info.textStatsLogs = fieldStatsLogs
 		return
 	}
 }
@@ -394,17 +394,17 @@ func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTa
 
 	if info, ok := i.statsTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &statsTaskInfo{
-			cancel:         info.cancel,
-			state:          info.state,
-			failReason:     info.failReason,
-			collID:         info.collID,
-			partID:         info.partID,
-			segID:          info.segID,
-			insertChannel:  info.insertChannel,
-			numRows:        info.numRows,
-			insertLogs:     info.insertLogs,
-			statsLogs:      info.statsLogs,
-			fieldStatsLogs: info.fieldStatsLogs,
+			cancel:        info.cancel,
+			state:         info.state,
+			failReason:    info.failReason,
+			collID:        info.collID,
+			partID:        info.partID,
+			segID:         info.segID,
+			insertChannel: info.insertChannel,
+			numRows:       info.numRows,
+			insertLogs:    info.insertLogs,
+			statsLogs:     info.statsLogs,
+			textStatsLogs: info.textStatsLogs,
 		}
 	}
 	return nil

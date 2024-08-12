@@ -1975,7 +1975,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		MaxRowNum:           cloned.GetMaxRowNum(),
 		Binlogs:             result.GetInsertLogs(),
 		Statslogs:           result.GetStatsLogs(),
-		FieldStatslogs:      result.GetFieldStatsLogs(),
+		TextStatsLogs:       result.GetTextStatsLogs(),
 		CreatedByCompaction: true,
 		CompactionFrom:      []int64{oldSegmentID},
 		LastExpireTime:      cloned.GetLastExpireTime(),
@@ -1983,6 +1983,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		StartPosition:       cloned.GetStartPosition(),
 		DmlPosition:         cloned.GetDmlPosition(),
 		IsSorted:            true,
+		IsImporting:         cloned.GetIsImporting(),
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {

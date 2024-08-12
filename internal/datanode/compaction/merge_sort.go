@@ -93,9 +93,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 	heap.Init(&pq)
 
 	for i, r := range segmentReaders {
-		if r.Next() == nil {
+		if v, err := r.Next(); err == nil {
 			heap.Push(&pq, &PQItem{
-				Value: r.Value(),
+				Value: v,
 				Index: i,
 			})
 		}
@@ -142,13 +142,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 			unflushedRowCount = 0
 		}
 
-		err = segmentReaders[smallest.Index].Next()
+		v, err = segmentReaders[smallest.Index].Next()
 		if err != nil && err != sio.EOF {
 			return nil, err
 		}
 		if err == nil {
 			next := &PQItem{
-				Value: segmentReaders[smallest.Index].Value(),
+				Value: v,
 				Index: smallest.Index,
 			}
 			heap.Push(&pq, next)

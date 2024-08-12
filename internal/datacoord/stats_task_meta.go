@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -103,9 +104,9 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	defer stm.Unlock()
 
 	if _, ok := stm.segmentStatsTaskIndex[t.GetSegmentID()]; ok {
-		log.Warn("stats task already exist in meta", zap.Int64("taskID", t.GetTaskID()),
-			zap.Int64("segmentID", t.GetSegmentID()))
-		return fmt.Errorf("stats task already exist in meta of segment %d", t.GetSegmentID())
+		msg := fmt.Sprintf("stats task already exist in meta of segment %d", t.GetSegmentID())
+		log.Warn(msg)
+		return merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(), msg)
 	}
 
 	log.Info("add stats task", zap.Int64("taskID", t.GetTaskID()), zap.Int64("segmentID", t.GetSegmentID()))
@@ -127,11 +128,17 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	return nil
 }
 
-func (stm *statsTaskMeta) RemoveStatsTask(taskID, segmentID int64) error {
+func (stm *statsTaskMeta) RemoveStatsTaskByTaskID(taskID int64) error {
 	stm.Lock()
 	defer stm.Unlock()
 
-	log.Info("remove stats task", zap.Int64("taskID", taskID), zap.Int64("segmentID", taskID))
+	log.Info("remove stats task by taskID", zap.Int64("taskID", taskID))
+
+	t, ok := stm.tasks[taskID]
+	if !ok {
+		log.Info("remove stats task success, task already not exist", zap.Int64("taskID", taskID))
+		return nil
+	}
 	if err := stm.catalog.DropStatsTask(stm.ctx, taskID); err != nil {
 		log.Warn("meta update: removing stats task failed",
 			zap.Int64("taskID", taskID),
@@ -141,10 +148,36 @@ func (stm *statsTaskMeta) RemoveStatsTask(taskID, segmentID int64) error {
 	}
 
 	delete(stm.tasks, taskID)
+	delete(stm.segmentStatsTaskIndex, t.SegmentID)
+	stm.updateMetrics()
+
+	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID))
+	return nil
+}
+
+func (stm *statsTaskMeta) RemoveStatsTaskBySegmentID(segmentID int64) error {
+	stm.Lock()
+	defer stm.Unlock()
+
+	log.Info("remove stats task by segmentID", zap.Int64("segmentID", segmentID))
+	t, ok := stm.segmentStatsTaskIndex[segmentID]
+	if !ok {
+		log.Info("remove stats task success, task already not exist", zap.Int64("segmentID", segmentID))
+		return nil
+	}
+	if err := stm.catalog.DropStatsTask(stm.ctx, t.TaskID); err != nil {
+		log.Warn("meta update: removing stats task failed",
+			zap.Int64("taskID", t.TaskID),
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err))
+		return err
+	}
+
+	delete(stm.tasks, t.TaskID)
 	delete(stm.segmentStatsTaskIndex, segmentID)
 	stm.updateMetrics()
 
-	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", taskID))
+	log.Info("remove stats task success", zap.Int64("taskID", t.TaskID), zap.Int64("segmentID", segmentID))
 	return nil
 }
 
@@ -256,14 +289,16 @@ func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64) indexpb.
 	return t.GetState()
 }
 
-func (stm *statsTaskMeta) GetTargetSegmentID(from int64) int64 {
+func (stm *statsTaskMeta) CanCleanedTasks() []int64 {
 	stm.RLock()
 	defer stm.RUnlock()
 
-	t, ok := stm.segmentStatsTaskIndex[from]
-	if !ok {
-		return 0
+	needCleanedTaskIDs := make([]int64, 0)
+	for taskID, t := range stm.tasks {
+		if t.GetState() == indexpb.JobState_JobStateFinished ||
+			t.GetState() == indexpb.JobState_JobStateFailed {
+			needCleanedTaskIDs = append(needCleanedTaskIDs, taskID)
+		}
 	}
-
-	return t.GetTargetSegmentID()
+	return needCleanedTaskIDs
 }
