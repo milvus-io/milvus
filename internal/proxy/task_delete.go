@@ -266,6 +266,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
 
+	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
+	if err != nil {
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
+	}
+	dr.dbID = db.dbID
+
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
@@ -480,9 +486,8 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		if dr.limiter != nil {
 			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
-				dr.err = err
 				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
-				return
+				return err
 			}
 		}
 
