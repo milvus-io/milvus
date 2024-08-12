@@ -135,6 +135,7 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
         }
         auto sparse_column = std::make_shared<SparseFloatColumn>(
             data_size, dim, data_type, mcm_, descriptor);
+        sparse_column->AppendBatchMmap(field_data);
         sparse_column->Seal(std::move(indices));
         column = std::move(sparse_column);
     } else if (IsVariableDataType(data_type)) {
@@ -143,8 +144,8 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
     } else {
         column = std::make_shared<Column>(
             data_size, dim, data_type, mcm_, descriptor);
+        column->AppendBatch(field_data);
     }
-    column->AppendBatch(field_data);
     return column;
 }
 }  // namespace milvus::storage
