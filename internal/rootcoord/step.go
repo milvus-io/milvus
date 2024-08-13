@@ -412,7 +412,7 @@ func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nested
 		msgs = append(msgs, msg)
 	}
 	resp := streaming.WAL().Append(ctx, msgs...)
-	if err := resp.IsAnyError(); err != nil {
+	if err := resp.UnwrapFirstError(); err != nil {
 		return nil, err
 	}
 	return nil, nil
