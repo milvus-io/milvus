@@ -112,8 +112,10 @@ func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates fun
 			)
 			continue
 		}
-		// policy hitted segment should be removed from assignment manager.
-		if predicates(segment) {
+
+		// policy hitted growing segment should be removed from assignment manager.
+		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING &&
+			predicates(segment) {
 			shouldBeSealedSegments = append(shouldBeSealedSegments, segment)
 			continue
 		}

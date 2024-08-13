@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func TestSegmentAllocManager(t *testing.T) {
@@ -48,7 +49,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 100,
 		},
-		TimeTick: 0,
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -61,7 +62,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1024 * 1024,
 			BinarySize: 1024 * 1024, // 1MB setting at paramtable.
 		},
-		TimeTick: 0,
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result2)
@@ -79,7 +80,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1,
 			BinarySize: 1,
 		},
-		TimeTick: 0,
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result3)
@@ -94,7 +95,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	// interactive with txn
 	txnManager := txn.NewTxnManager()
-	txn, err := txnManager.BeginNewTxn(context.Background(), 0, time.Second)
+	txn, err := txnManager.BeginNewTxn(context.Background(), tsoutil.GetCurrentTime(), time.Second)
 	assert.NoError(t, err)
 	txn.BeginDone()
 
@@ -107,7 +108,7 @@ func TestSegmentAllocManager(t *testing.T) {
 				BinarySize: 1024 * 1024, // 1MB setting at paramtable.
 			},
 			TxnSession: txn,
-			TimeTick:   0,
+			TimeTick:   tsoutil.GetCurrentTime(),
 		})
 		assert.NoError(t, err)
 		result.Ack()
@@ -143,6 +144,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 100,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -154,6 +156,30 @@ func TestSegmentAllocManager(t *testing.T) {
 	// Should be sealed.
 	m.TryToSealSegments(ctx)
 	assert.True(t, m.IsNoWaitSeal())
+
+	// Test fence
+	ts := tsoutil.GetCurrentTime()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	ids, err := m.SealAllSegmentsAndFenceUntil(ctx, 1, ts)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, ids)
+	assert.False(t, m.IsNoWaitSeal())
+	m.TryToSealSegments(ctx)
+	assert.True(t, m.IsNoWaitSeal())
+
+	result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
+		CollectionID: 1,
+		PartitionID:  3,
+		InsertMetrics: stats.InsertMetrics{
+			Rows:       100,
+			BinarySize: 100,
+		},
+		TimeTick: ts,
+	})
+	assert.ErrorIs(t, err, ErrFencedAssign)
+	assert.Nil(t, result)
 
 	m.Close(ctx)
 }
@@ -180,6 +206,7 @@ func TestCreateAndDropCollection(t *testing.T) {
 			Rows:       100,
 			BinarySize: 200,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	}
 
 	resp, err := m.AssignSegment(ctx, testRequest)
