@@ -140,6 +140,7 @@ message CreateStatsRequest {
   int64 collection_ttl = 15;
   uint64 current_ts = 16;
   int64 task_version = 17;
+  uint64 binlogMaxSize = 18;
 }
 
 message CreateJobV2Request {

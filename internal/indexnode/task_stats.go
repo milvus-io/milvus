@@ -200,7 +200,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 		unFlushedRowCount++
 
-		if (unFlushedRowCount+1)%100 == 0 && writer.IsFull() {
+		if (unFlushedRowCount+1)%100 == 0 && writer.FlushAndIsFullWithBinlogMaxSize(st.req.GetBinlogMaxSize()) {
 			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
@@ -222,7 +222,9 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			unFlushedRowCount = 0
 			st.logIDOffset += binlogNum
 			if st.req.GetStartLogID()+st.logIDOffset >= st.req.GetEndLogID() {
-				log.Warn("binlog files too much, log is not enough")
+				log.Warn("binlog files too much, log is not enough",
+					zap.Int64("binlog num", binlogNum), zap.Int64("startLogID", st.req.GetStartLogID()),
+					zap.Int64("endLogID", st.req.GetEndLogID()), zap.Int64("logIDOffset", st.logIDOffset))
 				return fmt.Errorf("binlog files too much, log is not enough")
 			}
 		}
@@ -579,7 +581,6 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	}
 
 	totalElapse := st.tr.RecordSpan()
-	st.node.storeFieldStatsLogs(st.req.GetClusterID(), st.req.GetTaskID(), fieldStatsLogs)
 
 	log.Info("create text index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),

@@ -35,7 +35,7 @@ func generateTestSchema() *schemapb.CollectionSchema {
 		{FieldID: 106, Name: "varchar", DataType: schemapb.DataType_VarChar},
 		{FieldID: 107, Name: "string", DataType: schemapb.DataType_String},
 		{FieldID: 108, Name: "array", DataType: schemapb.DataType_Array},
-		{FieldID: 109, Name: "string", DataType: schemapb.DataType_JSON},
+		{FieldID: 109, Name: "json", DataType: schemapb.DataType_JSON},
 		{FieldID: 110, Name: "int32", DataType: schemapb.DataType_Int32},
 		{FieldID: 111, Name: "floatVector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "8"},

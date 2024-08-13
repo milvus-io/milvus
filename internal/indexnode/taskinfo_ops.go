@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package indexnode
 
 import (
@@ -317,7 +333,7 @@ func (i *IndexNode) getStatsTaskState(clusterID string, taskID UniqueID) indexpb
 	key := taskKey{ClusterID: clusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	task, ok := i.analyzeTasks[key]
+	task, ok := i.statsTasks[key]
 	if !ok {
 		return indexpb.JobState_JobStateNone
 	}
@@ -333,14 +349,6 @@ func (i *IndexNode) storeStatsTaskState(clusterID string, taskID UniqueID, state
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.state = state
 		task.failReason = failReason
-	}
-}
-
-func (i *IndexNode) foreachStatsTaskInfo(fn func(clusterID string, taskID UniqueID, info *statsTaskInfo)) {
-	i.stateLock.Lock()
-	defer i.stateLock.Unlock()
-	for key, info := range i.statsTasks {
-		fn(key.ClusterID, key.TaskID, info)
 	}
 }
 
@@ -367,20 +375,6 @@ func (i *IndexNode) storeStatsResult(
 		info.numRows = numRows
 		info.insertLogs = insertLogs
 		info.statsLogs = statsLogs
-		info.fieldStatsLogs = fieldStatsLogs
-		return
-	}
-}
-
-func (i *IndexNode) storeFieldStatsLogs(
-	ClusterID string,
-	taskID UniqueID,
-	fieldStatsLogs []*datapb.FieldStatsLog,
-) {
-	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
-	i.stateLock.Lock()
-	defer i.stateLock.Unlock()
-	if info, ok := i.statsTasks[key]; ok {
 		info.fieldStatsLogs = fieldStatsLogs
 		return
 	}

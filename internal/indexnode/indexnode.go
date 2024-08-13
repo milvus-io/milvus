@@ -254,6 +254,12 @@ func (i *IndexNode) deleteAllTasks() {
 			t.cancel()
 		}
 	}
+	deletedStatsTasks := i.deleteAllStatsTasks()
+	for _, t := range deletedStatsTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
 }
 
 // Stop closes the server.
