@@ -513,6 +513,7 @@ class SparseFloatColumn : public ColumnBase {
                 data->RawValue(i));
             memcpy(data_ + size_, vec->data(), vec->data_byte_size());
             size_ += vec->data_byte_size();
+            dim_ = std::max(dim_, vec->dim());
         }
     }
 
