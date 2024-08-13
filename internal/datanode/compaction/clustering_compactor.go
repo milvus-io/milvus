@@ -594,7 +594,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 			if (remained+1)%100 == 0 {
 				t.clusterBufferLocks.RLock(clusterBuffer.id)
-				currentBufferWriterFull := clusterBuffer.writer.FlushAndIsFull()
+				currentBufferWriterFull := clusterBuffer.writer.IsFull()
 				t.clusterBufferLocks.RUnlock(clusterBuffer.id)
 
 				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
