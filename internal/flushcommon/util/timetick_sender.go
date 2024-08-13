@@ -164,9 +164,10 @@ func (m *TimeTickSender) cleanStatesCache(lastSentTss map[string]uint64) {
 					delete(m.statsCache[channelName].segStats, segmentID)
 				}
 			}
-		}
-		if len(m.statsCache[channelName].segStats) == 0 {
-			delete(m.statsCache, channelName)
+
+			if len(m.statsCache[channelName].segStats) == 0 {
+				delete(m.statsCache, channelName)
+			}
 		}
 	}
 	log.RatedDebug(30, "TimeTickSender stats", zap.Any("lastSentTss", lastSentTss), zap.Int("sizeBeforeClean", sizeBeforeClean), zap.Int("sizeAfterClean", len(m.statsCache)))
