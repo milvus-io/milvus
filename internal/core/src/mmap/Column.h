@@ -102,7 +102,6 @@ class ColumnBase {
                storage::MmapChunkDescriptorPtr descriptor)
         : mcm_(mcm),
           mmap_descriptor_(descriptor),
-          type_size_(GetDataTypeSize(data_type, dim)),
           num_rows_(0),
           size_(0),
           cap_size_(reserve),
@@ -111,6 +110,9 @@ class ColumnBase {
                    "use wrong mmap chunk manager and mmap chunk descriptor to "
                    "create column.");
 
+        if (!IsVariableDataType(data_type)) {
+            type_size_ = GetDataTypeSize(data_type, dim);
+        }
         SetPaddingSize(data_type);
         size_t mapped_size = cap_size_ + padding_;
         data_ = (char*)mcm_->Allocate(mmap_descriptor_, (uint64_t)mapped_size);
@@ -500,6 +502,19 @@ class SparseFloatColumn : public ColumnBase {
             dim_ = std::max(dim_, ptr[i].dim());
         }
         num_rows_ += data->Length();
+    }
+
+    void
+    AppendBatchMmap(const FieldDataPtr data) {
+        AssertInfo(data->Size() + size_ <= cap_size_,
+                   "append batch mmap exceed");
+        for (size_t i = 0; i < data->get_num_rows(); ++i) {
+            auto vec = static_cast<const knowhere::sparse::SparseRow<float>*>(
+                data->RawValue(i));
+            memcpy(data_ + size_, vec->data(), vec->data_byte_size());
+            size_ += vec->data_byte_size();
+            dim_ = std::max(dim_, vec->dim());
+        }
     }
 
     void
