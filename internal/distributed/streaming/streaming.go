@@ -113,4 +113,9 @@ type Utility interface {
 	// !!! This function do not promise the atomicity and deliver order of the messages appending.
 	// TODO: Remove after we support cross-wal txn.
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
+
+	// AppendMessagesWithOption appends messages to the wal with the given option.
+	// Same with AppendMessages, but with the given option.
+	// TODO: Remove after we support cross-wal txn.
+	AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses
 }

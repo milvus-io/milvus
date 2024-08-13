@@ -46,10 +46,8 @@ func (t *txnImpl) Append(ctx context.Context, msg message.MutableMessage, opts .
 	}
 
 	// setup txn context and add to wal.
-	msg.WithTxnContext(*t.txnCtx)
-
 	applyOpt(msg, opts...)
-	_, err := t.appendToWAL(ctx, msg)
+	_, err := t.appendToWAL(ctx, msg.WithTxnContext(*t.txnCtx))
 	return err
 }
 
@@ -75,8 +73,7 @@ func (t *txnImpl) Commit(ctx context.Context) (*types.AppendResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	commit = commit.WithTxnContext(*t.txnCtx)
-	return t.appendToWAL(ctx, commit)
+	return t.appendToWAL(ctx, commit.WithTxnContext(*t.txnCtx))
 }
 
 // Rollback rollbacks the transaction.
@@ -101,6 +98,6 @@ func (t *txnImpl) Rollback(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = t.appendToWAL(ctx, rollback)
+	_, err = t.appendToWAL(ctx, rollback.WithTxnContext(*t.txnCtx))
 	return err
 }

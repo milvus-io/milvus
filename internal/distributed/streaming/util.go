@@ -57,6 +57,14 @@ func (u *utility) AppendMessages(ctx context.Context, msgs ...message.MutableMes
 	return resp
 }
 
+// AppendMessagesWithOption appends messages to the wal with the given option.
+func (u *utility) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
+	for _, msg := range msgs {
+		applyOpt(msg, opts)
+	}
+	return u.AppendMessages(ctx, msgs...)
+}
+
 // dispatchMessages dispatches the messages into different vchannel.
 func (u *utility) dispatchMessages(msgs ...message.MutableMessage) (map[string][]message.MutableMessage, map[string][]int) {
 	dispatchedMessages := make(map[string][]message.MutableMessage, 0)
@@ -192,7 +200,7 @@ func (a *AppendResponses) fillAllResponse(resp AppendResponse) {
 // applyOpt applies the append options to the message.
 func applyOpt(msg message.MutableMessage, opts ...AppendOption) message.MutableMessage {
 	if len(opts) == 0 {
-		return nil
+		return msg
 	}
 	if opts[0].BarrierTimeTick > 0 {
 		msg = msg.WithBarrierTimeTick(opts[0].BarrierTimeTick)

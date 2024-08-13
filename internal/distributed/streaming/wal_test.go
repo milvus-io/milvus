@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
@@ -69,7 +70,7 @@ func TestWAL(t *testing.T) {
 	p.EXPECT().Close().Return()
 
 	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
-	result, err := w.Append(ctx, newFlushMessage(vChannel1))
+	result, err := w.Append(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
@@ -81,9 +82,9 @@ func TestWAL(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, txn)
 
-	err = txn.Append(ctx, newFlushMessage(vChannel1))
+	err = txn.Append(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
-	err = txn.Append(ctx, newFlushMessage(vChannel1))
+	err = txn.Append(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
 
 	result, err = txn.Commit(ctx)
@@ -98,33 +99,30 @@ func TestWAL(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, txn)
 
-	err = txn.Append(ctx, newFlushMessage(vChannel1))
+	err = txn.Append(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
-	err = txn.Append(ctx, newFlushMessage(vChannel1))
+	err = txn.Append(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
 
 	err = txn.Rollback(ctx)
 	assert.NoError(t, err)
 
 	resp := w.Utility().AppendMessages(ctx,
-		newFlushMessage(vChannel1),
-		newFlushMessage(vChannel2),
-		newFlushMessage(vChannel2),
-		newFlushMessage(vChannel3),
-		newFlushMessage(vChannel3),
-		newFlushMessage(vChannel3),
+		newInsertMessage(vChannel1),
+		newInsertMessage(vChannel2),
+		newInsertMessage(vChannel2),
+		newInsertMessage(vChannel3),
+		newInsertMessage(vChannel3),
+		newInsertMessage(vChannel3),
 	)
 	assert.NoError(t, resp.UnwrapFirstError())
-
-	// c := mock_consumer.NewMockConsumer(t)
-	// handler.EXPECT().CreateConsumer(mock.Anything, mock.Anything).Return(c, nil)
 }
 
-func newFlushMessage(vChannel string) message.MutableMessage {
-	msg, err := message.NewFlushMessageBuilderV2().
+func newInsertMessage(vChannel string) message.MutableMessage {
+	msg, err := message.NewInsertMessageBuilderV1().
 		WithVChannel(vChannel).
-		WithHeader(&message.FlushMessageHeader{}).
-		WithBody(&message.FlushMessageBody{}).
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
 		BuildMutable()
 	if err != nil {
 		panic(err)
