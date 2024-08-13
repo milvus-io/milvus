@@ -149,7 +149,6 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 		hasPartitionKeyField: hasPartitionkey,
 		pkField:              pkField,
 		schemaHelper:         schemaHelper,
-		// loadFields:           typeutil.NewSet(loadFields...),
 	}
 }
 
@@ -175,13 +174,14 @@ func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 // GetLoadFieldIDs returns field id for load field list.
 // If input `loadFields` is empty, use collection schema definition.
 // Otherwise, perform load field list constraint check then return field id.
-func (s *schemaInfo) GetLoadFieldIDs(loadFields []string) ([]int64, error) {
+func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool) ([]int64, error) {
 	if len(loadFields) == 0 {
 		// skip check logic since create collection already did the rule check already
-		return common.GetCollectionLoadFields(s.CollectionSchema), nil
+		return common.GetCollectionLoadFields(s.CollectionSchema, skipDynamicField), nil
 	}
 
-	fieldIDs := make([]int64, 0, len(loadFields))
+	fieldIDs := typeutil.NewSet[int64]()
+	// fieldIDs := make([]int64, 0, len(loadFields))
 	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
 	for _, name := range loadFields {
 		fieldSchema, err := s.schemaHelper.GetFieldFromName(name)
@@ -190,7 +190,21 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string) ([]int64, error) {
 		}
 
 		fields = append(fields, fieldSchema)
-		fieldIDs = append(fieldIDs, fieldSchema.GetFieldID())
+		fieldIDs.Insert(fieldSchema.GetFieldID())
+	}
+
+	// only append dynamic field when skipFlag == false
+	if !skipDynamicField {
+		// find dynamic field
+		dynamicField := lo.FindOrElse(s.Fields, nil, func(field *schemapb.FieldSchema) bool {
+			return field.IsDynamic
+		})
+
+		// if dynamic field not nil
+		if dynamicField != nil {
+			fieldIDs.Insert(dynamicField.GetFieldID())
+			fields = append(fields, dynamicField)
+		}
 	}
 
 	// validate load fields list
@@ -198,12 +212,12 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string) ([]int64, error) {
 		return nil, err
 	}
 
-	return fieldIDs, nil
+	return fieldIDs.Collect(), nil
 }
 
 func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.FieldSchema) error {
 	// ignore error if not found
-	partitionKeyField, _ := s.schemaHelper.GetPrimaryKeyField()
+	partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
 
 	var hasPrimaryKey, hasPartitionKey, hasVector bool
 	for _, field := range fields {

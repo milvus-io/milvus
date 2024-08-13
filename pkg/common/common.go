@@ -333,8 +333,13 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 }
 
 // GetCollectionLoadFields returns the load field ids according to the type params.
-func GetCollectionLoadFields(schema *schemapb.CollectionSchema) []int64 {
+func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField bool) []int64 {
 	return lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+		// skip dynamic field if specified
+		if field.IsDynamic && skipDynamicField {
+			return field.GetFieldID(), false
+		}
+
 		v, err := ShouldFieldBeLoaded(field.GetTypeParams())
 		if err != nil {
 			log.Warn("type param parse skip load failed", zap.Error(err))
