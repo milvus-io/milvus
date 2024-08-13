@@ -383,6 +383,7 @@ type broadcastCreatePartitionMsgStep struct {
 	baseStep
 	vchannels []string
 	partition *model.Partition
+	ts        Timestamp
 }
 
 func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nestedStep, error) {
@@ -411,8 +412,9 @@ func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nested
 		}
 		msgs = append(msgs, msg)
 	}
-	resp := streaming.WAL().Append(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
+	if err := streaming.WAL().Utility().AppendMessagesWithOption(ctx, streaming.AppendOption{
+		BarrierTimeTick: s.ts,
+	}, msgs...).UnwrapFirstError(); err != nil {
 		return nil, err
 	}
 	return nil, nil
