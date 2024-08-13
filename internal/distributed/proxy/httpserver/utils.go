@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -19,12 +20,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1255,4 +1260,30 @@ func formatInt64(intArray []int64) []string {
 		stringArray = append(stringArray, strconv.FormatInt(i, 10))
 	}
 	return stringArray
+}
+
+func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent) (any, error) {
+	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
+		return nil, nil
+	}
+	// apply limiter for http/http2 server
+	limiter, err := pxy.GetRateLimiter()
+	if err != nil {
+		log.Error("Get proxy rate limiter for httpV1/V2 server failed", zap.Error(err))
+		return nil, err
+	}
+
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
+	if err != nil {
+		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
+		return proxy.GetFailedResponse(req, err), err
+	}
+	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
+	return nil, nil
 }
