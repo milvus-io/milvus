@@ -29,7 +29,9 @@ if [[ -f "$toplevel/.env" ]]; then
     set +a  # stop automatically exporting
 fi
 
-OS_NAME="${OS_NAME:-ubuntu20.04}"
+# force to use ubuntu22.04 image to package milvus
+OS_NAME="ubuntu22.04"
+
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
 
