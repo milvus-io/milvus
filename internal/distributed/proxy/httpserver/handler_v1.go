@@ -454,6 +454,13 @@ func (h *HandlersV1) query(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
 	response, err := h.proxy.Query(ctx, &req)
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -520,6 +527,13 @@ func (h *HandlersV1) get(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 			HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
 		})
 		return
 	}
@@ -594,6 +608,13 @@ func (h *HandlersV1) delete(c *gin.Context) {
 		}
 		req.Expr = filter
 	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
 	response, err := h.proxy.Delete(ctx, &req)
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -666,6 +687,14 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		log.Warn("high level restful api, fail to insert for limiting", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
 		})
 		return
 	}
@@ -765,6 +794,13 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		})
 		return
 	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
 	response, err := h.proxy.Upsert(ctx, &req)
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -857,6 +893,13 @@ func (h *HandlersV1) search(c *gin.Context) {
 		return
 	}
 	if !h.checkDatabase(ctx, c, req.DbName) {
+		return
+	}
+	if _, err := CheckLimiter(&req, h.proxy); err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
+		})
 		return
 	}
 	response, err := h.proxy.Search(ctx, &req)
