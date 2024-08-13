@@ -217,6 +217,9 @@ func (s Section) sectionPageContent() string {
 	ret += fmt.Sprintf("# %s-related Configurations"+mdNextLine, s.Name)
 	ret += s.descriptionContent() + mdNextLine
 	for _, field := range s.Fields {
+		if len(field.Description) == 0 || field.Description[0] == "" {
+			continue
+		}
 		ret += field.sectionPageContent() + mdNextLine
 	}
 
@@ -248,9 +251,6 @@ const fieldTableTemplate = `<table id="%s">
 func (f Field) sectionPageContent() string {
 	ret := fmt.Sprintf("## `%s`", f.Name) + mdNextLine
 	desp := f.descriptionContent()
-	if len(desp) > 0 {
-		desp = "\n" + desp + "      "
-	}
 	ret += fmt.Sprintf(fieldTableTemplate, f.Name, desp, f.DefaultValue)
 	return ret
 }
@@ -258,11 +258,13 @@ func (f Field) sectionPageContent() string {
 func (f Field) descriptionContent() string {
 	var ret string
 	lines := len(f.Description)
-	for i, descLine := range f.Description {
-		ret += fmt.Sprintf("        <li>%s</li>", descLine)
-		if i < lines-1 {
-			ret += "\n"
+	if lines > 1 {
+		for _, descLine := range f.Description {
+			ret += fmt.Sprintf("\n        <li>%s</li>      ", descLine)
 		}
+	} else {
+		ret = fmt.Sprintf("        %s      ", f.Description[0])
 	}
+
 	return ret
 }
