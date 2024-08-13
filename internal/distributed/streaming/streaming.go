@@ -10,10 +10,6 @@ import (
 
 var singleton WALAccesser = nil
 
-func SetWAL(w WALAccesser) {
-	singleton = w
-}
-
 // Init initializes the wal accesser with the given etcd client.
 // should be called before any other operations.
 func Init() {
@@ -23,9 +19,7 @@ func Init() {
 
 // Release releases the resources of the wal accesser.
 func Release() {
-	if w, ok := singleton.(*walAccesserImpl); ok && w != nil {
-		w.Close()
-	}
+	singleton.Close()
 }
 
 // WAL is the entrance to interact with the milvus write ahead log.
@@ -67,4 +61,7 @@ type WALAccesser interface {
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
+
+	// Close closes the wal accesser
+	Close()
 }
