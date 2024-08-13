@@ -1236,7 +1236,8 @@ func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
 }
 
 func (t *clusteringCompactionTask) generatePkStats(ctx context.Context, segmentID int64,
-	numRows int64, binlogPaths [][]string) (*datapb.FieldBinlog, error) {
+	numRows int64, binlogPaths [][]string,
+) (*datapb.FieldBinlog, error) {
 	stats, err := storage.NewPrimaryKeyStats(t.primaryKeyField.GetFieldID(), int64(t.primaryKeyField.GetDataType()), numRows)
 	if err != nil {
 		return nil, err

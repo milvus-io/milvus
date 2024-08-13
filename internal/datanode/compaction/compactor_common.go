@@ -178,7 +178,8 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator
 }
 
 func uploadStatsBlobs(ctx context.Context, collectionID, partitionID, segmentID, pkID, numRows int64,
-	io io.BinlogIO, allocator allocator.Allocator, blob *storage.Blob) (*datapb.FieldBinlog, error) {
+	io io.BinlogIO, allocator allocator.Allocator, blob *storage.Blob,
+) (*datapb.FieldBinlog, error) {
 	logID, err := allocator.AllocOne()
 	if err != nil {
 		return nil, err
