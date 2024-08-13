@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   Build:
-    name: Build and test AMD64 Ubuntu 22.04
+    name: Build and test AMD64 Ubuntu 20.04
     runs-on: ubuntu-latest
     steps:
       - name: 'Setup $HOME'
@@ -92,7 +92,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache-restore
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'cpp'
       - name: Build
         run: |
@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'cpp'
 
   UT-Cpp:
@@ -136,7 +136,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache-restore
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'cpp'
       - name: Start Service
         shell: bash
@@ -161,7 +161,7 @@ jobs:
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'cpp'
   UT-Go:
     name: UT for Go
@@ -188,7 +188,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache-restore
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'go'
       - name: Start Service
         shell: bash
@@ -212,7 +212,7 @@ jobs:
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'go'
 
   integration-test:
@@ -240,7 +240,7 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache-restore
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'go'
       - name: Start Service
         shell: bash
@@ -263,7 +263,7 @@ jobs:
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
         with:
-          os: 'ubuntu22.04'
+          os: 'ubuntu20.04'
           kind: 'go'
 
   codecov:
