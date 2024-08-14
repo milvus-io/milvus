@@ -252,9 +252,33 @@ test_run() {
                 ASSERT_EQ(cnt, bitset.size());
                 for (size_t i = 0; i < bitset.size(); i++) {
                     if (nullable && !valid_data[i]) {
-                        ASSERT_EQ(bitset[i], true);
+                        ASSERT_EQ(bitset[i], false);
                     } else {
                         ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
+                    }
+                }
+            }
+
+            {
+                auto bitset = real_index->IsNull();
+                ASSERT_EQ(cnt, bitset.size());
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], true);
+                    } else {
+                        ASSERT_EQ(bitset[i], false);
+                    }
+                }
+            }
+
+            {
+                auto bitset = real_index->IsNotNull();
+                ASSERT_EQ(cnt, bitset.size());
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], false);
+                    } else {
+                        ASSERT_EQ(bitset[i], true);
                     }
                 }
             }
@@ -496,7 +520,7 @@ test_string() {
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
                 if (nullable && !valid_data[i]) {
-                    ASSERT_EQ(bitset[i], true);
+                    ASSERT_EQ(bitset[i], false);
                 } else {
                     ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
                 }

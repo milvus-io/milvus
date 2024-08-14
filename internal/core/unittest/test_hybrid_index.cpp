@@ -191,7 +191,7 @@ class HybridIndexTestV1 : public testing::Test {
         int64_t field_id = 101;
         int64_t index_build_id = 1000;
         int64_t index_version = 10000;
-        std::string root_path = "/tmp/test-bitmap-index/";
+        std::string root_path = "/tmp/test-bitmap-index";
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";
@@ -246,9 +246,37 @@ class HybridIndexTestV1 : public testing::Test {
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
         for (size_t i = 0; i < bitset.size(); i++) {
             if (nullable_ && !valid_data_[i]) {
-                ASSERT_EQ(bitset[i], true);
+                ASSERT_EQ(bitset[i], false);
             } else {
                 ASSERT_NE(bitset[i], s.find(data_[i]) != s.end());
+            }
+        }
+    }
+
+    void
+    TestIsNullFunc() {
+        auto index_ptr =
+            dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
+        auto bitset = index_ptr->IsNull();
+        for (size_t i = 0; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i]) {
+                ASSERT_EQ(bitset[i], true);
+            } else {
+                ASSERT_EQ(bitset[i], false);
+            }
+        }
+    }
+
+    void
+    TestIsNotNullFunc() {
+        auto index_ptr =
+            dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
+        auto bitset = index_ptr->IsNotNull();
+        for (size_t i = 0; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i]) {
+                ASSERT_EQ(bitset[i], false);
+            } else {
+                ASSERT_EQ(bitset[i], true);
             }
         }
     }
@@ -385,6 +413,14 @@ TYPED_TEST_P(HybridIndexTestV1, NotINFuncTest) {
     this->TestNotInFunc();
 }
 
+TYPED_TEST_P(HybridIndexTestV1, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV1, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
 TYPED_TEST_P(HybridIndexTestV1, CompareValFuncTest) {
     this->TestCompareValueFunc();
 }
@@ -399,6 +435,8 @@ using BitmapType =
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
                             INFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest,
                             NotINFuncTest,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
@@ -434,6 +472,14 @@ TYPED_TEST_P(HybridIndexTestV2, INFuncTest) {
 
 TYPED_TEST_P(HybridIndexTestV2, NotINFuncTest) {
     this->TestNotInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV2, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV2, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
 }
 
 TYPED_TEST_P(HybridIndexTestV2, CompareValFuncTest) {
@@ -473,6 +519,14 @@ TYPED_TEST_P(HybridIndexTestNullable, NotINFuncTest) {
     this->TestNotInFunc();
 }
 
+TYPED_TEST_P(HybridIndexTestNullable, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestNullable, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
 TYPED_TEST_P(HybridIndexTestNullable, CompareValFuncTest) {
     this->TestCompareValueFunc();
 }
@@ -487,6 +541,8 @@ using BitmapType =
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV2,
                             CountFuncTest,
                             INFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest,
                             NotINFuncTest,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
@@ -494,6 +550,8 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV2,
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestNullable,
                             CountFuncTest,
                             INFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest,
                             NotINFuncTest,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);

@@ -69,11 +69,14 @@ BitmapIndex<T>::Build(size_t n, const T* data) {
         PanicInfo(DataIsEmpty, "BitmapIndex can not build null values");
     }
 
+    total_num_rows_ = n;
+    valid_bitset = TargetBitmap(total_num_rows_, false);
+
     T* p = const_cast<T*>(data);
     for (int i = 0; i < n; ++i, ++p) {
         data_[*p].add(i);
+        valid_bitset.set(i);
     }
-    total_num_rows_ = n;
 
     if (data_.size() < DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND) {
         for (auto it = data_.begin(); it != data_.end(); ++it) {
@@ -98,6 +101,7 @@ BitmapIndex<T>::BuildPrimitiveField(
             if (data->is_valid(i)) {
                 auto val = reinterpret_cast<const T*>(data->RawValue(i));
                 data_[*val].add(offset);
+                valid_bitset.set(offset);
             }
             offset++;
         }
@@ -116,6 +120,7 @@ BitmapIndex<T>::BuildWithFieldData(
         PanicInfo(DataIsEmpty, "scalar bitmap index can not build null values");
     }
     total_num_rows_ = total_num_rows;
+    valid_bitset = TargetBitmap(total_num_rows_, false);
 
     switch (schema_.data_type()) {
         case proto::schema::DataType::Bool:
@@ -160,6 +165,7 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                     auto val = array->template get_data<T>(j);
                     data_[val].add(offset);
                 }
+                valid_bitset.set(offset);
             }
             offset++;
         }
@@ -333,6 +339,9 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
         } else {
             data_[key] = value;
         }
+        for (const auto& v : value) {
+            valid_bitset.set(v);
+        }
     }
 }
 
@@ -358,6 +367,9 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
         } else {
             data_[key] = value;
         }
+        for (const auto& v : value) {
+            valid_bitset.set(v);
+        }
     }
 }
 
@@ -370,6 +382,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                            index_meta_buffer->size);
     auto index_length = index_meta.first;
     total_num_rows_ = index_meta.second;
+    valid_bitset = TargetBitmap(total_num_rows_, false);
 
     auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
     DeserializeIndexData(index_data_buffer->data.get(), index_length);
@@ -445,6 +458,8 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
+        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
+        res &= valid_bitset;
         return res;
     } else {
         TargetBitmap res(total_num_rows_, false);
@@ -455,8 +470,29 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
             }
         }
         res.flip();
+        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
+        res &= valid_bitset;
         return res;
     }
+}
+
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::IsNull() {
+    AssertInfo(is_built_, "index has not been built");
+    TargetBitmap res(total_num_rows_, true);
+    res &= valid_bitset;
+    res.flip();
+    return res;
+}
+
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::IsNotNull() {
+    AssertInfo(is_built_, "index has not been built");
+    TargetBitmap res(total_num_rows_, true);
+    res &= valid_bitset;
+    return res;
 }
 
 template <typename T>

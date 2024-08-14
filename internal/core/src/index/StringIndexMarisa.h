@@ -70,6 +70,12 @@ class StringIndexMarisa : public StringIndex {
     NotIn(size_t n, const std::string* values) override;
 
     const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
+
+    const TargetBitmap
     Range(std::string value, OpType op) override;
 
     const TargetBitmap
