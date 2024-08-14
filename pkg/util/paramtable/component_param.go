@@ -268,6 +268,9 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
 		DefaultValue: "by-dev",
+		Doc: `Root name prefix of the channel when a message channel is created.
+It is recommended to change this parameter before starting Milvus for the first time.
+To share a Pulsar instance among multiple Milvus instances, consider changing this to a name rather than the default one for each Milvus instance before you start them.`,
 		PanicIfEmpty: true,
 		Forbidden:    true,
 		Export:       true,
@@ -291,8 +294,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordTimeTick.Init(base.mgr)
 
@@ -302,8 +309,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes its own statistics messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordStatistics}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordStatistics.Init(base.mgr)
 
@@ -313,8 +324,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes Data Manipulation Language (DML) messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordDml}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordDml.Init(base.mgr)
 
@@ -335,8 +350,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the query node publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.QueryCoordTimeTick.Init(base.mgr)
 
@@ -346,8 +365,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordTimeTick.Init(base.mgr)
 
@@ -357,8 +380,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes segment information messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordSegmentInfo}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSegmentInfo.Init(base.mgr)
 
@@ -368,8 +395,11 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data coord.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSubName.Init(base.mgr)
 
@@ -395,8 +425,11 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data node.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataNodeSubName.Init(base.mgr)
 
