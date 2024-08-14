@@ -37,7 +37,6 @@ func newTestSchema() *schemapb.CollectionSchema {
 		FieldID: 131, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
-		IsDynamic:   true,
 	})
 
 	return &schemapb.CollectionSchema{
