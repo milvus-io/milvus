@@ -130,6 +130,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.MaximumGOGCConfig.GetAsInt())
 		params.Save("common.gchelper.minimumGoGC", "80")
 		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
+
+		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
