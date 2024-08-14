@@ -548,7 +548,7 @@ func TestGcPartitionData(t *testing.T) {
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
-	streaming.SetWAL(wal)
+	streaming.SetWALForTest(wal)
 
 	tsoAllocator := mocktso.NewAllocator(t)
 	tsoAllocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)

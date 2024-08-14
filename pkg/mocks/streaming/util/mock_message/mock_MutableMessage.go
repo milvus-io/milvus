@@ -399,6 +399,49 @@ func (_c *MockMutableMessage_WithLastConfirmed_Call) RunAndReturn(run func(messa
 	return _c
 }
 
+// WithLastConfirmedUseMessageID provides a mock function with given fields:
+func (_m *MockMutableMessage) WithLastConfirmedUseMessageID() message.MutableMessage {
+	ret := _m.Called()
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func() message.MutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithLastConfirmedUseMessageID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithLastConfirmedUseMessageID'
+type MockMutableMessage_WithLastConfirmedUseMessageID_Call struct {
+	*mock.Call
+}
+
+// WithLastConfirmedUseMessageID is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) WithLastConfirmedUseMessageID() *MockMutableMessage_WithLastConfirmedUseMessageID_Call {
+	return &MockMutableMessage_WithLastConfirmedUseMessageID_Call{Call: _e.mock.On("WithLastConfirmedUseMessageID")}
+}
+
+func (_c *MockMutableMessage_WithLastConfirmedUseMessageID_Call) Run(run func()) *MockMutableMessage_WithLastConfirmedUseMessageID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithLastConfirmedUseMessageID_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithLastConfirmedUseMessageID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithLastConfirmedUseMessageID_Call) RunAndReturn(run func() message.MutableMessage) *MockMutableMessage_WithLastConfirmedUseMessageID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithTimeTick provides a mock function with given fields: tt
 func (_m *MockMutableMessage) WithTimeTick(tt uint64) message.MutableMessage {
 	ret := _m.Called(tt)

@@ -14,26 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ddl
+//go:build test
 
-import (
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-)
+package streaming
 
-var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
-
-// NewInterceptorBuilder creates a new ddl interceptor builder.
-func NewInterceptorBuilder() interceptors.InterceptorBuilder {
-	return &interceptorBuilder{}
-}
-
-// interceptorBuilder is a builder to build ddlAppendInterceptor.
-type interceptorBuilder struct{}
-
-// Build implements Builder.
-func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
-	interceptor := &ddlAppendInterceptor{
-		wal: param.WAL,
-	}
-	return interceptor
+// SetWALForTest initializes the singleton of wal for test.
+func SetWALForTest(w WALAccesser) {
+	singleton = w
 }

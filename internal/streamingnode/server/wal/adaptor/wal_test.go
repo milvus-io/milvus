@@ -230,10 +230,10 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 				"id":    fmt.Sprintf("%d", i),
 				"const": "t",
 			})
-			id, err := w.Append(ctx, msg)
+			appendResult, err := w.Append(ctx, msg)
 			assert.NoError(f.t, err)
-			assert.NotNil(f.t, id)
-			messages[i] = msg.IntoImmutableMessage(id)
+			assert.NotNil(f.t, appendResult)
+			messages[i] = msg.IntoImmutableMessage(appendResult.MessageID)
 		}(i)
 	}
 	swg.Wait()
@@ -243,9 +243,9 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 		"const": "t",
 		"term":  strconv.FormatInt(int64(f.term), 10),
 	})
-	id, err := w.Append(ctx, msg)
+	appendResult, err := w.Append(ctx, msg)
 	assert.NoError(f.t, err)
-	messages[f.messageCount-1] = msg.IntoImmutableMessage(id)
+	messages[f.messageCount-1] = msg.IntoImmutableMessage(appendResult.MessageID)
 	return messages, nil
 }
 
@@ -263,6 +263,9 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]messag
 	msgs := make([]message.ImmutableMessage, 0, expectedCnt)
 	for {
 		msg, ok := <-s.Chan()
+		if msg.MessageType() != message.MessageTypeInsert {
+			continue
+		}
 		assert.NotNil(f.t, msg)
 		assert.True(f.t, ok)
 		msgs = append(msgs, msg)
@@ -304,6 +307,9 @@ func (f *testOneWALFramework) testReadWithOption(ctx context.Context, w wal.WAL)
 			lastTimeTick := readFromMsg.TimeTick() - 1
 			for {
 				msg, ok := <-s.Chan()
+				if msg.MessageType() != message.MessageTypeInsert {
+					continue
+				}
 				msgCount++
 				assert.NotNil(f.t, msg)
 				assert.True(f.t, ok)

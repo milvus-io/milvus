@@ -359,6 +359,7 @@ func (c *compactionPlanHandler) loopCheck() {
 	log.Info("compactionPlanHandler start loop check", zap.Any("check result interval", interval))
 	defer c.stopWg.Done()
 	checkResultTicker := time.NewTicker(interval)
+	defer checkResultTicker.Stop()
 	for {
 		select {
 		case <-c.stopCh:

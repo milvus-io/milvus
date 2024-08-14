@@ -10,9 +10,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
@@ -38,6 +41,14 @@ func TestWalAdaptorReadFail(t *testing.T) {
 }
 
 func TestWALAdaptor(t *testing.T) {
+	resource.InitForTest(t)
+
+	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	operator.EXPECT().TimeTickNotifier().Return(inspector.NewTimeTickNotifier())
+	operator.EXPECT().Channel().Return(types.PChannelInfo{})
+	operator.EXPECT().Sync(mock.Anything).Return()
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+
 	// Create a mock WAL implementation
 	l := mock_walimpls.NewMockWALImpls(t)
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
@@ -61,7 +72,7 @@ func TestWALAdaptor(t *testing.T) {
 	assert.NotNil(t, lAdapted.Channel())
 	_, err := lAdapted.Append(context.Background(), nil)
 	assert.NoError(t, err)
-	lAdapted.AppendAsync(context.Background(), nil, func(mi message.MessageID, err error) {
+	lAdapted.AppendAsync(context.Background(), nil, func(mi *wal.AppendResult, err error) {
 		assert.Nil(t, err)
 	})
 
@@ -99,7 +110,7 @@ func TestWALAdaptor(t *testing.T) {
 
 	_, err = lAdapted.Append(context.Background(), nil)
 	assertShutdownError(t, err)
-	lAdapted.AppendAsync(context.Background(), nil, func(mi message.MessageID, err error) {
+	lAdapted.AppendAsync(context.Background(), nil, func(mi *wal.AppendResult, err error) {
 		assertShutdownError(t, err)
 	})
 	_, err = lAdapted.Read(context.Background(), wal.ReadOption{})
@@ -136,7 +147,7 @@ func TestWALWithInterceptor(t *testing.T) {
 
 	b := mock_interceptors.NewMockInterceptorBuilder(t)
 	readyCh := make(chan struct{})
-	b.EXPECT().Build(mock.Anything).RunAndReturn(func(ibp interceptors.InterceptorBuildParam) interceptors.BasicInterceptor {
+	b.EXPECT().Build(mock.Anything).RunAndReturn(func(ibp interceptors.InterceptorBuildParam) interceptors.Interceptor {
 		interceptor := mock_interceptors.NewMockInterceptorWithReady(t)
 		interceptor.EXPECT().Ready().Return(readyCh)
 		interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(

@@ -19,10 +19,13 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, err)
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 
-	s := newScannerAdaptor("scanner", l, wal.ReadOption{
-		DeliverPolicy: options.DeliverPolicyAll(),
-		MessageFilter: nil,
-	}, func() {})
+	s := newScannerAdaptor("scanner",
+		l,
+		wal.ReadOption{
+			DeliverPolicy: options.DeliverPolicyAll(),
+			MessageFilter: nil,
+		},
+		func() {})
 	defer s.Close()
 
 	<-s.Chan()
