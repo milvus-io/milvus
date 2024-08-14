@@ -356,6 +356,124 @@ func TestSchema_GetVectorFieldSchema(t *testing.T) {
 	})
 }
 
+func TestSchemaHelper_GetDynamicField(t *testing.T) {
+	t.Run("with_dynamic_schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:   102,
+					Name:      "$meta",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		f, err := helper.GetDynamicField()
+		assert.NoError(t, err)
+		assert.NotNil(t, f)
+		assert.EqualValues(t, 102, f.FieldID)
+	})
+
+	t.Run("without_dynamic_schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		}
+
+		helper, err := CreateSchemaHelper(sch)
+		require.NoError(t, err)
+
+		_, err = helper.GetDynamicField()
+		assert.Error(t, err)
+	})
+
+	t.Run("multiple_dynamic_fields", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "field_float_vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:   102,
+					Name:      "$meta",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+				{
+					FieldID:   103,
+					Name:      "other_json",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+			},
+		}
+
+		_, err := CreateSchemaHelper(sch)
+		assert.Error(t, err)
+	})
+}
+
 func TestSchema_invalid(t *testing.T) {
 	t.Run("Duplicate field name", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
