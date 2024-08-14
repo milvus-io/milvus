@@ -48,6 +48,11 @@ get_mask(const size_t count) {
 
 ///////////////////////////////////////////////////////////////////////////
 
+constexpr size_t N_BLOCKS = 8;
+constexpr size_t PAGE_SIZE = 4096;
+constexpr size_t BLOCKS_PREFETCH_AHEAD = 4;
+constexpr size_t CACHELINE_WIDTH = 0x40;
+
 //
 template <CompareOpType Op>
 bool
@@ -65,9 +70,30 @@ OpCompareValImpl<int8_t, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int8_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 64) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i v =
+                    _mm512_loadu_si512(src + i + p + ip * BLOCK_COUNT);
+                const __mmask64 cmp_mask =
+                    _mm512_cmp_epi8_mask(v, target, pred);
+
+                res_u64[(i + p + ip * BLOCK_COUNT) / 64] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size64 = (size / 64) * 64;
-    for (size_t i = 0; i < size64; i += 64) {
+    for (size_t i = size_8p; i < size64; i += 64) {
         const __m512i v = _mm512_loadu_si512(src + i);
         const __mmask64 cmp_mask = _mm512_cmp_epi8_mask(v, target, pred);
 
@@ -107,9 +133,30 @@ OpCompareValImpl<int16_t, Op>::op_compare_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int16_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 32) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i v =
+                    _mm512_loadu_si512(src + i + p + ip * BLOCK_COUNT);
+                const __mmask32 cmp_mask =
+                    _mm512_cmp_epi16_mask(v, target, pred);
+
+                res_u32[(i + p + ip * BLOCK_COUNT) / 32] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size32 = (size / 32) * 32;
-    for (size_t i = 0; i < size32; i += 32) {
+    for (size_t i = size_8p; i < size32; i += 32) {
         const __m512i v = _mm512_loadu_si512(src + i);
         const __mmask32 cmp_mask = _mm512_cmp_epi16_mask(v, target, pred);
 
@@ -149,9 +196,30 @@ OpCompareValImpl<int32_t, Op>::op_compare_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int32_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i v =
+                    _mm512_loadu_si512(src + i + p + ip * BLOCK_COUNT);
+                const __mmask16 cmp_mask =
+                    _mm512_cmp_epi32_mask(v, target, pred);
+
+                res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size16 = (size / 16) * 16;
-    for (size_t i = 0; i < size16; i += 16) {
+    for (size_t i = size_8p; i < size16; i += 16) {
         const __m512i v = _mm512_loadu_si512(src + i);
         const __mmask16 cmp_mask = _mm512_cmp_epi32_mask(v, target, pred);
 
@@ -187,9 +255,30 @@ OpCompareValImpl<int64_t, Op>::op_compare_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int64_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i v =
+                    _mm512_loadu_si512(src + i + p + ip * BLOCK_COUNT);
+                const __mmask8 cmp_mask =
+                    _mm512_cmp_epi64_mask(v, target, pred);
+
+                res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size8 = (size / 8) * 8;
-    for (size_t i = 0; i < size8; i += 8) {
+    for (size_t i = size_8p; i < size8; i += 8) {
         const __m512i v = _mm512_loadu_si512(src + i);
         const __mmask8 cmp_mask = _mm512_cmp_epi64_mask(v, target, pred);
 
@@ -216,9 +305,29 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(float);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512 v =
+                    _mm512_loadu_ps(src + i + p + ip * BLOCK_COUNT);
+                const __mmask16 cmp_mask = _mm512_cmp_ps_mask(v, target, pred);
+
+                res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size16 = (size / 16) * 16;
-    for (size_t i = 0; i < size16; i += 16) {
+    for (size_t i = size_8p; i < size16; i += 16) {
         const __m512 v = _mm512_loadu_ps(src + i);
         const __mmask16 cmp_mask = _mm512_cmp_ps_mask(v, target, pred);
 
@@ -254,9 +363,29 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(double);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512d v =
+                    _mm512_loadu_pd(src + i + p + ip * BLOCK_COUNT);
+                const __mmask8 cmp_mask = _mm512_cmp_pd_mask(v, target, pred);
+
+                res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size8 = (size / 8) * 8;
-    for (size_t i = 0; i < size8; i += 8) {
+    for (size_t i = size_8p; i < size8; i += 8) {
         const __m512d v = _mm512_loadu_pd(src + i);
         const __mmask8 cmp_mask = _mm512_cmp_pd_mask(v, target, pred);
 
@@ -792,9 +921,32 @@ OpWithinRangeValImpl<int8_t, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int8_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 64) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i vv =
+                    _mm512_loadu_si512(values + i + p + ip * BLOCK_COUNT);
+                const __mmask64 cmpl_mask =
+                    _mm512_cmp_epi8_mask(lower_v, vv, pred_lower);
+                const __mmask64 cmp_mask = _mm512_mask_cmp_epi8_mask(
+                    cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u64[(i + p + ip * BLOCK_COUNT) / 64] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size64 = (size / 64) * 64;
-    for (size_t i = 0; i < size64; i += 64) {
+    for (size_t i = size_8p; i < size64; i += 64) {
         const __m512i vv = _mm512_loadu_si512(values + i);
         const __mmask64 cmpl_mask =
             _mm512_cmp_epi8_mask(lower_v, vv, pred_lower);
@@ -845,9 +997,32 @@ OpWithinRangeValImpl<int16_t, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int16_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 32) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i vv =
+                    _mm512_loadu_si512(values + i + p + ip * BLOCK_COUNT);
+                const __mmask32 cmpl_mask =
+                    _mm512_cmp_epi16_mask(lower_v, vv, pred_lower);
+                const __mmask32 cmp_mask = _mm512_mask_cmp_epi16_mask(
+                    cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u32[(i + p + ip * BLOCK_COUNT) / 32] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size32 = (size / 32) * 32;
-    for (size_t i = 0; i < size32; i += 32) {
+    for (size_t i = size_8p; i < size32; i += 32) {
         const __m512i vv = _mm512_loadu_si512(values + i);
         const __mmask32 cmpl_mask =
             _mm512_cmp_epi16_mask(lower_v, vv, pred_lower);
@@ -898,9 +1073,32 @@ OpWithinRangeValImpl<int32_t, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int32_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i vv =
+                    _mm512_loadu_si512(values + i + p + ip * BLOCK_COUNT);
+                const __mmask16 cmpl_mask =
+                    _mm512_cmp_epi32_mask(lower_v, vv, pred_lower);
+                const __mmask16 cmp_mask = _mm512_mask_cmp_epi32_mask(
+                    cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size16 = (size / 16) * 16;
-    for (size_t i = 0; i < size16; i += 16) {
+    for (size_t i = size_8p; i < size16; i += 16) {
         const __m512i vv = _mm512_loadu_si512(values + i);
         const __mmask16 cmpl_mask =
             _mm512_cmp_epi32_mask(lower_v, vv, pred_lower);
@@ -947,9 +1145,32 @@ OpWithinRangeValImpl<int64_t, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(int64_t);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512i vv =
+                    _mm512_loadu_si512(values + i + p + ip * BLOCK_COUNT);
+                const __mmask8 cmpl_mask =
+                    _mm512_cmp_epi64_mask(lower_v, vv, pred_lower);
+                const __mmask8 cmp_mask = _mm512_mask_cmp_epi64_mask(
+                    cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size8 = (size / 8) * 8;
-    for (size_t i = 0; i < size8; i += 8) {
+    for (size_t i = size_8p; i < size8; i += 8) {
         const __m512i vv = _mm512_loadu_si512(values + i);
         const __mmask8 cmpl_mask =
             _mm512_cmp_epi64_mask(lower_v, vv, pred_lower);
@@ -984,9 +1205,32 @@ OpWithinRangeValImpl<float, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(float);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512 vv =
+                    _mm512_loadu_ps(values + i + p + ip * BLOCK_COUNT);
+                const __mmask16 cmpl_mask =
+                    _mm512_cmp_ps_mask(lower_v, vv, pred_lower);
+                const __mmask16 cmp_mask =
+                    _mm512_mask_cmp_ps_mask(cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size16 = (size / 16) * 16;
-    for (size_t i = 0; i < size16; i += 16) {
+    for (size_t i = size_8p; i < size16; i += 16) {
         const __m512 vv = _mm512_loadu_ps(values + i);
         const __mmask16 cmpl_mask = _mm512_cmp_ps_mask(lower_v, vv, pred_lower);
         const __mmask16 cmp_mask =
@@ -1031,9 +1275,32 @@ OpWithinRangeValImpl<double, Op>::op_within_range_val(
 
     // todo: aligned reads & writes
 
+    // interleaved pages
+    constexpr size_t BLOCK_COUNT = PAGE_SIZE / sizeof(double);
+    const size_t size_8p =
+        (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+    for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+        for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+            for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                const __m512d vv =
+                    _mm512_loadu_pd(values + i + p + ip * BLOCK_COUNT);
+                const __mmask8 cmpl_mask =
+                    _mm512_cmp_pd_mask(lower_v, vv, pred_lower);
+                const __mmask8 cmp_mask =
+                    _mm512_mask_cmp_pd_mask(cmpl_mask, vv, upper_v, pred_upper);
+
+                res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                _mm_prefetch((const char*)(values + i + p + ip * BLOCK_COUNT) +
+                                 BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                             _MM_HINT_T0);
+            }
+        }
+    }
+
     // process big blocks
     const size_t size8 = (size / 8) * 8;
-    for (size_t i = 0; i < size8; i += 8) {
+    for (size_t i = size_8p; i < size8; i += 8) {
         const __m512d vv = _mm512_loadu_pd(values + i);
         const __mmask8 cmpl_mask = _mm512_cmp_pd_mask(lower_v, vv, pred_lower);
         const __mmask8 cmp_mask =
@@ -1196,9 +1463,40 @@ OpArithCompareImpl<int8_t, AOp, CmpOp>::op_arith_compare(
         const __m512i right_v = _mm512_set1_epi64(right_operand);
         const __m512i value_v = _mm512_set1_epi64(value);
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(int8_t));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m128i vs = _mm_loadu_si128(
+                        (const __m128i*)(src + i + p + ip * BLOCK_COUNT));
+                    const __m512i v0s = _mm512_cvtepi8_epi64(
+                        _mm_unpacklo_epi64(vs, _mm_setzero_si128()));
+                    const __m512i v1s = _mm512_cvtepi8_epi64(
+                        _mm_unpackhi_epi64(vs, _mm_setzero_si128()));
+                    const __mmask8 cmp_mask0 =
+                        ArithHelperI64<AOp, CmpOp>::op(v0s, right_v, value_v);
+                    const __mmask8 cmp_mask1 =
+                        ArithHelperI64<AOp, CmpOp>::op(v1s, right_v, value_v);
+
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 0] = cmp_mask0;
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 1] = cmp_mask1;
+
+                    if (p % CACHELINE_WIDTH == 0) {
+                        _mm_prefetch(
+                            (const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                            _MM_HINT_T0);
+                    }
+                }
+            }
+        }
+
         // process big blocks
         const size_t size16 = (size / 16) * 16;
-        for (size_t i = 0; i < size16; i += 16) {
+        for (size_t i = size_8p; i < size16; i += 16) {
             const __m128i vs = _mm_loadu_si128((const __m128i*)(src + i));
             const __m512i v0s = _mm512_cvtepi8_epi64(
                 _mm_unpacklo_epi64(vs, _mm_setzero_si128()));
@@ -1251,9 +1549,40 @@ OpArithCompareImpl<int16_t, AOp, CmpOp>::op_arith_compare(
 
         // todo: aligned reads & writes
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(int16_t));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m256i vs = _mm256_loadu_si256(
+                        (const __m256i*)(src + i + p + ip * BLOCK_COUNT));
+                    const __m512i v0s =
+                        _mm512_cvtepi16_epi64(_mm256_extracti128_si256(vs, 0));
+                    const __m512i v1s =
+                        _mm512_cvtepi16_epi64(_mm256_extracti128_si256(vs, 1));
+                    const __mmask8 cmp_mask0 =
+                        ArithHelperI64<AOp, CmpOp>::op(v0s, right_v, value_v);
+                    const __mmask8 cmp_mask1 =
+                        ArithHelperI64<AOp, CmpOp>::op(v1s, right_v, value_v);
+
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 0] = cmp_mask0;
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 1] = cmp_mask1;
+
+                    if ((2 * p) % CACHELINE_WIDTH == 0) {
+                        _mm_prefetch(
+                            (const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                            _MM_HINT_T0);
+                    }
+                }
+            }
+        }
+
         // process big blocks
         const size_t size16 = (size / 16) * 16;
-        for (size_t i = 0; i < size16; i += 16) {
+        for (size_t i = size_8p; i < size16; i += 16) {
             const __m256i vs = _mm256_loadu_si256((const __m256i*)(src + i));
             const __m512i v0s =
                 _mm512_cvtepi16_epi64(_mm256_extracti128_si256(vs, 0));
@@ -1304,9 +1633,37 @@ OpArithCompareImpl<int32_t, AOp, CmpOp>::op_arith_compare(
 
         // todo: aligned reads & writes
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(int32_t));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m512i vs = _mm512_loadu_si512(
+                        (const __m512i*)(src + i + p + ip * BLOCK_COUNT));
+                    const __m512i v0s =
+                        _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(vs, 0));
+                    const __m512i v1s =
+                        _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(vs, 1));
+                    const __mmask8 cmp_mask0 =
+                        ArithHelperI64<AOp, CmpOp>::op(v0s, right_v, value_v);
+                    const __mmask8 cmp_mask1 =
+                        ArithHelperI64<AOp, CmpOp>::op(v1s, right_v, value_v);
+
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 0] = cmp_mask0;
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8 + 1] = cmp_mask1;
+
+                    _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                     BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                                 _MM_HINT_T0);
+                }
+            }
+        }
+
         // process big blocks
         const size_t size16 = (size / 16) * 16;
-        for (size_t i = 0; i < size16; i += 16) {
+        for (size_t i = size_8p; i < size16; i += 16) {
             const __m512i vs = _mm512_loadu_si512((const __m512i*)(src + i));
             const __m512i v0s =
                 _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(vs, 0));
@@ -1358,9 +1715,30 @@ OpArithCompareImpl<int64_t, AOp, CmpOp>::op_arith_compare(
 
         // todo: aligned reads & writes
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(int64_t));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m512i v0s = _mm512_loadu_si512(
+                        (const __m512i*)(src + i + p + ip * BLOCK_COUNT));
+                    const __mmask8 cmp_mask =
+                        ArithHelperI64<AOp, CmpOp>::op(v0s, right_v, value_v);
+
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                    _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                     BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                                 _MM_HINT_T0);
+                }
+            }
+        }
+
         // process big blocks
         const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
+        for (size_t i = size_8p; i < size8; i += 8) {
             const __m512i v0s = _mm512_loadu_si512((const __m512i*)(src + i));
             const __mmask8 cmp_mask =
                 ArithHelperI64<AOp, CmpOp>::op(v0s, right_v, value_v);
@@ -1394,9 +1772,30 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
 
         // todo: aligned reads & writes
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(float));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 16) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m512 v0s =
+                        _mm512_loadu_ps(src + i + p + ip * BLOCK_COUNT);
+                    const __mmask16 cmp_mask =
+                        ArithHelperF32<AOp, CmpOp>::op(v0s, right_v, value_v);
+
+                    res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
+
+                    _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                     BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                                 _MM_HINT_T0);
+                }
+            }
+        }
+
         // process big blocks
         const size_t size16 = (size / 16) * 16;
-        for (size_t i = 0; i < size16; i += 16) {
+        for (size_t i = size_8p; i < size16; i += 16) {
             const __m512 v0s = _mm512_loadu_ps(src + i);
             const __mmask16 cmp_mask =
                 ArithHelperF32<AOp, CmpOp>::op(v0s, right_v, value_v);
@@ -1437,9 +1836,30 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
 
         // todo: aligned reads & writes
 
+        // interleaved pages
+        constexpr size_t BLOCK_COUNT = PAGE_SIZE / (sizeof(int64_t));
+        const size_t size_8p =
+            (size / (N_BLOCKS * BLOCK_COUNT)) * N_BLOCKS * BLOCK_COUNT;
+        for (size_t i = 0; i < size_8p; i += N_BLOCKS * BLOCK_COUNT) {
+            for (size_t p = 0; p < BLOCK_COUNT; p += 8) {
+                for (size_t ip = 0; ip < N_BLOCKS; ip++) {
+                    const __m512d v0s =
+                        _mm512_loadu_pd(src + i + p + ip * BLOCK_COUNT);
+                    const __mmask8 cmp_mask =
+                        ArithHelperF64<AOp, CmpOp>::op(v0s, right_v, value_v);
+
+                    res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
+
+                    _mm_prefetch((const char*)(src + i + p + ip * BLOCK_COUNT) +
+                                     BLOCKS_PREFETCH_AHEAD * CACHELINE_WIDTH,
+                                 _MM_HINT_T0);
+                }
+            }
+        }
+
         // process big blocks
         const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
+        for (size_t i = size_8p; i < size8; i += 8) {
             const __m512d v0s = _mm512_loadu_pd(src + i);
             const __mmask8 cmp_mask =
                 ArithHelperF64<AOp, CmpOp>::op(v0s, right_v, value_v);
