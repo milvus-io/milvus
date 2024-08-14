@@ -89,6 +89,7 @@ typedef struct CStorageConfig {
     bool useIAM;
     bool useVirtualHost;
     int64_t requestTimeoutMs;
+    bool useCollectionIdIndexPath;
 } CStorageConfig;
 
 typedef struct CTraceConfig {
