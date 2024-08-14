@@ -16,7 +16,7 @@ import (
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		return HookInterceptor(ctx, req, getCurrentUser(ctx), info.FullMethod, handler)
+		return HookInterceptor(ctx, req, GetCurUserFromContextOrDefault(ctx), info.FullMethod, handler)
 	}
 }
 
@@ -65,12 +65,4 @@ func updateProxyFunctionCallMetric(fullMethod string) {
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, "", "").Inc()
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
-}
-
-func getCurrentUser(ctx context.Context) string {
-	username, err := GetCurUserFromContext(ctx)
-	if err != nil {
-		log.Warn("fail to get current user", zap.Error(err))
-	}
-	return username
 }
