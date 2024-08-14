@@ -249,6 +249,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
+		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
 	return true
