@@ -362,11 +362,10 @@ func (helper *SchemaHelper) IsFieldLoaded(fieldID int64) bool {
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
 	for _, f := range helper.schema.GetFields() {
 		if f.DataType == schemapb.DataType_JSON && f.IsDynamic {
-			if helper.IsFieldLoaded(f.GetFieldID()) {
-				return f, nil
-			} else {
+			if !helper.IsFieldLoaded(f.GetFieldID()) {
 				return nil, errors.Newf("field %s is dynamic but dynamic field is not loaded", fieldName)
 			}
+			return f, nil
 		}
 	}
 	errMsg := fmt.Sprintf("field %s not exist", fieldName)
