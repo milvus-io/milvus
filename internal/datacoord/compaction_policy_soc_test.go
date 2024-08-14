@@ -41,7 +41,7 @@ type SingleCompactionPolicySuite struct {
 	handler            *NMockHandler
 	mockPlanContext    *MockCompactionPlanContext
 
-	singlePolicy *singleCompactionPolicy
+	socPolicy *sizeOptimizationCompactionPolicy
 }
 
 func (s *SingleCompactionPolicySuite) SetupTest() {
@@ -59,15 +59,15 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	mockAllocator := newMockAllocator()
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
-	s.singlePolicy = newSingleCompactionPolicy(meta, mockAllocator, mockHandler)
+	s.socPolicy = newSOCPolicy(meta, mockAllocator, mockHandler)
 }
 
-func (s *SingleCompactionPolicySuite) TestTrigger() {
-	events, err := s.singlePolicy.Trigger()
+func (s *SingleCompactionPolicySuite) TestTriggerEmptyMeta() {
+	events, err := s.socPolicy.Trigger()
 	s.NoError(err)
-	gotViews, ok := events[TriggerTypeSingle]
-	s.True(ok)
-	s.NotNil(gotViews)
+	gotViews, ok := events[TriggerTypeDeltaTooMuch]
+	s.False(ok)
+	s.Nil(gotViews)
 	s.Equal(0, len(gotViews))
 }
 
@@ -128,9 +128,10 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	}
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-	s.singlePolicy.meta = &meta{
+	s.socPolicy.meta = &meta{
 		compactionTaskMeta: compactionTaskMeta,
 		segments:           segmentsInfo,
+		indexMeta:          &indexMeta{},
 	}
 	compactionTaskMeta.SaveCompactionTask(&datapb.CompactionTask{
 		TriggerID:    1,
@@ -139,7 +140,7 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		State:        datapb.CompactionTaskState_executing,
 	})
 
-	views, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	views, err := s.socPolicy.triggerOneCollection(context.TODO(), collID)
 	s.NoError(err)
 	s.Equal(2, len(views))
 }

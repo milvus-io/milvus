@@ -89,14 +89,15 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 	return pk2ts, nil
 }
 
-func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {
+// composePaths decompress all segments' binlogs paths and group binlog paths by batch, group deltalog paths by segment
+func composePaths(segments []*datapb.CompactionSegmentBinlogs) (deltaPaths map[typeutil.UniqueID][]string, allBatchPaths [][]string, err error) {
 	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, nil, err
 	}
 
-	deltaPaths := make(map[typeutil.UniqueID][]string) // segmentID to deltalog paths
-	allPath := make([][]string, 0)                     // group by binlog batch
+	deltaPaths = make(map[typeutil.UniqueID][]string)
+	allBatchPaths = make([][]string, 0)
 	for _, s := range segments {
 		// Get the batch count of field binlog files from non-empty segment
 		// each segment might contain different batches
@@ -117,7 +118,7 @@ func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 			for _, f := range s.GetFieldBinlogs() {
 				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
 			}
-			allPath = append(allPath, batchPaths)
+			allBatchPaths = append(allBatchPaths, batchPaths)
 		}
 
 		deltaPaths[s.GetSegmentID()] = []string{}
@@ -127,7 +128,7 @@ func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 			}
 		}
 	}
-	return deltaPaths, allPath, nil
+	return deltaPaths, allBatchPaths, nil
 }
 
 func serializeWrite(ctx context.Context, allocator allocator.Allocator, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -169,7 +170,7 @@ func serializeWrite(ctx context.Context, allocator allocator.Allocator, writer *
 func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Allocator, writer *SegmentWriter) (*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
-	sblob, err := writer.Finish(writer.GetRowNum())
+	sblob, err := writer.Finish()
 	if err != nil {
 		return nil, err
 	}

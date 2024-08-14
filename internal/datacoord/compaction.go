@@ -213,7 +213,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		switch t.GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetChannel())
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SplitCompaction:
 			mixChannelExcludes.Insert(t.GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -240,7 +240,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 			}
 			picked = append(picked, t)
 			l0ChannelExcludes.Insert(t.GetChannel())
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SplitCompaction:
 			if l0ChannelExcludes.Contain(t.GetChannel()) {
 				continue
 			}
@@ -578,7 +578,7 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SplitCompaction:
 		task = &mixCompactionTask{
 			CompactionTask: t,
 			meta:           c.meta,
@@ -678,7 +678,7 @@ func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task Comp
 	switch task.GetType() {
 	case datapb.CompactionType_ClusteringCompaction:
 		useSlot = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
-	case datapb.CompactionType_MixCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SplitCompaction:
 		useSlot = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 	case datapb.CompactionType_Level0DeleteCompaction:
 		useSlot = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()

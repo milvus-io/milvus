@@ -23,7 +23,7 @@ func (v *LevelZeroSegmentsView) String() string {
 		return v.LevelZeroString()
 	})
 
-	count := lo.SumBy(v.segments, func(v *SegmentView) int {
+	count := lo.SumBy(v.segments, func(v *SegmentView) int64 {
 		return v.DeltaRowCount
 	})
 	return fmt.Sprintf("L0SegCount=%d, DeltaRowCount=%d, label=<%s>, posT=<%v>, L0 segments=%v",

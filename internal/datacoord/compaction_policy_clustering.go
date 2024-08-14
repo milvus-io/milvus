@@ -162,6 +162,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		segmentViews := GetViewsByInfo(group.segments...)
 		view := &ClusteringSegmentsView{
 			label:              segmentViews[0].label,
+			schema:             collection.Schema,
 			segments:           segmentViews,
 			clusteringKeyField: clusteringKeyField,
 			collectionTTL:      collectionTTL,
@@ -265,6 +266,7 @@ var _ CompactionView = (*ClusteringSegmentsView)(nil)
 
 type ClusteringSegmentsView struct {
 	label              *CompactionGroupLabel
+	schema             *schemapb.CollectionSchema
 	segments           []*SegmentView
 	clusteringKeyField *schemapb.FieldSchema
 	collectionTTL      time.Duration
@@ -276,6 +278,14 @@ func (v *ClusteringSegmentsView) GetGroupLabel() *CompactionGroupLabel {
 		return &CompactionGroupLabel{}
 	}
 	return v.label
+}
+
+func (v *ClusteringSegmentsView) GetSchema() *schemapb.CollectionSchema {
+	if v == nil {
+		return nil
+	}
+
+	return v.schema
 }
 
 func (v *ClusteringSegmentsView) GetSegmentsView() []*SegmentView {

@@ -500,6 +500,7 @@ enum CompactionType {
   MajorCompaction = 6;
   Level0DeleteCompaction = 7;
   ClusteringCompaction = 8;
+  SplitCompaction = 9;
 }
 
 message CompactionStateRequest {
@@ -561,8 +562,9 @@ message CompactionPlan {
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
   int64 begin_logID = 17;
-  IDRange pre_allocated_segments = 18; // only for clustering compaction
+  IDRange pre_allocated_segments = 18;
   int64 slot_usage = 19;
+  int64 maxSize = 20;
 }
 
 message CompactionSegment {
@@ -917,6 +919,7 @@ message CompactionTask{
   int64 analyzeTaskID = 23;
   int64 analyzeVersion = 24;
   int64 lastStateStartTime = 25;
+  int64 maxSize = 26;
 }
 
 message PartitionStatsInfo {

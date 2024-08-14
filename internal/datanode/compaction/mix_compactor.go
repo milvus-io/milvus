@@ -331,7 +331,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return binlogs.GetSegmentID()
 	})
 
-	deltaPaths, allPath, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	deltaPaths, allPath, err := composePaths(t.plan.GetSegmentBinlogs())
 	if err != nil {
 		log.Warn("fail to merge deltalogs", zap.Error(err))
 		return nil, err

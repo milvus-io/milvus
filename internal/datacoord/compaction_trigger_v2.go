@@ -24,14 +24,11 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type CompactionTriggerType int8
@@ -41,7 +38,8 @@ const (
 	TriggerTypeLevelZeroViewIDLE
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
-	TriggerTypeSingle
+	TriggerTypeDeltaTooMuch
+	TriggerTypeOverSize
 )
 
 type TriggerManager interface {
@@ -72,7 +70,7 @@ type CompactionTriggerManager struct {
 	meta             *meta
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
-	singlePolicy     *singleCompactionPolicy
+	scoPolicy        *sizeOptimizationCompactionPolicy
 
 	closeSig chan struct{}
 	closeWg  sync.WaitGroup
@@ -91,7 +89,7 @@ func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHan
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
-	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.scoPolicy = newSOCPolicy(meta, m.allocator, m.handler)
 	return m
 }
 
@@ -160,14 +158,14 @@ func (m *CompactionTriggerManager) startLoop() {
 				}
 			}
 		case <-singleTicker.C:
-			if !m.singlePolicy.Enable() {
+			if !m.scoPolicy.Enable() {
 				continue
 			}
 			if m.compactionHandler.isFull() {
 				log.RatedInfo(10, "Skip trigger single compaction since compactionHandler is full")
 				continue
 			}
-			events, err := m.singlePolicy.Trigger()
+			events, err := m.scoPolicy.Trigger()
 			if err != nil {
 				log.Warn("Fail to trigger single policy", zap.Error(err))
 				continue
@@ -199,49 +197,41 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 }
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
+	if eventType == TriggerTypeLevelZeroViewIDLE {
+		for _, view := range views {
+			log.Debug("Try to force trigger a LevelZeroCompaction by ViewIDLE", zap.String("label", view.GetGroupLabel().String()))
+			outView, reason := view.ForceTrigger()
+			if outView != nil {
+				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitL0ViewToScheduler(ctx, outView)
+			}
+		}
+		return
+	}
+
 	for _, view := range views {
+		log.Debug("Try to trigger a Compaction", zap.String("view", view.String()), zap.String("label", view.GetGroupLabel().String()))
+		outView, reason := view.Trigger()
+		if outView == nil {
+			continue
+		}
+
+		log := log.With(zap.String("label", view.GetGroupLabel().String()), zap.String("reason", reason), zap.String("output view", outView.String()))
 		switch eventType {
 		case TriggerTypeLevelZeroViewChange:
-			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
-			outView, reason := view.Trigger()
-			if outView != nil {
-				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
-					zap.String("reason", reason),
-					zap.String("output view", outView.String()))
-				m.SubmitL0ViewToScheduler(ctx, outView)
-			}
-		case TriggerTypeLevelZeroViewIDLE:
-			log.Debug("Start to trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
-			outView, reason := view.Trigger()
-			if outView == nil {
-				log.Info("Start to force trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
-				outView, reason = view.ForceTrigger()
-			}
-
-			if outView != nil {
-				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
-					zap.String("reason", reason),
-					zap.String("output view", outView.String()))
-				m.SubmitL0ViewToScheduler(ctx, outView)
-			}
+			log.Info("Success to trigger a LevelZeroCompaction output view, try to submit")
+			m.SubmitL0ViewToScheduler(ctx, outView)
 		case TriggerTypeClustering:
-			log.Debug("Start to trigger a clustering compaction by TriggerTypeClustering")
-			outView, reason := view.Trigger()
-			if outView != nil {
-				log.Info("Success to trigger a ClusteringCompaction output view, try to submit",
-					zap.String("reason", reason),
-					zap.String("output view", outView.String()))
-				m.SubmitClusteringViewToScheduler(ctx, outView)
-			}
-		case TriggerTypeSingle:
-			log.Debug("Start to trigger a single compaction by TriggerTypeSingle")
-			outView, reason := view.Trigger()
-			if outView != nil {
-				log.Info("Success to trigger a L2SingleCompaction output view, try to submit",
-					zap.String("reason", reason),
-					zap.String("output view", outView.String()))
-				m.SubmitSingleViewToScheduler(ctx, outView)
-			}
+			log.Info("Success to trigger a ClusteringCompaction output view, try to submit")
+			m.SubmitClusteringViewToScheduler(ctx, outView)
+		case TriggerTypeDeltaTooMuch:
+			log.Info("Success to trigger a SingleCompaction output view, try to submit")
+			m.SubmitSingleViewToScheduler(ctx, outView)
+		case TriggerTypeOverSize:
+			log.Info("Success to trigger an OverSizeCompaction output view, try to submit")
+			m.SubmitOversizeViewToScheduler(ctx, outView)
 		}
 	}
 }
@@ -349,6 +339,52 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	)
 }
 
+func (m *CompactionTriggerManager) SubmitOversizeViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.With(zap.String("view", view.String()))
+	taskID, _, err := m.allocator.allocN(1)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
+		return
+	}
+
+	task := &datapb.CompactionTask{
+		PlanID:             taskID,
+		TriggerID:          view.(*OversizedSegmentView).triggerID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      view.(*OversizedSegmentView).collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+		Type:               datapb.CompactionType_SplitCompaction,
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		TotalRows:          lo.SumBy(view.GetSegmentsView(), func(segmentView *SegmentView) int64 { return segmentView.NumOfRows }),
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            view.(*OversizedSegmentView).maxSize,
+	}
+	err = m.compactionHandler.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to execute compaction task",
+			zap.Int64("triggerID", task.GetTriggerID()),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+	}
+	log.Info("Finish to submit an oversize compaction task",
+		zap.Int64("triggerID", task.GetTriggerID()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
+		zap.Int64("maxSize", task.GetMaxSize()),
+	)
+}
+
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
 	log := log.With(zap.String("view", view.String()))
 	taskID, _, err := m.allocator.allocN(1)
@@ -361,24 +397,21 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
-	var totalRows int64 = 0
-	for _, s := range view.GetSegmentsView() {
-		totalRows += s.NumOfRows
-	}
+
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
-		TriggerID:          view.(*MixSegmentView).triggerID,
+		TriggerID:          view.(*SegmentDeltaView).triggerID,
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
-		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
-		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
+		CollectionTtl:      view.(*SegmentDeltaView).collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,
 		Schema:             collection.Schema,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
-		TotalRows:          totalRows,
+		TotalRows:          lo.SumBy(view.GetSegmentsView(), func(segmentView *SegmentView) int64 { return segmentView.NumOfRows }),
 		LastStateStartTime: time.Now().Unix(),
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
@@ -397,26 +430,13 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 }
 
 func getExpectedSegmentSize(meta *meta, collection *collectionInfo) int64 {
-	indexInfos := meta.indexMeta.GetIndexesForCollection(collection.ID, "")
-
-	vectorFields := typeutil.GetVectorFieldSchemas(collection.Schema)
-	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, GetIndexType(t.IndexParams)
-	})
-	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
-			return indexparamcheck.IsDiskIndex(indexType)
-		}
-		return false
-	})
-
-	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	allDiskIndex := meta.indexMeta.AreAllDiskIndex(collection.ID, collection.Schema)
 	if allDiskIndex {
 		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+		return paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
 	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	return paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName

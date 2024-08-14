@@ -238,6 +238,13 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			node.allocator,
 			req,
 		)
+	case datapb.CompactionType_SplitCompaction:
+		task = compaction.NewSplitCompactionTask(
+			taskCtx,
+			binlogIO,
+			node.allocator,
+			req,
+		)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = compaction.NewClusteringCompactionTask(
 			taskCtx,

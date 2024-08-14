@@ -100,16 +100,14 @@ type SegmentView struct {
 	ExpireSize float64
 	DeltaSize  float64
 
-	NumOfRows int64
-	MaxRowNum int64
+	NumOfRows     int64
+	MaxRowNum     int64
+	DeltaRowCount int64
 
 	// file numbers
 	BinlogCount   int
 	StatslogCount int
 	DeltalogCount int
-
-	// row count
-	DeltaRowCount int
 }
 
 func (s *SegmentView) Clone() *SegmentView {
@@ -194,11 +192,11 @@ func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
 	return num
 }
 
-func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int {
-	var num int
+func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int64 {
+	var num int64
 	for _, fbinlog := range fieldBinlogs {
 		for _, binlog := range fbinlog.GetBinlogs() {
-			num += int(binlog.GetEntriesNum())
+			num += binlog.GetEntriesNum()
 		}
 	}
 	return num
