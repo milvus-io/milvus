@@ -1,7 +1,6 @@
 package planparserv2
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 
@@ -900,7 +899,7 @@ func Test_exprWithSingleQuotes(t *testing.T) {
 func Test_JSONContains(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	expr := ""
-	//var err error
+	var err error
 	exprs := []string{
 		`json_contains(A, 10)`,
 		`not json_contains(A, 10)`,
@@ -921,14 +920,12 @@ func Test_JSONContains(t *testing.T) {
 		`json_contains($meta, 1)`,
 	}
 	for _, expr = range exprs {
-		plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
 			Topk:         0,
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
 		})
-		fmt.Println(expr)
-		fmt.Println(plan)
 		assert.NoError(t, err)
 	}
 }

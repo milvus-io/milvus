@@ -26,8 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -36,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -1563,7 +1562,7 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key1"}, []string{"haha"}, nil)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key1"}, []string{"1234"}, nil)
 		kc.MetaKv = txn
 
 		tasks, err = kc.ListAnalyzeTasks(context.Background())
@@ -1654,7 +1653,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.Equal(t, 1, len(infos))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key1"}, []string{"haha"}, nil)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key1"}, []string{"1234"}, nil)
 		kc.MetaKv = txn
 
 		infos, err = kc.ListPartitionStatsInfos(context.Background())
@@ -1703,14 +1702,14 @@ func Test_PartitionStatsInfo(t *testing.T) {
 			CommitTime:    10,
 		}
 
-		err := kc.SavePartitionStatsInfo(context.Background(), info)
+		err := kc.DropPartitionStatsInfo(context.Background(), info)
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Remove(mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
-		err = kc.SavePartitionStatsInfo(context.Background(), info)
+		err = kc.DropPartitionStatsInfo(context.Background(), info)
 		assert.NoError(t, err)
 	})
 }
@@ -1808,6 +1807,14 @@ func Test_StatsTasks(t *testing.T) {
 		tasks, err = kc.ListStatsTasks(context.Background())
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
+
+		txn = mocks.NewMetaKv(t)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key1"}, []string{"1234"}, nil)
+		kc.MetaKv = txn
+
+		tasks, err = kc.ListStatsTasks(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, tasks)
 	})
 
 	t.Run("SaveStatsTask", func(t *testing.T) {

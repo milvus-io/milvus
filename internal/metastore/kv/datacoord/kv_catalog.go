@@ -937,6 +937,7 @@ func (kc *Catalog) ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, er
 		if err != nil {
 			return nil, err
 		}
+		tasks = append(tasks, task)
 	}
 	return tasks, nil
 }
