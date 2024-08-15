@@ -16,6 +16,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <utility>
 
 #include "opentelemetry/exporters/jaeger/jaeger_exporter_factory.h"
@@ -25,6 +26,8 @@
 #include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
 #include "opentelemetry/sdk/trace/sampler.h"
 #include "opentelemetry/sdk/trace/samplers/always_on.h"
+#include "opentelemetry/sdk/trace/samplers/always_off.h"
+#include "opentelemetry/sdk/trace/samplers/trace_id_ratio.h"
 #include "opentelemetry/sdk/trace/samplers/parent.h"
 #include "opentelemetry/sdk/trace/tracer_provider_factory.h"
 #include "opentelemetry/sdk/version/version.h"
@@ -84,8 +87,22 @@ initTelemetry(const TraceConfig& cfg) {
         resource::ResourceAttributes attributes = {
             {"service.name", TRACE_SERVICE_SEGCORE}, {"NodeID", cfg.nodeID}};
         auto resource = resource::Resource::Create(attributes);
-        auto sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
-            std::make_shared<trace_sdk::AlwaysOnSampler>());
+
+        std::unique_ptr<trace_sdk::ParentBasedSampler> sampler;
+        if (cfg.sampleFraction == 0) {
+            // if fraction is zero, use always off
+            sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
+                std::make_shared<trace_sdk::AlwaysOffSampler>());
+        } else if (cfg.sampleFraction == 1) {
+            // if fraction is one, use always on
+            sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
+                std::make_shared<trace_sdk::AlwaysOnSampler>());
+        } else {
+            // otherwise, use trace id ratio sampler
+            sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
+                std::make_shared<trace_sdk::TraceIdRatioBasedSampler>(
+                    cfg.sampleFraction));
+        }
         std::shared_ptr<trace::TracerProvider> provider =
             trace_sdk::TracerProviderFactory::Create(
                 std::move(processor), resource, std::move(sampler));
