@@ -1,9 +1,10 @@
 package utility
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"go.uber.org/zap"
 )
 
 // NewTxnBuffer creates a new txn buffer.
@@ -22,7 +23,7 @@ type TxnBuffer struct {
 
 // HandleImmutableMessages handles immutable messages.
 // The timetick of msgs should be in ascending order, and the timetick of all messages is less than or equal to ts.
-// Hold the uncommited txn messages until the commit or rollback message comes and pop the commited txn messages.
+// Hold the uncommitted txn messages until the commit or rollback message comes and pop the committed txn messages.
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
@@ -84,7 +85,7 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	builder, ok := b.builders[commitMsg.TxnContext().TxnID]
 	if !ok {
 		b.logger.Warn(
-			"txn id not exist, it may be a repeated commited message, so ignore it",
+			"txn id not exist, it may be a repeated committed message, so ignore it",
 			zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
 			zap.Any("messageID", commitMsg.MessageID()),
 		)
@@ -103,7 +104,7 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 		return nil
 	}
 	b.logger.Debug(
-		"the txn is commited",
+		"the txn is committed",
 		zap.Int64("txnID", int64(commitMsg.TxnContext().TxnID)),
 		zap.Any("messageID", commitMsg.MessageID()),
 	)

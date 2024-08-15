@@ -4,11 +4,12 @@ import (
 	"context"
 	"sync"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/atomic"
 )
 
 // AckManager manages the timestampAck.
@@ -127,7 +128,7 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
 
 	// pop all EndTimestamp is less than lastConfirmedTimeTick.
-	// The message which EndTimetick less than lastConfirmedTimeTick has all been commited into wal.
+	// The message which EndTimetick less than lastConfirmedTimeTick has all been committed into wal.
 	// So the MessageID of the messages is dense and continuous.
 	confirmedDetails := make(sortedDetails, 0, 5)
 	for ta.ackHeap.Len() > 0 && ta.ackHeap.Peek().detail.EndTimestamp < ta.lastConfirmedTimeTick {

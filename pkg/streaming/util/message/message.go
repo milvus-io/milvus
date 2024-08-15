@@ -105,7 +105,7 @@ type ImmutableMessage interface {
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.
-// Once a transaction is commited, the wal will generate a transaction message.
+// Once a transaction is committed, the wal will generate a transaction message.
 // The MessageType() is always return MessageTypeTransaction if it's a transaction message.
 type ImmutableTxnMessage interface {
 	ImmutableMessage

@@ -3,8 +3,9 @@ package utility
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 // extraAppendResultKey is the key type of extra append result.

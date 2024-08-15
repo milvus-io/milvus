@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/atomic"
 )
 
 func TestMain(m *testing.M) {
@@ -40,6 +41,7 @@ func TestSession(t *testing.T) {
 	assert.True(t, session.IsExpiredOrDone(0))
 
 	session, err = m.BeginNewTxn(ctx, 0, 10*time.Millisecond)
+	assert.NoError(t, err)
 	session.BeginDone()
 	assert.Equal(t, message.TxnStateInFlight, session.state)
 	assert.False(t, session.IsExpiredOrDone(0))
@@ -50,6 +52,16 @@ func TestSession(t *testing.T) {
 	serr := status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
+	// Test add new message after expire, should expired forever.
+	err = session.AddNewMessage(ctx, 0)
+	assert.Error(t, err)
+	serr = status.AsStreamingError(err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
+
+	session, err = m.BeginNewTxn(ctx, 0, 10*time.Millisecond)
+	assert.NoError(t, err)
+	session.BeginDone()
+	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
 	session.AddNewMessageAndKeepalive(0)
@@ -59,10 +71,11 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, message.TxnStateOnCommit, session.state)
 	session.CommitDone()
-	assert.Equal(t, message.TxnStateCommited, session.state)
+	assert.Equal(t, message.TxnStateCommitted, session.state)
 
 	// Test Commit timeout.
 	session, err = m.BeginNewTxn(ctx, 0, 10*time.Millisecond)
+	assert.NoError(t, err)
 	session.BeginDone()
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
@@ -89,6 +102,8 @@ func TestSession(t *testing.T) {
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
 	// Rollback success
+	session, _ = m.BeginNewTxn(context.Background(), 0, 10*time.Millisecond)
+	session.BeginDone()
 	err = session.RequestRollback(context.Background(), 0)
 	assert.NoError(t, err)
 	assert.Equal(t, message.TxnStateOnRollback, session.state)
@@ -130,7 +145,7 @@ func TestManager(t *testing.T) {
 	}
 	wg.Wait()
 
-	closed := make(chan struct{}, 0)
+	closed := make(chan struct{})
 	go func() {
 		m.GracefulClose()
 		close(closed)

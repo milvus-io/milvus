@@ -34,7 +34,7 @@ func WAL() WALAccesser {
 // AppendOption is the option for append operation.
 type AppendOption struct {
 	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
-	// Must be allocated from tso, otherwise undetermined behaviour.
+	// Must be allocated from tso, otherwise undetermined behavior.
 }
 
 type TxnOption struct {

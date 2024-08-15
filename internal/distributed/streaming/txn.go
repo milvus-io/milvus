@@ -58,7 +58,7 @@ func (t *txnImpl) Commit(ctx context.Context) (*types.AppendResult, error) {
 		t.mu.Unlock()
 		return nil, status.NewInvalidTransactionState("Commit", message.TxnStateInFlight, t.state)
 	}
-	t.state = message.TxnStateCommited
+	t.state = message.TxnStateCommitted
 	if t.inFlightCount != 0 {
 		panic("in flight count not zero when commit")
 	}

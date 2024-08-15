@@ -22,7 +22,7 @@ type TxnSession struct {
 	txnContext       message.TxnContext // transaction id of the session
 	inFlightCount    int                // The message is in flight count of the session.
 	state            message.TxnState   // The state of the session.
-	doneWait         chan struct{}      // The channel for waiting the transaction commited.
+	doneWait         chan struct{}      // The channel for waiting the transaction committed.
 	rollback         bool               // The flag indicates the transaction is rollbacked.
 	cleanupCallbacks []func()           // The cleanup callbacks function for the session.
 }
@@ -73,7 +73,7 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 }
 
 // AddNewMessageAndKeepalive decreases the in flight count of the session and keepalive the session.
-// notify the commitedWait channel if the in flight count is 0 and commited waited.
+// notify the committedWait channel if the in flight count is 0 and committed waited.
 func (s *TxnSession) AddNewMessageAndKeepalive(timetick uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,10 +109,10 @@ func (s *TxnSession) IsExpiredOrDone(ts uint64) bool {
 
 // isExpiredOrDone checks if the session is expired or done.
 func (s *TxnSession) isExpiredOrDone(ts uint64) bool {
-	// A timeout txn or rollbacked/commited txn should be cleared.
+	// A timeout txn or rollbacked/committed txn should be cleared.
 	// OnCommit and OnRollback session should not be cleared before timeout to
 	// avoid session clear callback to be called too early.
-	return s.expiredTimeTick() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommited
+	return s.expiredTimeTick() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommitted
 }
 
 // expiredTimeTick returns the expired time tick of the session.
@@ -135,7 +135,7 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 	}
 }
 
-// CommitDone marks the transaction as commited.
+// CommitDone marks the transaction as committed.
 func (s *TxnSession) CommitDone() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,7 +144,7 @@ func (s *TxnSession) CommitDone() {
 		// unreachable code here.
 		panic("invalid state for commit done")
 	}
-	s.state = message.TxnStateCommited
+	s.state = message.TxnStateCommitted
 	s.cleanup()
 }
 
@@ -178,7 +178,7 @@ func (s *TxnSession) RollbackDone() {
 
 // RegisterCleanup registers the cleanup function for the session.
 // It will be called when the session is expired or done.
-// !!! A commited/rollbacked or expired session will never be seen by other components.
+// !!! A committed/rollbacked or expired session will never be seen by other components.
 // so the cleanup function will always be called.
 func (s *TxnSession) RegisterCleanup(f func(), ts uint64) {
 	s.mu.Lock()
@@ -206,7 +206,7 @@ func (s *TxnSession) cleanup() {
 	s.cleanupCallbacks = nil
 }
 
-// getDoneChan returns the channel for waiting the transaction commited.
+// getDoneChan returns the channel for waiting the transaction committed.
 func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-chan struct{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

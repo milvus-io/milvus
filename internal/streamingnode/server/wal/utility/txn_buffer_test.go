@@ -4,13 +4,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 var idAllocator = typeutil.NewIDAllocator()
@@ -37,12 +38,12 @@ func TestTxnBuffer(t *testing.T) {
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, time.Millisecond))
 	assert.Len(t, msgs, 2)
 
-	// Test successfull commit
+	// Test successful commit
 	txnCtx := &message.TxnContext{
 		TxnID:     1,
 		Keepalive: 201 * time.Millisecond,
 	}
-	createUnCommited := func() {
+	createUnCommitted := func() {
 		msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 			newBeginMessage(t, txnCtx, baseTso),
 		}, tsoutil.AddPhysicalDurationOnTs(baseTso, time.Millisecond))
@@ -60,7 +61,7 @@ func TestTxnBuffer(t *testing.T) {
 		// non txn message should be passed.
 		assert.Len(t, msgs, 1)
 	}
-	createUnCommited()
+	createUnCommitted()
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 		newCommitMessage(t, txnCtx, tsoutil.AddPhysicalDurationOnTs(baseTso, 500*time.Millisecond)),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 600*time.Millisecond))
@@ -69,7 +70,7 @@ func TestTxnBuffer(t *testing.T) {
 
 	// Test rollback
 	txnCtx.TxnID = 2
-	createUnCommited()
+	createUnCommitted()
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 		newRollbackMessage(t, txnCtx, tsoutil.AddPhysicalDurationOnTs(baseTso, 500*time.Millisecond)),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 600*time.Millisecond))
@@ -77,7 +78,7 @@ func TestTxnBuffer(t *testing.T) {
 	assert.Len(t, b.builders, 0)
 
 	// Test expired txn
-	createUnCommited()
+	createUnCommitted()
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{}, tsoutil.AddPhysicalDurationOnTs(baseTso, 500*time.Millisecond))
 	assert.Len(t, msgs, 0)
 	assert.Len(t, b.builders, 1)

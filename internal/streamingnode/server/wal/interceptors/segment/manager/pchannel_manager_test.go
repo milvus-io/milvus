@@ -113,7 +113,7 @@ func TestSegmentAllocManager(t *testing.T) {
 		assert.NoError(t, err)
 		result.Ack()
 	}
-	// because of there's a txn session uncommited, so the segment will not be sealed.
+	// because of there's a txn session uncommitted, so the segment will not be sealed.
 	m.TryToSealSegments(ctx)
 	assert.False(t, m.IsNoWaitSeal())
 

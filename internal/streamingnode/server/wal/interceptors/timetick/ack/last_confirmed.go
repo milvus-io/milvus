@@ -6,7 +6,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type uncommitedTxnInfo struct {
+type uncommittedTxnInfo struct {
 	session   *txn.TxnSession   // if nil, it's a non-txn(autocommit) message.
 	messageID message.MessageID // the message id of the txn begins.
 }
@@ -15,14 +15,14 @@ type uncommitedTxnInfo struct {
 func newLastConfirmedManager(lastConfirmedMessageID message.MessageID) *lastConfirmedManager {
 	return &lastConfirmedManager{
 		lastConfirmedMessageID: lastConfirmedMessageID,
-		notDoneTxnMessage:      typeutil.NewHeap[*uncommitedTxnInfo](&uncommitedTxnInfoOrderByMessageID{}),
+		notDoneTxnMessage:      typeutil.NewHeap[*uncommittedTxnInfo](&uncommittedTxnInfoOrderByMessageID{}),
 	}
 }
 
 // lastConfirmedManager manages the last confirmed message id.
 type lastConfirmedManager struct {
 	lastConfirmedMessageID message.MessageID
-	notDoneTxnMessage      typeutil.Heap[*uncommitedTxnInfo]
+	notDoneTxnMessage      typeutil.Heap[*uncommittedTxnInfo]
 }
 
 // AddConfirmedDetails adds the confirmed details.
@@ -31,7 +31,7 @@ func (m *lastConfirmedManager) AddConfirmedDetails(details sortedDetails, ts uin
 		if detail.IsSync || detail.Err != nil {
 			continue
 		}
-		m.notDoneTxnMessage.Push(&uncommitedTxnInfo{
+		m.notDoneTxnMessage.Push(&uncommittedTxnInfo{
 			session:   detail.TxnSession,
 			messageID: detail.MessageID,
 		})
@@ -55,27 +55,27 @@ func (m *lastConfirmedManager) updateLastConfirmedMessageID(ts uint64) {
 	}
 }
 
-// uncommitedTxnInfoOrderByMessageID is the heap array of the txnSession.
-type uncommitedTxnInfoOrderByMessageID []*uncommitedTxnInfo
+// uncommittedTxnInfoOrderByMessageID is the heap array of the txnSession.
+type uncommittedTxnInfoOrderByMessageID []*uncommittedTxnInfo
 
-func (h uncommitedTxnInfoOrderByMessageID) Len() int {
+func (h uncommittedTxnInfoOrderByMessageID) Len() int {
 	return len(h)
 }
 
-func (h uncommitedTxnInfoOrderByMessageID) Less(i, j int) bool {
+func (h uncommittedTxnInfoOrderByMessageID) Less(i, j int) bool {
 	return h[i].messageID.LT(h[j].messageID)
 }
 
-func (h uncommitedTxnInfoOrderByMessageID) Swap(i, j int) {
+func (h uncommittedTxnInfoOrderByMessageID) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-func (h *uncommitedTxnInfoOrderByMessageID) Push(x interface{}) {
-	*h = append(*h, x.(*uncommitedTxnInfo))
+func (h *uncommittedTxnInfoOrderByMessageID) Push(x interface{}) {
+	*h = append(*h, x.(*uncommittedTxnInfo))
 }
 
 // Pop pop the last one at len.
-func (h *uncommitedTxnInfoOrderByMessageID) Pop() interface{} {
+func (h *uncommittedTxnInfoOrderByMessageID) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -84,6 +84,6 @@ func (h *uncommitedTxnInfoOrderByMessageID) Pop() interface{} {
 }
 
 // Peek returns the element at the top of the heap.
-func (h *uncommitedTxnInfoOrderByMessageID) Peek() interface{} {
+func (h *uncommittedTxnInfoOrderByMessageID) Peek() interface{} {
 	return (*h)[0]
 }

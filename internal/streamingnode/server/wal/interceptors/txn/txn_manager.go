@@ -29,7 +29,7 @@ type TxnManager struct {
 }
 
 // BeginNewTxn starts a new transaction with a session.
-// We only support a transaction work on a streaming node, once the wal is transfered to another node,
+// We only support a transaction work on a streaming node, once the wal is transferred to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
 func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
