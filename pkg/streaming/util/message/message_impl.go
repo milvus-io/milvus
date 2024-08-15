@@ -2,7 +2,6 @@ package message
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 )
@@ -131,11 +130,7 @@ func (m *messageImpl) TxnContext() *TxnContext {
 	if err := DecodeProto(value, txnCtx); err != nil {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty txn context %s in properties of message", value))
 	}
-	return &TxnContext{
-		TxnID:    TxnID(txnCtx.TxnId),
-		TTL:      time.Duration(txnCtx.TtlMilliseconds) * time.Millisecond,
-		BeginTSO: txnCtx.BeginTso,
-	}
+	return NewTxnContextFromProto(txnCtx)
 }
 
 // TimeTick returns the time tick of current message.

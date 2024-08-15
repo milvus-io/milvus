@@ -138,7 +138,7 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			PartitionID:  partition.GetPartitionId(),
 			InsertMetrics: stats.InsertMetrics{
 				Rows:       partition.GetRows(),
-				BinarySize: partition.GetBinarySize(),
+				BinarySize: uint64(msg.EstimateSize()), // TODO: Use parition.BinarySize in future when merge partitions together in one message.
 			},
 			TimeTick:   msg.TimeTick(),
 			TxnSession: txn.GetTxnSessionFromContext(ctx),

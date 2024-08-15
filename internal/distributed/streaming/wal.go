@@ -92,7 +92,7 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 	if opts.VChannel == "" {
 		return nil, status.NewInvaildArgument("vchannel is required")
 	}
-	if opts.TTL < 1*time.Millisecond {
+	if opts.Keepalive < 1*time.Millisecond {
 		return nil, status.NewInvaildArgument("ttl must be greater than or equal to 1ms")
 	}
 
@@ -100,7 +100,7 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 	beginTxn, err := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel(opts.VChannel).
 		WithHeader(&message.BeginTxnMessageHeader{
-			TtlMilliseconds: opts.TTL.Milliseconds(),
+			KeepaliveMilliseconds: opts.Keepalive.Milliseconds(),
 		}).
 		WithBody(&message.BeginTxnMessageBody{}).
 		BuildMutable()

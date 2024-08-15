@@ -104,8 +104,8 @@ func (u *utility) appendToVChannel(ctx context.Context, vchannel string, msgs ..
 	// Otherwise, we start a transaction to append the messages.
 	// The transaction will be committed when all messages are appended.
 	txn, err := u.Txn(ctx, TxnOption{
-		VChannel: vchannel,
-		TTL:      5 * time.Second,
+		VChannel:  vchannel,
+		Keepalive: 5 * time.Second,
 	})
 	if err != nil {
 		resp.fillAllError(err)

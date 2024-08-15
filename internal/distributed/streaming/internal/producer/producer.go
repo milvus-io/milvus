@@ -97,6 +97,13 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 		if status.IsCanceled(err) {
 			return nil, errors.Mark(err, errs.ErrCanceled)
 		}
+		if sErr := status.AsStreamingError(err); sErr != nil {
+			// if the error is txn unavailable, it cannot be retried forever.
+			// we should mark it and return.
+			if sErr.IsTxnUnavilable() {
+				return nil, errors.Mark(err, errs.ErrTxnUnavailable)
+			}
+		}
 	}
 }
 

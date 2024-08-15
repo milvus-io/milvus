@@ -43,6 +43,12 @@ func (e *StreamingError) IsSkippedOperation() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM
 }
 
+// IsTxnUnavilable returns true if the transaction is unavailable.
+func (e *StreamingError) IsTxnUnavilable() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED ||
+		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)
@@ -59,6 +65,7 @@ func NewInvalidRequestSeq(format string, args ...interface{}) *StreamingError {
 }
 
 // NewChannelFenced creates a new StreamingError with code STREAMING_CODE_CHANNEL_FENCED.
+// TODO: Unused by now, add it after enable wal fence.
 func NewChannelFenced(channel string) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED, "%s fenced", channel)
 }
@@ -89,8 +96,8 @@ func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
 }
 
 // NewTransactionExpired creates a new StreamingError with code STREAMING_CODE_TRANSACTION_EXPIRED.
-func NewTransactionExpired(expiredAt uint64, current uint64) *StreamingError {
-	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, "transaction expired at %d, current %d", expiredAt, current)
+func NewTransactionExpired(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, format, args...)
 }
 
 // NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.

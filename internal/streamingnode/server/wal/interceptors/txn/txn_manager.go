@@ -5,25 +5,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-var (
-	ErrInvalidTxnState = errors.New("invalid txn state")
-	ErrSessionExpired  = errors.New("txn session expired")
-	ErrManagerClosed   = errors.New("txn manager closed")
 )
 
 // NewTxnManager creates a new transaction manager.
 func NewTxnManager() *TxnManager {
 	return &TxnManager{
-		mu:          sync.Mutex{},
-		sessionHeap: typeutil.NewHeap[*TxnSession](&txnSessionHeapArrayOrderByEndTSO{}),
-		sessions:    make(map[message.TxnID]*TxnSession),
-		closed:      nil,
+		mu:       sync.Mutex{},
+		sessions: make(map[message.TxnID]*TxnSession),
+		closed:   nil,
 	}
 }
 
@@ -31,17 +23,15 @@ func NewTxnManager() *TxnManager {
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	mu sync.Mutex
-
-	sessionHeap typeutil.Heap[*TxnSession]
-	sessions    map[message.TxnID]*TxnSession
-	closed      chan struct{}
+	mu       sync.Mutex
+	sessions map[message.TxnID]*TxnSession
+	closed   chan struct{}
 }
 
 // BeginNewTxn starts a new transaction with a session.
 // We only support a transaction work on a streaming node, once the wal is transfered to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
-func (m *TxnManager) BeginNewTxn(ctx context.Context, beginTSO uint64, ttl time.Duration) (*TxnSession, error) {
+func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, err
@@ -52,24 +42,22 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, beginTSO uint64, ttl time.
 	// The manager is on graceful shutdown.
 	// Avoid creating new transactions.
 	if m.closed != nil {
-		return nil, ErrManagerClosed
+		return nil, status.NewTransactionExpired("manager closed")
 	}
 	session := &TxnSession{
-		mu: sync.Mutex{},
+		mu:           sync.Mutex{},
+		lastTimetick: timetick,
 		txnContext: message.TxnContext{
-			TxnID:    message.TxnID(id),
-			BeginTSO: beginTSO,
-			TTL:      ttl,
+			TxnID:     message.TxnID(id),
+			Keepalive: keepalive,
 		},
 		inFlightCount: 0,
 		state:         message.TxnStateBegin,
 		doneWait:      nil,
 		rollback:      false,
 	}
-	session.expiredTimeTick = session.txnContext.ExpiredTimeTick()
 
 	m.sessions[session.TxnContext().TxnID] = session
-	m.sessionHeap.Push(session)
 	return session, nil
 }
 
@@ -78,16 +66,15 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for m.sessionHeap.Len() > 0 && m.sessionHeap.Peek().IsExpiredOrDone(ts) {
-		session := m.sessionHeap.Pop()
-		// Cleanup the session from the manager,
-		// the expired session's cleanup will be called by the manager.
-		session.Cleanup()
-		delete(m.sessions, session.TxnContext().TxnID)
+	for id, session := range m.sessions {
+		if session.IsExpiredOrDone(ts) {
+			session.Cleanup()
+			delete(m.sessions, id)
+		}
 	}
 
 	// If the manager is on graceful shutdown and all transactions are cleaned up.
-	if m.sessionHeap.Len() == 0 && m.closed != nil {
+	if len(m.sessions) == 0 && m.closed != nil {
 		close(m.closed)
 	}
 }
@@ -99,7 +86,7 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 
 	session, ok := m.sessions[id]
 	if !ok {
-		return nil, ErrSessionExpired
+		return nil, status.NewTransactionExpired("not found in manager")
 	}
 	return session, nil
 }

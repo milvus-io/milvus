@@ -6,6 +6,7 @@ import (
 
 // All error in streamingservice package should be marked by streamingservice/errs package.
 var (
-	ErrClosed   = errors.New("closed")
-	ErrCanceled = errors.New("canceled")
+	ErrClosed         = errors.New("closed")
+	ErrCanceled       = errors.New("canceled")
+	ErrTxnUnavailable = errors.New("transaction unavailable")
 )

@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // NewMutableMessage creates a new mutable message.
@@ -163,6 +164,7 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 // NewImmutableTxnMessageBuilder creates a new txn builder.
 func NewImmutableTxnMessageBuilder(begin ImmutableBeginTxnMessageV2) *ImmutableTxnMessageBuilder {
 	return &ImmutableTxnMessageBuilder{
+		txnCtx:   *begin.TxnContext(),
 		begin:    begin,
 		messages: make([]ImmutableMessage, 0),
 	}
@@ -170,8 +172,17 @@ func NewImmutableTxnMessageBuilder(begin ImmutableBeginTxnMessageV2) *ImmutableT
 
 // ImmutableTxnMessageBuilder is a builder for txn message.
 type ImmutableTxnMessageBuilder struct {
+	txnCtx   TxnContext
 	begin    ImmutableBeginTxnMessageV2
 	messages []ImmutableMessage
+}
+
+// ExpiredTimeTick returns the expired time tick of the txn.
+func (b *ImmutableTxnMessageBuilder) ExpiredTimeTick() uint64 {
+	if len(b.messages) > 0 {
+		return tsoutil.AddPhysicalDurationOnTs(b.messages[len(b.messages)-1].TimeTick(), b.txnCtx.Keepalive)
+	}
+	return tsoutil.AddPhysicalDurationOnTs(b.begin.TimeTick(), b.txnCtx.Keepalive)
 }
 
 // Push pushes a message into the txn builder.

@@ -42,9 +42,10 @@ type TxnOption struct {
 	// TODO: support cross-wal txn in future.
 	VChannel string
 
-	// TTL is the time to live of the transaction.
+	// Keepalive is the time to keepalive of the transaction.
+	// If the txn don't append message in the keepalive time, the txn will be expired.
 	// Only make sense when ttl is greater than 1ms.
-	TTL time.Duration
+	Keepalive time.Duration
 }
 
 type ReadOption struct {

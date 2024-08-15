@@ -85,7 +85,13 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			if txnSession, err = impl.handleTxnMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			defer txnSession.AddNewMessageDone()
+			defer func() {
+				if err != nil {
+					txnSession.AddNewMessageFail()
+				}
+				// perform keepalive for the transaction session if append success.
+				txnSession.AddNewMessageAndKeepalive(msg.TimeTick())
+			}()
 		}
 	}
 
@@ -117,17 +123,12 @@ func (impl *timeTickAppendInterceptor) handleBegin(ctx context.Context, msg mess
 		return nil, nil, err
 	}
 	// Begin transaction will generate a txn context.
-	session, err := impl.txnManager.BeginNewTxn(ctx, msg.TimeTick(), time.Duration(beginTxnMsg.Header().TtlMilliseconds)*time.Millisecond)
+	session, err := impl.txnManager.BeginNewTxn(ctx, msg.TimeTick(), time.Duration(beginTxnMsg.Header().KeepaliveMilliseconds)*time.Millisecond)
 	if err != nil {
+		session.BeginRollback()
 		return nil, nil, err
 	}
-	defer func() {
-		if err != nil {
-			// mark the session rollback if sent begin message failed.
-			session.BeginRollback()
-		}
-		session.BeginDone()
-	}()
+	session.BeginDone()
 	return session, msg.WithTxnContext(session.TxnContext()), nil
 }
 

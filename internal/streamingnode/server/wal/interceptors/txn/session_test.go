@@ -52,7 +52,7 @@ func TestSession(t *testing.T) {
 
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageDone()
+	session.AddNewMessageAndKeepalive(0)
 
 	// Test Commit.
 	err = session.RequestCommitAndWait(ctx, 0)

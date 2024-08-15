@@ -3,33 +3,27 @@ package utility
 import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
 )
 
 // NewTxnBuffer creates a new txn buffer.
 func NewTxnBuffer(logger *log.MLogger) *TxnBuffer {
 	return &TxnBuffer{
-		logger:            logger,
-		builders:          make(map[message.TxnID]*message.ImmutableTxnMessageBuilder),
-		notExpiredTxnHeap: typeutil.NewHeap[*message.TxnContext](&txnContextsOrderByExpired{}),
+		logger:   logger,
+		builders: make(map[message.TxnID]*message.ImmutableTxnMessageBuilder),
 	}
 }
 
 // TxnBuffer is a buffer for txn messages.
 type TxnBuffer struct {
-	logger            *log.MLogger
-	builders          map[message.TxnID]*message.ImmutableTxnMessageBuilder
-	notExpiredTxnHeap typeutil.Heap[*message.TxnContext]
+	logger   *log.MLogger
+	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder
 }
 
 // HandleImmutableMessages handles immutable messages.
 // The timetick of msgs should be in ascending order, and the timetick of all messages is less than or equal to ts.
 // Hold the uncommited txn messages until the commit or rollback message comes and pop the commited txn messages.
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
-	if len(msgs) == 0 {
-		return msgs
-	}
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
 		// Not a txn message, can be consumed right now.
@@ -74,7 +68,6 @@ func (b *TxnBuffer) handleBeginTxn(msg message.ImmutableMessage) {
 		return
 	}
 	b.builders[beginMsg.TxnContext().TxnID] = message.NewImmutableTxnMessageBuilder(beginMsg)
-	b.notExpiredTxnHeap.Push(beginMsg.TxnContext())
 }
 
 // handleCommitTxn handles commit txn message.
@@ -153,49 +146,17 @@ func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 
 // clearExpiredTxn clears the expired txn.
 func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
-	for b.notExpiredTxnHeap.Len() > 0 && b.notExpiredTxnHeap.Peek().ExpiredTimeTick() <= ts {
-		txnContext := b.notExpiredTxnHeap.Pop()
-		if _, ok := b.builders[txnContext.TxnID]; ok {
-			delete(b.builders, txnContext.TxnID)
-			b.logger.Debug(
-				"the txn is expired, so drop the txn from buffer",
-				zap.Int64("txnID", int64(txnContext.TxnID)),
-				zap.Uint64("expiredTimeTick", txnContext.ExpiredTimeTick()),
-				zap.Uint64("currentTimeTick", ts),
-			)
+	for txnID, builder := range b.builders {
+		if builder.ExpiredTimeTick() <= ts {
+			delete(b.builders, txnID)
+			if b.logger.Level().Enabled(zap.DebugLevel) {
+				b.logger.Debug(
+					"the txn is expired, so drop the txn from buffer",
+					zap.Int64("txnID", int64(txnID)),
+					zap.Uint64("expiredTimeTick", builder.ExpiredTimeTick()),
+					zap.Uint64("currentTimeTick", ts),
+				)
+			}
 		}
 	}
-}
-
-// txnContextsOrderByExpired is the heap array of the txnSession.
-type txnContextsOrderByExpired []*message.TxnContext
-
-func (h txnContextsOrderByExpired) Len() int {
-	return len(h)
-}
-
-func (h txnContextsOrderByExpired) Less(i, j int) bool {
-	return h[i].ExpiredTimeTick() < h[j].ExpiredTimeTick()
-}
-
-func (h txnContextsOrderByExpired) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *txnContextsOrderByExpired) Push(x interface{}) {
-	*h = append(*h, x.(*message.TxnContext))
-}
-
-// Pop pop the last one at len.
-func (h *txnContextsOrderByExpired) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
-
-// Peek returns the element at the top of the heap.
-func (h *txnContextsOrderByExpired) Peek() interface{} {
-	return (*h)[0]
 }

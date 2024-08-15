@@ -56,8 +56,8 @@ func TestStreamingProduce(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
 		txn, err := streaming.WAL().Txn(context.Background(), streaming.TxnOption{
-			VChannel: vChannel,
-			TTL:      100 * time.Millisecond,
+			VChannel:  vChannel,
+			Keepalive: 100 * time.Millisecond,
 		})
 		if err != nil {
 			t.Errorf("txn failed: %v", err)

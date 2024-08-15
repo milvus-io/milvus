@@ -61,9 +61,8 @@ func TestWAL(t *testing.T) {
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
 		TxnCtx: &message.TxnContext{
-			TxnID:    1,
-			BeginTSO: 10,
-			TTL:      10 * time.Second,
+			TxnID:     1,
+			Keepalive: 10 * time.Second,
 		},
 	}, nil)
 	p.EXPECT().Available().Return(available)
@@ -76,8 +75,8 @@ func TestWAL(t *testing.T) {
 
 	// Test commited txn.
 	txn, err := w.Txn(ctx, TxnOption{
-		VChannel: vChannel1,
-		TTL:      10 * time.Second,
+		VChannel:  vChannel1,
+		Keepalive: 10 * time.Second,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, txn)
@@ -93,8 +92,8 @@ func TestWAL(t *testing.T) {
 
 	// Test rollback txn.
 	txn, err = w.Txn(ctx, TxnOption{
-		VChannel: vChannel1,
-		TTL:      10 * time.Second,
+		VChannel:  vChannel1,
+		Keepalive: 10 * time.Second,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, txn)

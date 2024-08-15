@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type txnSessionKeyType int
@@ -16,8 +17,9 @@ var txnSessionKeyValue txnSessionKeyType = 1
 type TxnSession struct {
 	mu sync.Mutex
 
+	lastTimetick     uint64             // session last timetick.
+	expired          bool               // The flag indicates the transaction has trigger expired once.
 	txnContext       message.TxnContext // transaction id of the session
-	expiredTimeTick  uint64             // The expired time tick of the session.
 	inFlightCount    int                // The message is in flight count of the session.
 	state            message.TxnState   // The state of the session.
 	doneWait         chan struct{}      // The channel for waiting the transaction commited.
@@ -28,11 +30,6 @@ type TxnSession struct {
 // TxnContext returns the txn context of the session.
 func (s *TxnSession) TxnContext() message.TxnContext {
 	return s.txnContext
-}
-
-// EndTso returns the end tso of the session.
-func (s *TxnSession) EndTSO() uint64 {
-	return s.expiredTimeTick // we don't support renewing lease by now, so it's a constant.
 }
 
 // BeginDone marks the transaction as in flight.
@@ -75,9 +72,24 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 	return nil
 }
 
-// AddNewMessageDone decreases the in flight count of the session.
+// AddNewMessageAndKeepalive decreases the in flight count of the session and keepalive the session.
 // notify the commitedWait channel if the in flight count is 0 and commited waited.
-func (s *TxnSession) AddNewMessageDone() {
+func (s *TxnSession) AddNewMessageAndKeepalive(timetick uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// make a refresh lease here.
+	if s.lastTimetick < timetick {
+		s.lastTimetick = timetick
+	}
+	s.inFlightCount--
+	if s.doneWait != nil && s.inFlightCount == 0 {
+		close(s.doneWait)
+	}
+}
+
+// AddNewMessageFail decreases the in flight count of the session but not refresh the lease.
+func (s *TxnSession) AddNewMessageFail() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -100,12 +112,17 @@ func (s *TxnSession) isExpiredOrDone(ts uint64) bool {
 	// A timeout txn or rollbacked/commited txn should be cleared.
 	// OnCommit and OnRollback session should not be cleared before timeout to
 	// avoid session clear callback to be called too early.
-	return s.EndTSO() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommited
+	return s.expiredTimeTick() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommited
+}
+
+// expiredTimeTick returns the expired time tick of the session.
+func (s *TxnSession) expiredTimeTick() uint64 {
+	return tsoutil.AddPhysicalDurationOnTs(s.lastTimetick, s.txnContext.Keepalive)
 }
 
 // RequestCommitAndWait request commits the transaction and waits for the all messages sent.
 func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) error {
-	waitCh, err := s.getCommitChan(timetick, message.TxnStateOnCommit)
+	waitCh, err := s.getDoneChan(timetick, message.TxnStateOnCommit)
 	if err != nil {
 		return err
 	}
@@ -133,7 +150,7 @@ func (s *TxnSession) CommitDone() {
 
 // RequestRollback rolls back the transaction.
 func (s *TxnSession) RequestRollback(ctx context.Context, timetick uint64) error {
-	waitCh, err := s.getCommitChan(timetick, message.TxnStateOnRollback)
+	waitCh, err := s.getDoneChan(timetick, message.TxnStateOnRollback)
 	if err != nil {
 		return err
 	}
@@ -189,8 +206,8 @@ func (s *TxnSession) cleanup() {
 	s.cleanupCallbacks = nil
 }
 
-// getCommitChan returns the channel for waiting the transaction commited.
-func (s *TxnSession) getCommitChan(timetick uint64, state message.TxnState) (<-chan struct{}, error) {
+// getDoneChan returns the channel for waiting the transaction commited.
+func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-chan struct{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -214,8 +231,14 @@ func (s *TxnSession) getCommitChan(timetick uint64, state message.TxnState) (<-c
 
 // checkIfExpired checks if the session is expired.
 func (s *TxnSession) checkIfExpired(tt uint64) error {
-	if tt >= s.expiredTimeTick {
-		return status.NewTransactionExpired(s.expiredTimeTick, tt)
+	if s.expired {
+		return status.NewTransactionExpired("some message has been expired, expired at %d, current %d", s.expiredTimeTick(), tt)
+	}
+	expiredTimeTick := s.expiredTimeTick()
+	if tt >= expiredTimeTick {
+		// once the session is expired, it will never be active again.
+		s.expired = true
+		return status.NewTransactionExpired("transaction expired at %d, current %d", expiredTimeTick, tt)
 	}
 	return nil
 }
