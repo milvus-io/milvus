@@ -1012,11 +1012,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-					if err != nil {
-						return nil, nil, err
-					}
-					err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
+					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
 						if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
 							expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
 							return nil
