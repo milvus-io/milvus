@@ -597,6 +597,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 					flushWriterFunc := func() {
 						t.clusterBufferLocks.Lock(clusterBuffer.id)
 						currentSegmentNumRows := clusterBuffer.currentSegmentRowNum.Load()
+						// double-check the condition is still met
 						if currentSegmentNumRows > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
 							writer := clusterBuffer.writer
 							pack, _ := t.refreshBufferWriterWithPack(clusterBuffer)
@@ -607,7 +608,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 								zap.Int64("writer num", writer.GetRowNum()))
 
 							t.clusterBufferLocks.Unlock(clusterBuffer.id)
-
+							// release the lock before sending the signal, avoid long wait caused by a full channel.
 							t.flushChan <- FlushSignal{
 								writer: writer,
 								pack:   pack,
@@ -615,6 +616,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 							}
 							return
 						}
+						// release the lock even if the conditions are no longer met.
 						t.clusterBufferLocks.Unlock(clusterBuffer.id)
 					}
 					flushWriterFunc()
