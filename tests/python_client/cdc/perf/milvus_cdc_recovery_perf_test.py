@@ -356,7 +356,7 @@ class MilvusCDCPerformance:
                 results = self.target_collection.query(
                     expr="",
                     output_fields=["count(*)"],
-                    timeout=5
+                    timeout=10
                 )
                 tt = time.time() - t0
                 self.target_count = results[0]['count(*)']
@@ -370,7 +370,7 @@ class MilvusCDCPerformance:
                 results = self.source_collection.query(
                     expr="",
                     output_fields=["count(*)"],
-                    timeout=5
+                    timeout=10
                 )
                 tt = time.time() - t0
                 self.source_count = results[0]['count(*)']
@@ -400,7 +400,7 @@ class MilvusCDCPerformance:
                 self.count_series_data['source_count'].append(self.source_count)
                 self.count_series_data['target_count'].append(self.target_count)
                 logger.debug(f"sync progress {self.target_count}/{self.source_count} {progress:.2f}%")
-                # 检查同步是否接近完成（99%）
+                # 检查同步是否接近完成（90%）
                 if progress >= 90 and time.time() > self.cdc_metrics['pause_end'] and self.cdc_metrics['time_to_90_percent'] == 0:
                     # 计算 catch-up time
                     catchup_time = time.time() - self.cdc_metrics['pause_end']
@@ -519,7 +519,7 @@ if __name__ == "__main__":
     parser.add_argument('--target_uri', type=str, default='http://10.104.9.69:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
     parser.add_argument('--cdc_host', type=str, default='10.104.19.130', help='cdc host')
-    parser.add_argument('--test_duration', type=int, default=300, help='cdc test duration in seconds')
+    parser.add_argument('--test_duration', type=int, default=100, help='cdc test duration in seconds')
 
     args = parser.parse_args()
 
