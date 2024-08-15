@@ -272,12 +272,18 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 func ValidateIndexParams(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
+	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap index params", err.Error())
 	}
-	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+	}
+	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, indexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
+	}
+	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
 	}
 	return nil
 }

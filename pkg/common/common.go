@@ -167,10 +167,11 @@ const (
 
 // common properties
 const (
-	MmapEnabledKey           = "mmap.enabled"
-	LazyLoadEnableKey        = "lazyload.enabled"
-	PartitionKeyIsolationKey = "partitionkey.isolation"
-	FieldSkipLoadKey         = "field.skipLoad"
+	MmapEnabledKey             = "mmap.enabled"
+	LazyLoadEnableKey          = "lazyload.enabled"
+	PartitionKeyIsolationKey   = "partitionkey.isolation"
+	FieldSkipLoadKey           = "field.skipLoad"
+	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 )
 
 const (

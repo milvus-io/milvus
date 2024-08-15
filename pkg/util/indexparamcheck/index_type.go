@@ -73,6 +73,10 @@ func IsVectorMmapIndex(indexType IndexType) bool {
 		indexType == IndexSparseWand
 }
 
+func IsOffsetCacheSupported(indexType IndexType) bool {
+	return indexType == IndexBitmap
+}
+
 func IsDiskIndex(indexType IndexType) bool {
 	return indexType == IndexDISKANN
 }
@@ -93,6 +97,21 @@ func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string)
 	mmapSupport := indexType == AutoIndex || IsVectorMmapIndex(indexType) || IsScalarMmapIndex(indexType)
 	if enable && !mmapSupport {
 		return fmt.Errorf("index type %s does not support mmap", indexType)
+	}
+	return nil
+}
+
+func ValidateOffsetCacheIndexParams(indexType IndexType, indexParams map[string]string) error {
+	offsetCacheEnable, ok := indexParams[common.IndexOffsetCacheEnabledKey]
+	if !ok {
+		return nil
+	}
+	enable, err := strconv.ParseBool(offsetCacheEnable)
+	if err != nil {
+		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
+	}
+	if enable && IsOffsetCacheSupported(indexType) {
+		return fmt.Errorf("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
 	}
 	return nil
 }

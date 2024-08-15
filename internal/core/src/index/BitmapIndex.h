@@ -176,6 +176,12 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
 
     void
+    BuildOffsetCache();
+
+    T
+    Reverse_Lookup_InCache(size_t idx) const;
+
+    void
     ChooseIndexLoadMode(int64_t index_length);
 
     bool
@@ -210,6 +216,11 @@ class BitmapIndex : public ScalarIndex<T> {
     std::map<T, TargetBitmap> bitsets_;
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
+    bool use_offset_cache_{false};
+    std::vector<typename std::map<T, roaring::Roaring>::iterator>
+        data_offsets_cache_;
+    std::vector<typename std::map<T, TargetBitmap>::iterator>
+        bitsets_offsets_cache_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 
     // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
