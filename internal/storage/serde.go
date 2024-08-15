@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -768,7 +769,7 @@ type SerializeWriter[T any] struct {
 
 	buffer            []T
 	pos               int
-	writtenMemorySize uint64
+	writtenMemorySize atomic.Uint64
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
@@ -787,7 +788,7 @@ func (sw *SerializeWriter[T]) Flush() error {
 		return err
 	}
 	sw.pos = 0
-	sw.writtenMemorySize += size
+	sw.writtenMemorySize.Add(size)
 	return nil
 }
 
@@ -806,7 +807,7 @@ func (sw *SerializeWriter[T]) Write(value T) error {
 }
 
 func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
-	return sw.writtenMemorySize
+	return sw.writtenMemorySize.Load()
 }
 
 func (sw *SerializeWriter[T]) Close() error {
