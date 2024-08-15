@@ -89,31 +89,31 @@ class MilvusCDCPerformance:
         fig.add_trace(go.Scatter(x=count_data['datetime'], y=count_data['target_count'],
                                  mode='lines', name='Target Count'),
                       row=1, col=1)
-        # # Add CDC pause and resume events as annotations
-        # for event in cdc_events:
-        #     event_time = pd.to_datetime(event['timestamp'], unit='s')
-        #     color = "red" if event['action'] == 'pause' else "green"
-        #     fig.add_annotation(
-        #         x=event_time,
-        #         y=1,
-        #         yref="paper",
-        #         text=f"CDC {event['action'].capitalize()}<br>{event_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        #         showarrow=True,
-        #         arrowhead=2,
-        #         arrowsize=1,
-        #         arrowwidth=2,
-        #         arrowcolor=color,
-        #         ax=0,
-        #         ay=-60,
-        #         bordercolor=color,
-        #         borderwidth=2,
-        #         borderpad=4,
-        #         bgcolor="white",
-        #         opacity=0.8,
-        #         font=dict(size=10),
-        #         align="center",
-        #         row=1, col=1
-        #     )
+        # Add CDC pause and resume events as annotations
+        for event in self.cdc_events:
+            event_time = pd.to_datetime(event['timestamp'], unit='s')
+            color = "red" if event['action'] == 'pause' else "green"
+            fig.add_annotation(
+                x=event_time,
+                y=1,
+                yref="paper",
+                text=f"CDC {event['action'].capitalize()}<br>{event_time.strftime('%Y-%m-%d %H:%M:%S')}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                arrowcolor=color,
+                ax=0,
+                ay=-60,
+                bordercolor=color,
+                borderwidth=2,
+                borderpad=4,
+                bgcolor="white",
+                opacity=0.8,
+                font=dict(size=10),
+                align="center",
+                row=1, col=1
+            )
         # if self.sync_completion_time:
         #     fig.add_annotation(x=pd.to_datetime(self.sync_completion_time, unit='s'), y=1, yref="paper",
         #                        text=f"Sync Completion (99.9%)<br>Catch-up: {self.catch_up_count:,} entities in {self.catch_up_time:.2f} seconds",
