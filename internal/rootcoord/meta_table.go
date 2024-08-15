@@ -1446,8 +1446,8 @@ func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.R
 }
 
 func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
-	mt.permissionLock.RLock()
-	defer mt.permissionLock.RUnlock()
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
 }
