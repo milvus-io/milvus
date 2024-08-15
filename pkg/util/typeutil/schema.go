@@ -256,6 +256,7 @@ type SchemaHelper struct {
 	idOffset           map[int64]int
 	primaryKeyOffset   int
 	partitionKeyOffset int
+	dynamicFieldOffset int
 }
 
 // CreateSchemaHelper returns a new SchemaHelper object
@@ -263,7 +264,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
-	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1, partitionKeyOffset: -1}
+	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1, partitionKeyOffset: -1, dynamicFieldOffset: -1}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
@@ -286,6 +287,13 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 			}
 			schemaHelper.partitionKeyOffset = offset
 		}
+
+		if field.IsDynamic {
+			if schemaHelper.dynamicFieldOffset != -1 {
+				return nil, errors.New("dynamic field is not unique")
+			}
+			schemaHelper.dynamicFieldOffset = offset
+		}
 	}
 	return &schemaHelper, nil
 }
@@ -304,6 +312,15 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 		return nil, fmt.Errorf("failed to get partition key field: no partition key in schema")
 	}
 	return helper.schema.Fields[helper.partitionKeyOffset], nil
+}
+
+// GetDynamicField returns the field schema of dynamic field if exists.
+// if there is no dynamic field defined in schema, error will be returned.
+func (helper *SchemaHelper) GetDynamicField() (*schemapb.FieldSchema, error) {
+	if helper.dynamicFieldOffset == -1 {
+		return nil, fmt.Errorf("failed to get dynamic field: no dynamic field in schema")
+	}
+	return helper.schema.Fields[helper.dynamicFieldOffset], nil
 }
 
 // GetFieldFromName is used to find the schema by field name
