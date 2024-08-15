@@ -16,6 +16,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -89,11 +90,13 @@ initTelemetry(const TraceConfig& cfg) {
         auto resource = resource::Resource::Create(attributes);
 
         std::unique_ptr<trace_sdk::ParentBasedSampler> sampler;
-        if (cfg.sampleFraction == 0) {
+        if (std::abs(cfg.sampleFraction) <
+            std::numeric_limits<float>::epsilon()) {
             // if fraction is zero, use always off
             sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
                 std::make_shared<trace_sdk::AlwaysOffSampler>());
-        } else if (cfg.sampleFraction == 1) {
+        } else if (std::abs(cfg.sampleFraction - 1) <
+                   std::numeric_limits<float>::epsilon()) {
             // if fraction is one, use always on
             sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
                 std::make_shared<trace_sdk::AlwaysOnSampler>());
