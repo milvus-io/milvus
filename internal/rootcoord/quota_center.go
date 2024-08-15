@@ -1283,7 +1283,8 @@ func (q *QuotaCenter) calculateRates() error {
 }
 
 func (q *QuotaCenter) resetAllCurrentRates() error {
-	q.rateLimiter = rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps))
+	q.rateLimiter = rlinternal.NewRateLimiterTree(newParamLimiterFunc(internalpb.RateScope_Cluster, allOps)())
+
 	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
 		for dbID, collections := range sourceCollections {
 			for collectionID, partitionIDs := range collections {
@@ -1469,9 +1470,7 @@ func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *pro
 			return nil
 		}
 		limiter.GetLimiters().Range(func(rt internalpb.RateType, limiter *ratelimitutil.Limiter) bool {
-			if !limiter.HasUpdated() {
-				return true
-			}
+			// limiter.HasUpdated may block rate update when proxy node number changed
 			r := limiter.Limit()
 			if r != Inf {
 				rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r) / float64(proxyNum)})
