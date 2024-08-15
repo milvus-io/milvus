@@ -56,12 +56,10 @@ func (v *validateUtil) apply(opts ...validateOption) {
 	}
 }
 
-func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.CollectionSchema, numRows uint64) error {
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return err
+func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.SchemaHelper, numRows uint64) error {
+	if helper == nil {
+		return merr.WrapErrServiceInternal("nil schema helper provided for Validation")
 	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -122,7 +120,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		}
 	}
 
-	err = v.fillWithDefaultValue(data, helper, numRows)
+	err := v.fillWithDefaultValue(data, helper, numRows)
 	if err != nil {
 		return err
 	}

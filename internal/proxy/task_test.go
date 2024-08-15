@@ -2088,6 +2088,35 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 		},
 	}
 
+	idField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "id",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams:   nil,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		},
+		AutoID: false,
+	}
+	vectorField := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         fieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams:   nil,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		},
+		AutoID: false,
+	}
+
 	t.Run("normal", func(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.On("GetCollectionSchema",
@@ -2096,20 +2125,8 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         fieldName,
-					IsPrimaryKey: false,
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams:   nil,
-					IndexParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "dim",
-							Value: "128",
-						},
-					},
-					AutoID: false,
-				},
+				idField,
+				vectorField,
 			},
 		}), nil)
 
@@ -2131,28 +2148,9 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("invalid schema", func(t *testing.T) {
-		cache := NewMockCache(t)
-		cache.On("GetCollectionSchema",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name: fieldName,
-				},
-				{
-					Name: fieldName, // duplicate
-				},
-			},
-		}), nil)
-		globalMetaCache = cache
-		_, err := cit.getIndexedField(context.Background())
-		assert.Error(t, err)
-	})
-
 	t.Run("field not found", func(t *testing.T) {
+		otherField := typeutil.Clone(vectorField)
+		otherField.Name = otherField.Name + "_other"
 		cache := NewMockCache(t)
 		cache.On("GetCollectionSchema",
 			mock.Anything, // context.Context
@@ -2160,9 +2158,8 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{
-					Name: fieldName + fieldName,
-				},
+				idField,
+				otherField,
 			},
 		}), nil)
 		globalMetaCache = cache
