@@ -135,18 +135,20 @@ class MilvusCDCPerformance:
                       row=3, col=1)
 
         # Plot 4: CDC Performance Metrics Table
-        fig.add_trace(go.Table(
-            header=dict(values=['Metric', 'Value'],
-                        fill_color='paleturquoise',
-                        align='left'),
-            cells=dict(values=[['CDC Pause Start', 'CDC Pause End', 'Time to 90% Recovery', 'Time to 99% Recovery'],
-                               [cdc_metrics['pause_start'],
-                                cdc_metrics['pause_end'],
-                                cdc_metrics['time_to_90_percent'],
-                                cdc_metrics['time_to_99_percent']]],
-                       fill_color='lavender',
-                       align='left')
-        ), row=4, col=1)
+        #
+        # fig = go.Figure(data=[go.Table(header=dict(values=['A Scores', 'B Scores']),
+        #                                cells=dict(values=[[100, 90, 80, 90], [95, 85, 75, 95]]))
+        #                       ])
+
+
+        # fig.add_trace(go.Table(
+        #     header=dict(values=['CDC Pause Start', 'CDC Pause End', 'Time to 90% Recovery', 'Time to 99% Recovery'],
+        #                 fill_color='paleturquoise',
+        #                 align='left'),
+        #     cells=dict(values=[[cdc_metrics['pause_start']], [cdc_metrics['pause_end']], [cdc_metrics['time_to_90_percent']], [cdc_metrics['time_to_99_percent']]],
+        #                fill_color='lavender',
+        #                align='left')
+        # ), row=4, col=1)
 
         # Update layout
         fig.update_layout(height=1200, width=1000, title_text="Milvus CDC Performance Metrics")
@@ -258,11 +260,11 @@ class MilvusCDCPerformance:
 
     def pause_and_resume_cdc_tasks(self, duration):
         time.sleep(duration / 3)
-        self.cdc_metrics['pause_start'] = datetime.now().strftime("%Y%m%d%H%M%S")
+        self.cdc_metrics['pause_start'] = time.time()
         self.pause_cdc_tasks()
         time.sleep(duration / 3)
         self.resume_cdc_tasks()
-        self.cdc_metrics['pause_end'] = datetime.now().strftime("%Y%m%d%H%M%S")
+        self.cdc_metrics['pause_end'] = time.time()
 
     def setup_collections(self):
         self.resume_cdc_tasks()
@@ -328,8 +330,8 @@ class MilvusCDCPerformance:
                             )
                         except Exception as e:
                             logger.debug(f"Query failed: {e}")
-                        logger.debug(
-                            f"query latest_insert_ts: {latest_insert_ts}, results: {results} query latency: {time.time()-t0} seconds")
+                        # logger.debug(
+                        #     f"query latest_insert_ts: {latest_insert_ts}, results: {results} query latency: {time.time()-t0} seconds")
                         if len(results) > 0 and results[0]["timestamp"] == latest_insert_ts:
                             break
                     tt = time.time() - t0
@@ -476,6 +478,7 @@ class MilvusCDCPerformance:
         logger.info(f"Min latency: {min(self.latencies):.2f} seconds")
         logger.info(f"Max latency: {max(self.latencies):.2f} seconds")
         self.plot_time_series_data()
+        logger.info(f"catch up metric: {self.cdc_metrics}")
         return total_time, self.insert_count, self.sync_count, insert_throughput, sync_throughput, avg_latency, min(
             self.latencies), max(self.latencies)
 
@@ -511,12 +514,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='cdc perf test')
-    parser.add_argument('--source_uri', type=str, default='http://10.104.33.28:19530', help='source uri')
+    parser.add_argument('--source_uri', type=str, default='http://10.104.30.245:19530', help='source uri')
     parser.add_argument('--source_token', type=str, default='root:Milvus', help='source token')
-    parser.add_argument('--target_uri', type=str, default='http://10.104.32.189:19530', help='target uri')
+    parser.add_argument('--target_uri', type=str, default='http://10.104.9.69:19530', help='target uri')
     parser.add_argument('--target_token', type=str, default='root:Milvus', help='target token')
-    parser.add_argument('--cdc_host', type=str, default='10.104.9.165', help='cdc host')
-    parser.add_argument('--test_duration', type=int, default=30, help='cdc test duration in seconds')
+    parser.add_argument('--cdc_host', type=str, default='10.104.19.130', help='cdc host')
+    parser.add_argument('--test_duration', type=int, default=300, help='cdc test duration in seconds')
 
     args = parser.parse_args()
 
