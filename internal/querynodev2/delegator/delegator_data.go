@@ -524,6 +524,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID: info.GetPartitionID(),
 			NodeID:      req.GetDstNodeID(),
 			Version:     req.GetVersion(),
+			Level:       info.GetLevel(),
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
