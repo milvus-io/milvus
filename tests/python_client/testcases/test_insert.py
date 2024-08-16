@@ -513,7 +513,7 @@ class TestInsertOperation(TestcaseBase):
         data = [vectors, ["limit_1___________",
                           "limit_2___________"], ['1', '2']]
         error = {ct.err_code: 999,
-                 ct.err_msg: "invalid input, length of string exceeds max length"}
+                 ct.err_msg: "invalid input of field (small_limit), length of string exceeds max length."}
         collection_w.insert(
             data, check_task=CheckTasks.err_res, check_items=error)
 
