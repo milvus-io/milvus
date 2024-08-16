@@ -204,7 +204,6 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
-	t.Parallel()
 
 	for _, fieldType := range []entity.FieldType{entity.FieldTypeVarChar, entity.FieldTypeInt64} {
 		partitionKeyField := entity.NewField().WithName("par_key").WithDataType(fieldType).WithIsPartitionKey(true).WithMaxLength(common.TestMaxLen)
@@ -517,7 +516,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
-	t.Parallel()
+
 	// create collection with autoID true or not
 	collName := common.GenRandomString(prefix, 6)
 
