@@ -82,7 +82,9 @@ func IsDiskIndex(indexType IndexType) bool {
 }
 
 func IsScalarMmapIndex(indexType IndexType) bool {
-	return indexType == IndexINVERTED
+	return indexType == IndexINVERTED ||
+		indexType == IndexBitmap ||
+		indexType == IndexHybrid
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {
@@ -110,7 +112,7 @@ func ValidateOffsetCacheIndexParams(indexType IndexType, indexParams map[string]
 	if err != nil {
 		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
 	}
-	if enable && IsOffsetCacheSupported(indexType) {
+	if enable && !IsOffsetCacheSupported(indexType) {
 		return fmt.Errorf("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
 	}
 	return nil

@@ -24,6 +24,7 @@
 #include "knowhere/dataset.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "index/Meta.h"
 
 namespace milvus::index {
 
@@ -73,7 +74,10 @@ class IndexBase {
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
                index_type_ ==
                    knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND ||
+               // support mmap for bitmap/hybrid index
+               index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
+               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
     }
 
     const IndexType&

@@ -60,6 +60,9 @@ ToString(ScalarIndexType type) {
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
+    ScalarIndex(const std::string& index_type) : IndexBase(index_type) {
+    }
+
     void
     BuildWithRawData(size_t n,
                      const void* values,

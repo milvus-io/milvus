@@ -40,7 +40,8 @@
 namespace milvus::index {
 
 StringIndexMarisa::StringIndexMarisa(
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context)
+    : StringIndex(MARISA_TRIE) {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
