@@ -1145,6 +1145,14 @@ func (s *Server) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReque
 	return s.proxy.SelectGrant(ctx, req)
 }
 
+func (s *Server) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	return s.proxy.BackupRBAC(ctx, req)
+}
+
+func (s *Server) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	return s.proxy.RestoreRBAC(ctx, req)
+}
+
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.RefreshPolicyInfoCache(ctx, req)
 }

@@ -5325,6 +5325,46 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	return result, nil
 }
 
+func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-BackupRBAC")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Debug("BackupRBAC", zap.Any("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.BackupRBACMetaResponse{Status: merr.Status(err)}, nil
+	}
+
+	result, err := node.rootCoord.BackupRBAC(ctx, req)
+	if err != nil {
+		log.Warn("fail to backup rbac", zap.Error(err))
+		return &milvuspb.BackupRBACMetaResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Debug("RestoreRBAC", zap.Any("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	result, err := node.rootCoord.RestoreRBAC(ctx, req)
+	if err != nil {
+		log.Warn("fail to restore rbac", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return result, nil
+}
+
 func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
 	defer sp.End()

@@ -533,3 +533,11 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.RenameCollection(ctx, request)
 }
+
+func (s *Server) BackupRBAC(ctx context.Context, request *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	return s.rootCoord.BackupRBAC(ctx, request)
+}
+
+func (s *Server) RestoreRBAC(ctx context.Context, request *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	return s.rootCoord.RestoreRBAC(ctx, request)
+}

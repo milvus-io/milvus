@@ -82,6 +82,10 @@ type RootCoordCatalog interface {
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
+	ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error)
+	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
+	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
+
 	Close()
 }
 
