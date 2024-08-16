@@ -255,6 +255,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeManageOwnership.String(),
 		commonpb.ObjectPrivilege_PrivilegeSelectUser.String(),
 		commonpb.ObjectPrivilege_PrivilegeUpdateUser.String(),
+		commonpb.ObjectPrivilege_PrivilegeBackupRBAC.String(),
+		commonpb.ObjectPrivilege_PrivilegeRestoreRBAC.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String(),
 		commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String(),
