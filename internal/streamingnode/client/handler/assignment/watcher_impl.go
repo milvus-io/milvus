@@ -82,6 +82,7 @@ func (w *watcherImpl) Get(ctx context.Context, channel string) *types.PChannelIn
 // Watch watches the channel assignment.
 func (w *watcherImpl) Watch(ctx context.Context, channel string, previous *types.PChannelInfoAssigned) error {
 	w.cond.L.Lock()
+	defer w.cond.L.Unlock()
 
 	term := types.InitialTerm
 	if previous != nil {
@@ -98,7 +99,7 @@ func (w *watcherImpl) Watch(ctx context.Context, channel string, previous *types
 			return err
 		}
 	}
-	w.cond.L.Unlock()
+
 	return nil
 }
 
