@@ -256,13 +256,13 @@ class SegmentExpr : public Expr {
 
         auto& skip_index = segment_->GetSkipIndex();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
-            auto data_vec =
-                segment_
-                    ->get_batch_views<T>(
-                        field_id_, 0, current_data_chunk_pos_, need_size)
-                    .first;
-
-            func(data_vec.data(), need_size, res, values...);
+            auto views_info = segment_->get_batch_views<T>(
+                field_id_, 0, current_data_chunk_pos_, need_size);
+            func(views_info.first.data(),
+                 views_info.second.data(),
+                 need_size,
+                 res,
+                 values...);
         }
         current_data_chunk_pos_ += need_size;
         return need_size;
@@ -303,7 +303,11 @@ class SegmentExpr : public Expr {
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 auto chunk = segment_->chunk_data<T>(field_id_, i);
                 const T* data = chunk.data() + data_pos;
-                func(data, size, res + processed_size, values...);
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += data_pos;
+                }
+                func(data, valid_data, size, res + processed_size, values...);
             }
 
             processed_size += size;

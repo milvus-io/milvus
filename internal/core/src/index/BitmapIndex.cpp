@@ -80,7 +80,7 @@ BitmapIndex<T>::Build(const Config& config) {
 
 template <typename T>
 void
-BitmapIndex<T>::Build(size_t n, const T* data) {
+BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
     if (is_built_) {
         return;
     }
@@ -93,8 +93,10 @@ BitmapIndex<T>::Build(size_t n, const T* data) {
 
     T* p = const_cast<T*>(data);
     for (int i = 0; i < n; ++i, ++p) {
-        data_[*p].add(i);
-        valid_bitset.set(i);
+        if (!valid_data || valid_data[i]) {
+            data_[*p].add(i);
+            valid_bitset.set(i);
+        }
     }
 
     if (data_.size() < DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND) {
@@ -1121,6 +1123,7 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
             }
         }
     }
+    return std::nullopt;
     PanicInfo(UnexpectedError,
               fmt::format(
                   "scalar bitmap index can not lookup target value of index {}",

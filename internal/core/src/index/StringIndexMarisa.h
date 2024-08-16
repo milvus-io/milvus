@@ -55,7 +55,9 @@ class StringIndexMarisa : public StringIndex {
     }
 
     void
-    Build(size_t n, const std::string* values) override;
+    Build(size_t n,
+          const std::string* values,
+          const bool* valid_data = nullptr) override;
 
     void
     Build(const Config& config = {}) override;
@@ -87,7 +89,7 @@ class StringIndexMarisa : public StringIndex {
     const TargetBitmap
     PrefixMatch(const std::string_view prefix) override;
 
-    std::string
+    std::optional<std::string>
     Reverse_Lookup(size_t offset) const override;
 
     BinarySet

@@ -19,6 +19,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -118,7 +119,9 @@ StringIndexMarisa::BuildWithFieldData(
 }
 
 void
-StringIndexMarisa::Build(size_t n, const std::string* values) {
+StringIndexMarisa::Build(size_t n,
+                         const std::string* values,
+                         const bool* valid_data) {
     if (built_) {
         PanicInfo(IndexAlreadyBuild, "index has been built");
     }
@@ -127,7 +130,9 @@ StringIndexMarisa::Build(size_t n, const std::string* values) {
     {
         // fill key set.
         for (size_t i = 0; i < n; i++) {
-            keyset.push_back(values[i].c_str());
+            if (!valid_data || valid_data[i]) {
+                keyset.push_back(values[i].c_str());
+            }
         }
     }
 
@@ -534,11 +539,13 @@ StringIndexMarisa::prefix_match(const std::string_view prefix) {
     }
     return ret;
 }
-
-std::string
+std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     AssertInfo(offset < str_ids_.size(), "out of range of total count");
     marisa::Agent agent;
+    if (str_ids_[offset] < 0) {
+        return std::nullopt;
+    }
     agent.set_query(str_ids_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());

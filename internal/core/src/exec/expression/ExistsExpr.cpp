@@ -50,10 +50,15 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto execute_sub_batch = [](const milvus::Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string& pointer) {
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = data[i].exist(pointer);
         }
     };

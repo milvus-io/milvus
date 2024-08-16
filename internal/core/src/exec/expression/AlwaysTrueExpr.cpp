@@ -25,6 +25,7 @@ PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                   ? active_count_ - current_pos_
                                   : batch_size_;
 
+    // always true no need to skip null
     if (real_batch_size == 0) {
         result = nullptr;
         return;

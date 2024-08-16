@@ -77,7 +77,7 @@ class BitmapIndex : public ScalarIndex<T> {
     }
 
     void
-    Build(size_t n, const T* values) override;
+    Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
     void
     Build(const Config& config = {}) override;
@@ -106,7 +106,7 @@ class BitmapIndex : public ScalarIndex<T> {
           T upper_bound_value,
           bool ub_inclusive) override;
 
-    T
+    std::optional<T>
     Reverse_Lookup(size_t offset) const override;
 
     int64_t

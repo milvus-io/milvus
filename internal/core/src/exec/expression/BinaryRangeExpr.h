@@ -35,25 +35,65 @@ struct BinaryRangeElementFunc {
                                T>
         HighPrecisionType;
     void
-    operator()(T val1, T val2, const T* src, size_t n, TargetBitmapView res) {
-        if constexpr (lower_inclusive && upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
-                val1, val2, src, n);
-        } else if constexpr (lower_inclusive && !upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncExc>(
-                val1, val2, src, n);
-        } else if constexpr (!lower_inclusive && upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcInc>(
-                val1, val2, src, n);
-        } else {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcExc>(
-                val1, val2, src, n);
+    operator()(T val1,
+               T val2,
+               const T* src,
+               const bool* valid_data,
+               size_t n,
+               TargetBitmapView res) {
+        auto execute_sub_batch = [](T val1,
+                                    T val2,
+                                    const T* src,
+                                    size_t n,
+                                    TargetBitmapView res) {
+            if (n == 0) {
+                return;
+            }
+            if constexpr (lower_inclusive && upper_inclusive) {
+                res.inplace_within_range_val<T,
+                                             milvus::bitset::RangeType::IncInc>(
+                    val1, val2, src, n);
+            } else if constexpr (lower_inclusive && !upper_inclusive) {
+                res.inplace_within_range_val<T,
+                                             milvus::bitset::RangeType::IncExc>(
+                    val1, val2, src, n);
+            } else if constexpr (!lower_inclusive && upper_inclusive) {
+                res.inplace_within_range_val<T,
+                                             milvus::bitset::RangeType::ExcInc>(
+                    val1, val2, src, n);
+            } else {
+                res.inplace_within_range_val<T,
+                                             milvus::bitset::RangeType::ExcExc>(
+                    val1, val2, src, n);
+            }
+        };
+        if (valid_data == nullptr) {
+            return execute_sub_batch(val1, val2, src, n, res);
+        }
+        for (int left = 0; left < n; left++) {
+            for (int right = left; right < n; right++) {
+                if (valid_data[right]) {
+                    if (right == n - 1) {
+                        execute_sub_batch(
+                            val1, val2, src + left, right - left, res + left);
+                    }
+                    continue;
+                }
+                execute_sub_batch(
+                    val1, val2, src + left, right - left, res + left);
+                left = right;
+                break;
+            }
         }
     }
 };
 
 #define BinaryRangeJSONCompare(cmp)                           \
     do {                                                      \
+        if (valid_data && !valid_data[i]) {                   \
+            res[i] = false;                                   \
+            continue;                                         \
+        }                                                     \
         auto x = src[i].template at<GetType>(pointer);        \
         if (x.error()) {                                      \
             if constexpr (std::is_same_v<GetType, int64_t>) { \
@@ -81,6 +121,7 @@ struct BinaryRangeElementFuncForJson {
                ValueType val2,
                const std::string& pointer,
                const milvus::Json* src,
+               const bool* valid_data,
                size_t n,
                TargetBitmapView res) {
         for (size_t i = 0; i < n; ++i) {
@@ -107,9 +148,14 @@ struct BinaryRangeElementFuncForArray {
                ValueType val2,
                int index,
                const milvus::ArrayView* src,
+               const bool* valid_data,
                size_t n,
                TargetBitmapView res) {
         for (size_t i = 0; i < n; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             if constexpr (lower_inclusive && upper_inclusive) {
                 if (index >= src[i].length()) {
                     res[i] = false;

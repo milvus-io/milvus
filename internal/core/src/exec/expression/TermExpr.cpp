@@ -250,6 +250,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     ValueType target_val = GetValueFromProto<ValueType>(expr_->vals_[0]);
 
     auto execute_sub_batch = [](const ArrayView* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const ValueType& target_val) {
@@ -263,6 +264,10 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
             return false;
         };
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             executor(i);
         }
     };
@@ -309,11 +314,16 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     }
 
     auto execute_sub_batch = [](const ArrayView* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             if (index >= data[i].length()) {
                 res[i] = false;
                 continue;
@@ -354,6 +364,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     auto execute_sub_batch = [](const Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string pointer,
@@ -375,6 +386,10 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
             return false;
         };
         for (size_t i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -416,6 +431,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     }
 
     auto execute_sub_batch = [](const Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string pointer,
@@ -439,6 +455,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
             return terms.find(ValueType(x.value())) != terms.end();
         };
         for (size_t i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -542,11 +562,16 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
     }
     std::unordered_set<T> vals_set(vals.begin(), vals.end());
     auto execute_sub_batch = [](const T* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::unordered_set<T>& vals) {
         TermElementFuncSet<T> func;
         for (size_t i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = func(vals, data[i]);
         }
     };

@@ -182,6 +182,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
         elements.insert(GetValueFromProto<GetType>(element));
     }
     auto execute_sub_batch = [](const milvus::ArrayView* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::unordered_set<GetType>& elements) {
@@ -195,6 +196,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
             return false;
         };
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -231,6 +236,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
         elements.insert(GetValueFromProto<GetType>(element));
     }
     auto execute_sub_batch = [](const milvus::Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string& pointer,
@@ -253,6 +259,10 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
             return false;
         };
         for (size_t i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -285,6 +295,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
     }
     auto execute_sub_batch =
         [](const milvus::Json* data,
+           const bool* valid_data,
            const int size,
            TargetBitmapView res,
            const std::string& pointer,
@@ -316,6 +327,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
                 return false;
             };
             for (size_t i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
                 res[i] = executor(i);
             }
         };
@@ -354,6 +369,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
     }
 
     auto execute_sub_batch = [](const milvus::ArrayView* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::unordered_set<GetType>& elements) {
@@ -369,6 +385,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
             return tmp_elements.size() == 0;
         };
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -406,6 +426,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     }
 
     auto execute_sub_batch = [](const milvus::Json* data,
+                                const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string& pointer,
@@ -431,6 +452,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
             return tmp_elements.size() == 0;
         };
         for (size_t i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             res[i] = executor(i);
         }
     };
@@ -467,6 +492,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
 
     auto execute_sub_batch =
         [](const milvus::Json* data,
+           const bool* valid_data,
            const int size,
            TargetBitmapView res,
            const std::string& pointer,
@@ -553,6 +579,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
                 return tmp_elements_index.size() == 0;
             };
             for (size_t i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
                 res[i] = executor(i);
             }
         };
@@ -590,6 +620,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
     }
     auto execute_sub_batch =
         [](const milvus::Json* data,
+           const bool* valid_data,
            const int size,
            TargetBitmapView res,
            const std::string& pointer,
@@ -625,6 +656,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
                 return exist_elements_index.size() == elements.size();
             };
             for (size_t i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
                 res[i] = executor(i);
             }
         };
@@ -662,6 +697,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
 
     auto execute_sub_batch =
         [](const milvus::Json* data,
+           const bool* valid_data,
            const int size,
            TargetBitmapView res,
            const std::string& pointer,
@@ -739,6 +775,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
                 return false;
             };
             for (size_t i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
                 res[i] = executor(i);
             }
         };

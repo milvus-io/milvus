@@ -60,6 +60,7 @@ struct UnaryElementFunc {
             IndexInnerType;
     void
     operator()(const T* src,
+               const bool* valid_data,
                size_t size,
                IndexInnerType val,
                TargetBitmapView res) {
@@ -96,33 +97,66 @@ struct UnaryElementFunc {
         }
         */
 
+        auto execute_sub_batch = [](const T* src,
+                                    size_t size,
+                                    IndexInnerType val,
+                                    TargetBitmapView res) {
+            if (size == 0) {
+                return;
+            }
+            if constexpr (op == proto::plan::OpType::Equal) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
+                    src, size, val);
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
+                    src, size, val);
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
+                    src, size, val);
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
+                    src, size, val);
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
+                    src, size, val);
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
+                    src, size, val);
+            } else {
+                PanicInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported op_type:{} for UnaryElementFunc",
+                                op));
+            }
+        };
+
         if constexpr (op == proto::plan::OpType::PrefixMatch) {
             for (int i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
                 res[i] = milvus::query::Match(
                     src[i], val, proto::plan::OpType::PrefixMatch);
             }
-        } else if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
-                src, size, val);
-        } else {
-            PanicInfo(
-                OpTypeInvalid,
-                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
+            return;
+        }
+        if (!valid_data) {
+            return execute_sub_batch(src, size, val, res);
+        }
+        for (int left = 0; left < size; left++) {
+            for (int right = left; right < size; right++) {
+                if (valid_data[right]) {
+                    if (right == size - 1) {
+                        execute_sub_batch(
+                            src + left, right - left, val, res + left);
+                    }
+                    continue;
+                }
+                execute_sub_batch(src + left, right - left, val, res + left);
+                left = right;
+                break;
+            }
         }
     }
 };
@@ -148,11 +182,16 @@ struct UnaryElementFuncForArray {
                                        ValueType>;
     void
     operator()(const ArrayView* src,
+               const bool* valid_data,
                size_t size,
                ValueType val,
                int index,
                TargetBitmapView res) {
         for (int i = 0; i < size; ++i) {
+            if (valid_data && !valid_data[i]) {
+                res[i] = false;
+                continue;
+            }
             if constexpr (op == proto::plan::OpType::Equal) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = src[i].is_same_array(val);
@@ -224,7 +263,11 @@ struct UnaryIndexFuncForMatch {
             RegexMatcher matcher(regex_pattern);
             for (int64_t i = 0; i < cnt; i++) {
                 auto raw = index->Reverse_Lookup(i);
-                res[i] = matcher(raw);
+                if (!raw.has_value()) {
+                    res[i] = false;
+                    continue;
+                }
+                res[i] = matcher(raw.value());
             }
             return res;
         }

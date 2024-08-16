@@ -246,22 +246,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const T* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
                                  HighPrecisionType val1,
                                  HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true> func;
-            func(val1, val2, data, size, res);
+            func(val1, val2, data, valid_data, size, res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFunc<T, true, false> func;
-            func(val1, val2, data, size, res);
+            func(val1, val2, data, valid_data, size, res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, false, true> func;
-            func(val1, val2, data, size, res);
+            func(val1, val2, data, valid_data, size, res);
         } else {
             BinaryRangeElementFunc<T, false, false> func;
-            func(val1, val2, data, size, res);
+            func(val1, val2, data, valid_data, size, res);
         }
     };
     auto skip_index_func =
@@ -313,22 +314,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive, pointer](
                                  const milvus::Json* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
                                  ValueType val1,
                                  ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, false> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, false, true> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res);
         } else {
             BinaryRangeElementFuncForJson<ValueType, false, false> func;
-            func(val1, val2, pointer, data, size, res);
+            func(val1, val2, pointer, data, valid_data, size, res);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
@@ -366,6 +368,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const milvus::ArrayView* data,
+                                 const bool* valid_data,
                                  const int size,
                                  TargetBitmapView res,
                                  ValueType val1,
@@ -373,16 +376,16 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
                                  int index) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, false> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res);
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, false, true> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res);
         } else {
             BinaryRangeElementFuncForArray<ValueType, false, false> func;
-            func(val1, val2, index, data, size, res);
+            func(val1, val2, index, data, valid_data, size, res);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
