@@ -1557,8 +1557,8 @@ func trimSparseFloatArray(vec *schemapb.SparseFloatArray) {
 
 func ValidateSparseFloatRows(rows ...[]byte) error {
 	for _, row := range rows {
-		if len(row) == 0 {
-			return errors.New("empty sparse float vector row")
+		if row == nil {
+			return errors.New("nil sparse float vector")
 		}
 		if len(row)%8 != 0 {
 			return fmt.Errorf("invalid data length in sparse float vector: %d", len(row))
@@ -1647,7 +1647,8 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 	var values []float32
 
 	if len(input) == 0 {
-		return nil, fmt.Errorf("empty JSON input")
+		// for empty json input, return empty sparse row
+		return CreateSparseFloatRow(indices, values), nil
 	}
 
 	getValue := func(key interface{}) (float32, error) {
@@ -1743,9 +1744,6 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 	if len(indices) != len(values) {
 		return nil, fmt.Errorf("indices and values length mismatch")
 	}
-	if len(indices) == 0 {
-		return nil, fmt.Errorf("empty indices/values in JSON input")
-	}
 
 	sortedIndices, sortedValues := SortSparseFloatRow(indices, values)
 	row := CreateSparseFloatRow(sortedIndices, sortedValues)
@@ -1766,7 +1764,8 @@ func CreateSparseFloatRowFromJSON(input []byte) ([]byte, error) {
 	return CreateSparseFloatRowFromMap(vec)
 }
 
-// dim of a sparse float vector is the maximum/last index + 1
+// dim of a sparse float vector is the maximum/last index + 1.
+// for an empty row, dim is 0.
 func SparseFloatRowDim(row []byte) int64 {
 	if len(row) == 0 {
 		return 0
