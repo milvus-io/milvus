@@ -245,7 +245,10 @@ class ColumnBase {
 
     bool
     IsValid(size_t offset) const {
-        return valid_data_[offset];
+        if (nullable_) {
+            return valid_data_[offset];
+        }
+        return true;
     }
 
     bool
