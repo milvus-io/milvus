@@ -26,6 +26,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"runtime/debug"
 	"strconv"
@@ -955,7 +956,6 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	)
 	log.Info("loading delta...")
 
-	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	var futures []*conc.Future[any]
 	for _, deltaLog := range deltaLogs {
@@ -991,9 +991,23 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		log.Info("there are no delta logs saved with segment, skip loading delete record")
 		return nil
 	}
-	_, _, deltaData, err := dCodec.Deserialize(blobs)
+
+	deltaData := &storage.DeleteData{}
+	reader, err := storage.CreateDeltalogReader(blobs)
 	if err != nil {
 		return err
+	}
+	defer reader.Close()
+	for {
+		err := reader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		dl := reader.Value()
+		deltaData.Append(dl.Pk, dl.Ts)
 	}
 
 	err = segment.LoadDeltaData(ctx, deltaData)

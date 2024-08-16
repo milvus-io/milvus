@@ -4023,6 +4023,8 @@ type dataNodeConfig struct {
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	DeltalogFormat ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4369,7 +4371,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyParallelFactor",
+		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
@@ -4377,6 +4379,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.DeltalogFormat = ParamItem{
+		Key:          "dataNode.storage.deltalog",
+		Version:      "2.5.0",
+		DefaultValue: "json",
+		Doc:          "deltalog format, options: [json, parquet]",
+		Export:       true,
+	}
+	p.DeltalogFormat.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

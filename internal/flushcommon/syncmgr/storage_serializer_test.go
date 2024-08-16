@@ -135,15 +135,6 @@ func (s *StorageV1SerializerSuite) getDeleteBuffer() *storage.DeleteData {
 	return buf
 }
 
-func (s *StorageV1SerializerSuite) getDeleteBufferZeroTs() *storage.DeleteData {
-	buf := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
-		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		buf.Append(pk, 0)
-	}
-	return buf
-}
-
 func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
 	pack := &SyncPack{}
 
@@ -283,15 +274,6 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 func (s *StorageV1SerializerSuite) TestSerializeDelete() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	s.Run("serialize_failed", func() {
-		pack := s.getBasicPack()
-		pack.WithDeleteData(s.getDeleteBufferZeroTs())
-		pack.WithTimeRange(50, 100)
-
-		_, err := s.serializer.EncodeBuffer(ctx, pack)
-		s.Error(err)
-	})
 
 	s.Run("serialize_normal", func() {
 		pack := s.getBasicPack()

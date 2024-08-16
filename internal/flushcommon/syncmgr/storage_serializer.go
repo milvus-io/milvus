@@ -42,8 +42,7 @@ type storageV1Serializer struct {
 	schema       *schemapb.CollectionSchema
 	pkField      *schemapb.FieldSchema
 
-	inCodec  *storage.InsertCodec
-	delCodec *storage.DeleteCodec
+	inCodec *storage.InsertCodec
 
 	allocator  allocator.Interface
 	metacache  metacache.MetaCache
@@ -68,7 +67,6 @@ func NewStorageSerializer(allocator allocator.Interface, metacache metacache.Met
 		pkField:      pkField,
 
 		inCodec:    inCodec,
-		delCodec:   storage.NewDeleteCodec(),
 		allocator:  allocator,
 		metacache:  metacache,
 		metaWriter: metaWriter,
@@ -226,5 +224,26 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 }
 
 func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, error) {
-	return s.delCodec.Serialize(pack.collectionID, pack.partitionID, pack.segmentID, pack.deltaData)
+	if len(pack.deltaData.Pks) == 0 {
+		return &storage.Blob{}, nil
+	}
+
+	writer, finalizer, err := storage.CreateDeltalogWriter(pack.collectionID, pack.partitionID, pack.segmentID, pack.deltaData.Pks[0].Type(), 1024)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(pack.deltaData.Pks) != len(pack.deltaData.Tss) {
+		return nil, fmt.Errorf("pk and ts should have same length in delta log, but get %d and %d", len(pack.deltaData.Pks), len(pack.deltaData.Tss))
+	}
+
+	for i := 0; i < len(pack.deltaData.Pks); i++ {
+		deleteLog := storage.NewDeleteLog(pack.deltaData.Pks[i], pack.deltaData.Tss[i])
+		err = writer.Write(deleteLog)
+		if err != nil {
+			return nil, err
+		}
+	}
+	writer.Close()
+	return finalizer()
 }
