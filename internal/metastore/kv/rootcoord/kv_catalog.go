@@ -8,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -747,23 +748,37 @@ func (kc *Catalog) ListAliases(ctx context.Context, dbID int64, ts typeutil.Time
 }
 
 func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
-	keys, _, err := kc.Txn.LoadWithPrefix(CredentialPrefix)
+	users, err := kc.ListCredentialsWithPasswd(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return lo.Keys(users), nil
+}
+
+func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
+	keys, values, err := kc.Txn.LoadWithPrefix(CredentialPrefix)
 	if err != nil {
 		log.Error("list all credential usernames fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
 		return nil, err
 	}
 
-	var usernames []string
-	for _, path := range keys {
-		username := typeutil.After(path, UserSubPrefix+"/")
+	users := make(map[string]string)
+	for i := range keys {
+		username := typeutil.After(keys[i], UserSubPrefix+"/")
 		if len(username) == 0 {
-			log.Warn("no username extract from path:", zap.String("path", path))
+			log.Warn("no username extract from path:", zap.String("path", keys[i]))
 			continue
 		}
-		usernames = append(usernames, username)
+		credential := &internalpb.CredentialInfo{}
+		err := json.Unmarshal([]byte(values[i]), credential)
+		if err != nil {
+			log.Error("credential unmarshal fail", zap.String("key", keys[i]), zap.Error(err))
+			return nil, err
+		}
+		users[username] = credential.EncryptedPassword
 	}
 
-	return usernames, nil
+	return users, nil
 }
 
 func (kc *Catalog) save(k string) error {
@@ -1215,6 +1230,161 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 		userRoles = append(userRoles, funcutil.EncodeUserRoleCache(userRolesInfos[0], userRolesInfos[1]))
 	}
 	return userRoles, nil
+}
+
+func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
+	users, err := kc.ListUser(ctx, tenant, nil, true)
+	if err != nil {
+		return nil, err
+	}
+
+	credentials, err := kc.ListCredentialsWithPasswd(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	userInfos := lo.FilterMap(users, func(entity *milvuspb.UserResult, _ int) (*milvuspb.UserInfo, bool) {
+		userName := entity.GetUser().GetName()
+		if userName == util.UserRoot {
+			return nil, false
+		}
+		return &milvuspb.UserInfo{
+			User:     userName,
+			Password: credentials[userName],
+			Roles:    entity.GetRoles(),
+		}, true
+	})
+
+	roles, err := kc.ListRole(ctx, tenant, nil, false)
+	if err != nil {
+		return nil, err
+	}
+
+	roleEntity := lo.FilterMap(roles, func(entity *milvuspb.RoleResult, _ int) (*milvuspb.RoleEntity, bool) {
+		roleName := entity.GetRole().GetName()
+		if roleName == util.RoleAdmin || roleName == util.RolePublic {
+			return nil, false
+		}
+
+		return entity.GetRole(), true
+	})
+
+	grantsEntity := make([]*milvuspb.GrantEntity, 0)
+	for _, role := range roleEntity {
+		grants, err := kc.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:   role,
+			DbName: util.AnyWord,
+		})
+		if err != nil {
+			return nil, err
+		}
+		grantsEntity = append(grantsEntity, grants...)
+	}
+
+	return &milvuspb.RBACMeta{
+		Users:  userInfos,
+		Roles:  roleEntity,
+		Grants: grantsEntity,
+	}, nil
+}
+
+func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	var err error
+	needRollbackUser := make([]*milvuspb.UserInfo, 0)
+	needRollbackRole := make([]*milvuspb.RoleEntity, 0)
+	needRollbackGrants := make([]*milvuspb.GrantEntity, 0)
+	defer func() {
+		if err != nil {
+			log.Warn("failed to restore rbac, try to rollback", zap.Error(err))
+			// roll back role
+			for _, role := range needRollbackRole {
+				err = kc.DropRole(ctx, tenant, role.Name)
+				if err != nil {
+					log.Warn("failed to rollback roles after restore failed", zap.Error(err))
+				}
+			}
+
+			// roll back grant
+			for _, grant := range needRollbackGrants {
+				err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Revoke)
+				if err != nil {
+					log.Warn("failed to rollback grants after restore failed", zap.Error(err))
+				}
+			}
+
+			for _, user := range needRollbackUser {
+				// roll back user
+				err = kc.DropCredential(ctx, user.User)
+				if err != nil {
+					log.Warn("failed to rollback users after restore failed", zap.Error(err))
+				}
+			}
+		}
+	}()
+
+	// restore role
+	existRoles, err := kc.ListRole(ctx, tenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	for _, role := range meta.Roles {
+		if _, ok := existRoleMap[role.GetName()]; ok {
+			log.Warn("failed to restore, role already exists", zap.String("role", role.GetName()))
+			err = errors.Newf("role [%s] already exists", role.GetName())
+			return err
+		}
+		err = kc.CreateRole(ctx, tenant, role)
+		if err != nil {
+			return err
+		}
+		needRollbackRole = append(needRollbackRole, role)
+	}
+
+	// restore grant
+	for _, grant := range meta.Grants {
+		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
+		if err != nil {
+			return err
+		}
+		needRollbackGrants = append(needRollbackGrants, grant)
+	}
+
+	// need rollback user
+	existUser, err := kc.ListUser(ctx, tenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
+	for _, user := range meta.Users {
+		if _, ok := existUserMap[user.GetUser()]; ok {
+			log.Info("failed to restore, user already exists", zap.String("user", user.GetUser()))
+			err = errors.Newf("user [%s] already exists", user.GetUser())
+			return err
+		}
+		// restore user
+		err = kc.CreateCredential(ctx, &model.Credential{
+			Username:          user.User,
+			EncryptedPassword: user.Password,
+		})
+		if err != nil {
+			return err
+		}
+		needRollbackUser = append(needRollbackUser, user)
+
+		// restore user role mapping
+		entity := &milvuspb.UserEntity{
+			Name: user.User,
+		}
+		for _, role := range user.Roles {
+			err = kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return err
 }
 
 func (kc *Catalog) Close() {
