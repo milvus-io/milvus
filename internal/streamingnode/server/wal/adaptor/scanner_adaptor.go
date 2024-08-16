@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
@@ -29,11 +30,13 @@ func newScannerAdaptor(
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
 	}
+	options.GetFilterFunc(readOption.MessageFilter)
 	logger := log.With(zap.String("name", name), zap.String("channel", l.Channel().Name))
 	s := &scannerAdaptorImpl{
 		logger:           logger,
 		innerWAL:         l,
 		readOption:       readOption,
+		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
 		reorderBuffer:    utility.NewReOrderBuffer(),
 		pendingQueue:     typeutil.NewMultipartQueue[message.ImmutableMessage](),
 		txnBuffer:        utility.NewTxnBuffer(logger),
@@ -51,6 +54,7 @@ type scannerAdaptorImpl struct {
 	logger           *log.MLogger
 	innerWAL         walimpls.WALImpls
 	readOption       wal.ReadOption
+	filterFunc       func(message.ImmutableMessage) bool
 	reorderBuffer    *utility.ReOrderByTimeTickBuffer                   // only support time tick reorder now.
 	pendingQueue     *typeutil.MultipartQueue[message.ImmutableMessage] //
 	txnBuffer        *utility.TxnBuffer                                 // txn buffer for txn message.
@@ -158,7 +162,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 
 	// Filtering the message if needed.
 	// System message should never be filtered.
-	if !msg.IsSystemMessage() && (s.readOption.MessageFilter != nil && !s.readOption.MessageFilter(msg)) {
+	if s.filterFunc != nil && !s.filterFunc(msg) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.

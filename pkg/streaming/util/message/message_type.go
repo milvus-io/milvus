@@ -56,6 +56,12 @@ func (t MessageType) Valid() bool {
 	return t != MessageTypeUnknown && ok
 }
 
+// IsSysmtem checks if the MessageType is a system type.
+func (t MessageType) IsSystem() bool {
+	_, ok := systemMessageType[t]
+	return ok
+}
+
 // unmarshalMessageType unmarshal MessageType from string.
 func unmarshalMessageType(s string) MessageType {
 	i, err := strconv.ParseInt(s, 10, 32)

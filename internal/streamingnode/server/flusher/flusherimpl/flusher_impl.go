@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -188,11 +187,12 @@ func (f *flusherImpl) buildPipeline(vchannel string, w wal.WAL) error {
 
 	// Create scanner.
 	policy := options.DeliverPolicyStartFrom(messageID)
-	filter := func(msg message.ImmutableMessage) bool { return msg.VChannel() == vchannel }
 	handler := adaptor2.NewMsgPackAdaptorHandler()
 	ro := wal.ReadOption{
-		DeliverPolicy:  policy,
-		MessageFilter:  filter,
+		DeliverPolicy: policy,
+		MessageFilter: []options.DeliverFilter{
+			options.DeliverFilterVChannel(vchannel),
+		},
 		MesasgeHandler: handler,
 	}
 	scanner, err := w.Read(ctx, ro)

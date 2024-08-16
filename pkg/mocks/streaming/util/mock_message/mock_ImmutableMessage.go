@@ -102,47 +102,6 @@ func (_c *MockImmutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *
 	return _c
 }
 
-// IsSystemMessage provides a mock function with given fields:
-func (_m *MockImmutableMessage) IsSystemMessage() bool {
-	ret := _m.Called()
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockImmutableMessage_IsSystemMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSystemMessage'
-type MockImmutableMessage_IsSystemMessage_Call struct {
-	*mock.Call
-}
-
-// IsSystemMessage is a helper method to define mock.On call
-func (_e *MockImmutableMessage_Expecter) IsSystemMessage() *MockImmutableMessage_IsSystemMessage_Call {
-	return &MockImmutableMessage_IsSystemMessage_Call{Call: _e.mock.On("IsSystemMessage")}
-}
-
-func (_c *MockImmutableMessage_IsSystemMessage_Call) Run(run func()) *MockImmutableMessage_IsSystemMessage_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockImmutableMessage_IsSystemMessage_Call) Return(_a0 bool) *MockImmutableMessage_IsSystemMessage_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockImmutableMessage_IsSystemMessage_Call) RunAndReturn(run func() bool) *MockImmutableMessage_IsSystemMessage_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // LastConfirmedMessageID provides a mock function with given fields:
 func (_m *MockImmutableMessage) LastConfirmedMessageID() message.MessageID {
 	ret := _m.Called()

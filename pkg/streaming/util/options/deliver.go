@@ -1,6 +1,8 @@
 package options
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -104,6 +106,9 @@ func DeliverFilterVChannel(vchannel string) DeliverFilter {
 func DeliverFilterMessageType(messageType ...message.MessageType) DeliverFilter {
 	messageTypes := make([]messagespb.MessageType, 0, len(messageType))
 	for _, mt := range messageType {
+		if mt.IsSystem() {
+			panic(fmt.Sprintf("system message type cannot be filter, %s", mt.String()))
+		}
 		messageTypes = append(messageTypes, messagespb.MessageType(mt))
 	}
 	return &streamingpb.DeliverFilter{
@@ -126,25 +131,40 @@ func IsDeliverFilterTimeTick(filter DeliverFilter) bool {
 }
 
 // GetFilterFunc returns the filter function.
-func GetFilterFunc(filters []DeliverFilter) (func(message.ImmutableMessage) bool, error) {
+func GetFilterFunc(filters []DeliverFilter) func(message.ImmutableMessage) bool {
 	filterFuncs := make([]func(message.ImmutableMessage) bool, 0, len(filters))
 	for _, filter := range filters {
 		filter := filter
 		switch filter.GetFilter().(type) {
 		case *streamingpb.DeliverFilter_TimeTickGt:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
-				return im.TimeTick() > filter.GetTimeTickGt().TimeTick
+				// txn message's timetick is determined by the commit message.
+				// so we only need to filter the commit message.
+				if im.TxnContext() == nil || im.MessageType() == message.MessageTypeCommitTxn {
+					return im.TimeTick() > filter.GetTimeTickGt().TimeTick
+				}
+				return true
 			})
 		case *streamingpb.DeliverFilter_TimeTickGte:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
-				return im.TimeTick() >= filter.GetTimeTickGte().TimeTick
+				// txn message's timetick is determined by the commit message.
+				// so we only need to filter the commit message.
+				if im.TxnContext() == nil || im.MessageType() == message.MessageTypeCommitTxn {
+					return im.TimeTick() >= filter.GetTimeTickGte().TimeTick
+				}
+				return true
 			})
 		case *streamingpb.DeliverFilter_Vchannel:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
-				return im.VChannel() == filter.GetVchannel().Vchannel
+				// vchannel == "" is a broadcast operation.
+				return im.VChannel() == "" || im.VChannel() == filter.GetVchannel().Vchannel
 			})
 		case *streamingpb.DeliverFilter_MessageType:
 			filterFuncs = append(filterFuncs, func(im message.ImmutableMessage) bool {
+				// system message cannot be filterred.
+				if im.MessageType().IsSystem() {
+					return true
+				}
 				for _, mt := range filter.GetMessageType().MessageTypes {
 					if im.MessageType() == message.MessageType(mt) {
 						return true
@@ -163,5 +183,5 @@ func GetFilterFunc(filters []DeliverFilter) (func(message.ImmutableMessage) bool
 			}
 		}
 		return true
-	}, nil
+	}
 }

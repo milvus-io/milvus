@@ -11,12 +11,6 @@ type messageImpl struct {
 	properties propertiesImpl
 }
 
-// IsSystemMessage returns whether the message is a system message.
-func (m *messageImpl) IsSystemMessage() bool {
-	_, ok := systemMessageType[m.MessageType()]
-	return ok
-}
-
 // MessageType returns the type of message.
 func (m *messageImpl) MessageType() MessageType {
 	val, ok := m.properties.Get(messageTypeKey)

@@ -11,9 +11,6 @@ var (
 
 // BasicMessage is the basic interface of message.
 type BasicMessage interface {
-	// IsSystemMessage returns whether the message is a system message.
-	IsSystemMessage() bool
-
 	// MessageType returns the type of message.
 	MessageType() MessageType
 

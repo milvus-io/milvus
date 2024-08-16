@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -30,66 +29,6 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	m.Run()
-}
-
-func TestNewMessageFilter(t *testing.T) {
-	filters := []*streamingpb.DeliverFilter{
-		{
-			Filter: &streamingpb.DeliverFilter_TimeTickGt{
-				TimeTickGt: &streamingpb.DeliverFilterTimeTickGT{
-					TimeTick: 1,
-				},
-			},
-		},
-		{
-			Filter: &streamingpb.DeliverFilter_Vchannel{
-				Vchannel: &streamingpb.DeliverFilterVChannel{
-					Vchannel: "test",
-				},
-			},
-		},
-	}
-	filterFunc, err := options.GetFilterFunc(filters)
-	assert.NoError(t, err)
-
-	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(2).Maybe()
-	msg.EXPECT().VChannel().Return("test2").Maybe()
-	assert.False(t, filterFunc(msg))
-
-	msg = mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(1).Maybe()
-	msg.EXPECT().VChannel().Return("test").Maybe()
-	assert.False(t, filterFunc(msg))
-
-	msg = mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(2).Maybe()
-	msg.EXPECT().VChannel().Return("test").Maybe()
-	assert.True(t, filterFunc(msg))
-
-	filters = []*streamingpb.DeliverFilter{
-		{
-			Filter: &streamingpb.DeliverFilter_TimeTickGte{
-				TimeTickGte: &streamingpb.DeliverFilterTimeTickGTE{
-					TimeTick: 1,
-				},
-			},
-		},
-		{
-			Filter: &streamingpb.DeliverFilter_Vchannel{
-				Vchannel: &streamingpb.DeliverFilterVChannel{
-					Vchannel: "test",
-				},
-			},
-		},
-	}
-	filterFunc, err = options.GetFilterFunc(filters)
-	assert.NoError(t, err)
-
-	msg = mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(1).Maybe()
-	msg.EXPECT().VChannel().Return("test").Maybe()
-	assert.True(t, filterFunc(msg))
 }
 
 func TestCreateConsumeServer(t *testing.T) {

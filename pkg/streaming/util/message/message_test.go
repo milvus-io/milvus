@@ -1,12 +1,9 @@
 package message
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestMessageType(t *testing.T) {
@@ -36,28 +33,4 @@ func TestVersion(t *testing.T) {
 
 	assert.True(t, VersionV1.GT(VersionOld))
 	assert.True(t, VersionV2.GT(VersionV1))
-}
-
-func TestBuilder(t *testing.T) {
-	m, err := NewBeginTxnMessageBuilderV2().
-		WithVChannel("vchannel").
-		WithHeader(&BeginTxnMessageHeader{}).
-		WithBody(&BeginTxnMessageBody{}).
-		BuildMutable()
-	fmt.Printf("%v, %v\n", m, err)
-	m2 := messagespb.Message{
-		Payload:    m.Payload(),
-		Properties: m.Properties().ToRawMap(),
-	}
-	h, err := proto.Marshal(&m2)
-	fmt.Printf("%v, %v\n", h, err)
-
-	var m3 messagespb.Message
-	err = proto.Unmarshal(h, &m3)
-	fmt.Printf("%v, %v\n", h, err)
-
-	m4 := NewMutableMessage(m3.Payload, m3.Properties)
-	msg, err := AsMutableBeginTxnMessageV2(m4)
-	result, err := msg.Body()
-	fmt.Printf("%v, %v\n", result, err)
 }

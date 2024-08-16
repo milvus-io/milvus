@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -193,8 +194,7 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 
 	if impl.ackDetails.IsNoPersistedMessage() {
 		// there's no persisted message, so no need to send persistent time tick message.
-		// only update it to notify the scanner.
-		return impl.notifyNoPersistentTsMsg(ts)
+		return impl.sendNoPersistentTsMsg(ctx, ts, appender)
 	}
 	// otherwise, send persistent time tick message.
 	_, err := impl.sendPersistentTsMsg(ctx, ts, lastConfirmedMessageID, appender)
@@ -232,9 +232,32 @@ func (impl *timeTickSyncOperator) sendPersistentTsMsg(ctx context.Context,
 	return msgID, nil
 }
 
-// notifyNoPersistentTsMsg sends no persistent time tick message.
-func (impl *timeTickSyncOperator) notifyNoPersistentTsMsg(ts uint64) error {
+// sendNoPersistentTsMsg sends no persistent time tick message to wal.
+func (impl *timeTickSyncOperator) sendNoPersistentTsMsg(ctx context.Context, ts uint64, appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)) error {
+	msg, err := NewTimeTickMsg(ts, nil, impl.sourceID)
+	if err != nil {
+		return errors.Wrap(err, "at build time tick msg when send no persist msg")
+	}
+
+	// with the hint of not persisted message, the underlying wal will not persist it.
+	// but the interceptors will still be triggered.
+	ctx = utility.WithNotPersisted(ctx, &utility.NotPersistedHint{
+		MessageID: impl.timeTickNotifier.Get().MessageID,
+	})
+
+	// Append it to wal.
+	_, err = appender(ctx, msg)
+	if err != nil {
+		return errors.Wrapf(err,
+			"append no persist time tick msg to wal failed, timestamp: %d, previous message counter: %d",
+			impl.ackDetails.LastAllAcknowledgedTimestamp(),
+			impl.ackDetails.Len(),
+		)
+	}
+
+	// Ack details has been committed to wal, clear it.
 	impl.ackDetails.Clear()
+	// Only update time tick.
 	impl.timeTickNotifier.OnlyUpdateTs(ts)
 	return nil
 }

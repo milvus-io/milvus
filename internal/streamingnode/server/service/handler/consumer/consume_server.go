@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -37,13 +36,9 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, err
 	}
-	filter, err := options.GetFilterFunc(createReq.DeliverFilters)
-	if err != nil {
-		return nil, err
-	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
 		DeliverPolicy: createReq.GetDeliverPolicy(),
-		MessageFilter: filter,
+		MessageFilter: createReq.DeliverFilters,
 	})
 	if err != nil {
 		return nil, err

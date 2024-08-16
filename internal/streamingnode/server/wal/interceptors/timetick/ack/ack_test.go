@@ -2,12 +2,18 @@ package ack
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
+	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -17,7 +23,21 @@ func TestAck(t *testing.T) {
 
 	ctx := context.Background()
 
-	rc := idalloc.NewMockRootCoordClient(t)
+	counter := atomic.NewUint64(1)
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+			if atr.Count > 1000 {
+				panic(fmt.Sprintf("count %d is too large", atr.Count))
+			}
+			c := counter.Add(uint64(atr.Count))
+			return &rootcoordpb.AllocTimestampResponse{
+				Status:    merr.Success(),
+				Timestamp: c - uint64(atr.Count),
+				Count:     atr.Count,
+			}, nil
+		},
+	)
 	resource.InitForTest(t, resource.OptRootCoordClient(rc))
 
 	ackManager := NewAckManager(0, nil)
