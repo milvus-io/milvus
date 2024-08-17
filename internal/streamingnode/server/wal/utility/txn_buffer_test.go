@@ -35,6 +35,14 @@ func TestTxnBuffer(t *testing.T) {
 			Keepalive: time.Second,
 		}, baseTso),
 		newInsertMessage(t, nil, baseTso),
+		newRollbackMessage(t, &message.TxnContext{
+			TxnID:     1,
+			Keepalive: time.Second,
+		}, baseTso),
+		newCommitMessage(t, &message.TxnContext{
+			TxnID:     2,
+			Keepalive: time.Second,
+		}, baseTso),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, time.Millisecond))
 	assert.Len(t, msgs, 2)
 

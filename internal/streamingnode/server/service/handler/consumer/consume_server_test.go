@@ -140,9 +140,9 @@ func TestConsumerServeSendArm(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	grpcConsumerServer.EXPECT().Context().Return(ctx)
-	grpcConsumerServer.EXPECT().Send(mock.Anything).RunAndReturn(func(cr *streamingpb.ConsumeResponse) error { return nil }).Times(2)
+	grpcConsumerServer.EXPECT().Send(mock.Anything).RunAndReturn(func(cr *streamingpb.ConsumeResponse) error { return nil }).Times(7)
 
-	scanCh := make(chan message.ImmutableMessage, 1)
+	scanCh := make(chan message.ImmutableMessage, 5)
 	scanner.EXPECT().Channel().Return(types.PChannelInfo{})
 	scanner.EXPECT().Chan().Return(scanCh)
 	scanner.EXPECT().Close().Return(nil).Times(3)
@@ -165,6 +165,20 @@ func TestConsumerServeSendArm(t *testing.T) {
 	properties.EXPECT().ToRawMap().Return(map[string]string{})
 	msg.EXPECT().Properties().Return(properties)
 	scanCh <- msg
+
+	// test send txn message.
+	txnMsg := mock_message.NewMockImmutableTxnMessage(t)
+	txnMsg.EXPECT().Begin().Return(msg)
+	txnMsg.EXPECT().RangeOver(mock.Anything).RunAndReturn(func(f func(message.ImmutableMessage) error) error {
+		for i := 0; i < 3; i++ {
+			if err := f(msg); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	txnMsg.EXPECT().Commit().Return(msg)
+	scanCh <- txnMsg
 
 	// test scanner broken.
 	scanner.EXPECT().Error().Return(io.EOF)

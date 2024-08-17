@@ -133,6 +133,16 @@ func (c *consumerImpl) execute() {
 // recvLoop is the recv arm of the grpc stream.
 // Throughput of the grpc framework should be ok to use single stream to receive message.
 // Once throughput is not enough, look at https://grpc.io/docs/guides/performance/ to find the solution.
+// recvLoop will always receive message from server by following sequence:
+// - message at timetick 4.
+// - message at timetick 5.
+// - txn begin message at timetick 1.
+// - txn body message at timetick 2.
+// - txn body message at timetick 3.
+// - txn commit message at timetick 6.
+// - message at timetick 7.
+// - Close.
+// - EOF.
 func (c *consumerImpl) recvLoop() (err error) {
 	defer func() {
 		if err != nil {
@@ -167,7 +177,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 				c.handleTxnMessage(newImmutableMsg)
 			} else {
 				if c.txnBuilder != nil {
-					panic("txn builder should be nil if we receive a non-txn message")
+					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
 				c.msgHandler.Handle(newImmutableMsg)
 			}
@@ -180,40 +190,39 @@ func (c *consumerImpl) recvLoop() (err error) {
 	}
 }
 
-func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
+func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) {
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
 		if c.txnBuilder != nil {
-			err := errors.New("txn builder should be nil if we receive a begin txn message")
-			c.logger.DPanic("unreachable code", zap.Error(err))
-			return err
+			panic("unreachable code: txn builder should be nil if we receive a begin txn message")
 		}
 		beginMsg, err := message.AsImmutableBeginTxnMessageV2(msg)
 		if err != nil {
-			c.logger.DPanic("failed to convert message to begin txn message")
-			return err
+			c.logger.Warn("failed to convert message to begin txn message", zap.Any("messageID", beginMsg.MessageID()), zap.Error(err))
+			return
 		}
 		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg)
 	case message.MessageTypeCommitTxn:
 		if c.txnBuilder == nil {
-			err := errors.New("txn builder should not be nil if we receive a commit txn message")
-			c.logger.DPanic("unreachable code", zap.Error(err))
-			return err
+			panic("unreachable code: txn builder should not be nil if we receive a commit txn message")
 		}
 		commitMsg, err := message.AsImmutableCommitTxnMessageV2(msg)
 		if err != nil {
-			c.logger.DPanic("failed to convert message to commit txn message")
-			return err
+			c.logger.Warn("failed to convert message to commit txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
+			c.txnBuilder = nil
+			return
 		}
 		msg, err := c.txnBuilder.Build(commitMsg)
-		if err != nil {
-			c.logger.DPanic("failed to build txn message")
-			return err
-		}
 		c.txnBuilder = nil
+		if err != nil {
+			c.logger.Warn("failed to build txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
+			return
+		}
 		c.msgHandler.Handle(msg)
 	default:
+		if c.txnBuilder == nil {
+			panic("unreachable code: txn builder should not be nil if we receive a non-begin txn message")
+		}
 		c.txnBuilder.Add(msg)
 	}
-	return nil
 }

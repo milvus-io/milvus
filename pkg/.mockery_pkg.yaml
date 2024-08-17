@@ -1,7 +1,7 @@
 quiet: False
 with-expecter: True
 filename: "mock_{{.InterfaceName}}.go"
-dir: "mocks/{{trimPrefix .PackagePath \"github.com/milvus-io/milvus/pkg\" | dir }}/mock_{{.PackageName}}"
+dir: 'mocks/{{trimPrefix .PackagePath "github.com/milvus-io/milvus/pkg" | dir }}/mock_{{.PackageName}}'
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
 packages:
@@ -12,6 +12,7 @@ packages:
     interfaces:
       MessageID:
       ImmutableMessage:
+      ImmutableTxnMessage:
       MutableMessage:
       RProperties:
   github.com/milvus-io/milvus/pkg/streaming/walimpls:
@@ -38,4 +39,3 @@ packages:
       StreamingNodeHandlerServiceClient:
       StreamingNodeHandlerService_ConsumeClient:
       StreamingNodeHandlerService_ProduceClient:
-  
