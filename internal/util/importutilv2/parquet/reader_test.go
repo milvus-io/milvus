@@ -134,6 +134,10 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 						Key:   "max_length",
 						Value: "256",
 					},
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "256",
+					},
 				},
 			},
 		},
@@ -158,11 +162,35 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 		for fieldID, data := range actualInsertData.Data {
 			s.Equal(expectRows, data.RowNum())
 			fieldDataType := typeutil.GetField(schema, fieldID).GetDataType()
+			elementType := typeutil.GetField(schema, fieldID).GetElementType()
 			for i := 0; i < expectRows; i++ {
 				expect := expectInsertData.Data[fieldID].GetRow(i + offsetBegin)
 				actual := data.GetRow(i)
 				if fieldDataType == schemapb.DataType_Array {
-					s.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
+					switch elementType {
+					case schemapb.DataType_Bool:
+						actualArray := actual.(*schemapb.ScalarField).GetBoolData().GetData()
+						s.True(slices.Equal(expect.(*schemapb.ScalarField).GetBoolData().GetData(), actualArray))
+						s.LessOrEqual(len(actualArray), len(expect.(*schemapb.ScalarField).GetBoolData().GetData()), "array size %d exceeds max_size %d", len(actualArray), len(expect.(*schemapb.ScalarField).GetBoolData().GetData()))
+					case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+						actualArray := actual.(*schemapb.ScalarField).GetIntData().GetData()
+						s.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actualArray))
+						s.LessOrEqual(len(actualArray), len(expect.(*schemapb.ScalarField).GetIntData().GetData()), "array size %d exceeds max_size %d", len(actualArray), len(expect.(*schemapb.ScalarField).GetIntData().GetData()))
+					case schemapb.DataType_Float:
+						actualArray := actual.(*schemapb.ScalarField).GetFloatData().GetData()
+						s.True(slices.Equal(expect.(*schemapb.ScalarField).GetFloatData().GetData(), actualArray))
+						s.LessOrEqual(len(actualArray), len(expect.(*schemapb.ScalarField).GetFloatData().GetData()), "array size %d exceeds max_size %d", len(actualArray), len(expect.(*schemapb.ScalarField).GetFloatData().GetData()))
+					case schemapb.DataType_Double:
+						actualArray := actual.(*schemapb.ScalarField).GetDoubleData().GetData()
+						s.True(slices.Equal(expect.(*schemapb.ScalarField).GetDoubleData().GetData(), actualArray))
+						s.LessOrEqual(len(actualArray), len(expect.(*schemapb.ScalarField).GetDoubleData().GetData()), "array size %d exceeds max_size %d", len(actualArray), len(expect.(*schemapb.ScalarField).GetDoubleData().GetData()))
+					case schemapb.DataType_String:
+						actualArray := actual.(*schemapb.ScalarField).GetStringData().GetData()
+						s.True(slices.Equal(expect.(*schemapb.ScalarField).GetStringData().GetData(), actualArray))
+						s.LessOrEqual(len(actualArray), len(expect.(*schemapb.ScalarField).GetStringData().GetData()), "array size %d exceeds max_size %d", len(actualArray), len(expect.(*schemapb.ScalarField).GetStringData().GetData()))
+					default:
+						s.Fail("unsupported array element type")
+					}
 				} else {
 					s.Equal(expect, actual)
 				}

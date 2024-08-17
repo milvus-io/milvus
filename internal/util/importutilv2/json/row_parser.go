@@ -25,7 +25,9 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -360,10 +362,23 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return vec, nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String:
 		value, ok := obj.(string)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		return value, nil
+	case schemapb.DataType_VarChar:
+		value, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		maxLength, err := parameterutil.GetMaxLength(r.id2Field[fieldID])
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckVarcharLength(value, maxLength); err != nil {
+			return nil, err
 		}
 		return value, nil
 	case schemapb.DataType_JSON:
@@ -387,6 +402,14 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
+
+		maxCapacity, err := parameterutil.GetMaxCapacity(r.id2Field[fieldID])
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckArrayCapacity(len(arr), maxCapacity); err != nil {
+			return nil, err
+		}
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
