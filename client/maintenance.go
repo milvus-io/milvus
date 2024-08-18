@@ -34,13 +34,13 @@ type LoadTask struct {
 }
 
 func (t *LoadTask) Await(ctx context.Context) error {
-	ticker := time.NewTicker(t.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(t.interval)
+	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			loaded := false
-			t.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+			err := t.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 				resp, err := milvusService.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 					CollectionName: t.collectionName,
 					PartitionNames: t.partitionNames,
@@ -51,10 +51,13 @@ func (t *LoadTask) Await(ctx context.Context) error {
 				loaded = resp.GetProgress() == 100
 				return nil
 			})
+			if err != nil {
+				return err
+			}
 			if loaded {
 				return nil
 			}
-			ticker.Reset(t.interval)
+			timer.Reset(t.interval)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -134,13 +137,13 @@ type FlushTask struct {
 }
 
 func (t *FlushTask) Await(ctx context.Context) error {
-	ticker := time.NewTicker(t.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(t.interval)
+	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			flushed := false
-			t.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+			err := t.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 				resp, err := milvusService.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
 					CollectionName: t.collectionName,
 					SegmentIDs:     t.segmentIDs,
@@ -154,10 +157,13 @@ func (t *FlushTask) Await(ctx context.Context) error {
 
 				return nil
 			})
+			if err != nil {
+				return err
+			}
 			if flushed {
 				return nil
 			}
-			ticker.Reset(t.interval)
+			timer.Reset(t.interval)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
