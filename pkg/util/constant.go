@@ -123,6 +123,8 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropOwnership.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectOwnership.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageOwnership.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeBackupRBAC.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreRBAC.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String()),

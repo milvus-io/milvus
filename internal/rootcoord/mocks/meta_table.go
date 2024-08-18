@@ -334,6 +334,61 @@ func (_c *IMetaTable_AlterDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// BackupRBAC provides a mock function with given fields: ctx, tenant
+func (_m *IMetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
+	ret := _m.Called(ctx, tenant)
+
+	var r0 *milvuspb.RBACMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*milvuspb.RBACMeta, error)); ok {
+		return rf(ctx, tenant)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *milvuspb.RBACMeta); ok {
+		r0 = rf(ctx, tenant)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RBACMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, tenant)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_BackupRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BackupRBAC'
+type IMetaTable_BackupRBAC_Call struct {
+	*mock.Call
+}
+
+// BackupRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+func (_e *IMetaTable_Expecter) BackupRBAC(ctx interface{}, tenant interface{}) *IMetaTable_BackupRBAC_Call {
+	return &IMetaTable_BackupRBAC_Call{Call: _e.mock.On("BackupRBAC", ctx, tenant)}
+}
+
+func (_c *IMetaTable_BackupRBAC_Call) Run(run func(ctx context.Context, tenant string)) *IMetaTable_BackupRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_BackupRBAC_Call) Return(_a0 *milvuspb.RBACMeta, _a1 error) *IMetaTable_BackupRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_BackupRBAC_Call) RunAndReturn(run func(context.Context, string) (*milvuspb.RBACMeta, error)) *IMetaTable_BackupRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ChangeCollectionState provides a mock function with given fields: ctx, collectionID, state, ts
 func (_m *IMetaTable) ChangeCollectionState(ctx context.Context, collectionID int64, state etcdpb.CollectionState, ts uint64) error {
 	ret := _m.Called(ctx, collectionID, state, ts)
@@ -1936,6 +1991,50 @@ func (_c *IMetaTable_RenameCollection_Call) Return(_a0 error) *IMetaTable_Rename
 }
 
 func (_c *IMetaTable_RenameCollection_Call) RunAndReturn(run func(context.Context, string, string, string, string, uint64) error) *IMetaTable_RenameCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreRBAC provides a mock function with given fields: ctx, tenant, meta
+func (_m *IMetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	ret := _m.Called(ctx, tenant, meta)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RBACMeta) error); ok {
+		r0 = rf(ctx, tenant, meta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_RestoreRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreRBAC'
+type IMetaTable_RestoreRBAC_Call struct {
+	*mock.Call
+}
+
+// RestoreRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - meta *milvuspb.RBACMeta
+func (_e *IMetaTable_Expecter) RestoreRBAC(ctx interface{}, tenant interface{}, meta interface{}) *IMetaTable_RestoreRBAC_Call {
+	return &IMetaTable_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC", ctx, tenant, meta)}
+}
+
+func (_c *IMetaTable_RestoreRBAC_Call) Run(run func(ctx context.Context, tenant string, meta *milvuspb.RBACMeta)) *IMetaTable_RestoreRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RBACMeta))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RestoreRBAC_Call) Return(_a0 error) *IMetaTable_RestoreRBAC_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_RestoreRBAC_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RBACMeta) error) *IMetaTable_RestoreRBAC_Call {
 	_c.Call.Return(run)
 	return _c
 }
