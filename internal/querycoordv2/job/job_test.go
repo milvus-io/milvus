@@ -362,7 +362,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// Load with 3 replica on 3 rg
 	req = &querypb.LoadCollectionRequest{
@@ -384,7 +384,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -414,7 +414,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -596,7 +596,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// test load 3 replica in 3 rg, should pass rg check
 	req = &querypb.LoadPartitionsRequest{
@@ -619,7 +619,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestDynamicLoad() {
@@ -766,7 +766,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -1107,7 +1107,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, meta.ErrNodeNotEnough)
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
