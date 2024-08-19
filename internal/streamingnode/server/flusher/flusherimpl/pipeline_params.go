@@ -18,43 +18,34 @@ package flusherimpl
 
 import (
 	"context"
-	"sync"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var (
-	pipelineParams *util.PipelineParams
-	initOnce       sync.Once
-)
-
-func initPipelineParams() {
-	initOnce.Do(func() {
-		var (
-			rsc         = resource.Resource()
-			syncMgr     = rsc.SyncManager()
-			wbMgr       = rsc.BufferManager()
-			coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
-			cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
-		)
-		pipelineParams = &util.PipelineParams{
-			Ctx:                context.Background(),
-			Broker:             coordBroker,
-			SyncMgr:            syncMgr,
-			ChunkManager:       rsc.ChunkManager(),
-			WriteBufferManager: wbMgr,
-			CheckpointUpdater:  cpUpdater,
-			Allocator:          idalloc.NewMAllocator(rsc.IDAllocator()),
-			FlushMsgHandler:    flushMsgHandlerImpl(wbMgr),
-		}
-	})
-}
-
-func GetPipelineParams() *util.PipelineParams {
-	initPipelineParams()
-	return pipelineParams
+// getPipelineParams initializes the pipeline parameters.
+func getPipelineParams(chunkManager storage.ChunkManager) *util.PipelineParams {
+	var (
+		rsc         = resource.Resource()
+		syncMgr     = syncmgr.NewSyncManager(chunkManager)
+		wbMgr       = writebuffer.NewManager(syncMgr)
+		coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
+		cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
+	)
+	return &util.PipelineParams{
+		Ctx:                context.Background(),
+		Broker:             coordBroker,
+		SyncMgr:            syncMgr,
+		ChunkManager:       chunkManager,
+		WriteBufferManager: wbMgr,
+		CheckpointUpdater:  cpUpdater,
+		Allocator:          idalloc.NewMAllocator(rsc.IDAllocator()),
+		FlushMsgHandler:    flushMsgHandlerImpl(wbMgr),
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 )
 
 // AssignSegmentRequest is a request to allocate segment.
@@ -11,6 +12,8 @@ type AssignSegmentRequest struct {
 	CollectionID  int64
 	PartitionID   int64
 	InsertMetrics stats.InsertMetrics
+	TimeTick      uint64
+	TxnSession    *txn.TxnSession
 }
 
 // AssignSegmentResult is a result of segment allocation.

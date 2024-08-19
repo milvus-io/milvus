@@ -17,7 +17,7 @@ var ErrUpstreamClosed = errors.New("upstream closed")
 // ReadOption is the option for reading records from the wal.
 type ReadOption struct {
 	DeliverPolicy  options.DeliverPolicy
-	MessageFilter  MessageFilter
+	MessageFilter  []options.DeliverFilter
 	MesasgeHandler MessageHandler // message handler for message processing.
 	// If the message handler is nil (no redundant operation need to apply),
 	// the default message handler will be used, and the receiver will be returned from Chan.

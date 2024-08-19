@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -137,8 +138,10 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			PartitionID:  partition.GetPartitionId(),
 			InsertMetrics: stats.InsertMetrics{
 				Rows:       partition.GetRows(),
-				BinarySize: partition.GetBinarySize(),
+				BinarySize: uint64(msg.EstimateSize()), // TODO: Use parition.BinarySize in future when merge partitions together in one message.
 			},
+			TimeTick:   msg.TimeTick(),
+			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
 		if err != nil {
 			return nil, status.NewInner("segment assignment failure with error: %s", err.Error())

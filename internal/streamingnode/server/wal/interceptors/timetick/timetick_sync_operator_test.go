@@ -12,6 +12,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -50,6 +52,14 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	operator.initialize()
 	<-operator.Ready()
 	l := mock_wal.NewMockWAL(t)
+	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+		hint := utility.GetNotPersisted(ctx)
+		assert.NotNil(t, hint)
+		return &types.AppendResult{
+			MessageID: hint.MessageID,
+			TimeTick:  mm.TimeTick(),
+		}, nil
+	})
 	walFuture.Set(l)
 
 	// Test the sync operation, but there is no message to sync.
@@ -77,7 +87,8 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	operator.Sync(ctx)
 
 	// After ack, a wal operation will be trigger.
-	acker.Ack()
+	acker.Ack(ack.OptMessageID(msgID), ack.OptTxnSession(nil))
+	l.EXPECT().Append(mock.Anything, mock.Anything).Unset()
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
 		ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
 		return &types.AppendResult{

@@ -18,6 +18,10 @@ const (
 	MessageTypeDropCollection   MessageType = MessageType(messagespb.MessageType_DropCollection)
 	MessageTypeCreatePartition  MessageType = MessageType(messagespb.MessageType_CreatePartition)
 	MessageTypeDropPartition    MessageType = MessageType(messagespb.MessageType_DropPartition)
+	MessageTypeTxn              MessageType = MessageType(messagespb.MessageType_Txn)
+	MessageTypeBeginTxn         MessageType = MessageType(messagespb.MessageType_BeginTxn)
+	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
+	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
 )
 
 var messageTypeName = map[MessageType]string{
@@ -30,6 +34,10 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeDropCollection:   "DROP_COLLECTION",
 	MessageTypeCreatePartition:  "CREATE_PARTITION",
 	MessageTypeDropPartition:    "DROP_PARTITION",
+	MessageTypeTxn:              "TXN",
+	MessageTypeBeginTxn:         "BEGIN_TXN",
+	MessageTypeCommitTxn:        "COMMIT_TXN",
+	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
 }
 
 // String implements fmt.Stringer interface.
@@ -46,6 +54,12 @@ func (t MessageType) marshal() string {
 func (t MessageType) Valid() bool {
 	_, ok := messageTypeName[t]
 	return t != MessageTypeUnknown && ok
+}
+
+// IsSysmtem checks if the MessageType is a system type.
+func (t MessageType) IsSystem() bool {
+	_, ok := systemMessageType[t]
+	return ok
 }
 
 // unmarshalMessageType unmarshal MessageType from string.

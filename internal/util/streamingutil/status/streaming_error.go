@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/redact"
 
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 var _ error = (*StreamingError)(nil)
@@ -42,6 +43,12 @@ func (e *StreamingError) IsSkippedOperation() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM
 }
 
+// IsTxnUnavilable returns true if the transaction is unavailable.
+func (e *StreamingError) IsTxnUnavilable() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED ||
+		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)
@@ -55,6 +62,12 @@ func NewUnknownError(format string, args ...interface{}) *StreamingError {
 // NewInvalidRequestSeq creates a new StreamingError with code STREAMING_CODE_INVALID_REQUEST_SEQ.
 func NewInvalidRequestSeq(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_REQUEST_SEQ, format, args...)
+}
+
+// NewChannelFenced creates a new StreamingError with code STREAMING_CODE_CHANNEL_FENCED.
+// TODO: Unused by now, add it after enable wal fence.
+func NewChannelFenced(channel string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED, "%s fenced", channel)
 }
 
 // NewChannelNotExist creates a new StreamingError with code STREAMING_CODE_CHANNEL_NOT_EXIST.
@@ -80,6 +93,16 @@ func NewInner(format string, args ...interface{}) *StreamingError {
 // NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
 func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
+}
+
+// NewTransactionExpired creates a new StreamingError with code STREAMING_CODE_TRANSACTION_EXPIRED.
+func NewTransactionExpired(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, format, args...)
+}
+
+// NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.
+func NewInvalidTransactionState(operation string, expectState message.TxnState, currentState message.TxnState) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, "invalid transaction state for operation %s, expect %s, current %s", operation, expectState, currentState)
 }
 
 // New creates a new StreamingError with the given code and cause.

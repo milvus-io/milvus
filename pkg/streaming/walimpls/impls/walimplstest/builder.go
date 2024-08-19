@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	WALName = "test"
+	WALName = "walimplstest"
 )
 
 func init() {

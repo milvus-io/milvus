@@ -48,6 +48,7 @@ type FlusherSuite struct {
 	pchannel  string
 	vchannels []string
 
+	syncMgr   *syncmgr.MockSyncManager
 	wbMgr     *writebuffer.MockBufferManager
 	rootcoord *mocks.MockRootCoordClient
 
@@ -89,22 +90,18 @@ func (s *FlusherSuite) SetupSuite() {
 			}, nil
 		})
 
-	syncMgr := syncmgr.NewMockSyncManager(s.T())
-	wbMgr := writebuffer.NewMockBufferManager(s.T())
-	wbMgr.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	wbMgr.EXPECT().RemoveChannel(mock.Anything).Return()
-	wbMgr.EXPECT().Start().Return()
-	wbMgr.EXPECT().Stop().Return()
-
 	resource.InitForTest(
 		s.T(),
-		resource.OptSyncManager(syncMgr),
-		resource.OptBufferManager(wbMgr),
 		resource.OptRootCoordClient(rootcoord),
 		resource.OptDataCoordClient(datacoord),
 	)
 
-	s.wbMgr = wbMgr
+	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
+	s.wbMgr = writebuffer.NewMockBufferManager(s.T())
+	s.wbMgr.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.wbMgr.EXPECT().RemoveChannel(mock.Anything).Return()
+	s.wbMgr.EXPECT().Start().Return()
+	s.wbMgr.EXPECT().Stop().Return()
 	s.rootcoord = rootcoord
 }
 
@@ -131,7 +128,12 @@ func (s *FlusherSuite) SetupTest() {
 	})
 
 	s.wal = w
-	s.flusher = NewFlusher()
+	m := mocks.NewChunkManager(s.T())
+	params := getPipelineParams(m)
+	params.SyncMgr = s.syncMgr
+	params.WriteBufferManager = s.wbMgr
+
+	s.flusher = newFlusherWithParam(params)
 	s.flusher.Start()
 }
 

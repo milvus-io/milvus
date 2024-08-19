@@ -7,6 +7,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb
 import "messages.proto";
 import "milvus.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
 
 //
 // Common
@@ -187,15 +188,17 @@ message DeliverFilterMessageType {
 // StreamingCode is the error code for log internal component.
 enum StreamingCode {
     STREAMING_CODE_OK                     = 0;
-    STREAMING_CODE_CHANNEL_NOT_EXIST      = 1;    // channel not exist
-    STREAMING_CODE_CHANNEL_FENCED         = 2;    // channel is fenced
-    STREAMING_CODE_ON_SHUTDOWN            = 3;    // component is on shutdown
-    STREAMING_CODE_INVALID_REQUEST_SEQ    = 4;    // invalid request sequence
-    STREAMING_CODE_UNMATCHED_CHANNEL_TERM = 5;    // unmatched channel term
-    STREAMING_CODE_IGNORED_OPERATION      = 6;    // ignored operation
-    STREAMING_CODE_INNER                  = 7;    // underlying service failure.
-    STREAMING_CODE_INVAILD_ARGUMENT       = 8;    // invalid argument
-    STREAMING_CODE_UNKNOWN                = 999;  // unknown error
+    STREAMING_CODE_CHANNEL_NOT_EXIST      = 1;  // channel not exist
+    STREAMING_CODE_CHANNEL_FENCED         = 2;  // channel is fenced
+    STREAMING_CODE_ON_SHUTDOWN            = 3;  // component is on shutdown
+    STREAMING_CODE_INVALID_REQUEST_SEQ    = 4;  // invalid request sequence
+    STREAMING_CODE_UNMATCHED_CHANNEL_TERM = 5;  // unmatched channel term
+    STREAMING_CODE_IGNORED_OPERATION      = 6;  // ignored operation
+    STREAMING_CODE_INNER                  = 7;  // underlying service failure.
+    STREAMING_CODE_INVAILD_ARGUMENT       = 8;  // invalid argument
+    STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
+    STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
+    STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
 // StreamingError is the error type for log internal component.
@@ -289,6 +292,8 @@ message ProduceMessageResponse {
 message ProduceMessageResponseResult {
     messages.MessageID id = 1;  // the offset of the message in the channel.
     uint64 timetick       = 2;  // the timetick of that message sent.
+    messages.TxnContext txnContext = 3;  // the txn context of the message.
+    google.protobuf.Any extra      = 4;  // the extra message.
 }
 
 // CloseProducerResponse is the result of the CloseProducer RPC.

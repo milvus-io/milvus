@@ -232,10 +232,14 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 }
 
 func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Context, vchannels []string, partition *model.Partition) (uint64, error) {
+	ts, err := c.s.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return 0, err
+	}
 	req := &msgpb.DropPartitionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
-			commonpbutil.WithTimeStamp(0), // ts is given by streamingnode.
+			commonpbutil.WithTimeStamp(ts),
 			commonpbutil.WithSourceID(c.s.session.ServerID),
 		),
 		PartitionName: partition.PartitionName,
@@ -258,12 +262,13 @@ func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Con
 		}
 		msgs = append(msgs, msg)
 	}
-	resp := streaming.WAL().Append(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
+	// Ts is used as barrier time tick to ensure the message's time tick are given after the barrier time tick.
+	if err := streaming.WAL().Utility().AppendMessagesWithOption(ctx, streaming.AppendOption{
+		BarrierTimeTick: ts,
+	}, msgs...).UnwrapFirstError(); err != nil {
 		return 0, err
 	}
-	// TODO: sheep, return resp.MaxTimeTick(), nil
-	return c.s.tsoAllocator.GenerateTSO(1)
+	return ts, nil
 }
 
 func (c *bgGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {

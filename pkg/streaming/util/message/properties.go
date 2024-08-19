@@ -2,17 +2,16 @@ package message
 
 const (
 	// preserved properties
-	messageVersion          = "_v"  // message version for compatibility.
-	messageTypeKey          = "_t"  // message type key.
-	messageTimeTick         = "_tt" // message time tick.
-	messageLastConfirmed    = "_lc" // message last confirmed message id.
-	messageVChannel         = "_vc" // message virtual channel.
-	messageSpecialiedHeader = "_sh" // specialized message header.
-)
-
-const (
-	messageLastConfirmedValueUseMessageID = "use_message_id" // message last confirmed message id is same with message id.
-	// some message type can not set last confirmed message id, but can use the message id as last confirmed id.
+	messageVersion                          = "_v"   // message version for compatibility, see `Version` for more information.
+	messageWALTerm                          = "_wt"  // wal term of a message, always increase by MessageID order, should never rollback.
+	messageTypeKey                          = "_t"   // message type key.
+	messageTimeTick                         = "_tt"  // message time tick.
+	messageBarrierTimeTick                  = "_btt" // message barrier time tick.
+	messageLastConfirmed                    = "_lc"  // message last confirmed message id.
+	messageLastConfirmedIDSameWithMessageID = "_lcs" // message last confirmed message id is the same with message id.
+	messageVChannel                         = "_vc"  // message virtual channel.
+	messageHeader                           = "_h"   // specialized message header.
+	messageTxnContext                       = "_tx"  // transaction context.
 )
 
 var (
@@ -55,6 +54,10 @@ func (prop propertiesImpl) Exist(key string) bool {
 
 func (prop propertiesImpl) Set(key, value string) {
 	prop[key] = value
+}
+
+func (prop propertiesImpl) Delete(key string) {
+	delete(prop, key)
 }
 
 func (prop propertiesImpl) ToRawMap() map[string]string {

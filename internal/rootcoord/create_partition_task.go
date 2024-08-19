@@ -102,6 +102,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 			baseStep:  baseStep{core: t.core},
 			vchannels: t.collMeta.VirtualChannelNames,
 			partition: partition,
+			ts:        t.GetTs(),
 		}, &nullStep{})
 	}
 
