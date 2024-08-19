@@ -39,11 +39,11 @@ type CreateIndexTask struct {
 }
 
 func (t *CreateIndexTask) Await(ctx context.Context) error {
-	ticker := time.NewTicker(t.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(t.interval)
+	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			finished := false
 			err := t.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 				resp, err := milvusService.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
@@ -75,7 +75,7 @@ func (t *CreateIndexTask) Await(ctx context.Context) error {
 			if finished {
 				return nil
 			}
-			ticker.Reset(t.interval)
+			timer.Reset(t.interval)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
