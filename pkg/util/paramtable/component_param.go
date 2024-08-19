@@ -259,6 +259,9 @@ type commonConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
 	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
+	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
+	ReadWritePrivileges                 ParamItem `refreshable:"false"`
+	AdminPrivileges                     ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -883,6 +886,27 @@ This helps Milvus-CDC synchronize incremental data`,
 		DefaultValue: "30",
 	}
 	p.MinimumGOGCConfig.Init(base.mgr)
+
+	p.ReadOnlyPrivileges = ParamItem{
+		Key:     "common.security.readonly.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-only privileges,  example: "PrivilegeQuery,PrivilegeSearch"`,
+	}
+	p.ReadOnlyPrivileges.Init(base.mgr)
+
+	p.ReadWritePrivileges = ParamItem{
+		Key:     "common.security.readwrite.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-write privileges,  example: "PrivilegeCreateCollection,PrivilegeDropCollection"`,
+	}
+	p.ReadWritePrivileges.Init(base.mgr)
+
+	p.AdminPrivileges = ParamItem{
+		Key:     "common.security.admin.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
+	}
+	p.AdminPrivileges.Init(base.mgr)
 }
 
 type gpuConfig struct {
