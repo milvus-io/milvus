@@ -4755,18 +4755,33 @@ func convertToV1ListImportResponse(rsp *internalpb.ListImportsResponse) *milvusp
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	rsp, err := node.ImportV2(ctx, convertToV2ImportRequest(req))
+	if err != nil {
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1ImportResponse(rsp), err
 }
 
 // GetImportState checks import task state from RootCoord.
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	rsp, err := node.GetImportProgress(ctx, convertToV2GetImportRequest(req))
+	if err != nil {
+		return &milvuspb.GetImportStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1GetImportResponse(rsp), err
 }
 
 // ListImportTasks get id array of all import tasks from rootcoord
 func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	rsp, err := node.ListImports(ctx, convertToV2ListImportRequest(req))
+	if err != nil {
+		return &milvuspb.ListImportTasksResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1ListImportResponse(rsp), err
 }
 
