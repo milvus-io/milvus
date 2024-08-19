@@ -75,6 +75,10 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 }
 
 func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
+	if !segment.GetIsSorted() {
+		log.Debug("segment is not sorted by pk, skip create index", zap.Int64("segmentID", segment.ID))
+		return nil
+	}
 	indexes := s.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := s.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
@@ -91,7 +95,7 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 
 func (s *Server) getUnIndexTaskSegments() []*SegmentInfo {
 	flushedSegments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg)
+		return isFlush(seg) && seg.GetIsSorted()
 	}))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
@@ -125,7 +129,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 		case collectionID := <-s.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
 			segments := s.meta.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info)
+				return isFlush(info) && info.GetIsSorted()
 			}))
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {

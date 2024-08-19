@@ -4040,7 +4040,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.statsTask.enable",
 		Version:      "2.5.0",
 		Doc:          "enable stats task",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
 	}

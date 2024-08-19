@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -50,7 +51,7 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 		case <-ticker.C:
 			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 				segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-					return isFlush(seg) && !seg.GetIsSorted() && !seg.isCompacting
+					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting
 				}))
 				for _, segment := range segments {
 					if err := s.createStatsSegmentTask(segment); err != nil {
