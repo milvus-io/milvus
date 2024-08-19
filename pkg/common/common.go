@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -286,7 +287,7 @@ func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error)
 				return nil, invalidPropValue
 			}
 
-			return rgs, nil
+			return lo.Map(rgs, func(rg string, _ int) string { return strings.TrimSpace(rg) }), nil
 		}
 	}
 
@@ -321,7 +322,7 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 				return nil, invalidPropValue
 			}
 
-			return rgs, nil
+			return lo.Map(rgs, func(rg string, _ int) string { return strings.TrimSpace(rg) }), nil
 		}
 	}
 
