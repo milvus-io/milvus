@@ -1012,11 +1012,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-					if err != nil {
-						return nil, nil, err
-					}
-					err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
+					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
 						if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
 							expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
 							return nil
@@ -1578,6 +1574,11 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 			BaseMsg:             getBaseMsg(ctx, ts),
 			DropDatabaseRequest: r,
 		}
+	case *milvuspb.AlterDatabaseRequest:
+		tsMsg = &msgstream.AlterDatabaseMsg{
+			BaseMsg:              getBaseMsg(ctx, ts),
+			AlterDatabaseRequest: r,
+		}
 	case *milvuspb.FlushRequest:
 		tsMsg = &msgstream.FlushMsg{
 			BaseMsg:      getBaseMsg(ctx, ts),
@@ -1617,6 +1618,41 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		tsMsg = &msgstream.AlterIndexMsg{
 			BaseMsg:           getBaseMsg(ctx, ts),
 			AlterIndexRequest: r,
+		}
+	case *milvuspb.CreateCredentialRequest:
+		tsMsg = &msgstream.CreateUserMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			CreateCredentialRequest: r,
+		}
+	case *milvuspb.UpdateCredentialRequest:
+		tsMsg = &msgstream.UpdateUserMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			UpdateCredentialRequest: r,
+		}
+	case *milvuspb.DeleteCredentialRequest:
+		tsMsg = &msgstream.DeleteUserMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			DeleteCredentialRequest: r,
+		}
+	case *milvuspb.CreateRoleRequest:
+		tsMsg = &msgstream.CreateRoleMsg{
+			BaseMsg:           getBaseMsg(ctx, ts),
+			CreateRoleRequest: r,
+		}
+	case *milvuspb.DropRoleRequest:
+		tsMsg = &msgstream.DropRoleMsg{
+			BaseMsg:         getBaseMsg(ctx, ts),
+			DropRoleRequest: r,
+		}
+	case *milvuspb.OperateUserRoleRequest:
+		tsMsg = &msgstream.OperateUserRoleMsg{
+			BaseMsg:                getBaseMsg(ctx, ts),
+			OperateUserRoleRequest: r,
+		}
+	case *milvuspb.OperatePrivilegeRequest:
+		tsMsg = &msgstream.OperatePrivilegeMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			OperatePrivilegeRequest: r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))

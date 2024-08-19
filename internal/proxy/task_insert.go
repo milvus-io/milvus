@@ -213,7 +213,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema.CollectionSchema, it.insertMsg.NRows()); err != nil {
+		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
 	}
 

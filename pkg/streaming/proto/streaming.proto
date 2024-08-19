@@ -156,6 +156,7 @@ message DeliverFilter {
         DeliverFilterTimeTickGT time_tick_gt   = 1;
         DeliverFilterTimeTickGTE time_tick_gte = 2;
         DeliverFilterVChannel vchannel         = 3;
+        DeliverFilterMessageType message_type  = 4;
     }
 }
 
@@ -176,6 +177,11 @@ message DeliverFilterTimeTickGTE {
 // DeliverFilterVChannel is the filter to deliver message with vchannel name.
 message DeliverFilterVChannel {
     string vchannel = 1;  // deliver message with vchannel name.
+}
+
+message DeliverFilterMessageType {
+    // deliver message with message type.
+    repeated messages.MessageType message_types = 1;
 }
 
 // StreamingCode is the error code for log internal component.

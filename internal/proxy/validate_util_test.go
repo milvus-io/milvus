@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -1430,8 +1431,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil()
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 100)
+		err = v.Validate(data, helper, 100)
 
 		assert.Error(t, err)
 	})
@@ -1560,8 +1563,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 2)
+		err = v.Validate(data, helper, 2)
 
 		assert.Error(t, err)
 	})
@@ -1690,7 +1695,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
-		err := v.Validate(data, schema, 2)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = v.Validate(data, helper, 2)
 		assert.Error(t, err)
 
 		// Validate JSON length
@@ -1719,7 +1726,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
-		err = v.Validate(data, schema, 2)
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = v.Validate(data, helper, 2)
 		assert.Error(t, err)
 	})
 
@@ -1751,8 +1760,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withOverflowCheck())
-
-		err := v.Validate(data, schema, 2)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = v.Validate(data, helper, 2)
 		assert.Error(t, err)
 	})
 
@@ -1788,8 +1798,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil()
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 100)
+		err = v.Validate(data, helper, 100)
 
 		assert.Error(t, err)
 	})
@@ -1836,8 +1848,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withMaxCapCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 1)
+		err = v.Validate(data, helper, 1)
 
 		assert.Error(t, err)
 	})
@@ -1889,8 +1903,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withMaxCapCheck(), withMaxLenCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 1)
+		err = v.Validate(data, helper, 1)
 
 		assert.Error(t, err)
 	})
@@ -1932,8 +1948,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withMaxCapCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 1)
+		err = v.Validate(data, helper, 1)
 
 		assert.Error(t, err)
 	})
@@ -1980,8 +1998,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withMaxCapCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 1)
+		err = v.Validate(data, helper, 1)
 
 		assert.Error(t, err)
 	})
@@ -2035,7 +2055,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withMaxCapCheck())
-		err := v.Validate(data, schema, 1)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = v.Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2084,8 +2106,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		schema = &schemapb.CollectionSchema{
@@ -2103,8 +2127,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		schema = &schemapb.CollectionSchema{
@@ -2123,7 +2149,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2172,7 +2201,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2221,8 +2252,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2271,8 +2304,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2321,8 +2356,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 	})
 
@@ -2366,8 +2403,9 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
-
-		err := newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, schema, 1)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		err = newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -2409,8 +2447,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 				},
 			},
 		}
+		helper, err = typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, schema, 1)
+		err = newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 	})
 
@@ -2830,8 +2870,10 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck(), withMaxCapCheck())
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
 
-		err := v.Validate(data, schema, 2)
+		err = v.Validate(data, helper, 2)
 
 		assert.NoError(t, err)
 	})

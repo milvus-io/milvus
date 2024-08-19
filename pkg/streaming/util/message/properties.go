@@ -10,6 +10,11 @@ const (
 	messageSpecialiedHeader = "_sh" // specialized message header.
 )
 
+const (
+	messageLastConfirmedValueUseMessageID = "use_message_id" // message last confirmed message id is same with message id.
+	// some message type can not set last confirmed message id, but can use the message id as last confirmed id.
+)
+
 var (
 	_ RProperties = propertiesImpl{}
 	_ Properties  = propertiesImpl{}

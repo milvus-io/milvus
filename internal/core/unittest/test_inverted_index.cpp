@@ -32,8 +32,8 @@ gen_field_meta(int64_t collection_id = 1,
                int64_t segment_id = 3,
                int64_t field_id = 101,
                DataType data_type = DataType::NONE,
-               DataType element_type = DataType::NONE)
-    -> storage::FieldDataMeta {
+               DataType element_type = DataType::NONE,
+               bool nullable = false) -> storage::FieldDataMeta {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -44,6 +44,7 @@ gen_field_meta(int64_t collection_id = 1,
         static_cast<proto::schema::DataType>(data_type));
     meta.field_schema.set_element_type(
         static_cast<proto::schema::DataType>(element_type));
+    meta.field_schema.set_nullable(nullable);
     return meta;
 }
 
@@ -92,7 +93,10 @@ struct ChunkManagerWrapper {
 };
 }  // namespace milvus::test
 
-template <typename T, DataType dtype, DataType element_type = DataType::NONE>
+template <typename T,
+          DataType dtype,
+          DataType element_type = DataType::NONE,
+          bool nullable = false>
 void
 test_run() {
     int64_t collection_id = 1;
@@ -102,8 +106,13 @@ test_run() {
     int64_t index_build_id = 1000;
     int64_t index_version = 10000;
 
-    auto field_meta = test::gen_field_meta(
-        collection_id, partition_id, segment_id, field_id, dtype, element_type);
+    auto field_meta = test::gen_field_meta(collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           dtype,
+                                           element_type,
+                                           nullable);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 
@@ -114,6 +123,7 @@ test_run() {
     size_t nb = 10000;
     std::vector<T> data_gen;
     boost::container::vector<T> data;
+    FixedVector<bool> valid_data;
     if constexpr (!std::is_same_v<T, bool>) {
         data_gen = GenSortedArr<T>(nb);
     } else {
@@ -121,12 +131,36 @@ test_run() {
             data_gen.push_back(rand() % 2 == 0);
         }
     }
+    if (nullable) {
+        valid_data.reserve(nb);
+        for (size_t i = 0; i < nb; i++) {
+            valid_data.push_back(rand() % 2 == 0);
+        }
+    }
     for (auto x : data_gen) {
         data.push_back(x);
     }
 
-    auto field_data = storage::CreateFieldData(dtype);
-    field_data->FillFieldData(data.data(), data.size());
+    auto field_data = storage::CreateFieldData(dtype, nullable);
+    if (nullable) {
+        int byteSize = (nb + 7) / 8;
+        uint8_t* valid_data_ = new uint8_t[byteSize];
+        for (int i = 0; i < nb; i++) {
+            bool value = valid_data[i];
+            int byteIndex = i / 8;
+            int bitIndex = i % 8;
+            if (value) {
+                valid_data_[byteIndex] |= (1 << bitIndex);
+            } else {
+                valid_data_[byteIndex] &= ~(1 << bitIndex);
+            }
+        }
+        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        delete[] valid_data_;
+    } else {
+        field_data->FillFieldData(data.data(), data.size());
+    }
+    // std::cout << "length:" << field_data->get_num_rows() << std::endl;
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
@@ -197,7 +231,11 @@ test_run() {
                     real_index->In(test_data.size(), test_data.data());
                 ASSERT_EQ(cnt, bitset.size());
                 for (size_t i = 0; i < bitset.size(); i++) {
-                    ASSERT_EQ(bitset[i], s.find(data[i]) != s.end());
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], false);
+                    } else {
+                        ASSERT_EQ(bitset[i], s.find(data[i]) != s.end());
+                    }
                 }
             }
 
@@ -213,7 +251,35 @@ test_run() {
                     real_index->NotIn(test_data.size(), test_data.data());
                 ASSERT_EQ(cnt, bitset.size());
                 for (size_t i = 0; i < bitset.size(); i++) {
-                    ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], false);
+                    } else {
+                        ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
+                    }
+                }
+            }
+
+            {
+                auto bitset = real_index->IsNull();
+                ASSERT_EQ(cnt, bitset.size());
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], true);
+                    } else {
+                        ASSERT_EQ(bitset[i], false);
+                    }
+                }
+            }
+
+            {
+                auto bitset = real_index->IsNotNull();
+                ASSERT_EQ(cnt, bitset.size());
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(bitset[i], false);
+                    } else {
+                        ASSERT_EQ(bitset[i], true);
+                    }
                 }
             }
         }
@@ -241,12 +307,16 @@ test_run() {
                 for (const auto& [test_value, op, ref] : test_cases) {
                     auto bitset = real_index->Range(test_value, op);
                     ASSERT_EQ(cnt, bitset.size());
-                    for (size_t i = 0; i < bitset.size(); i++) {
+                    for (size_t i = 0; i < nb; i++) {
                         auto ans = bitset[i];
                         auto should = ref(i);
-                        ASSERT_EQ(ans, should)
-                            << "op: " << op << ", @" << i << ", ans: " << ans
-                            << ", ref: " << should;
+                        if (nullable && !valid_data[i]) {
+                            ASSERT_EQ(ans, false);
+                        } else {
+                            ASSERT_EQ(ans, should)
+                                << "op: " << op << ", @" << i
+                                << ", ans: " << ans << ", ref: " << should;
+                        }
                     }
                 }
             }
@@ -287,11 +357,16 @@ test_run() {
                     auto bitset =
                         real_index->Range(lb, lb_inclusive, ub, ub_inclusive);
                     ASSERT_EQ(cnt, bitset.size());
-                    for (size_t i = 0; i < bitset.size(); i++) {
+                    for (size_t i = 0; i < nb; i++) {
                         auto ans = bitset[i];
                         auto should = ref(i);
-                        ASSERT_EQ(ans, should) << "@" << i << ", ans: " << ans
-                                               << ", ref: " << should;
+                        if (nullable && !valid_data[i]) {
+                            ASSERT_EQ(ans, false);
+                        } else {
+                            ASSERT_EQ(ans, should)
+                                << "@" << i << ", ans: " << ans
+                                << ", ref: " << should;
+                        }
                     }
                 }
             }
@@ -299,6 +374,7 @@ test_run() {
     }
 }
 
+template <bool nullable = false>
 void
 test_string() {
     using T = std::string;
@@ -316,7 +392,8 @@ test_string() {
                                            segment_id,
                                            field_id,
                                            dtype,
-                                           DataType::NONE);
+                                           DataType::NONE,
+                                           nullable);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 
@@ -326,12 +403,36 @@ test_string() {
 
     size_t nb = 10000;
     boost::container::vector<T> data;
+    FixedVector<bool> valid_data;
     for (size_t i = 0; i < nb; i++) {
         data.push_back(std::to_string(rand()));
     }
+    if (nullable) {
+        valid_data.reserve(nb);
+        for (size_t i = 0; i < nb; i++) {
+            valid_data.push_back(rand() % 2 == 0);
+        }
+    }
 
-    auto field_data = storage::CreateFieldData(dtype, false);
-    field_data->FillFieldData(data.data(), data.size());
+    auto field_data = storage::CreateFieldData(dtype, nullable);
+    if (nullable) {
+        int byteSize = (nb + 7) / 8;
+        uint8_t* valid_data_ = new uint8_t[byteSize];
+        for (int i = 0; i < nb; i++) {
+            bool value = valid_data[i];
+            int byteIndex = i / 8;
+            int bitIndex = i % 8;
+            if (value) {
+                valid_data_[byteIndex] |= (1 << bitIndex);
+            } else {
+                valid_data_[byteIndex] &= ~(1 << bitIndex);
+            }
+        }
+        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        delete[] valid_data_;
+    } else {
+        field_data->FillFieldData(data.data(), data.size());
+    }
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
@@ -399,7 +500,11 @@ test_string() {
             auto bitset = real_index->In(test_data.size(), test_data.data());
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
-                ASSERT_EQ(bitset[i], s.find(data[i]) != s.end());
+                if (nullable && !valid_data[i]) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    ASSERT_EQ(bitset[i], s.find(data[i]) != s.end());
+                }
             }
         }
 
@@ -414,7 +519,11 @@ test_string() {
             auto bitset = real_index->NotIn(test_data.size(), test_data.data());
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
-                ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
+                if (nullable && !valid_data[i]) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    ASSERT_NE(bitset[i], s.find(data[i]) != s.end());
+                }
             }
         }
 
@@ -441,9 +550,13 @@ test_string() {
                 for (size_t i = 0; i < bitset.size(); i++) {
                     auto ans = bitset[i];
                     auto should = ref(i);
-                    ASSERT_EQ(ans, should)
-                        << "op: " << op << ", @" << i << ", ans: " << ans
-                        << ", ref: " << should;
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(ans, false);
+                    } else {
+                        ASSERT_EQ(ans, should)
+                            << "op: " << op << ", @" << i << ", ans: " << ans
+                            << ", ref: " << should;
+                    }
                 }
             }
         }
@@ -484,11 +597,15 @@ test_string() {
                 auto bitset =
                     real_index->Range(lb, lb_inclusive, ub, ub_inclusive);
                 ASSERT_EQ(cnt, bitset.size());
-                for (size_t i = 0; i < bitset.size(); i++) {
+                for (size_t i = 0; i < nb; i++) {
                     auto ans = bitset[i];
                     auto should = ref(i);
-                    ASSERT_EQ(ans, should)
-                        << "@" << i << ", ans: " << ans << ", ref: " << should;
+                    if (nullable && !valid_data[i]) {
+                        ASSERT_EQ(ans, false);
+                    } else {
+                        ASSERT_EQ(ans, should) << "@" << i << ", ans: " << ans
+                                               << ", ref: " << should;
+                    }
                 }
             }
         }
@@ -501,7 +618,11 @@ test_string() {
             auto bitset = real_index->Query(dataset);
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
-                ASSERT_EQ(bitset[i], boost::starts_with(data[i], prefix));
+                auto should = boost::starts_with(data[i], prefix);
+                if (nullable && !valid_data[i]) {
+                    should = false;
+                }
+                ASSERT_EQ(bitset[i], should);
             }
         }
 
@@ -511,7 +632,11 @@ test_string() {
             auto bitset = real_index->RegexQuery(prefix + "(.|\n)*");
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
-                ASSERT_EQ(bitset[i], boost::starts_with(data[i], prefix));
+                auto should = boost::starts_with(data[i], prefix);
+                if (nullable && !valid_data[i]) {
+                    should = false;
+                }
+                ASSERT_EQ(bitset[i], should);
             }
         }
     }
@@ -529,4 +654,15 @@ TEST(InvertedIndex, Naive) {
     test_run<double, DataType::DOUBLE>();
 
     test_string();
+    test_run<int8_t, DataType::INT8, DataType::NONE, true>();
+    test_run<int16_t, DataType::INT16, DataType::NONE, true>();
+    test_run<int32_t, DataType::INT32, DataType::NONE, true>();
+    test_run<int64_t, DataType::INT64, DataType::NONE, true>();
+
+    test_run<bool, DataType::BOOL, DataType::NONE, true>();
+
+    test_run<float, DataType::FLOAT, DataType::NONE, true>();
+    test_run<double, DataType::DOUBLE, DataType::NONE, true>();
+
+    test_string<true>();
 }

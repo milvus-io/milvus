@@ -19,7 +19,10 @@ import (
 func TestResumableProducer(t *testing.T) {
 	p := mock_producer.NewMockProducer(t)
 	msgID := mock_message.NewMockMessageID(t)
-	p.EXPECT().Produce(mock.Anything, mock.Anything).Return(msgID, nil)
+	p.EXPECT().Produce(mock.Anything, mock.Anything).Return(&producer.ProduceResult{
+		MessageID: msgID,
+		TimeTick:  100,
+	}, nil)
 	p.EXPECT().Close().Return()
 	ch := make(chan struct{})
 	p.EXPECT().Available().Return(ch)
@@ -44,11 +47,14 @@ func TestResumableProducer(t *testing.T) {
 		} else if i == 2 {
 			p := mock_producer.NewMockProducer(t)
 			msgID := mock_message.NewMockMessageID(t)
-			p.EXPECT().Produce(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
+			p.EXPECT().Produce(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*producer.ProduceResult, error) {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
-				return msgID, nil
+				return &producer.ProduceResult{
+					MessageID: msgID,
+					TimeTick:  100,
+				}, nil
 			})
 			p.EXPECT().Close().Return()
 			p.EXPECT().Available().Return(ch2)

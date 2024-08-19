@@ -21,10 +21,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
 type stepPriority int
@@ -372,6 +377,49 @@ func (s *addPartitionMetaStep) Execute(ctx context.Context) ([]nestedStep, error
 
 func (s *addPartitionMetaStep) Desc() string {
 	return fmt.Sprintf("add partition to meta table, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
+}
+
+type broadcastCreatePartitionMsgStep struct {
+	baseStep
+	vchannels []string
+	partition *model.Partition
+}
+
+func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	req := &msgpb.CreatePartitionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
+			commonpbutil.WithTimeStamp(0), // ts is given by streamingnode.
+		),
+		PartitionName: s.partition.PartitionName,
+		CollectionID:  s.partition.CollectionID,
+		PartitionID:   s.partition.PartitionID,
+	}
+
+	msgs := make([]message.MutableMessage, 0, len(s.vchannels))
+	for _, vchannel := range s.vchannels {
+		msg, err := message.NewCreatePartitionMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.CreatePartitionMessageHeader{
+				CollectionId: s.partition.CollectionID,
+				PartitionId:  s.partition.PartitionID,
+			}).
+			WithBody(req).
+			BuildMutable()
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, msg)
+	}
+	resp := streaming.WAL().Append(ctx, msgs...)
+	if err := resp.UnwrapFirstError(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (s *broadcastCreatePartitionMsgStep) Desc() string {
+	return fmt.Sprintf("broadcast create partition message to mq, collection: %d, partition: %d", s.partition.CollectionID, s.partition.PartitionID)
 }
 
 type changePartitionStateStep struct {

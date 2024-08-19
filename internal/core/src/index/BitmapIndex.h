@@ -83,6 +83,12 @@ class BitmapIndex : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
+
+    const TargetBitmap
     Range(T value, OpType op) override;
 
     const TargetBitmap
@@ -205,6 +211,9 @@ class BitmapIndex : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+
+    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset;
 };
 
 }  // namespace index

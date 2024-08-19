@@ -350,12 +350,7 @@ func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.Fiel
 		log.Error("failed to get collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-	if err != nil {
-		log.Error("failed to parse collection schema", zap.Error(err))
-		return nil, fmt.Errorf("failed to parse collection schema: %s", err)
-	}
-	field, err := schemaHelper.GetFieldFromName(cit.req.GetFieldName())
+	field, err := schema.schemaHelper.GetFieldFromName(cit.req.GetFieldName())
 	if err != nil {
 		log.Error("create index on non-exist field", zap.Error(err))
 		return nil, fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
@@ -678,11 +673,6 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-	if err != nil {
-		log.Error("failed to parse collection schema", zap.Error(err))
-		return fmt.Errorf("failed to parse collection schema: %s", err)
-	}
 
 	resp, err := dit.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
 	if err != nil {
@@ -700,7 +690,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, indexInfo := range resp.IndexInfos {
-		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		field, err := schema.schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			log.Error("failed to get collection field", zap.Error(err))
 			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
@@ -802,11 +792,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-	if err != nil {
-		log.Error("failed to parse collection schema", zap.String("collection_name", schema.GetName()), zap.Error(err))
-		return fmt.Errorf("failed to parse collection schema: %s", dit.GetCollectionName())
-	}
+	schemaHelper := schema.schemaHelper
 
 	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
 		CollectionID: dit.collectionID, IndexName: dit.IndexName,

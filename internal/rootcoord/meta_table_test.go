@@ -2000,3 +2000,44 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		assert.False(t, mt.aliases.exist("not_commit"))
 	})
 }
+
+func TestMetaTable_BackupRBAC(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(&milvuspb.RBACMeta{}, nil)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+	_, err := mt.BackupRBAC(context.TODO(), util.DefaultTenant)
+	assert.NoError(t, err)
+
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(nil, errors.New("error mock BackupRBAC"))
+	_, err = mt.BackupRBAC(context.TODO(), util.DefaultTenant)
+	assert.Error(t, err)
+}
+
+func TestMetaTable_RestoreRBAC(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+
+	err := mt.RestoreRBAC(context.TODO(), util.DefaultTenant, &milvuspb.RBACMeta{})
+	assert.NoError(t, err)
+
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error mock RestoreRBAC"))
+	err = mt.RestoreRBAC(context.TODO(), util.DefaultTenant, &milvuspb.RBACMeta{})
+	assert.Error(t, err)
+}

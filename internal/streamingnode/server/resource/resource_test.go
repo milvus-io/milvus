@@ -8,9 +8,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestInit(t *testing.T) {
+	paramtable.Init()
+
 	assert.Panics(t, func() {
 		Init()
 	})

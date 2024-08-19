@@ -88,6 +88,16 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
+    IsNull() override {
+        return internal_index_->IsNull();
+    }
+
+    const TargetBitmap
+    IsNotNull() override {
+        return internal_index_->IsNotNull();
+    }
+
+    const TargetBitmap
     Query(const DatasetPtr& dataset) override {
         return internal_index_->Query(dataset);
     }

@@ -97,6 +97,8 @@ type IMetaTable interface {
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(tenant string) ([]string, error)
 	ListUserRole(tenant string) ([]string, error)
+	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
+	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -1434,4 +1436,18 @@ func (mt *MetaTable) ListUserRole(tenant string) ([]string, error) {
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListUserRole(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	return mt.catalog.BackupRBAC(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
 }

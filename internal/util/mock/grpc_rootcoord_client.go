@@ -266,6 +266,14 @@ func (m *GrpcRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	return &milvuspb.BackupRBACMetaResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) Close() error {
 	return nil
 }

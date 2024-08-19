@@ -341,6 +341,61 @@ func (_c *RootCoordCatalog_AlterUserRole_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// BackupRBAC provides a mock function with given fields: ctx, tenant
+func (_m *RootCoordCatalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
+	ret := _m.Called(ctx, tenant)
+
+	var r0 *milvuspb.RBACMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*milvuspb.RBACMeta, error)); ok {
+		return rf(ctx, tenant)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *milvuspb.RBACMeta); ok {
+		r0 = rf(ctx, tenant)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RBACMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, tenant)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_BackupRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BackupRBAC'
+type RootCoordCatalog_BackupRBAC_Call struct {
+	*mock.Call
+}
+
+// BackupRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+func (_e *RootCoordCatalog_Expecter) BackupRBAC(ctx interface{}, tenant interface{}) *RootCoordCatalog_BackupRBAC_Call {
+	return &RootCoordCatalog_BackupRBAC_Call{Call: _e.mock.On("BackupRBAC", ctx, tenant)}
+}
+
+func (_c *RootCoordCatalog_BackupRBAC_Call) Run(run func(ctx context.Context, tenant string)) *RootCoordCatalog_BackupRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_BackupRBAC_Call) Return(_a0 *milvuspb.RBACMeta, _a1 error) *RootCoordCatalog_BackupRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_BackupRBAC_Call) RunAndReturn(run func(context.Context, string) (*milvuspb.RBACMeta, error)) *RootCoordCatalog_BackupRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with given fields:
 func (_m *RootCoordCatalog) Close() {
 	_m.Called()
@@ -1327,6 +1382,60 @@ func (_c *RootCoordCatalog_ListCredentials_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// ListCredentialsWithPasswd provides a mock function with given fields: ctx
+func (_m *RootCoordCatalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
+	ret := _m.Called(ctx)
+
+	var r0 map[string]string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (map[string]string, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) map[string]string); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_ListCredentialsWithPasswd_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCredentialsWithPasswd'
+type RootCoordCatalog_ListCredentialsWithPasswd_Call struct {
+	*mock.Call
+}
+
+// ListCredentialsWithPasswd is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *RootCoordCatalog_Expecter) ListCredentialsWithPasswd(ctx interface{}) *RootCoordCatalog_ListCredentialsWithPasswd_Call {
+	return &RootCoordCatalog_ListCredentialsWithPasswd_Call{Call: _e.mock.On("ListCredentialsWithPasswd", ctx)}
+}
+
+func (_c *RootCoordCatalog_ListCredentialsWithPasswd_Call) Run(run func(ctx context.Context)) *RootCoordCatalog_ListCredentialsWithPasswd_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListCredentialsWithPasswd_Call) Return(_a0 map[string]string, _a1 error) *RootCoordCatalog_ListCredentialsWithPasswd_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListCredentialsWithPasswd_Call) RunAndReturn(run func(context.Context) (map[string]string, error)) *RootCoordCatalog_ListCredentialsWithPasswd_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListDatabases provides a mock function with given fields: ctx, ts
 func (_m *RootCoordCatalog) ListDatabases(ctx context.Context, ts uint64) ([]*model.Database, error) {
 	ret := _m.Called(ctx, ts)
@@ -1658,6 +1767,50 @@ func (_c *RootCoordCatalog_ListUserRole_Call) Return(_a0 []string, _a1 error) *R
 }
 
 func (_c *RootCoordCatalog_ListUserRole_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *RootCoordCatalog_ListUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreRBAC provides a mock function with given fields: ctx, tenant, meta
+func (_m *RootCoordCatalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	ret := _m.Called(ctx, tenant, meta)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RBACMeta) error); ok {
+		r0 = rf(ctx, tenant, meta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_RestoreRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreRBAC'
+type RootCoordCatalog_RestoreRBAC_Call struct {
+	*mock.Call
+}
+
+// RestoreRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - meta *milvuspb.RBACMeta
+func (_e *RootCoordCatalog_Expecter) RestoreRBAC(ctx interface{}, tenant interface{}, meta interface{}) *RootCoordCatalog_RestoreRBAC_Call {
+	return &RootCoordCatalog_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC", ctx, tenant, meta)}
+}
+
+func (_c *RootCoordCatalog_RestoreRBAC_Call) Run(run func(ctx context.Context, tenant string, meta *milvuspb.RBACMeta)) *RootCoordCatalog_RestoreRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RBACMeta))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_RestoreRBAC_Call) Return(_a0 error) *RootCoordCatalog_RestoreRBAC_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_RestoreRBAC_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RBACMeta) error) *RootCoordCatalog_RestoreRBAC_Call {
 	_c.Call.Return(run)
 	return _c
 }

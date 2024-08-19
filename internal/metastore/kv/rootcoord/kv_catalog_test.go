@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -1473,7 +1475,20 @@ func TestRBAC_Credential(t *testing.T) {
 				}
 				return nil
 			},
-			nil,
+			func(key string) []string {
+				cmu.RLock()
+				defer cmu.RUnlock()
+				passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
+				if count == 0 {
+					return []string{
+						string(passwd),
+						string(passwd),
+						string(passwd),
+						string(passwd),
+					}
+				}
+				return nil
+			},
 			func(key string) error {
 				cmu.RLock()
 				defer cmu.RUnlock()
@@ -1931,7 +1946,14 @@ func TestRBAC_Role(t *testing.T) {
 					}
 				}
 				return nil
-			}, nil,
+			},
+			func(key string) []string {
+				if loadCredentialPrefixReturn.Load() {
+					passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
+					return []string{string(passwd)}
+				}
+				return nil
+			},
 			func(key string) error {
 				if loadCredentialPrefixReturn.Load() {
 					return nil
@@ -2542,6 +2564,186 @@ func TestRBAC_Grant(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestRBAC_Backup(t *testing.T) {
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := "/test/rbac"
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix("")
+	defer metaKV.Close()
+	c := &Catalog{Txn: metaKV}
+
+	ctx := context.Background()
+	c.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "role1"},
+		Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+		ObjectName: "obj_name1",
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "user1"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant)
+	c.CreateCredential(ctx, &model.Credential{
+		Username:          "user1",
+		EncryptedPassword: "passwd",
+	})
+	c.AlterUserRole(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: "user1"}, &milvuspb.RoleEntity{Name: "role1"}, milvuspb.OperateUserRoleType_AddUserToRole)
+
+	// test backup success
+	backup, err := c.BackupRBAC(ctx, util.DefaultTenant)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(backup.Grants))
+	assert.Equal(t, "obj_name1", backup.Grants[0].ObjectName)
+	assert.Equal(t, "role1", backup.Grants[0].Role.Name)
+	assert.Equal(t, 1, len(backup.Users))
+	assert.Equal(t, "user1", backup.Users[0].User)
+	assert.Equal(t, 1, len(backup.Users[0].Roles))
+	assert.Equal(t, 1, len(backup.Roles))
+}
+
+func TestRBAC_Restore(t *testing.T) {
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := "/test/rbac"
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix("")
+	defer metaKV.Close()
+	c := &Catalog{Txn: metaKV}
+
+	ctx := context.Background()
+
+	rbacMeta := &milvuspb.RBACMeta{
+		Users: []*milvuspb.UserInfo{
+			{
+				User:     "user1",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role1",
+					},
+				},
+			},
+		},
+		Roles: []*milvuspb.RoleEntity{
+			{
+				Name: "role1",
+			},
+		},
+
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name1",
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: "user1"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+				},
+			},
+		},
+	}
+	// test restore success
+	err := c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta)
+	assert.NoError(t, err)
+
+	// check user
+	users, err := c.ListCredentialsWithPasswd(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, users, 1)
+	assert.Equal(t, users["user1"], "passwd")
+	// check role
+	roles, err := c.ListRole(ctx, util.DefaultTenant, nil, false)
+	assert.NoError(t, err)
+	assert.Len(t, roles, 1)
+	assert.Equal(t, "role1", roles[0].Role.Name)
+	// check grant
+	grants, err := c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   roles[0].Role,
+		DbName: util.AnyWord,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, grants, 1)
+	assert.Equal(t, "obj_name1", grants[0].ObjectName)
+	assert.Equal(t, "role1", grants[0].Role.Name)
+	assert.Equal(t, "user1", grants[0].Grantor.User.Name)
+
+	rbacMeta2 := &milvuspb.RBACMeta{
+		Users: []*milvuspb.UserInfo{
+			{
+				User:     "user2",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role2",
+					},
+				},
+			},
+			{
+				User:     "user1",
+				Password: "passwd",
+				Roles: []*milvuspb.RoleEntity{
+					{
+						Name: "role2",
+					},
+				},
+			},
+		},
+		Roles: []*milvuspb.RoleEntity{
+			{
+				Name: "role2",
+			},
+		},
+
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role2"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj2"},
+				ObjectName: "obj_name2",
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: "user2"},
+					Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+				},
+			},
+		},
+	}
+
+	// test restore failed and roll back
+	err = c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta2)
+	assert.Error(t, err)
+
+	// check user
+	users, err = c.ListCredentialsWithPasswd(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, users, 1)
+	// check role
+	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
+	assert.NoError(t, err)
+	assert.Len(t, roles, 1)
+	// check grant
+	grants, err = c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   roles[0].Role,
+		DbName: util.AnyWord,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, grants, 1)
 }
 
 func TestCatalog_AlterDatabase(t *testing.T) {

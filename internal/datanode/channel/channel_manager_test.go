@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -181,11 +182,10 @@ func (s *ChannelManagerSuite) TearDownTest() {
 
 func (s *ChannelManagerSuite) TestReleaseStuck() {
 	var (
-		channel  = "by-dev-rootcoord-dml-2"
-		stuckSig = make(chan struct{})
+		channel = "by-dev-rootcoord-dml-2"
 	)
 	s.manager.releaseFunc = func(channel string) {
-		stuckSig <- struct{}{}
+		time.Sleep(1 * time.Second)
 	}
 
 	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
@@ -214,8 +214,6 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 	abchannel, ok := s.manager.abnormals.Get(releaseInfo.GetOpID())
 	s.True(ok)
 	s.Equal(channel, abchannel)
-
-	<-stuckSig
 
 	resp := s.manager.GetProgress(releaseInfo)
 	s.Equal(datapb.ChannelWatchState_ReleaseFailure, resp.GetState())
