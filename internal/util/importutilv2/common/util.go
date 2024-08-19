@@ -74,7 +74,7 @@ func CheckVarcharLength(data any, maxLength int64) error {
 
 func CheckArrayCapacity(arrLength int, maxCapacity int64) error {
 	if (int64)(arrLength) > maxCapacity {
-		return fmt.Errorf("array capacity %d exceeds max_length %d", arrLength, maxCapacity)
+		return fmt.Errorf("array capacity %d exceeds max_capacity %d", arrLength, maxCapacity)
 	}
 	return nil
 }

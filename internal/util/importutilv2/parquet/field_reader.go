@@ -96,10 +96,8 @@ func (c *FieldReader) Next(count int64) (any, error) {
 			return nil, nil
 		}
 		return data, typeutil.VerifyFloats64(data.([]float64))
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return ReadVarcharData(c, count)
-	case schemapb.DataType_String:
-		return ReadStringData(c, count)
 	case schemapb.DataType_JSON:
 		return ReadJSONData(c, count)
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -225,15 +223,15 @@ func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
 		return nil, err
 	}
 	data := make([]string, 0, count)
+	maxLength, err := parameterutil.GetMaxLength(pcr.field)
+	if err != nil {
+		return nil, err
+	}
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
 		stringReader, ok := chunk.(*array.String)
 		if !ok {
 			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
-		}
-		maxLength, err := parameterutil.GetMaxLength(pcr.field)
-		if err != nil {
-			return nil, err
 		}
 		for i := 0; i < dataNums; i++ {
 			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength); err != nil {
@@ -414,8 +412,6 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 			for j := start; j < end; j++ {
 				elementData = append(elementData, getValue(int(j)))
 			}
-
-			fmt.Println(" element Data : ", elementData)
 			data = append(data, elementData)
 		}
 	}
