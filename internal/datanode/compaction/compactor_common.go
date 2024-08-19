@@ -92,10 +92,10 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 
 		dl := reader.Value()
 		// If pk already exists in pk2ts, record the later one.
-		if ts, ok := pk2ts[dl.Pk]; ok && ts > dl.Ts {
+		if ts, ok := pk2ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
 			continue
 		}
-		pk2ts[dl.Pk] = dl.Ts
+		pk2ts[dl.Pk.GetValue()] = dl.Ts
 	}
 
 	log.Info("compact mergeDeltalogs end",
