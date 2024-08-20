@@ -17,6 +17,8 @@
 package common
 
 import (
+	"fmt"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -57,4 +59,22 @@ func getInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSc
 		}
 	}
 	return 0
+}
+
+func CheckVarcharLength(data any, maxLength int64) error {
+	str, ok := data.(string)
+	if !ok {
+		return fmt.Errorf("expected string, got %T", data)
+	}
+	if (int64)(len(str)) > maxLength {
+		return fmt.Errorf("value length %d exceeds max_length %d", len(str), maxLength)
+	}
+	return nil
+}
+
+func CheckArrayCapacity(arrLength int, maxCapacity int64) error {
+	if (int64)(arrLength) > maxCapacity {
+		return fmt.Errorf("array capacity %d exceeds max_capacity %d", arrLength, maxCapacity)
+	}
+	return nil
 }
