@@ -8,14 +8,15 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
 type ReaderSuite struct {
@@ -100,7 +101,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	suite.NoError(err)
 
-	// check reader seperate fields by '\t'
+	// check reader separate fields by '\t'
 	wrongSep := ','
 	_, err = NewReader(ctx, cm, schema, filePath, 64*1024*1024, wrongSep)
 	suite.Error(err)

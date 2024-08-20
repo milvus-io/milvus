@@ -219,7 +219,7 @@ func (s *BulkInsertSuite) run() {
 }
 
 func (s *BulkInsertSuite) TestMultiFileTypes() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet}
+	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
 
 	for _, fileType := range fileTypeArr {
 		s.fileType = fileType

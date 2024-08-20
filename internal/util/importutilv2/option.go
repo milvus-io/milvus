@@ -22,11 +22,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/samber/lo"
 )
 
 const (
@@ -108,7 +109,7 @@ func GetCSVSep(options Options) (rune, error) {
 	if err != nil || len(sep) == 0 {
 		return defaultSep, nil
 	} else if lo.Contains(unsupportedSep, []rune(sep)[0]) {
-		return 0, merr.WrapErrImportFailed(fmt.Sprintf("unsupported csv seperator: %s", sep))
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("unsupported csv separator: %s", sep))
 	}
 	return []rune(sep)[0], nil
 }

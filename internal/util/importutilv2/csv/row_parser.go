@@ -6,10 +6,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 type RowParser interface {
@@ -186,7 +187,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
-		return int64(num), nil
+		return num, nil
 	case schemapb.DataType_Float:
 		num, err := strconv.ParseFloat(obj, 32)
 		if err != nil {
@@ -198,7 +199,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
-		return float64(num), nil
+		return num, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
@@ -209,9 +210,6 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		if len(vec) != r.name2Dim[field.GetName()]/8 {
 			return nil, r.wrapDimError(len(vec)*8, field)
-		}
-		for i := 0; i < len(vec); i++ {
-			vec[i] = byte(vec[i])
 		}
 		return vec, nil
 	case schemapb.DataType_JSON:
@@ -230,9 +228,6 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if len(vec) != r.name2Dim[field.GetName()] {
 			return nil, r.wrapDimError(len(vec), field)
 		}
-		for i := 0; i < len(vec); i++ {
-			vec[i] = float32(vec[i])
-		}
 		return vec, nil
 	case schemapb.DataType_Float16Vector:
 		var vec []float32
@@ -245,7 +240,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		vec2 := make([]byte, len(vec)*2)
 		for i := 0; i < len(vec); i++ {
-			copy(vec2[i*2:], typeutil.Float32ToFloat16Bytes(float32(vec[i])))
+			copy(vec2[i*2:], typeutil.Float32ToFloat16Bytes(vec[i]))
 		}
 		return vec2, nil
 	case schemapb.DataType_BFloat16Vector:
@@ -259,7 +254,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		vec2 := make([]byte, len(vec)*2)
 		for i := 0; i < len(vec); i++ {
-			copy(vec2[i*2:], typeutil.Float32ToBFloat16Bytes(float32(vec[i])))
+			copy(vec2[i*2:], typeutil.Float32ToBFloat16Bytes(vec[i]))
 		}
 		return vec2, nil
 	case schemapb.DataType_SparseFloatVector:
