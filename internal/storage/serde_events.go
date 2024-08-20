@@ -521,6 +521,7 @@ func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int
 			}
 
 			builder.AppendValueFromString(string(strVal))
+			eventWriter.memorySize += len(strVal)
 			memorySize += uint64(len(strVal))
 		}
 		arr := []arrow.Array{builder.NewArray()}
@@ -765,7 +766,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 			for _, vv := range v {
 				pk := vv.Pk.GetValue().(int64)
 				pb.Append(pk)
-				memorySize += uint64(pk)
+				memorySize += 8
 			}
 		case schemapb.DataType_VarChar:
 			pb := builder.Field(0).(*array.StringBuilder)
@@ -780,8 +781,9 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 
 		for _, vv := range v {
 			builder.Field(1).(*array.Int64Builder).Append(int64(vv.Ts))
-			memorySize += vv.Ts
+			memorySize += 8
 		}
+		eventWriter.memorySize += int(memorySize)
 
 		arr := []arrow.Array{builder.Field(0).NewArray(), builder.Field(1).NewArray()}
 
