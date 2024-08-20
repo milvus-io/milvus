@@ -731,7 +731,7 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(cw.collection, default_field_name, default_index_params)
         res, _ = self.utility_wrap.index_building_progress(c_name)
-        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0}
+        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 'Finished'}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -822,7 +822,7 @@ class TestUtilityBase(TestcaseBase):
         cw.create_index(default_field_name, default_index_params)
         assert self.utility_wrap.wait_for_index_building_complete(c_name)[0]
         res, _ = self.utility_wrap.index_building_progress(c_name)
-        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0}
+        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 'Finished'}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
