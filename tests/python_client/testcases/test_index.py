@@ -923,24 +923,24 @@ class TestNewIndexBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
                                   index_name=ct.default_index_name)
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
         collection_w.load()
         collection_w.release()
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': False})
         collection_w.load()
-        assert collection_w.index().params["mmap.enabled"] == 'False'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'False'
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp)
         collection_w.release()
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
         collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
@@ -958,12 +958,11 @@ class TestNewIndexBase(TestcaseBase):
         expected: search success
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=cf.gen_default_collection_schema())
+        collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False)[0]
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index(field_name, default_index, index_name=f"mmap_index_{index}")
         collection_w.alter_index(f"mmap_index_{index}", {'mmap.enabled': True})
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
         collection_w.drop_index(index_name=f"mmap_index_{index}")
         collection_w.create_index(field_name, default_index, index_name=f"index_{index}")
         collection_w.load()
@@ -984,21 +983,21 @@ class TestNewIndexBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w = self.init_collection_general(c_name, insert_data=True, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
                                   index_name=ct.default_index_name)
         collection_w.set_properties({'mmap.enabled': True})
-        pro = collection_w.describe().get("properties")
+        pro = collection_w.describe()[0].get("properties")
         assert pro["mmap.enabled"] == 'True'
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
         collection_w.insert(cf.gen_default_list_data())
         collection_w.flush()
 
         # check if mmap works after rebuild index
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
                                   index_name=ct.default_index_name)
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
 
         collection_w.load()
         collection_w.release()
@@ -1006,8 +1005,8 @@ class TestNewIndexBase(TestcaseBase):
         # check if mmap works after reloading and rebuilding index.
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
                                   index_name=ct.default_index_name)
-        assert collection_w.index().params["mmap.enabled"] == 'True'
-        pro = collection_w.describe().get("properties")
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        pro = collection_w.describe()[0].get("properties")
         assert pro["mmap.enabled"] == 'True'
 
         collection_w.load()
