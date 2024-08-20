@@ -98,6 +98,7 @@ func TestRowParser_Parse_Valid(t *testing.T) {
 			var mp map[string]interface{}
 
 			desc := json.NewDecoder(strings.NewReader(c.name))
+
 			desc.UseNumber()
 			err = desc.Decode(&mp)
 			assert.NoError(t, err)
