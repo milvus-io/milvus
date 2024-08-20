@@ -1666,7 +1666,7 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	// Test for get shard leader fail
 	server.targetMgr = otm
 	for _, node := range suite.nodes {
-		suite.nodeMgr.Suspend(node)
+		suite.nodeMgr.Stopping(node)
 	}
 	assertCheckHealthResult(true)
 }
