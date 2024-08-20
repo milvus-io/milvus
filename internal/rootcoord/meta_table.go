@@ -142,8 +142,6 @@ func (mt *MetaTable) reload() error {
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
-	partitionNum := int64(0)
-
 	metrics.RootCoordNumOfCollections.Reset()
 	metrics.RootCoordNumOfPartitions.Reset()
 	metrics.RootCoordNumOfDatabases.Set(0)
@@ -177,12 +175,14 @@ func (mt *MetaTable) reload() error {
 
 	// recover collections from db namespace
 	for dbName, db := range mt.dbName2Meta {
+		partitionNum := int64(0)
+		collectionNum := int64(0)
+
 		mt.names.createDbIfNotExist(dbName)
 		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
 		if err != nil {
 			return err
 		}
-		collectionNum := int64(0)
 		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
@@ -194,6 +194,7 @@ func (mt *MetaTable) reload() error {
 
 		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		log.Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
 			zap.Int64("partition_num", partitionNum))
@@ -210,8 +211,6 @@ func (mt *MetaTable) reload() error {
 			mt.aliases.insert(dbName, alias.Name, alias.CollectionID)
 		}
 	}
-
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	log.Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
