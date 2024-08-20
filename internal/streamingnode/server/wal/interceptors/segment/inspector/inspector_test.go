@@ -10,11 +10,16 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/segment/mock_inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestSealedInspector(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
 	notifier := stats.NewSealSignalNotifier()
 	inspector := NewSealedInspector(notifier)
 

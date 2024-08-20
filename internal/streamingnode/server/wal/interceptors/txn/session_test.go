@@ -147,7 +147,7 @@ func TestManager(t *testing.T) {
 
 	closed := make(chan struct{})
 	go func() {
-		m.GracefulClose()
+		m.GracefulClose(context.Background())
 		close(closed)
 	}()
 

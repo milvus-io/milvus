@@ -110,12 +110,12 @@ func (s *FlusherSuite) SetupTest() {
 	scanner := mock_wal.NewMockScanner(s.T())
 
 	w := mock_wal.NewMockWAL(s.T())
-	w.EXPECT().WALName().Return("rocksmq")
+	w.EXPECT().WALName().Return("rocksmq").Maybe()
 	w.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, option wal.ReadOption) (wal.Scanner, error) {
 			handlers.Insert(option.MesasgeHandler)
 			return scanner, nil
-		})
+		}).Maybe()
 
 	once := sync.Once{}
 	scanner.EXPECT().Close().RunAndReturn(func() error {
@@ -126,7 +126,7 @@ func (s *FlusherSuite) SetupTest() {
 			})
 		})
 		return nil
-	})
+	}).Maybe()
 
 	s.wal = w
 	m := mocks.NewChunkManager(s.T())

@@ -2,9 +2,11 @@ package adaptor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -43,6 +45,9 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 			CollectionId: 1,
 		}).
 		WithBody(&msgpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Delete,
+			},
 			CollectionID: 1,
 			PartitionID:  1,
 			Timestamps:   []uint64{10},
@@ -78,7 +83,13 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, msg)
 
+	txnCtx := message.TxnContext{
+		TxnID:     1,
+		Keepalive: time.Second,
+	}
+
 	beginImmutableMsg, err := message.AsImmutableBeginTxnMessageV2(msg.WithTimeTick(9).
+		WithTxnContext(txnCtx).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(2)))
 	assert.NoError(t, err)
@@ -90,14 +101,15 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		BuildMutable()
 
 	commitImmutableMsg, err := message.AsImmutableCommitTxnMessageV2(msg.WithTimeTick(12).
+		WithTxnContext(txnCtx).
 		WithTxnContext(message.TxnContext{}).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(3)))
 	assert.NoError(t, err)
 
 	txn, err := message.NewImmutableTxnMessageBuilder(beginImmutableMsg).
-		Add(insertImmutableMessage).
-		Add(deleteImmutableMsg).
+		Add(insertMsg.WithTxnContext(txnCtx).IntoImmutableMessage(id)).
+		Add(deleteMsg.WithTxnContext(txnCtx).IntoImmutableMessage(id)).
 		Build(commitImmutableMsg)
 	assert.NoError(t, err)
 

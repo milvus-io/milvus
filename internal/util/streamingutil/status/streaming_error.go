@@ -43,6 +43,12 @@ func (e *StreamingError) IsSkippedOperation() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM
 }
 
+// IsUnrecoverable returns true if the error is unrecoverable.
+// Stop resuming retry and report to user.
+func (e *StreamingError) IsUnrecoverable() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE || e.IsTxnUnavilable()
+}
+
 // IsTxnUnavilable returns true if the transaction is unavailable.
 func (e *StreamingError) IsTxnUnavilable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED ||
@@ -103,6 +109,11 @@ func NewTransactionExpired(format string, args ...interface{}) *StreamingError {
 // NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.
 func NewInvalidTransactionState(operation string, expectState message.TxnState, currentState message.TxnState) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, "invalid transaction state for operation %s, expect %s, current %s", operation, expectState, currentState)
+}
+
+// NewUnrecoverableError creates a new StreamingError with code STREAMING_CODE_UNRECOVERABLE.
+func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

@@ -148,7 +148,7 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
 		if err != nil {
-			return nil, status.NewInner("segment assignment failure with error: %s", err.Error())
+			return nil, err
 		}
 		// once the segment assignment is done, we need to ack the result,
 		// if other partitions failed to assign segment or wal write failure,

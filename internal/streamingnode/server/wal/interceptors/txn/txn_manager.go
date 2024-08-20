@@ -93,7 +93,7 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 }
 
 // GracefulClose waits for all transactions to be cleaned up.
-func (m *TxnManager) GracefulClose() {
+func (m *TxnManager) GracefulClose(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed == nil {
 		m.closed = lifetime.NewSafeChan()
@@ -104,7 +104,9 @@ func (m *TxnManager) GracefulClose() {
 	m.mu.Unlock()
 
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-m.closed.CloseCh():
-	case <-time.After(5 * time.Second):
+		return nil
 	}
 }

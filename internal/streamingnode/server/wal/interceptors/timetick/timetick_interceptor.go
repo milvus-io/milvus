@@ -107,9 +107,15 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 
 // GracefulClose implements InterceptorWithGracefulClose.
 func (impl *timeTickAppendInterceptor) GracefulClose() {
-	log.Warn("timeTickAppendInterceptor is closing", zap.String("pchannel", impl.operator.pchannel.Name))
-	impl.txnManager.GracefulClose()
-	log.Warn("timeTickAppendInterceptor is closed", zap.String("pchannel", impl.operator.pchannel.Name))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	logger := log.With(zap.Any("pchannel", impl.operator.pchannel))
+	logger.Info("timeTickAppendInterceptor is closing, try to perform a txn manager graceful shutdown")
+	if err := impl.txnManager.GracefulClose(ctx); err != nil {
+		logger.Warn("timeTickAppendInterceptor is closed", zap.Error(err))
+		return
+	}
+	logger.Info("txnManager of timeTickAppendInterceptor is graceful closed")
 }
 
 // Close implements AppendInterceptor.

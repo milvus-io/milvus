@@ -95,13 +95,14 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 		}
 		// It's ok to stop retry if the error is canceled or deadline exceed.
 		if status.IsCanceled(err) {
-			return nil, errors.Mark(err, errs.ErrCanceled)
+			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
-			// if the error is txn unavailable, it cannot be retried forever.
+			// if the error is txn unavailable or unrecoverable error,
+			// it cannot be retried forever.
 			// we should mark it and return.
-			if sErr.IsTxnUnavilable() {
-				return nil, errors.Mark(err, errs.ErrTxnUnavailable)
+			if sErr.IsUnrecoverable() {
+				return nil, errors.Mark(err, errs.ErrUnrecoverable)
 			}
 		}
 	}
