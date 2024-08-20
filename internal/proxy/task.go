@@ -1611,6 +1611,13 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	// TODO use load collection load field list after proto merged
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
+
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1658,6 +1665,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema))
@@ -1855,6 +1863,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1908,6 +1921,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {

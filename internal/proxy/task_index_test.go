@@ -188,6 +188,18 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("coll has been loaded", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
@@ -200,6 +212,22 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("show collection error", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        merr.Success(),
+			CollectionIDs: []int64{collectionID},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 		dit.queryCoord = qc
 
@@ -209,6 +237,22 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	t.Run("show collection fail", func(t *testing.T) {
 		qc := getMockQueryCoord()
+		qc.ExpectedCalls = nil
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        merr.Success(),
+			CollectionIDs: []int64{collectionID},
+		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -236,6 +280,7 @@ func getMockQueryCoord() *mocks.MockQueryCoordClient {
 			},
 		},
 	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	return qc
 }
 

@@ -249,6 +249,8 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	qc := mocks.NewMockQueryCoordClient(t)
 	node.SetQueryCoordClient(qc)
 
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+
 	tsoAllocatorIns := newMockTsoAllocator()
 	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns, node.factory)
 	assert.NoError(t, err)
