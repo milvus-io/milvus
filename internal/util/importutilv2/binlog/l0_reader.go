@@ -105,7 +105,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				if err == io.EOF {
 					break
 				}
-				log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
+				log.Error("error on importing L0 segment, fail to read deltalogs", zap.Error(err))
 				return nil, err
 			}
 
