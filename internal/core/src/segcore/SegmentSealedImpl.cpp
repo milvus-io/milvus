@@ -1435,6 +1435,30 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     return get_raw_data(field_id, field_meta, seg_offsets, count);
 }
 
+std::unique_ptr<DataArray>
+SegmentSealedImpl::bulk_subscript(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
+    Assert(!dynamic_field_names.empty());
+    auto& field_meta = schema_->operator[](field_id);
+    if (count == 0) {
+        return fill_with_empty(field_id, 0);
+    }
+
+    auto column = fields_.at(field_id);
+    auto ret = fill_with_empty(field_id, count);
+    auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
+    auto field = reinterpret_cast<const VariableColumn<Json>*>(column.get());
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        dst->at(i) = ExtractSubJson(std::string(field->RawAt(offset)),
+                                    dynamic_field_names);
+    }
+    return ret;
+}
+
 bool
 SegmentSealedImpl::HasIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
