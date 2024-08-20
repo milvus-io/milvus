@@ -433,6 +433,10 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
+	suite.meta.ResourceManager.HandleNodeUp(1)
+	nodes, err := suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Contains(nodes, int64(1))
 	// test success
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{
@@ -440,16 +444,18 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	node := suite.nodeMgr.Get(1)
-	suite.Equal(session.NodeStateSuspend, node.GetState())
+	nodes, err = suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.NotContains(nodes, int64(1))
 
 	resp, err = suite.server.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: 1,
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	node = suite.nodeMgr.Get(1)
-	suite.Equal(session.NodeStateNormal, node.GetState())
+	nodes, err = suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Contains(nodes, int64(1))
 }
 
 func (suite *OpsServiceSuite) TestTransferSegment() {
