@@ -53,6 +53,7 @@ struct Plan {
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     std::vector<FieldId> target_entries_;
+    std::vector<std::string> target_dynamic_fields_;
     void
     check_identical(Plan& other);
 
@@ -100,6 +101,7 @@ struct RetrievePlan {
     const Schema& schema_;
     std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldId> field_ids_;
+    std::vector<std::string> target_dynamic_fields_;
 };
 
 using PlanPtr = std::unique_ptr<Plan>;
