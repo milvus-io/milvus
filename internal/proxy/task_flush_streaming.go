@@ -129,7 +129,7 @@ func (t *flushTaskByStreamingService) sendManualFlushToWAL(ctx context.Context, 
 		return nil, err
 	}
 
-	appendResult, err := streaming.WAL().Append(ctx, flushMsg, streaming.AppendOption{
+	appendResult, err := streaming.WAL().RawAppend(ctx, flushMsg, streaming.AppendOption{
 		BarrierTimeTick: flushTs,
 	})
 	if err != nil {

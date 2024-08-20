@@ -35,7 +35,7 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp, err := streaming.WAL().Append(context.Background(), msg)
+	resp, err := streaming.WAL().RawAppend(context.Background(), msg)
 	fmt.Printf("%+v\t%+v\n", resp, err)
 
 	for i := 0; i < 500; i++ {
@@ -49,7 +49,7 @@ func TestStreamingProduce(t *testing.T) {
 			}).
 			WithVChannel(vChannel).
 			BuildMutable()
-		resp, err := streaming.WAL().Append(context.Background(), msg)
+		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
 		fmt.Printf("%+v\t%+v\n", resp, err)
 	}
 
@@ -92,7 +92,7 @@ func TestStreamingProduce(t *testing.T) {
 		}).
 		WithVChannel(vChannel).
 		BuildMutable()
-	resp, err = streaming.WAL().Append(context.Background(), msg)
+	resp, err = streaming.WAL().RawAppend(context.Background(), msg)
 	fmt.Printf("%+v\t%+v\n", resp, err)
 }
 

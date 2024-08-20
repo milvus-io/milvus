@@ -546,16 +546,12 @@ func TestGcPartitionData(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
-	u := mock_streaming.NewMockUtility(t)
-	u.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().Utility().Return(u)
+	wal.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
 	streaming.SetWALForTest(wal)
 
 	tsoAllocator := mocktso.NewAllocator(t)
-	tsoAllocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
-
-	core := newTestCore(withTsoAllocator(tsoAllocator))
+	core := newTestCore()
 	gc := newBgGarbageCollector(core)
 	core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 

@@ -47,6 +47,11 @@ func (s *HelloStreamingSuite) SetupSuite() {
 	streamingutil.SetStreamingServiceEnabled()
 }
 
+func (s *HelloStreamingSuite) TeardownSuite() {
+	s.MiniClusterSuite.TearDownSuite()
+	streamingutil.UnsetStreamingServiceEnabled()
+}
+
 func (s *HelloStreamingSuite) TestHelloStreaming() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()

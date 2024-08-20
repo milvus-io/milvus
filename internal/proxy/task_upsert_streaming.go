@@ -36,7 +36,7 @@ func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
 	}
 
 	messages := append(insertMsgs, deleteMsgs...)
-	resp := streaming.WAL().Utility().AppendMessages(ctx, messages...)
+	resp := streaming.WAL().AppendMessages(ctx, messages...)
 	if err := resp.UnwrapFirstError(); err != nil {
 		log.Warn("append messages to wal failed", zap.Error(err))
 		return err

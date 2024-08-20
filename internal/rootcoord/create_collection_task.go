@@ -469,7 +469,7 @@ func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(
 	// ts is used as initial checkpoint at datacoord,
 	// it must be set as barrier time tick.
 	// The timetick of create message in wal must be greater than ts, to avoid data read loss at read side.
-	resps := streaming.WAL().Utility().AppendMessagesWithOption(ctx, streaming.AppendOption{
+	resps := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
 		BarrierTimeTick: ts,
 	}, msgs...)
 	if err := resps.UnwrapFirstError(); err != nil {

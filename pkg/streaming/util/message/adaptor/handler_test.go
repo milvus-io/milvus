@@ -99,6 +99,7 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		BuildMutable()
+	assert.NoError(t, err)
 
 	commitImmutableMsg, err := message.AsImmutableCommitTxnMessageV2(msg.WithTimeTick(12).
 		WithTxnContext(txnCtx).
@@ -125,6 +126,7 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 		WithHeader(&message.FlushMessageHeader{}).
 		WithBody(&message.FlushMessageBody{}).
 		BuildMutable()
+	assert.NoError(t, err)
 
 	flushMsg := msg.
 		WithTimeTick(13).
