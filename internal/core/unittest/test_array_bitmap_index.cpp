@@ -162,6 +162,7 @@ class ArrayBitmapIndexTest : public testing::Test {
          int64_t index_version) {
         proto::schema::FieldSchema field_schema;
         field_schema.set_data_type(proto::schema::DataType::Array);
+        field_schema.set_nullable(nullable_);
         proto::schema::DataType element_type;
         if constexpr (std::is_same_v<int8_t, T>) {
             element_type = proto::schema::DataType::Int8;
@@ -185,17 +186,34 @@ class ArrayBitmapIndexTest : public testing::Test {
             segment_id, field_id, index_build_id, index_version};
 
         data_ = GenerateArrayData(element_type, cardinality_, nb_, 10);
-
-        auto field_data = storage::CreateFieldData(DataType::ARRAY);
-        field_data->FillFieldData(data_.data(), data_.size());
+        auto field_data = storage::CreateFieldData(DataType::ARRAY, nullable_);
+        if (nullable_) {
+            valid_data_.reserve(nb_);
+            uint8_t* ptr = new uint8_t[(nb_ + 7) / 8];
+            for (int i = 0; i < nb_; i++) {
+                int byteIndex = i / 8;
+                int bitIndex = i % 8;
+                if (i % 2 == 0) {
+                    valid_data_.push_back(true);
+                    ptr[byteIndex] |= (1 << bitIndex);
+                } else {
+                    valid_data_.push_back(false);
+                    ptr[byteIndex] &= ~(1 << bitIndex);
+                }
+            }
+            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            delete[] ptr;
+        } else {
+            field_data->FillFieldData(data_.data(), data_.size());
+        }
         storage::InsertData insert_data(field_data);
         insert_data.SetFieldDataMeta(field_meta);
         insert_data.SetTimestamps(0, 100);
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("{}/{}/{}/{}/{}/{}",
-                                    "test_array_bitmap",
+        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
+                                    "/tmp/test_array_bitmap",
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -208,9 +226,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         std::vector<std::string> index_files;
 
         Config config;
-        config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
+        config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
-        config["bitmap_cardinality_limit"] = "1000";
+        config["bitmap_cardinality_limit"] = "100";
 
         auto build_index =
             indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -223,7 +241,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         }
 
         index::CreateIndexInfo index_info{};
-        index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
+        index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
 
         config["index_files"] = index_files;
@@ -233,11 +251,16 @@ class ArrayBitmapIndexTest : public testing::Test {
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
-    void
-    SetUp() override {
+    virtual void
+    SetParam() {
         nb_ = 10000;
         cardinality_ = 30;
+        nullable_ = false;
+    }
 
+    void
+    SetUp() override {
+        SetParam();
         // if constexpr (std::is_same_v<T, int8_t>) {
         //     type_ = DataType::INT8;
         // } else if constexpr (std::is_same_v<T, int16_t>) {
@@ -289,6 +312,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         for (size_t i = 0; i < bitset.size(); i++) {
             auto ref = [&]() -> bool {
                 milvus::Array array = data_[i];
+                if (nullable_ && !valid_data_[i]) {
+                    return false;
+                }
                 for (size_t j = 0; j < array.length(); ++j) {
                     auto val = array.template get_data<T>(j);
                     if (s.find(val) != s.end()) {
@@ -309,7 +335,9 @@ class ArrayBitmapIndexTest : public testing::Test {
     IndexBasePtr index_;
     size_t nb_;
     size_t cardinality_;
+    bool nullable_;
     std::vector<milvus::Array> data_;
+    FixedVector<bool> valid_data_;
 };
 
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTest);
@@ -338,3 +366,58 @@ REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTest,
 INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheck,
                                ArrayBitmapIndexTest,
                                BitmapType);
+
+template <typename T>
+class ArrayBitmapIndexTestV1 : public ArrayBitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 200;
+        this->nullable_ = false;
+    }
+
+    virtual ~ArrayBitmapIndexTestV1() {
+    }
+};
+
+TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1);
+
+TYPED_TEST_P(ArrayBitmapIndexTestV1, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+template <typename T>
+class ArrayBitmapIndexTestNullable : public ArrayBitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 30;
+        this->nullable_ = true;
+    }
+
+    virtual ~ArrayBitmapIndexTestNullable() {
+    }
+};
+
+TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullable);
+
+TYPED_TEST_P(ArrayBitmapIndexTestNullable, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+using BitmapTypeV1 = testing::Types<int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1, CountFuncTest);
+REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullable, CountFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
+                               ArrayBitmapIndexTestV1,
+                               BitmapTypeV1);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
+                               ArrayBitmapIndexTestNullable,
+                               BitmapTypeV1);

@@ -17,7 +17,9 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -345,13 +348,69 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	s.SetupTest()
 	nodeSlots := map[int64]int64{
-		100: 2,
-		101: 3,
+		100: 16,
+		101: 23,
 	}
-	node := s.handler.pickAnyNode(nodeSlots)
+	node, useSlot := s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
 	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node = s.handler.pickAnyNode(map[int64]int64{})
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
+	s.Equal(int64(100), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &mixCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_MixCompaction,
+		},
+	})
+	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
+	s.Equal(int64(NullNodeID), node)
+}
+
+func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
+	s.SetupTest()
+	nodeSlots := map[int64]int64{
+		100: 2,
+		101: 16,
+		102: 10,
+	}
+	executingTasks := make(map[int64]CompactionTask, 0)
+	executingTasks[1] = &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	}
+	executingTasks[2] = &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	}
+	s.handler.executingTasks = executingTasks
+	node, useSlot := s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	})
+	s.Equal(int64(101), node)
+	nodeSlots[node] = nodeSlots[node] - useSlot
+
+	node, useSlot = s.handler.pickAnyNode(nodeSlots, &clusteringCompactionTask{
+		CompactionTask: &datapb.CompactionTask{
+			Type: datapb.CompactionType_ClusteringCompaction,
+		},
+	})
 	s.Equal(int64(NullNodeID), node)
 }
 
@@ -701,6 +760,43 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	t = s.handler.getCompactionTask(6)
 	s.Equal(datapb.CompactionTaskState_executing, t.GetState())
+}
+
+func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
+	s.SetupTest()
+	inTasks := []*datapb.CompactionTask{
+		{
+			PlanID:    1,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_completed,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+		},
+		{
+			PlanID:    2,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+		},
+		{
+			PlanID:    3,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Unix(),
+		},
+	}
+
+	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
+	compactionTaskMeta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	s.NoError(err)
+	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
+	for _, t := range inTasks {
+		s.handler.meta.SaveCompactionTask(t)
+	}
+
+	s.handler.cleanCompactionTaskMeta()
+	// two task should be cleaned, one remains
+	tasks := s.handler.meta.GetCompactionTaskMeta().GetCompactionTasks()
+	s.Equal(1, len(tasks))
 }
 
 func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {

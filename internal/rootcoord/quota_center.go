@@ -41,10 +41,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -270,15 +272,36 @@ func getRateTypes(scope internalpb.RateScope, opType opType) typeutil.Set[intern
 
 func (q *QuotaCenter) Start() {
 	q.wg.Add(1)
-	go q.run()
+	go func() {
+		defer q.wg.Done()
+		q.run()
+	}()
+}
+
+func (q *QuotaCenter) watchQuotaAndLimit() {
+	pt := paramtable.Get()
+	pt.Watch(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, config.NewHandler(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, func(event *config.Event) {
+		metrics.QueryNodeMemoryHighWaterLevel.Set(pt.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuota.Key, config.NewHandler(pt.QuotaConfig.DiskQuota.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "cluster").Set(pt.QuotaConfig.DiskQuota.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuotaPerDB.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerDB.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "db").Set(pt.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuotaPerCollection.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerCollection.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(pt.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	}))
+	pt.Watch(pt.QuotaConfig.DiskQuotaPerPartition.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerPartition.Key, func(event *config.Event) {
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(pt.QuotaConfig.DiskQuotaPerPartition.GetAsFloat())
+	}))
 }
 
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
-	defer q.wg.Done()
-
 	interval := Params.QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
+	q.watchQuotaAndLimit()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -957,6 +980,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(memFactors)
 	growingSegFactors := q.getGrowingSegmentsSizeFactor()
 	updateCollectionFactor(growingSegFactors)
+	l0Factors := q.getL0SegmentsSizeFactor()
+	updateCollectionFactor(l0Factors)
 
 	ttCollections := make([]int64, 0)
 	memoryCollections := make([]int64, 0)
@@ -1210,6 +1235,26 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 			zap.Float64("highWatermark", high),
 			zap.Float64("lowWatermark", low),
 			zap.Float64("factor", factor))
+	}
+	return collectionFactor
+}
+
+// getL0SegmentsSizeFactor checks wether any collection
+func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
+	if !Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	l0segmentSizeLowWaterLevel := Params.QuotaConfig.L0SegmentRowCountLowWaterLevel.GetAsInt64()
+	l0SegmentSizeHighWaterLevel := Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64()
+
+	collectionFactor := make(map[int64]float64)
+	for collectionID, l0RowCount := range q.dataCoordMetrics.CollectionL0RowCount {
+		if l0RowCount < l0segmentSizeLowWaterLevel {
+			continue
+		}
+		factor := float64(l0SegmentSizeHighWaterLevel-l0RowCount) / float64(l0SegmentSizeHighWaterLevel-l0segmentSizeLowWaterLevel)
+		collectionFactor[collectionID] = factor
 	}
 	return collectionFactor
 }
@@ -1546,6 +1591,7 @@ func (q *QuotaCenter) recordMetrics() {
 						return false
 					}
 					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), name).Set(1.0)
+					metrics.RootCoordForceDenyWritingCounter.Inc()
 					return false
 				}
 				return true

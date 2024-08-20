@@ -105,7 +105,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             segment.get_chunk_mutex());
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
-        auto vec_ptr = record.get_field_data_base(vecfield_id);
+        auto vec_ptr = record.get_data_base(vecfield_id);
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 

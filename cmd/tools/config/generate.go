@@ -283,6 +283,10 @@ func WriteYaml(w io.Writer) {
 			name: "dataNode",
 		},
 		{
+			name:   "msgChannel",
+			header: "\n# This topic introduces the message channel-related configurations of Milvus.",
+		},
+		{
 			name:   "log",
 			header: "\n# Configures the system log output.",
 		},

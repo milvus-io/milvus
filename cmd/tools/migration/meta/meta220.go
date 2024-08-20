@@ -2,7 +2,7 @@ package meta
 
 import (
 	"github.com/blang/semver/v4"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"

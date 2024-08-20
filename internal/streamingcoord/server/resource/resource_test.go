@@ -21,12 +21,6 @@ func TestInit(t *testing.T) {
 			mock_metastore.NewMockStreamingCoordCataLog(t),
 		))
 	})
-	Init(OptETCD(&clientv3.Client{}), OptStreamingCatalog(
-		mock_metastore.NewMockStreamingCoordCataLog(t),
-	))
-
-	assert.NotNil(t, Resource().StreamingCatalog())
-	assert.NotNil(t, Resource().ETCD())
 }
 
 func TestInitForTest(t *testing.T) {

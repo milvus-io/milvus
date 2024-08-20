@@ -2579,6 +2579,29 @@ class TestQueryOperation(TestcaseBase):
         _, check_res = collection_w.query(multi_exprs, output_fields=[f'{default_int_field_name}'])
         assert(check_res == True) 
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_multi_logical_exprs(self):
+        """
+        target: test the scenario which search with many logical expressions
+        method: 1. create collection
+                3. search with the expr that like: int64 == 0 || int64 == 1 ........ 
+        expected: run successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+    
+        multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
+    
+        collection_w.load()
+        vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        limit = 1000
+        _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
+                            ct.default_search_params, limit, multi_exprs)
+        assert(check_res == True) 
 
 class TestQueryString(TestcaseBase):
     """
@@ -2675,6 +2698,99 @@ class TestQueryString(TestcaseBase):
         output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
         collection_w.query(expression, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_prefixes_auto_index(self):
+        """
+        target: test query with prefix string expression and indexed with auto index
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=default_int_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.create_index("varchar", index_name="varchar_auto_index")
+        time.sleep(1)
+        collection_w.load()
+        expression = 'varchar like "0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len = len(result)
+        collection_w.release()
+        collection_w.drop_index(index_name="varchar_auto_index")
+        collection_w.load()
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_1 = len(result)
+        assert res_len_1 == res_len
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_prefixes_bitmap(self):
+        """
+        target: test query with prefix string expression and indexed with bitmap
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=default_int_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.create_index("varchar", index_name="bitmap_auto_index")
+        time.sleep(1)
+        collection_w.load()
+        expression = 'varchar like "0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len = len(result)
+        collection_w.release()
+        collection_w.drop_index(index_name="varchar_bitmap_index")
+        collection_w.load()
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_1 = len(result)
+        assert res_len_1 == res_len
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_match_auto_index(self):
+        """
+        target: test query with match string expression and indexed with auto index
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=default_int_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.create_index("varchar", index_name="varchar_auto_index")
+        time.sleep(1)
+        collection_w.load()
+        expression = 'varchar like "%0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len = len(result)
+        collection_w.release()
+        collection_w.drop_index(index_name="varchar_auto_index")
+        collection_w.load()
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_1 = len(result)
+        assert res_len_1 == res_len
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_match_bitmap(self):
+        """
+        target: test query with match string expression and indexed with bitmap
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=default_int_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.create_index("varchar", index_name="bitmap_auto_index")
+        time.sleep(1)
+        collection_w.load()
+        expression = 'varchar like "%0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len = len(result)
+        collection_w.release()
+        collection_w.drop_index(index_name="varchar_bitmap_index")
+        collection_w.load()
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_1 = len(result)
+        assert res_len_1 == res_len
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_with_invalid_prefix_expr(self):

@@ -48,6 +48,8 @@ func (sc *testSubConn) GetOrBuildProducer(balancer.ProducerBuilder) (balancer.Pr
 	return nil, nil
 }
 
+func (sc *testSubConn) Shutdown() {}
+
 // testPickBuilder creates balancer.Picker for test.
 type testPickBuilder struct {
 	validate func(info PickerBuildInfo)

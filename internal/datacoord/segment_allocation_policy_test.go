@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -132,11 +133,63 @@ func TestGetChannelOpenSegCapacityPolicy(t *testing.T) {
 		},
 	}
 	for _, c := range testCases {
-		result := p(c.channel, c.segments, c.ts)
+		result, _ := p(c.channel, c.segments, c.ts)
 		if c.validator != nil {
 			assert.True(t, c.validator(result))
 		}
 	}
+}
+
+func TestCalBySegmentSizePolicy(t *testing.T) {
+	t.Run("nil schema", func(t *testing.T) {
+		rows, err := calBySegmentSizePolicy(nil, 1024)
+
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("get dim failed", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "coll1",
+			Description: "",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "fake"}}},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		}
+
+		rows, err := calBySegmentSizePolicy(schema, 1024)
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("sizePerRecord is zero", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: nil}
+		rows, err := calBySegmentSizePolicy(schema, 1024)
+
+		assert.Error(t, err)
+		assert.Equal(t, -1, rows)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "coll1",
+			Description: "",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		}
+
+		rows, err := calBySegmentSizePolicy(schema, 1200)
+		assert.NoError(t, err)
+		// 1200/(4*8+8)
+		assert.Equal(t, 30, rows)
+	})
 }
 
 func TestSortSegmentsByLastExpires(t *testing.T) {
@@ -194,4 +247,38 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
 	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
 	assert.True(t, shouldSeal)
+}
+
+func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key)
+
+	seg0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      0,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 30 * MB}}}},
+	}}
+	seg1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      1,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 40 * MB}}}},
+	}}
+	seg2 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:      2,
+		State:   commonpb.SegmentState_Growing,
+		Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 50 * MB}}}},
+	}}
+	seg3 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:    3,
+		State: commonpb.SegmentState_Sealed,
+	}}
+
+	fn := sealByTotalGrowingSegmentsSize()
+	// size not reach threshold
+	res, _ := fn("ch-0", []*SegmentInfo{seg0}, 0)
+	assert.Equal(t, 0, len(res))
+	// size reached the threshold
+	res, _ = fn("ch-0", []*SegmentInfo{seg0, seg1, seg2, seg3}, 0)
+	assert.Equal(t, 1, len(res))
+	assert.Equal(t, seg2.GetID(), res[0].GetID())
 }

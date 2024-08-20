@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 func TestWithCreateProducer(t *testing.T) {
@@ -31,7 +31,7 @@ func TestWithCreateProducer(t *testing.T) {
 	assert.Equal(t, req.Pchannel.Term, req2.Pchannel.Term)
 
 	// panic case.
-	assert.Panics(t, func() { WithCreateProducer(context.Background(), nil) })
+	assert.NotPanics(t, func() { WithCreateProducer(context.Background(), nil) })
 }
 
 func TestGetCreateProducer(t *testing.T) {

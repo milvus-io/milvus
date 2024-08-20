@@ -25,8 +25,8 @@
 namespace milvus::storage {
 class PayloadWriter {
  public:
-    explicit PayloadWriter(const DataType column_type);
-    explicit PayloadWriter(const DataType column_type, int dim);
+    explicit PayloadWriter(const DataType column_type, int dim, bool nullable);
+    explicit PayloadWriter(const DataType column_type, bool nullable);
     ~PayloadWriter() = default;
 
     void
@@ -58,6 +58,7 @@ class PayloadWriter {
 
  private:
     DataType column_type_;
+    bool nullable_;
     std::shared_ptr<arrow::ArrayBuilder> builder_;
     std::shared_ptr<arrow::Schema> schema_;
     std::shared_ptr<PayloadOutputStream> output_;

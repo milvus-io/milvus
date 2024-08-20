@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1022,6 +1022,7 @@ func TestHasCollectionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_HasCollection, task.Type())
@@ -1084,6 +1085,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeCollection, task.Type())
@@ -1332,6 +1334,7 @@ func TestCreatePartitionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_CreatePartition, task.Type())
@@ -1407,6 +1410,7 @@ func TestDropPartitionTask(t *testing.T) {
 		queryCoord: qc,
 		result:     nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DropPartition, task.Type())
@@ -1524,6 +1528,7 @@ func TestHasPartitionTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_HasPartition, task.Type())
@@ -1571,6 +1576,7 @@ func TestShowPartitionsTask(t *testing.T) {
 		rootCoord: rc,
 		result:    nil,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_ShowPartitions, task.Type())
@@ -1706,7 +1712,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1900,7 +1906,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1956,7 +1962,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					InsertRequest: msgpb.InsertRequest{
+					InsertRequest: &msgpb.InsertRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:  commonpb.MsgType_Insert,
 							MsgID:    0,
@@ -1973,7 +1979,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					DeleteRequest: msgpb.DeleteRequest{
+					DeleteRequest: &msgpb.DeleteRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:   commonpb.MsgType_Delete,
 							MsgID:     0,
@@ -2082,6 +2088,35 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 		},
 	}
 
+	idField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "id",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams:   nil,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		},
+		AutoID: false,
+	}
+	vectorField := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         fieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams:   nil,
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		},
+		AutoID: false,
+	}
+
 	t.Run("normal", func(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.On("GetCollectionSchema",
@@ -2090,20 +2125,8 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         fieldName,
-					IsPrimaryKey: false,
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams:   nil,
-					IndexParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "dim",
-							Value: "128",
-						},
-					},
-					AutoID: false,
-				},
+				idField,
+				vectorField,
 			},
 		}), nil)
 
@@ -2125,28 +2148,9 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("invalid schema", func(t *testing.T) {
-		cache := NewMockCache(t)
-		cache.On("GetCollectionSchema",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name: fieldName,
-				},
-				{
-					Name: fieldName, // duplicate
-				},
-			},
-		}), nil)
-		globalMetaCache = cache
-		_, err := cit.getIndexedField(context.Background())
-		assert.Error(t, err)
-	})
-
 	t.Run("field not found", func(t *testing.T) {
+		otherField := typeutil.Clone(vectorField)
+		otherField.Name = otherField.Name + "_other"
 		cache := NewMockCache(t)
 		cache.On("GetCollectionSchema",
 			mock.Anything, // context.Context
@@ -2154,9 +2158,8 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{
-					Name: fieldName + fieldName,
-				},
+				idField,
+				otherField,
 			},
 		}), nil)
 		globalMetaCache = cache
@@ -2693,6 +2696,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 		ctx:                        ctx,
 		queryCoord:                 qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_CreateResourceGroup, task.Type())
@@ -2732,6 +2736,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 		ctx:                      ctx,
 		queryCoord:               qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DropResourceGroup, task.Type())
@@ -2773,6 +2778,7 @@ func TestTransferNodeTask(t *testing.T) {
 		ctx:                 ctx,
 		queryCoord:          qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_TransferNode, task.Type())
@@ -2815,6 +2821,7 @@ func TestTransferReplicaTask(t *testing.T) {
 		ctx:                    ctx,
 		queryCoord:             qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_TransferReplica, task.Type())
@@ -2854,6 +2861,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 		ctx:                       ctx,
 		queryCoord:                qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_ListResourceGroups, task.Type())
@@ -2906,6 +2914,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 		ctx:                          ctx,
 		queryCoord:                   qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
@@ -2952,6 +2961,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 		ctx:                          ctx,
 		queryCoord:                   qc,
 	}
+	task.OnEnqueue()
 	task.PreExecute(ctx)
 
 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
@@ -3312,7 +3322,7 @@ func TestPartitionKey(t *testing.T) {
 		it := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,

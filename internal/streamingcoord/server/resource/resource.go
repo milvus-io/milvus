@@ -37,8 +37,8 @@ func Init(opts ...optResourceInit) {
 	}
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
-	// TODO: after add streaming node manager client, remove this line.
-	// assertNotNil(r.StreamingNodeManagerClient())
+	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
+	assertNotNil(newR.StreamingNodeManagerClient())
 	r = newR
 }
 

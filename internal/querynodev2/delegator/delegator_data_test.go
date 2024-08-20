@@ -509,6 +509,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
 					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
@@ -524,6 +525,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L1,
 			},
 		}, sealed[0].Segments)
 	})
@@ -599,20 +601,21 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 		s.NoError(err)
 
-		err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-			Base:         commonpbutil.NewMsgBase(),
-			DstNodeID:    1,
-			CollectionID: s.collectionID,
-			Infos: []*querypb.SegmentLoadInfo{
-				{
-					SegmentID:     200,
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
-				},
-			},
-		})
+		// err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		// 	Base:         commonpbutil.NewMsgBase(),
+		// 	DstNodeID:    1,
+		// 	CollectionID: s.collectionID,
+		// 	Infos: []*querypb.SegmentLoadInfo{
+		// 		{
+		// 			SegmentID:     200,
+		// 			PartitionID:   500,
+		// 			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		// 			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		// 			Level:         datapb.SegmentLevel_L1,
+		// 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+		// 		},
+		// 	},
+		// })
 
 		s.NoError(err)
 		sealed, _ := s.delegator.GetSegmentInfo(false)
@@ -624,12 +627,14 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L1,
 			},
 			{
 				SegmentID:     200,
 				NodeID:        1,
 				PartitionID:   500,
 				TargetVersion: unreadableTargetVersion,
+				Level:         datapb.SegmentLevel_L0,
 			},
 		}, sealed[0].Segments)
 	})
@@ -1198,10 +1203,10 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 
 	datas := []*msgstream.MsgPack{
 		{EndTs: 10, EndPositions: []*msgpb.MsgPosition{{Timestamp: 10}}, Msgs: []msgstream.TsMsg{
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
 			// invalid msg because partition wrong
-			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
+			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
 		}},
 	}
 

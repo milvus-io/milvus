@@ -50,8 +50,6 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
-    void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
     LoadSegmentMeta(
@@ -110,6 +108,15 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
 
+    bool
+    is_nullable(FieldId field_id) const override {
+        auto it = fields_.find(field_id);
+        AssertInfo(it != fields_.end(),
+                   "Cannot find field with field_id: " +
+                       std::to_string(field_id.get()));
+        return it->second->IsNullable();
+    };
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -135,11 +142,8 @@ class SegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
-        return insert_record_.pk2offset_->find_first(
-            limit, bitset, false_filtered_out);
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 
     // Calculate: output[i] = Vec[seg_offset[i]]
@@ -160,10 +164,10 @@ class SegmentSealedImpl : public SegmentSealed {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,

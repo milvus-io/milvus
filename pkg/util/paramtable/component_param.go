@@ -19,6 +19,7 @@ package paramtable
 import (
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,23 +83,25 @@ type ComponentParam struct {
 	StreamingCoordCfg streamingCoordConfig
 	StreamingNodeCfg  streamingNodeConfig
 
-	RootCoordGrpcServerCfg  GrpcServerConfig
-	ProxyGrpcServerCfg      GrpcServerConfig
-	QueryCoordGrpcServerCfg GrpcServerConfig
-	QueryNodeGrpcServerCfg  GrpcServerConfig
-	DataCoordGrpcServerCfg  GrpcServerConfig
-	DataNodeGrpcServerCfg   GrpcServerConfig
-	IndexNodeGrpcServerCfg  GrpcServerConfig
+	RootCoordGrpcServerCfg     GrpcServerConfig
+	ProxyGrpcServerCfg         GrpcServerConfig
+	QueryCoordGrpcServerCfg    GrpcServerConfig
+	QueryNodeGrpcServerCfg     GrpcServerConfig
+	DataCoordGrpcServerCfg     GrpcServerConfig
+	DataNodeGrpcServerCfg      GrpcServerConfig
+	IndexNodeGrpcServerCfg     GrpcServerConfig
+	StreamingNodeGrpcServerCfg GrpcServerConfig
 
-	RootCoordGrpcClientCfg  GrpcClientConfig
-	ProxyGrpcClientCfg      GrpcClientConfig
-	QueryCoordGrpcClientCfg GrpcClientConfig
-	QueryNodeGrpcClientCfg  GrpcClientConfig
-	DataCoordGrpcClientCfg  GrpcClientConfig
-	DataNodeGrpcClientCfg   GrpcClientConfig
-	IndexNodeGrpcClientCfg  GrpcClientConfig
-
-	IntegrationTestCfg integrationTestConfig
+	RootCoordGrpcClientCfg      GrpcClientConfig
+	ProxyGrpcClientCfg          GrpcClientConfig
+	QueryCoordGrpcClientCfg     GrpcClientConfig
+	QueryNodeGrpcClientCfg      GrpcClientConfig
+	DataCoordGrpcClientCfg      GrpcClientConfig
+	DataNodeGrpcClientCfg       GrpcClientConfig
+	IndexNodeGrpcClientCfg      GrpcClientConfig
+	StreamingCoordGrpcClientCfg GrpcClientConfig
+	StreamingNodeGrpcClientCfg  GrpcClientConfig
+	IntegrationTestCfg          integrationTestConfig
 
 	RuntimeConfig runtimeConfig
 }
@@ -128,6 +131,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.IndexNodeCfg.init(bt)
+	p.StreamingCoordCfg.init(bt)
+	p.StreamingNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -143,6 +148,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
 	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
+	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
 	p.ProxyGrpcClientCfg.Init("proxy", bt)
@@ -151,6 +157,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
 	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
+	p.StreamingCoordGrpcClientCfg.Init("streamingCoord", bt)
+	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
 }
@@ -200,7 +208,6 @@ type commonConfig struct {
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
 	DataCoordSubName      ParamItem `refreshable:"false"`
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
-	DataCoordTicklePath   ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
@@ -229,6 +236,7 @@ type commonConfig struct {
 
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
+	DefaultRootPassword  ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -262,6 +270,15 @@ type commonConfig struct {
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 	EnableVectorClusteringKey      ParamItem `refreshable:"true"`
+
+	GCEnabled                           ParamItem `refreshable:"false"`
+	GCHelperEnabled                     ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
+	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
+	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
+	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
+	ReadWritePrivileges                 ParamItem `refreshable:"false"`
+	AdminPrivileges                     ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -271,6 +288,9 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
 		DefaultValue: "by-dev",
+		Doc: `Root name prefix of the channel when a message channel is created.
+It is recommended to change this parameter before starting Milvus for the first time.
+To share a Pulsar instance among multiple Milvus instances, consider changing this to a name rather than the default one for each Milvus instance before you start them.`,
 		PanicIfEmpty: true,
 		Forbidden:    true,
 		Export:       true,
@@ -294,8 +314,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordTimeTick.Init(base.mgr)
 
@@ -305,8 +329,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes its own statistics messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordStatistics}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordStatistics.Init(base.mgr)
 
@@ -316,8 +344,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes Data Manipulation Language (DML) messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordDml}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordDml.Init(base.mgr)
 
@@ -338,8 +370,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the query node publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.QueryCoordTimeTick.Init(base.mgr)
 
@@ -349,8 +385,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordTimeTick.Init(base.mgr)
 
@@ -360,8 +400,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes segment information messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordSegmentInfo}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSegmentInfo.Init(base.mgr)
 
@@ -371,8 +415,11 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data coord.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSubName.Init(base.mgr)
 
@@ -384,22 +431,17 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.DataCoordWatchSubPath.Init(base.mgr)
 
-	p.DataCoordTicklePath = ParamItem{
-		Key:          "msgChannel.subNamePrefix.dataCoordWatchSubPath",
-		Version:      "2.2.3",
-		DefaultValue: "tickle",
-		PanicIfEmpty: true,
-	}
-	p.DataCoordTicklePath.Init(base.mgr)
-
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
 		DefaultValue: "dataNode",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data node.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataNodeSubName.Init(base.mgr)
 
@@ -408,7 +450,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "_default",
 		Forbidden:    true,
-		Doc:          "default partition name for a collection",
+		Doc:          "Name of the default partition when a collection is created",
 		Export:       true,
 	}
 	p.DefaultPartitionName.Init(base.mgr)
@@ -417,7 +459,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		Key:          "common.defaultIndexName",
 		Version:      "2.0.0",
 		DefaultValue: "_default_idx",
-		Doc:          "default index name",
+		Doc:          "Name of the index when it is created with name unspecified",
 		Export:       true,
 	}
 	p.DefaultIndexName.Init(base.mgr)
@@ -455,7 +497,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.indexSliceSize",
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(DefaultIndexSliceSize),
-		Doc:          "MB",
+		Doc:          "Index slice size in MB",
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
@@ -615,6 +657,15 @@ like the old password verification when updating the credential`,
 	}
 	p.SuperUsers.Init(base.mgr)
 
+	p.DefaultRootPassword = ParamItem{
+		Key:          "common.security.defaultRootPassword",
+		Version:      "2.4.7",
+		Doc:          "default password for root user",
+		DefaultValue: "Milvus",
+		Export:       true,
+	}
+	p.DefaultRootPassword.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -727,8 +778,10 @@ like the old password verification when updating the credential`,
 		Key:          "common.ttMsgEnabled",
 		Version:      "2.3.2",
 		DefaultValue: "true",
-		Doc:          "Whether the instance disable sending ts messages",
-		Export:       true,
+		Doc: `Whether to disable the internal time messaging mechanism for the system. 
+If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+This helps Milvus-CDC synchronize incremental data`,
+		Export: true,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
 
@@ -790,6 +843,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on partition key field",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.UsePartitionKeyAsClusteringKey.Init(base.mgr)
 
@@ -798,6 +852,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, do clustering compaction and segment prune on vector field",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.UseVectorAsClusteringKey.Init(base.mgr)
 
@@ -806,8 +861,69 @@ like the old password verification when updating the credential`,
 		Version:      "2.4.6",
 		Doc:          "if true, enable vector clustering key and vector clustering compaction",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.EnableVectorClusteringKey.Init(base.mgr)
+
+	p.GCEnabled = ParamItem{
+		Key:          "common.gcenabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCEnabled.Init(base.mgr)
+
+	p.GCHelperEnabled = ParamItem{
+		Key:          "common.gchelper.enabled",
+		Version:      "2.4.7",
+		DefaultValue: "true",
+	}
+	p.GCHelperEnabled.Init(base.mgr)
+
+	p.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "common.overloadedMemoryThresholdPercentage",
+		Version:      "2.4.7",
+		DefaultValue: "90",
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	p.OverloadedMemoryThresholdPercentage.Init(base.mgr)
+
+	p.MaximumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.maximumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "200",
+	}
+	p.MaximumGOGCConfig.Init(base.mgr)
+
+	p.MinimumGOGCConfig = ParamItem{
+		Key:          "common.gchelper.minimumGoGC",
+		Version:      "2.4.7",
+		DefaultValue: "30",
+	}
+	p.MinimumGOGCConfig.Init(base.mgr)
+
+	p.ReadOnlyPrivileges = ParamItem{
+		Key:     "common.security.readonly.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-only privileges,  example: "PrivilegeQuery,PrivilegeSearch"`,
+	}
+	p.ReadOnlyPrivileges.Init(base.mgr)
+
+	p.ReadWritePrivileges = ParamItem{
+		Key:     "common.security.readwrite.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-write privileges,  example: "PrivilegeCreateCollection,PrivilegeDropCollection"`,
+	}
+	p.ReadWritePrivileges.Init(base.mgr)
+
+	p.AdminPrivileges = ParamItem{
+		Key:     "common.security.admin.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
+	}
+	p.AdminPrivileges.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -817,18 +933,20 @@ type gpuConfig struct {
 
 func (t *gpuConfig) init(base *BaseTable) {
 	t.InitSize = ParamItem{
-		Key:     "gpu.initMemSize",
-		Version: "2.3.4",
-		Doc:     `Gpu Memory Pool init size`,
-		Export:  true,
+		Key:          "gpu.initMemSize",
+		Version:      "2.3.4",
+		Doc:          `Gpu Memory Pool init size`,
+		Export:       true,
+		DefaultValue: "2048",
 	}
 	t.InitSize.Init(base.mgr)
 
 	t.MaxSize = ParamItem{
-		Key:     "gpu.maxMemSize",
-		Version: "2.3.4",
-		Doc:     `Gpu Memory Pool Max size`,
-		Export:  true,
+		Key:          "gpu.maxMemSize",
+		Version:      "2.3.4",
+		Doc:          `Gpu Memory Pool Max size`,
+		Export:       true,
+		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
 }
@@ -838,6 +956,7 @@ type traceConfig struct {
 	SampleFraction     ParamItem `refreshable:"false"`
 	JaegerURL          ParamItem `refreshable:"false"`
 	OtlpEndpoint       ParamItem `refreshable:"false"`
+	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
@@ -875,10 +994,19 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.OtlpEndpoint = ParamItem{
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
-		Doc:     "example: \"127.0.0.1:4318\"",
+		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
 		Export:  true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
+
+	t.OtlpMethod = ParamItem{
+		Key:          "trace.otlp.method",
+		Version:      "2.4.7",
+		DefaultValue: "",
+		Doc:          `otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default`,
+		Export:       true,
+	}
+	t.OtlpMethod.Init(base.mgr)
 
 	t.OtlpSecure = ParamItem{
 		Key:          "trace.otlp.secure",
@@ -914,16 +1042,20 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.level",
 		DefaultValue: "info",
 		Version:      "2.0.0",
-		Doc:          "Only supports debug, info, warn, error, panic, or fatal. Default 'info'.",
-		Export:       true,
+		Doc: `Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+It is recommended to use debug level under test and development environments, and info level in production environment.`,
+		Export: true,
 	}
 	l.Level.Init(base.mgr)
 
 	l.RootPath = ParamItem{
 		Key:     "log.file.rootPath",
 		Version: "2.0.0",
-		Doc:     "root dir path to put logs, default \"\" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs",
-		Export:  true,
+		Doc: `Root path to the log files.
+The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
+If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
+Set this parameter as the path that you have permission to write.`,
+		Export: true,
 	}
 	l.RootPath.Init(base.mgr)
 
@@ -931,7 +1063,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.file.maxSize",
 		DefaultValue: "300",
 		Version:      "2.0.0",
-		Doc:          "MB",
+		Doc:          "The maximum size of a log file, unit: MB.",
 		Export:       true,
 	}
 	l.MaxSize.Init(base.mgr)
@@ -940,7 +1072,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.file.maxAge",
 		DefaultValue: "10",
 		Version:      "2.0.0",
-		Doc:          "Maximum time for log retention in day.",
+		Doc:          "The maximum retention time before a log file is automatically cleared, unit: day. The minimum value is 1.",
 		Export:       true,
 	}
 	l.MaxAge.Init(base.mgr)
@@ -949,6 +1081,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.file.maxBackups",
 		DefaultValue: "20",
 		Version:      "2.0.0",
+		Doc:          "The maximum number of log files to back up, unit: day. The minimum value is 1.",
 		Export:       true,
 	}
 	l.MaxBackups.Init(base.mgr)
@@ -957,7 +1090,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.format",
 		DefaultValue: "text",
 		Version:      "2.0.0",
-		Doc:          "text or json",
+		Doc:          "Milvus log format. Option: text and JSON",
 		Export:       true,
 	}
 	l.Format.Init(base.mgr)
@@ -998,7 +1131,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "16",
 		Forbidden:    true,
-		Doc:          "The number of dml channels created at system startup",
+		Doc:          "The number of DML-Channels to create at the root coord startup.",
 		Export:       true,
 	}
 	p.DmlChannelNum.Init(base.mgr)
@@ -1007,8 +1140,10 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Key:          "rootCoord.maxPartitionNum",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
-		Doc:          "Maximum number of partitions in a collection",
-		Export:       true,
+		Doc: `The maximum number of partitions in each collection.
+New partitions cannot be created if this parameter is set as 0 or 1.
+Range: [0, INT64MAX]`,
+		Export: true,
 	}
 	p.MaxPartitionNum.Init(base.mgr)
 
@@ -1016,8 +1151,9 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Key:          "rootCoord.minSegmentSizeToEnableIndex",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
-		Doc:          "It's a threshold. When the segment size is less than this value, the segment will not be indexed",
-		Export:       true,
+		Doc: `The minimum row count of a segment required for creating index.
+Segments with smaller size than this parameter will not be indexed, and will be searched with brute force.`,
+		Export: true,
 	}
 	p.MinSegmentSizeToEnableIndex.Init(base.mgr)
 
@@ -1123,6 +1259,7 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
+	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1131,7 +1268,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Version:      "2.2.0",
 		DefaultValue: "200",
 		PanicIfEmpty: true,
-		Doc:          "ms, the interval that proxy synchronize the time tick",
+		Doc:          "The interval at which proxy synchronizes the time tick, unit: ms.",
 		Export:       true,
 	}
 	p.TimeTickInterval.Init(base.mgr)
@@ -1152,6 +1289,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Version:      "2.2.0",
 		DefaultValue: "512",
 		PanicIfEmpty: true,
+		Doc:          "The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.",
 		Export:       true,
 	}
 	p.MsgStreamTimeTickBufSize.Init(base.mgr)
@@ -1161,7 +1299,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "255",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc:          "Maximum length of name for a collection or alias",
+		Doc:          "The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.",
 		Export:       true,
 	}
 	p.MaxNameLength.Init(base.mgr)
@@ -1195,10 +1333,8 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "64",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc: `Maximum number of fields in a collection.
-As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
-So adjust at your risk!`,
-		Export: true,
+		Doc:          "The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.",
+		Export:       true,
 	}
 	p.MaxFieldNum.Init(base.mgr)
 
@@ -1207,7 +1343,7 @@ So adjust at your risk!`,
 		Version:      "2.4.0",
 		DefaultValue: "4",
 		PanicIfEmpty: true,
-		Doc:          "Maximum number of vector fields in a collection.",
+		Doc:          "The maximum number of vector fields that can be specified in a collection. Value range: [1, 10].",
 		Export:       true,
 	}
 	p.MaxVectorFieldNum.Init(base.mgr)
@@ -1221,7 +1357,7 @@ So adjust at your risk!`,
 		DefaultValue: "16",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc:          "Maximum number of shards in a collection",
+		Doc:          "The maximum number of shards can be created when creating in a collection.",
 		Export:       true,
 	}
 	p.MaxShardNum.Init(base.mgr)
@@ -1231,7 +1367,7 @@ So adjust at your risk!`,
 		DefaultValue: "32768",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc:          "Maximum dimension of a vector",
+		Doc:          "The maximum number of dimensions of a vector can have when creating in a collection.",
 		Export:       true,
 	}
 	p.MaxDimension.Init(base.mgr)
@@ -1240,7 +1376,7 @@ So adjust at your risk!`,
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
 		DefaultValue: "10000",
-		Doc:          "max task number of proxy task queue",
+		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
@@ -1291,7 +1427,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.enable",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc:          "if use access log",
+		Doc:          "Whether to enable the access log feature.",
 		Export:       true,
 	}
 	p.AccessLog.Enable.Init(base.mgr)
@@ -1300,7 +1436,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.minioEnable",
 		Version:      "2.2.0",
 		DefaultValue: "false",
-		Doc:          "if upload sealed access log file to minio",
+		Doc:          "Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.",
 		Export:       true,
 	}
 	p.AccessLog.MinioEnable.Init(base.mgr)
@@ -1309,6 +1445,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.localPath",
 		Version:      "2.2.0",
 		DefaultValue: "/tmp/milvus_access",
+		Doc:          "The local folder path where the access log file is stored. This parameter can be specified when proxy.accessLog.filename is not empty.",
 		Export:       true,
 	}
 	p.AccessLog.LocalPath.Init(base.mgr)
@@ -1317,7 +1454,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.filename",
 		Version:      "2.2.0",
 		DefaultValue: "",
-		Doc:          "Log filename, leave empty to use stdout.",
+		Doc:          "The name of the access log file. If you leave this parameter empty, access logs will be printed to stdout.",
 		Export:       true,
 	}
 	p.AccessLog.Filename.Init(base.mgr)
@@ -1326,7 +1463,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.maxSize",
 		Version:      "2.2.0",
 		DefaultValue: "64",
-		Doc:          "Max size for a single file, in MB.",
+		Doc:          "The maximum size allowed for a single access log file. If the log file size reaches this limit, a rotation process will be triggered. This process seals the current access log file, creates a new log file, and clears the contents of the original log file. Unit: MB.",
 		Export:       true,
 	}
 	p.AccessLog.MaxSize.Init(base.mgr)
@@ -1335,7 +1472,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "0",
-		Doc:          "Size of log of write cache, in B. (Close write cache if size was 0",
+		Doc:          "Size of log of write cache, in byte. (Close write cache if size was 0)",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
@@ -1344,7 +1481,8 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheFlushInterval",
 		Version:      "2.4.0",
 		DefaultValue: "3",
-		Doc:          "time interval of auto flush write cache, in Seconds. (Close auto flush if interval was 0)",
+		Doc:          "time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)",
+		Export:       true,
 	}
 	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
@@ -1352,7 +1490,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.maxBackups",
 		Version:      "2.2.0",
 		DefaultValue: "8",
-		Doc:          "Maximum number of old log files to retain.",
+		Doc:          "The maximum number of sealed access log files that can be retained. If the number of sealed access log files exceeds this limit, the oldest one will be deleted.",
 	}
 	p.AccessLog.MaxBackups.Init(base.mgr)
 
@@ -1360,7 +1498,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.rotatedTime",
 		Version:      "2.2.0",
 		DefaultValue: "0",
-		Doc:          "Max time for single access log file in seconds",
+		Doc:          "The maximum time interval allowed for rotating a single access log file. Upon reaching the specified time interval, a rotation process is triggered, resulting in the creation of a new access log file and sealing of the previous one. Unit: seconds",
 		Export:       true,
 	}
 	p.AccessLog.RotatedTime.Init(base.mgr)
@@ -1369,7 +1507,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.remotePath",
 		Version:      "2.2.0",
 		DefaultValue: "access_log/",
-		Doc:          "File path in minIO",
+		Doc:          "The path of the object storage for uploading access log files.",
 		Export:       true,
 	}
 	p.AccessLog.RemotePath.Init(base.mgr)
@@ -1378,7 +1516,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.remoteMaxTime",
 		Version:      "2.2.0",
 		DefaultValue: "0",
-		Doc:          "Max time for log file in minIO, in hours",
+		Doc:          "The time interval allowed for uploading access log files. If the upload time of a log file exceeds this interval, the file will be deleted. Setting the value to 0 disables this feature.",
 		Export:       true,
 	}
 	p.AccessLog.RemoteMaxTime.Init(base.mgr)
@@ -1387,7 +1525,7 @@ please adjust in embedded Milvus: false`,
 		KeyPrefix: "proxy.accessLog.formatters.",
 		Version:   "2.3.4",
 		Export:    true,
-		Doc:       "access log formatters for specified methods, if not set, use the base formatter.",
+		Doc:       "Access log formatters for specified methods, if not set, use the base formatter.",
 	}
 	p.AccessLog.Formatter.Init(base.mgr)
 
@@ -1524,6 +1662,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
+
+	p.QueryNodePoolingSize = ParamItem{
+		Key:          "proxy.queryNodePooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for shardleader(querynode) client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.QueryNodePoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1559,7 +1706,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
-	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true`
+	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1599,8 +1746,12 @@ type queryCoordConfig struct {
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval  ParamItem `refreshable:"false"`
+	CollectionObserverInterval         ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
+	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
+	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
+	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
+	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1640,8 +1791,9 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "true",
 		PanicIfEmpty: true,
-		Doc:          "Enable auto handoff",
-		Export:       true,
+		Doc: `Switch value to control if to automatically replace a growing segment with the corresponding indexed sealed segment when the growing segment reaches the sealing threshold.
+If this parameter is set false, Milvus simply searches the growing segments with brute force.`,
+		Export: true,
 	}
 	p.AutoHandoff.Init(base.mgr)
 
@@ -1650,7 +1802,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "true",
 		PanicIfEmpty: true,
-		Doc:          "Enable auto balance",
+		Doc:          "Switch value to control if to automatically balance the memory usage among query nodes by distributing segment loading and releasing operations evenly.",
 		Export:       true,
 	}
 	p.AutoBalance.Init(base.mgr)
@@ -1770,7 +1922,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "90",
 		PanicIfEmpty: true,
-		Doc:          "The threshold percentage that memory overload",
+		Doc:          "The threshold of memory usage (in percentage) in a query node to trigger the sealed segment balancing.",
 		Export:       true,
 	}
 	p.OverloadedMemoryThresholdPercentage.Init(base.mgr)
@@ -1780,6 +1932,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "60",
 		PanicIfEmpty: true,
+		Doc:          "The interval at which query coord balances the memory usage among query nodes.",
 		Export:       true,
 	}
 	p.BalanceIntervalSeconds.Init(base.mgr)
@@ -1797,7 +1950,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.DelegatorMemoryOverloadFactor = ParamItem{
 		Key:          "queryCoord.delegatorMemoryOverloadFactor",
 		Version:      "2.3.19",
-		DefaultValue: "0.3",
+		DefaultValue: "0.1",
 		PanicIfEmpty: true,
 		Doc:          "the factor of delegator overloaded memory",
 		Export:       true,
@@ -1819,6 +1972,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "30",
 		PanicIfEmpty: true,
+		Doc:          "The threshold of memory usage difference (in percentage) between any two query nodes to trigger the sealed segment balancing.",
 		Export:       true,
 	}
 	p.MemoryUsageMaxDifferencePercentage.Init(base.mgr)
@@ -1853,7 +2007,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.BalanceCheckInterval = ParamItem{
 		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
-		DefaultValue: "10000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -1992,6 +2146,17 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.CheckHealthInterval.Init(base.mgr)
 
+	p.UpdateCollectionLoadStatusInterval = ParamItem{
+		Key:          "queryCoord.updateCollectionLoadStatusInterval",
+		Version:      "2.4.7",
+		DefaultValue: "5",
+		PanicIfEmpty: true,
+		Doc:          "5m, max interval of updating collection loaded status for check health",
+		Export:       true,
+	}
+
+	p.UpdateCollectionLoadStatusInterval.Init(base.mgr)
+
 	p.CheckHealthRPCTimeout = ParamItem{
 		Key:          "queryCoord.checkHealthRPCTimeout",
 		Version:      "2.2.7",
@@ -2102,7 +2267,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.4.4",
 		DefaultValue: "200",
 		Doc:          "the interval of collection observer",
-		Export:       false,
+		Export:       true,
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
 
@@ -2111,9 +2276,36 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.4.4",
 		DefaultValue: "100",
 		Doc:          "the interval of check executed flag to force to pull dist",
-		Export:       false,
+		Export:       true,
 	}
 	p.CheckExecutedFlagInterval.Init(base.mgr)
+
+	p.CollectionBalanceSegmentBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
+		Version:      "2.4.7",
+		DefaultValue: "5",
+		Doc:          "the max balance task number for collection at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.ClusterLevelLoadReplicaNumber = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadReplicaNumber",
+		Version:      "2.4.7",
+		DefaultValue: "0",
+		Doc:          "the cluster level default value for load replica number",
+		Export:       false,
+	}
+	p.ClusterLevelLoadReplicaNumber.Init(base.mgr)
+
+	p.ClusterLevelLoadResourceGroups = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadResourceGroups",
+		Version:      "2.4.7",
+		DefaultValue: "",
+		Doc:          "resource group names for load collection should be at least equal to queryCoord.clusterLevelLoadReplicaNumber, separate with commas",
+		Export:       false,
+	}
+	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2214,6 +2406,9 @@ type queryNodeConfig struct {
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
+
+	// worker
+	WorkerPoolingSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2228,7 +2423,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
 		DefaultValue: "16",
-		Doc:          "Maximum length of task queue in flowgraph",
+		Doc:          "The maximum size of task queue cache in flow graph in query node.",
 		Export:       true,
 	}
 	p.FlowGraphMaxQueueLength.Init(base.mgr)
@@ -2246,7 +2441,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.stats.publishInterval",
 		Version:      "2.0.0",
 		DefaultValue: "1000",
-		Doc:          "Interval for querynode to report node information (milliseconds)",
+		Doc:          "The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.",
 		Export:       true,
 	}
 	p.StatsPublishInterval.Init(base.mgr)
@@ -2280,7 +2475,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 			}
 			return v
 		},
-		Doc:    "The number of vectors in a chunk.",
+		Doc:    "Row count by which Segcore divides a segment into chunks.",
 		Export: true,
 	}
 	p.ChunkRows.Init(base.mgr)
@@ -2289,8 +2484,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.interimIndex.enableIndex",
 		Version:      "2.0.0",
 		DefaultValue: "false",
-		Doc:          "Enable segment build with index to accelerate vector search when segment is in growing or binlog.",
-		Export:       true,
+		Doc: `Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
+Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.
+This defaults to true, indicating that Milvus creates temporary index for growing segments and the sealed segments that are not indexed upon searches.`,
+		Export: true,
 	}
 	p.EnableTempSegmentIndex.Init(base.mgr)
 
@@ -2395,6 +2592,12 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "",
 		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "mmap")
+			}
+			return v
+		},
 	}
 	p.MmapDirPath.Init(base.mgr)
 
@@ -2432,7 +2635,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.FixedFileSizeForMmapManager.Init(base.mgr)
 
 	p.MaxMmapDiskPercentageForMmapManager = ParamItem{
-		Key:          "querynode.mmap.maxDiskUsagePercentageForMmapAlloc",
+		Key:          "queryNode.mmap.maxDiskUsagePercentageForMmapAlloc",
 		Version:      "2.4.6",
 		DefaultValue: "20",
 		Doc:          "disk percentage used in mmap chunk manager",
@@ -2810,7 +3013,7 @@ user-task-polling:
 		Key:          "queryNode.enableSegmentPrune",
 		Version:      "2.3.4",
 		DefaultValue: "false",
-		Doc:          "use partition prune function on shard delegator",
+		Doc:          "use partition stats to prune data in search/query on shard delegator",
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
@@ -2847,6 +3050,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.WorkerPoolingSize = ParamItem{
+		Key:          "queryNode.workerPooling.size",
+		Version:      "2.4.7",
+		Doc:          "the size for worker querynode client pool",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.WorkerPoolingSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2871,6 +3083,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 
@@ -2889,6 +3102,7 @@ type dataCoordConfig struct {
 	SegmentExpansionRate              ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
 	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds     ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -2899,24 +3113,21 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval              ParamItem `refreshable:"false"`
 
 	// Clustering Compaction
-	ClusteringCompactionEnable               ParamItem `refreshable:"true"`
-	ClusteringCompactionAutoEnable           ParamItem `refreshable:"true"`
-	ClusteringCompactionTriggerInterval      ParamItem `refreshable:"true"`
-	ClusteringCompactionStateCheckInterval   ParamItem `refreshable:"true"`
-	ClusteringCompactionGCInterval           ParamItem `refreshable:"true"`
-	ClusteringCompactionMinInterval          ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxInterval          ParamItem `refreshable:"true"`
-	ClusteringCompactionNewDataSizeThreshold ParamItem `refreshable:"true"`
-	ClusteringCompactionDropTolerance        ParamItem `refreshable:"true"`
-	ClusteringCompactionPreferSegmentSize    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxSegmentSize       ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds     ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxCentroidsNum      ParamItem `refreshable:"true"`
-	ClusteringCompactionMinCentroidsNum      ParamItem `refreshable:"true"`
-	ClusteringCompactionMinClusterSizeRatio  ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSizeRatio  ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSize       ParamItem `refreshable:"true"`
+	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
+	ClusteringCompactionTriggerInterval        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval            ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval            ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold   ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -2939,6 +3150,7 @@ type dataCoordConfig struct {
 	WithCredential             ParamItem `refreshable:"false"`
 	IndexNodeID                ParamItem `refreshable:"false"`
 	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold          ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -2958,6 +3170,10 @@ type dataCoordConfig struct {
 	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
+	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
+	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3019,7 +3235,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
-		Doc:          "Maximum size of a segment in MB",
+		Doc:          "The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.",
 		Export:       true,
 	}
 	p.SegmentMaxSize.Init(base.mgr)
@@ -3037,6 +3253,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
 		DefaultValue: "0.12",
+		Doc:          "The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.",
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
@@ -3045,7 +3262,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.sealProportionJitter",
 		Version:      "2.4.6",
 		DefaultValue: "0.1",
-		Doc:          "segment seal proportion jitter ratio, default value 0.1(10%), if seal propertion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%",
+		Doc:          "segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%",
 		Export:       true,
 	}
 	p.SegmentSealProportionJitter.Init(base.mgr)
@@ -3054,7 +3271,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.assignmentExpiration",
 		Version:      "2.0.0",
 		DefaultValue: "2000",
-		Doc:          "The time of the assignment expiration in ms",
+		Doc:          "Expiration time of the segment assignment, unit: ms",
 		Export:       true,
 	}
 	p.SegAssignmentExpiration.Init(base.mgr)
@@ -3107,12 +3324,23 @@ the number of binlog file reaches to max value.`,
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
 
+	p.GrowingSegmentsMemSizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
+		Version:      "2.4.6",
+		DefaultValue: "4096",
+		Doc: `The size threshold in MB, if the total size of growing segments of each shard 
+exceeds this threshold, the largest growing segment will be sealed.`,
+		Export: true,
+	}
+	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
+
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Doc:          "Enable data segment compaction",
-		Export:       true,
+		Doc: `Switch value to control if to enable segment compaction. 
+Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.`,
+		Export: true,
 	}
 	p.EnableCompaction.Init(base.mgr)
 
@@ -3120,7 +3348,9 @@ the number of binlog file reaches to max value.`,
 		Key:          "dataCoord.compaction.enableAutoCompaction",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Export:       true,
+		Doc: `Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
+This configuration takes effect only when dataCoord.enableCompaction is set as true.`,
+		Export: true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
 
@@ -3210,10 +3440,20 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionDropToleranceInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.dropTolerance",
 		Version:      "2.4.2",
-		Doc:          "If compaction job is finished for a long time, gc it",
+		Doc:          "Compaction task will be cleaned after finish longer than this time(in seconds)",
 		DefaultValue: "86400",
+		Export:       true,
 	}
 	p.CompactionDropToleranceInSeconds.Init(base.mgr)
+
+	p.CompactionGCIntervalInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.gcInterval",
+		Version:      "2.4.7",
+		Doc:          "The time interval in seconds for compaction gc",
+		DefaultValue: "1800",
+		Export:       true,
+	}
+	p.CompactionGCIntervalInSeconds.Init(base.mgr)
 
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",
@@ -3270,6 +3510,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.6",
 		Doc:          "The time interval for regularly syncing segments",
 		DefaultValue: "300", // 5 * 60 seconds
+		Export:       true,
 	}
 	p.SyncSegmentsInterval.Init(base.mgr)
 
@@ -3320,7 +3561,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "false",
 		Doc:          "Enable clustering compaction",
 		Export:       true,
@@ -3329,7 +3570,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionAutoEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.autoEnable",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "false",
 		Doc:          "Enable auto clustering compaction",
 		Export:       true,
@@ -3338,85 +3579,68 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.triggerInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "600",
+		Doc:          "clustering compaction trigger interval in seconds",
+		Export:       true,
 	}
 	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
-	p.ClusteringCompactionStateCheckInterval = ParamItem{
-		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
-		Version:      "2.4.6",
-		DefaultValue: "10",
-	}
-	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
-
-	p.ClusteringCompactionGCInterval = ParamItem{
-		Key:          "dataCoord.compaction.clustering.gcInterval",
-		Version:      "2.4.6",
-		DefaultValue: "600",
-	}
-	p.ClusteringCompactionGCInterval.Init(base.mgr)
-
 	p.ClusteringCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction",
 		DefaultValue: "3600",
+		Export:       true,
 	}
 	p.ClusteringCompactionMinInterval.Init(base.mgr)
 
 	p.ClusteringCompactionMaxInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxInterval",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "If a collection haven't been clustering compacted for longer than maxInterval, force compact",
 		DefaultValue: "86400",
+		Export:       true,
 	}
 	p.ClusteringCompactionMaxInterval.Init(base.mgr)
 
 	p.ClusteringCompactionNewDataSizeThreshold = ParamItem{
 		Key:          "dataCoord.compaction.clustering.newDataSizeThreshold",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute clustering compaction",
 		DefaultValue: "512m",
+		Export:       true,
 	}
 	p.ClusteringCompactionNewDataSizeThreshold.Init(base.mgr)
 
 	p.ClusteringCompactionTimeoutInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.clustering.timeout",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "3600",
 	}
 	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
 
-	p.ClusteringCompactionDropTolerance = ParamItem{
-		Key:          "dataCoord.compaction.clustering.dropTolerance",
-		Version:      "2.4.6",
-		Doc:          "If clustering compaction job is finished for a long time, gc it",
-		DefaultValue: "259200",
-	}
-	p.ClusteringCompactionDropTolerance.Init(base.mgr)
-
-	p.ClusteringCompactionPreferSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.clustering.preferSegmentSize",
-		Version:      "2.4.6",
-		DefaultValue: "512m",
+	p.ClusteringCompactionPreferSegmentSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.preferSegmentSizeRatio",
+		Version:      "2.4.7",
+		DefaultValue: "0.8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ClusteringCompactionPreferSegmentSize.Init(base.mgr)
+	p.ClusteringCompactionPreferSegmentSizeRatio.Init(base.mgr)
 
-	p.ClusteringCompactionMaxSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.clustering.maxSegmentSize",
-		Version:      "2.4.6",
-		DefaultValue: "1024m",
+	p.ClusteringCompactionMaxSegmentSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxSegmentSizeRatio",
+		Version:      "2.4.7",
+		DefaultValue: "1.0",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ClusteringCompactionMaxSegmentSize.Init(base.mgr)
+	p.ClusteringCompactionMaxSegmentSizeRatio.Init(base.mgr)
 
 	p.ClusteringCompactionMaxTrainSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxTrainSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "0.8",
 		Doc:          "max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
@@ -3425,7 +3649,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "10240",
 		Doc:          "maximum centroids number in Kmeans train",
 		Export:       true,
@@ -3434,7 +3658,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minCentroidsNum",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "16",
 		Doc:          "minimum centroids number in Kmeans train",
 		Export:       true,
@@ -3443,7 +3667,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMinClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minClusterSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "0.01",
 		Doc:          "minimum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3452,7 +3676,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSizeRatio = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSizeRatio",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "10",
 		Doc:          "maximum cluster size / avg size in Kmeans train",
 		Export:       true,
@@ -3461,7 +3685,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.ClusteringCompactionMaxClusterSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxClusterSize",
-		Version:      "2.4.6",
+		Version:      "2.4.7",
 		DefaultValue: "5g",
 		Doc:          "maximum cluster size in Kmeans train",
 		Export:       true,
@@ -3472,7 +3696,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.enableGarbageCollection",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Doc:          "",
+		Doc:          "Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.",
 		Export:       true,
 	}
 	p.EnableGarbageCollection.Init(base.mgr)
@@ -3481,7 +3705,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.interval",
 		Version:      "2.0.0",
 		DefaultValue: "3600",
-		Doc:          "meta-based gc scanning interval in seconds",
+		Doc:          "The interval at which data coord performs garbage collection, unit: second.",
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
@@ -3500,7 +3724,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "86400",
-		Doc:          "orphan file gc tolerance duration in seconds (orphan file which last modified time before the tolerance interval ago will be deleted)",
+		Doc:          "The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
@@ -3509,7 +3733,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
 		DefaultValue: "10800",
-		Doc:          "meta-based gc tolerace duration in seconds (file which meta is marked as dropped before the tolerace interval ago will be deleted)",
+		Doc:          "The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.",
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
@@ -3577,6 +3801,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
+
+	p.TaskSlowThreshold = ParamItem{
+		Key:          "datacoord.scheduler.taskSlowThreshold",
+		Version:      "2.0.0",
+		DefaultValue: "300",
+	}
+	p.TaskSlowThreshold.Init(base.mgr)
 
 	p.BrokerTimeout = ParamItem{
 		Key:          "dataCoord.brokerTimeout",
@@ -3716,6 +3947,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.ClusteringCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.clusteringCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of clustering compaction job.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionSlotUsage.Init(base.mgr)
+
+	p.MixCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.mixCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of mix compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MixCompactionSlotUsage.Init(base.mgr)
+
+	p.L0DeleteCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of l0 compaction job.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3851,7 +4112,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Version:      "2.3.4",
 		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
-		Export:       true,
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				log.Warn("positive parallel task number, reset to default 256", zap.String("value", v))
+				return "256" // MaxParallelSyncMgrTasks must >= 1
+			}
+			return strconv.FormatInt(int64(concurrency), 10)
+		},
+		Export: true,
 	}
 	p.MaxParallelSyncMgrTasks.Init(base.mgr)
 
@@ -3861,8 +4130,10 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"DATA_NODE_IBUFSIZE"},
 		DefaultValue: "16777216",
 		PanicIfEmpty: true,
-		Doc:          "Max buffer size to flush for a single segment.",
-		Export:       true,
+		Doc: `The maximum size of each binlog file in a segment buffered in memory. Binlog files whose size exceeds this value are then flushed to MinIO or S3 service.
+Unit: Byte
+Setting this parameter too small causes the system to store a small amount of data too frequently. Setting it too large increases the system's demand for memory.`,
+		Export: true,
 	}
 	p.FlushInsertBufferSize.Init(base.mgr)
 
@@ -4095,7 +4366,7 @@ if this parameter <= 0, will set it as 10`,
 	p.SlotCap = ParamItem{
 		Key:          "dataNode.slot.slotCap",
 		Version:      "2.4.2",
-		DefaultValue: "2",
+		DefaultValue: "16",
 		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
 		Export:       true,
 	}
@@ -4104,7 +4375,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
-		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
+		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
 		DefaultValue: "0.1",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -4115,7 +4386,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.workPoolSize",
 		Version:      "2.4.6",
 		Doc:          "worker pool size for one clustering compaction job.",
-		DefaultValue: "1",
+		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

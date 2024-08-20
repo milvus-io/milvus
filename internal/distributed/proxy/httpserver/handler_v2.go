@@ -13,13 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	validator "github.com/go-playground/validator/v10"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1244,6 +1244,12 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
 			Value: fmt.Sprintf("%v", httpReq.Params["ttlSeconds"]),
+		})
+	}
+	if _, ok := httpReq.Params["partitionKeyIsolation"]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.PartitionKeyIsolationKey,
+			Value: fmt.Sprintf("%v", httpReq.Params["partitionKeyIsolation"]),
 		})
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", func(reqCtx context.Context, req any) (interface{}, error) {

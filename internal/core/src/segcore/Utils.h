@@ -28,7 +28,6 @@
 #include "log/Log.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
-#include "storage/space.h"
 
 namespace milvus::segcore {
 
@@ -63,6 +62,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
+                          const void* valid_data,
                           int64_t count,
                           const FieldMeta& field_meta);
 
@@ -73,6 +73,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
 
 std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw,
+                    const void* valid_data,
                     int64_t count,
                     const FieldMeta& field_meta);
 
@@ -187,10 +188,6 @@ void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel);
 
-void
-LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
-                          SchemaPtr schema,
-                          FieldDataInfo& field_data_info);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

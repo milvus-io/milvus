@@ -90,7 +90,7 @@ jobs:
           echo "useasan=ON" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
@@ -104,6 +104,13 @@ jobs:
         with:
           name: code
           path: code.zip
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+
   UT-Cpp:
     name: UT for Cpp
     needs: Build
@@ -127,14 +134,14 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d azurite
+          docker compose up -d azurite
       - name: UT
         run: |
           chmod +x build/builder.sh
@@ -150,11 +157,17 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
   UT-Go:
     name: UT for Go
     needs: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -173,14 +186,14 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'go'
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio azurite
+          docker compose up -d pulsar etcd minio azurite
       - name: UT
         run: |
           chmod +x build/builder.sh
@@ -195,6 +208,13 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
   integration-test:
     name: Integration Test
     needs: Build
@@ -218,14 +238,14 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Download Caches
-        uses: ./.github/actions/cache
+        uses: ./.github/actions/cache-restore
         with:
           os: 'ubuntu22.04'
           kind: 'go'
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio
+          docker compose up -d pulsar etcd minio
       - name: IntegrationTest
         run: |
           chmod +x build/builder.sh
@@ -239,6 +259,13 @@ jobs:
             ./it_coverage.txt
             *.info
             *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go, integration-test]

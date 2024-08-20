@@ -379,7 +379,7 @@ func TestInsertColumnVarcharExceedLen(t *testing.T) {
 	vecColumn := hp.GenColumnData(100, entity.FieldTypeBinaryVector, *hp.TNewDataOption())
 
 	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn))
-	common.CheckErr(t, err, false, "the length (12) of 0th VarChar varchar exceeds max length (0)%!(EXTRA int64=10)")
+	common.CheckErr(t, err, false, "length of varchar field varchar exceeds max length")
 }
 
 // test insert sparse vector

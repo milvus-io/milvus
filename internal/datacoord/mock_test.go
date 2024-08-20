@@ -168,6 +168,17 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "test_scalar_clustering",
+		Description: "schema for test scalar clustering compaction",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "field1", IsPrimaryKey: true, IsClusteringKey: true, Description: "field no.1", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "field2", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+}
+
 type mockDataNodeClient struct {
 	id                  int64
 	state               commonpb.StateCode
@@ -539,6 +550,10 @@ func (m *mockRootCoordClient) ShowSegments(ctx context.Context, req *milvuspb.Sh
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) GetPChannelInfo(ctx context.Context, req *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) DescribeSegments(ctx context.Context, req *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	panic("implement me")
 }
@@ -607,6 +622,14 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
+}
+
+func (m *mockRootCoordClient) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 type mockCompactionTrigger struct {

@@ -59,11 +59,11 @@ func TestSizeofStruct(t *testing.T) {
 }
 
 func TestEventWriter(t *testing.T) {
-	insertEvent, err := newInsertEventWriter(schemapb.DataType_Int32, false)
+	insertEvent, err := newInsertEventWriter(schemapb.DataType_Int32)
 	assert.NoError(t, err)
 	insertEvent.Close()
 
-	insertEvent, err = newInsertEventWriter(schemapb.DataType_Int32, false)
+	insertEvent, err = newInsertEventWriter(schemapb.DataType_Int32)
 	assert.NoError(t, err)
 	defer insertEvent.Close()
 

@@ -166,16 +166,18 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 			continue
 		}
 		// filter low version.
+		// !!! important, stopping nodes should not be removed here.
 		if !sw.versionRange(v) {
 			sw.logger.Info("skip low version node", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version))
 			continue
 		}
-		// !!! important, stopping nodes should not be removed here.
-		attr := new(attributes.Attributes)
-		attr = attributes.WithSession(attr, session)
+
 		addrs = append(addrs, resolver.Address{
-			Addr:               session.Address,
-			BalancerAttributes: attr,
+			Addr: session.Address,
+			// resolverAttributes is important to use when resolving, server id to make resolver.Address with same adresss different.
+			Attributes: attributes.WithServerID(new(attributes.Attributes), session.ServerID),
+			// balancerAttributes can be seen by picker of grpc balancer.
+			BalancerAttributes: attributes.WithSession(new(attributes.Attributes), session),
 		})
 	}
 

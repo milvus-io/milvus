@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -558,7 +558,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
-	idTsMap := make(map[any]int64)
+	idTsMap := make(map[any]int64, limit*len(validRetrieveResults))
 
 	var availableCount int
 	var retSize int64
@@ -600,7 +600,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		// judge the `!plan.ignoreNonPk` condition.
 		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span2.End()
-		ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].Result.GetFieldsData()))
+		ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(len(selected)))
 		cursors = make([]int64, len(validRetrieveResults))
 		for _, sel := range selected {
 			// cannot use `cursors[sel]` directly, since some of them may be skipped.
@@ -645,7 +645,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		for _, r := range segmentResults {
 			if len(r.GetFieldsData()) != 0 {
-				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
+				ret.FieldsData = typeutil.PrepareResultFieldData(r.GetFieldsData(), int64(len(selected)))
 				break
 			}
 		}

@@ -212,12 +212,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	err := s.nodeMgr.Suspend(req.GetNodeID())
-	if err != nil {
-		log.Warn(errMsg, zap.Error(err))
-		return merr.Status(err), nil
-	}
-
+	s.meta.ResourceManager.HandleNodeDown(req.GetNodeID())
 	return merr.Success(), nil
 }
 
@@ -238,11 +233,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 		return merr.Status(err), nil
 	}
 
-	err := s.nodeMgr.Resume(req.GetNodeID())
-	if err != nil {
-		log.Warn(errMsg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, errMsg)), nil
-	}
+	s.meta.ResourceManager.HandleNodeUp(req.GetNodeID())
 
 	return merr.Success(), nil
 }
@@ -423,38 +414,29 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		return ch.GetChannelName(), ch
 	})
 	for _, ch := range channelOnSrc {
+		if s.targetMgr.GetDmChannel(ch.GetCollectionID(), ch.GetChannelName(), meta.CurrentTargetFirst) == nil {
+			continue
+		}
+
 		if _, ok := channelDstMap[ch.GetChannelName()]; !ok {
 			return merr.Status(merr.WrapErrChannelLack(ch.GetChannelName())), nil
 		}
 	}
-	channelSrcMap := lo.SliceToMap(channelOnSrc, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
-		return ch.GetChannelName(), ch
-	})
-	for _, ch := range channelOnDst {
-		if _, ok := channelSrcMap[ch.GetChannelName()]; !ok {
-			return merr.Status(merr.WrapErrChannelLack(ch.GetChannelName())), nil
-		}
-	}
 
-	// check segment list
+	// check whether all segment exist in source node has been loaded in target node
 	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
 	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
 	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
 		return s.GetID(), s
 	})
-	for _, s := range segmentOnSrc {
-		if _, ok := segmentDstMap[s.GetID()]; !ok {
-			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
+	for _, segment := range segmentOnSrc {
+		if s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst) == nil {
+			continue
 		}
-	}
-	segmentSrcMap := lo.SliceToMap(segmentOnSrc, func(s *meta.Segment) (int64, *meta.Segment) {
-		return s.GetID(), s
-	})
-	for _, s := range segmentOnDst {
-		if _, ok := segmentSrcMap[s.GetID()]; !ok {
-			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
-		}
-	}
 
+		if _, ok := segmentDstMap[segment.GetID()]; !ok {
+			return merr.Status(merr.WrapErrSegmentLack(segment.GetID())), nil
+		}
+	}
 	return merr.Success(), nil
 }

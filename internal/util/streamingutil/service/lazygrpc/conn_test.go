@@ -66,7 +66,7 @@ func TestLazyConn(t *testing.T) {
 	})
 
 	// Test WithLazyGRPCServiceCreator
-	grpcService := WithServiceCreator(lconn, func(*grpc.ClientConn) int {
+	grpcService := WithServiceCreator(lconn, func(grpc.ClientConnInterface) int {
 		return 1
 	})
 	realService, err := grpcService.GetService(ctx)

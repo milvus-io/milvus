@@ -31,6 +31,7 @@ set(MILVUS_TEST_FILES
         test_growing.cpp
         test_growing_index.cpp
         test_indexing.cpp
+        test_bitmap_index.cpp
         test_hybrid_index.cpp
         test_array_bitmap_index.cpp
         test_index_c_api.cpp
@@ -71,6 +72,8 @@ set(MILVUS_TEST_FILES
         test_array_inverted_index.cpp
         test_chunk_vector.cpp
         test_mmap_chunk_manager.cpp
+        test_monitor.cpp
+        test_chunk.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -128,6 +131,7 @@ if (LINUX)
     target_link_libraries(index_builder_test
             gtest
             gtest_main
+            milvus_monitor
             milvus_segcore
             milvus_storage
             milvus_indexbuilder

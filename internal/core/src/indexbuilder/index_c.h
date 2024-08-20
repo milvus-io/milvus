@@ -129,14 +129,6 @@ CStatus
 SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
 
 CStatus
-SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set);
-
-CStatus
-CreateIndexV2(CIndex* res_index,
-              const uint8_t* serialized_build_index_info,
-              const uint64_t len);
-
-CStatus
 AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
                        const char* c_data_store_path,
                        const char* c_index_store_path,

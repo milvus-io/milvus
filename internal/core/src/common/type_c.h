@@ -107,6 +107,7 @@ typedef struct CTraceConfig {
     float sampleFraction;
     const char* jaegerURL;
     const char* otlpEndpoint;
+    const char* otlpMethod;
     bool oltpSecure;
 
     int nodeID;

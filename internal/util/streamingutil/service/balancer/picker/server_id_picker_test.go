@@ -91,13 +91,13 @@ func TestServerIDPickerBuilder(t *testing.T) {
 		Ctx: contextutil.WithPickServerID(context.Background(), 4),
 	})
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrNoSubConnNotExist)
+	assert.ErrorIs(t, err, ErrSubConnNotExist)
 	assert.NotNil(t, info)
 }
 
 func TestIsErrNoSubConnForPick(t *testing.T) {
-	assert.True(t, IsErrNoSubConnForPick(ErrNoSubConnNotExist))
-	assert.False(t, IsErrNoSubConnForPick(errors.New("test")))
-	err := status.ConvertStreamingError("test", ErrNoSubConnNotExist)
-	assert.True(t, IsErrNoSubConnForPick(err))
+	assert.True(t, IsErrSubConnNoExist(ErrSubConnNotExist))
+	assert.False(t, IsErrSubConnNoExist(errors.New("test")))
+	err := status.ConvertStreamingError("test", ErrSubConnNotExist)
+	assert.True(t, IsErrSubConnNoExist(err))
 }

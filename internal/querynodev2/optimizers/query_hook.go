@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -65,6 +65,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool(),
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
+		}
+		if withFilter && channelNum > 1 {
+			params[common.ChannelNumKey] = channelNum
 		}
 		err := queryHook.Run(params)
 		if err != nil {

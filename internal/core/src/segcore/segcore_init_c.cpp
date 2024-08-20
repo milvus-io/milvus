@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "config/ConfigKnowhere.h"
+#include "fmt/core.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
@@ -74,6 +75,7 @@ SegcoreSetSimdType(const char* value) {
     LOG_DEBUG("set config simd_type: {}", value);
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
+    AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
     memcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;

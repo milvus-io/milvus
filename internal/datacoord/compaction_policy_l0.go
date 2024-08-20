@@ -30,6 +30,7 @@ func (policy *l0CompactionPolicy) Enable() bool {
 }
 
 func (policy *l0CompactionPolicy) Trigger() (map[CompactionTriggerType][]CompactionView, error) {
+	log.Info("start trigger l0CompactionPolicy...")
 	// support config hot refresh
 	events := policy.generateEventForLevelZeroViewChange()
 	if len(events) != 0 {

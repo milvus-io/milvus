@@ -34,6 +34,10 @@ class ChunkVectorBase {
     get_chunk_size(int64_t index) = 0;
     virtual Type
     get_element(int64_t chunk_id, int64_t chunk_offset) = 0;
+    virtual int64_t
+    get_element_size() = 0;
+    virtual int64_t
+    get_element_offset(int64_t index) = 0;
     virtual ChunkViewType<Type>
     view_element(int64_t chunk_id, int64_t chunk_offset) = 0;
     int64_t
@@ -164,6 +168,25 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         this->counter_ = 0;
         vec_.clear();
+    }
+
+    int64_t
+    get_element_size() override {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+            return sizeof(ChunkViewType<Type>);
+        }
+        return sizeof(Type);
+    }
+
+    int64_t
+    get_element_offset(int64_t index) override {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        int64_t offset = 0;
+        for (int i = 0; i < index - 1; i++) {
+            offset += vec_[i].size();
+        }
+        return offset;
     }
 
     SpanBase

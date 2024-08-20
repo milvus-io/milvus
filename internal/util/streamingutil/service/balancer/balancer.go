@@ -23,9 +23,9 @@
 package balancer
 
 import (
-	"errors"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"

@@ -206,8 +206,11 @@ class SegmentExpr : public Expr {
 
         auto& skip_index = segment_->GetSkipIndex();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
-            auto data_vec = segment_->get_batch_views<T>(
-                field_id_, 0, current_data_chunk_pos_, need_size);
+            auto data_vec =
+                segment_
+                    ->get_batch_views<T>(
+                        field_id_, 0, current_data_chunk_pos_, need_size)
+                    .first;
 
             func(data_vec.data(), need_size, res, values...);
         }
@@ -362,6 +365,11 @@ class SegmentExpr : public Expr {
         }
 
         return true;
+    }
+
+    void
+    SetNotUseIndex() {
+        use_index_ = false;
     }
 
  protected:

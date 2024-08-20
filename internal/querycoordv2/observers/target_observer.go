@@ -55,7 +55,7 @@ type TargetObserver struct {
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	distMgr   *meta.DistributionManager
 	broker    meta.Broker
 	cluster   session.Cluster
@@ -76,7 +76,7 @@ type TargetObserver struct {
 
 func NewTargetObserver(
 	meta *meta.Meta,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	distMgr *meta.DistributionManager,
 	broker meta.Broker,
 	cluster session.Cluster,

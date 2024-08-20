@@ -2,8 +2,8 @@ package resolver
 
 import (
 	"context"
-	"errors"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"

@@ -64,8 +64,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
-    void
-    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
 
     std::string
     debug() const override;
@@ -74,6 +72,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_segment_id() const override {
         return id_;
     }
+
+    bool
+    is_nullable(FieldId field_id) const override {
+        AssertInfo(insert_record_.is_data_exist(field_id),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        return insert_record_.is_valid_data_exist(field_id);
+    };
 
  public:
     const InsertRecord<>&
@@ -292,11 +298,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit,
-               const BitsetType& bitset,
-               bool false_filtered_out) const override {
-        return insert_record_.pk2offset_->find_first(
-            limit, bitset, false_filtered_out);
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 
     bool
@@ -311,10 +314,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::vector<std::string_view>
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    BufferView
+    std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
                      int64_t chunk_id,
                      int64_t start_offset,

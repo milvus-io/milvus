@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -38,4 +39,11 @@ type Task interface {
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool
 	SetJobInfo(meta *meta) error
+	SetQueueTime(time.Time)
+	GetQueueTime() time.Time
+	SetStartTime(time.Time)
+	GetStartTime() time.Time
+	SetEndTime(time.Time)
+	GetEndTime() time.Time
+	GetTaskType() string
 }

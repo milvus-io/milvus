@@ -3,15 +3,30 @@
 
 package resource
 
-import "github.com/milvus-io/milvus/internal/streamingnode/server/resource/timestamp"
+import (
+	"testing"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
+	sinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+)
 
 // InitForTest initializes the singleton of resources for test.
-func InitForTest(opts ...optResourceInit) {
+func InitForTest(t *testing.T, opts ...optResourceInit) {
 	r = &resourceImpl{}
 	for _, opt := range opts {
 		opt(r)
 	}
 	if r.rootCoordClient != nil {
-		r.timestampAllocator = timestamp.NewAllocator(r.rootCoordClient)
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+	} else {
+		r.rootCoordClient = idalloc.NewMockRootCoordClient(t)
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
+	r.segmentAssignStatsManager = stats.NewStatsManager()
+	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
+	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 }

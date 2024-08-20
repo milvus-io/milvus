@@ -14,12 +14,10 @@ type (
 )
 
 // NewChainedInterceptor creates a new chained interceptor.
-func NewChainedInterceptor(interceptors ...BasicInterceptor) InterceptorWithReady {
+func NewChainedInterceptor(interceptors ...Interceptor) InterceptorWithReady {
 	appendCalls := make([]appendInterceptorCall, 0, len(interceptors))
 	for _, i := range interceptors {
-		if r, ok := i.(AppendInterceptor); ok {
-			appendCalls = append(appendCalls, r.DoAppend)
-		}
+		appendCalls = append(appendCalls, i.DoAppend)
 	}
 	return &chainedInterceptor{
 		closed:       make(chan struct{}),
@@ -31,7 +29,7 @@ func NewChainedInterceptor(interceptors ...BasicInterceptor) InterceptorWithRead
 // chainedInterceptor chains all interceptors into one.
 type chainedInterceptor struct {
 	closed       chan struct{}
-	interceptors []BasicInterceptor
+	interceptors []Interceptor
 	appendCall   appendInterceptorCall
 }
 
@@ -41,7 +39,7 @@ func (c *chainedInterceptor) Ready() <-chan struct{} {
 	go func() {
 		for _, i := range c.interceptors {
 			// check if ready is implemented
-			if r, ok := i.(InterceptorReady); ok {
+			if r, ok := i.(InterceptorWithReady); ok {
 				select {
 				case <-r.Ready():
 				case <-c.closed:

@@ -7,7 +7,7 @@ import (
 )
 
 // WithServiceCreator creates a lazy grpc service with a service creator.
-func WithServiceCreator[T any](conn Conn, serviceCreator func(*grpc.ClientConn) T) Service[T] {
+func WithServiceCreator[T any](conn Conn, serviceCreator func(grpc.ClientConnInterface) T) Service[T] {
 	return &serviceImpl[T]{
 		Conn:           conn,
 		serviceCreator: serviceCreator,
@@ -24,7 +24,7 @@ type Service[T any] interface {
 // serviceImpl is a lazy grpc service implementation.
 type serviceImpl[T any] struct {
 	Conn
-	serviceCreator func(*grpc.ClientConn) T
+	serviceCreator func(grpc.ClientConnInterface) T
 }
 
 func (s *serviceImpl[T]) GetService(ctx context.Context) (T, error) {

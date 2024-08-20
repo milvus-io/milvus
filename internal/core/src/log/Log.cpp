@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
 #include "log/Log.h"
 
 /*
@@ -105,6 +107,7 @@ get_thread_starttime() {
     int64_t val = 0;
     char comm[16], state;
     FILE* thread_stat = fopen(filename, "r");
+    AssertInfo(thread_stat != nullptr, "opening file:{} failed!", filename);
     auto ret = fscanf(
         thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);  // NOLINT
 

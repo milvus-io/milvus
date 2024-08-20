@@ -171,6 +171,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 
 	replicasToBalance := b.replicasToBalance()
 	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
+	// iterate all collection to find a collection to balance
+	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+		replicasToBalance := b.replicasToBalance()
+		segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+	}
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)

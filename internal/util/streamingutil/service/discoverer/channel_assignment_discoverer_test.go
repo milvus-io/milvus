@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_types"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -91,6 +92,12 @@ func TestChannelAssignmentDiscoverer(t *testing.T) {
 			ch <- expected[idx+1]
 			idx++
 			return nil
+		}
+
+		// resolver attributes
+		for _, addr := range state.State.Addresses {
+			serverID := attributes.GetServerID(addr.Attributes)
+			assert.NotNil(t, serverID)
 		}
 		return io.EOF
 	})

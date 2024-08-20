@@ -89,6 +89,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	redoTask.AddAsyncStep(&deletePartitionDataStep{
 		baseStep: baseStep{core: t.core},
 		pchans:   t.collMeta.PhysicalChannelNames,
+		vchans:   t.collMeta.VirtualChannelNames,
 		partition: &model.Partition{
 			PartitionID:   partID,
 			PartitionName: t.Req.GetPartitionName(),

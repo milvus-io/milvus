@@ -19,8 +19,8 @@ package meta
 import (
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -57,7 +57,7 @@ func (f *ReplicaSegDistFilter) Match(s *Segment) bool {
 	return f.GetCollectionID() == s.GetCollectionID() && f.Contains(s.Node)
 }
 
-func (f ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
+func (f *ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
 	filter.nodes = f.GetNodes()
 	filter.collectionID = f.GetCollectionID()
 }

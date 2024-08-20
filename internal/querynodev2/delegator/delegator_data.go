@@ -526,6 +526,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID: info.GetPartitionID(),
 			NodeID:      req.GetDstNodeID(),
 			Version:     req.GetVersion(),
+			Level:       info.GetLevel(),
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
@@ -646,6 +647,16 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			position = deltaPositions[0]
 		}
 
+		// after L0 segment feature
+		// growing segemnts should have load stream delete as well
+		deleteScope := querypb.DataScope_All
+		switch candidate.Type() {
+		case commonpb.SegmentState_Sealed:
+			deleteScope = querypb.DataScope_Historical
+		case commonpb.SegmentState_Growing:
+			deleteScope = querypb.DataScope_Streaming
+		}
+
 		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
 		deleteData := &storage.DeleteData{}
 		deleteData.AppendBatch(deletedPks, deletedTss)
@@ -660,7 +671,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
-				Scope:        querypb.DataScope_Historical, // only sealed segment need to loadStreamDelete
+				Scope:        deleteScope,
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
@@ -718,6 +729,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
+				Scope:        deleteScope,
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))

@@ -32,7 +32,7 @@ func TestBinlogWriterReader(t *testing.T) {
 
 	binlogWriter.SetEventTimeStamp(1000, 2000)
 	defer binlogWriter.Close()
-	eventWriter, err := binlogWriter.NextInsertEventWriter(false)
+	eventWriter, err := binlogWriter.NextInsertEventWriter()
 	assert.NoError(t, err)
 	err = eventWriter.AddInt32ToPayload([]int32{1, 2, 3}, nil)
 	assert.NoError(t, err)

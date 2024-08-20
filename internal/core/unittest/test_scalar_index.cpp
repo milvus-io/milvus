@@ -301,31 +301,6 @@ TestRecords(int vec_size, GeneratedData& dataset, std::vector<T>& scalars) {
     return reader;
 }
 
-template <typename T>
-std::shared_ptr<milvus_storage::Space>
-TestSpace(boost::filesystem::path& temp_path,
-          int vec_size,
-          GeneratedData& dataset,
-          std::vector<T>& scalars) {
-    auto arrow_schema = TestSchema<T>(vec_size);
-    milvus_storage::SchemaOptions schema_options{
-        .primary_column = "pk", .version_column = "ts", .vector_column = "vec"};
-    auto schema =
-        std::make_shared<milvus_storage::Schema>(arrow_schema, schema_options);
-    EXPECT_TRUE(schema->Validate().ok());
-
-    auto space_res = milvus_storage::Space::Open(
-        "file://" + boost::filesystem::canonical(temp_path).string(),
-        milvus_storage::Options{schema});
-    EXPECT_TRUE(space_res.has_value());
-
-    auto space = std::move(space_res.value());
-    auto rec = TestRecords<T>(vec_size, dataset, scalars);
-    auto write_opt = milvus_storage::WriteOption{nb};
-    space->Write(*rec, write_opt);
-    return std::move(space);
-}
-
 template <>
 struct TypedScalarIndexTestV2<int8_t>::Helper {
     using C = arrow::Int8Type;

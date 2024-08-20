@@ -16,7 +16,6 @@
 #include <string>
 #include <vector>
 #include "common/EasyAssert.h"
-#include "storage/prometheus_client.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/storage_c.h"
@@ -105,54 +104,4 @@ TEST_F(StorageTest, InitChunkCacheSingleton) {
 
 TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
-}
-
-vector<string>
-split(const string& str,
-      const string& delim) {  //将分割后的子字符串存储在vector中
-    vector<string> res;
-    if ("" == str)
-        return res;
-
-    string strs = str + delim;
-    size_t pos;
-    size_t size = strs.size();
-
-    for (int i = 0; i < size; ++i) {
-        pos = strs.find(delim, i);
-        if (pos < size) {
-            string s = strs.substr(i, pos - i);
-            res.push_back(s);
-            i = pos + delim.size() - 1;
-        }
-    }
-    return res;
-}
-
-TEST_F(StorageTest, GetStorageMetrics) {
-    auto metricsChars = GetStorageMetrics();
-    string helpPrefix = "# HELP ";
-    string familyName = "";
-    char* p;
-    const char* delim = "\n";
-    p = strtok(metricsChars, delim);
-    while (p) {
-        char* currentLine = p;
-        p = strtok(NULL, delim);
-        if (strncmp(currentLine, "# HELP ", 7) == 0) {
-            familyName = "";
-            continue;
-        } else if (strncmp(currentLine, "# TYPE ", 7) == 0) {
-            std::vector<string> res = split(currentLine, " ");
-            EXPECT_EQ(4, res.size());
-            familyName = res[2];
-            EXPECT_EQ(true,
-                      res[3] == "gauge" || res[3] == "counter" ||
-                          res[3] == "histogram");
-            continue;
-        }
-        EXPECT_EQ(true, familyName.length() > 0);
-        EXPECT_EQ(
-            0, strncmp(currentLine, familyName.c_str(), familyName.length()));
-    }
 }

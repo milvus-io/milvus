@@ -1,14 +1,23 @@
 package pulsar
 
 import (
+	"encoding/base64"
+
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 var _ message.MessageID = pulsarID{}
 
-func UnmarshalMessageID(data []byte) (message.MessageID, error) {
+// NewPulsarID creates a new pulsarID
+// TODO: remove in future.
+func NewPulsarID(id pulsar.MessageID) message.MessageID {
+	return pulsarID{id}
+}
+
+func UnmarshalMessageID(data string) (message.MessageID, error) {
 	id, err := unmarshalMessageID(data)
 	if err != nil {
 		return nil, err
@@ -16,16 +25,27 @@ func UnmarshalMessageID(data []byte) (message.MessageID, error) {
 	return id, nil
 }
 
-func unmarshalMessageID(data []byte) (pulsarID, error) {
-	msgID, err := pulsar.DeserializeMessageID(data)
+func unmarshalMessageID(data string) (pulsarID, error) {
+	val, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return pulsarID{nil}, err
+		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when decode base64 with err: %s, id: %s", err.Error(), data)
+	}
+	msgID, err := pulsar.DeserializeMessageID(val)
+	if err != nil {
+		return pulsarID{nil}, errors.Wrapf(message.ErrInvalidMessageID, "decode pulsar fail when deserialize with err: %s, id: %s", err.Error(), data)
 	}
 	return pulsarID{msgID}, nil
 }
 
 type pulsarID struct {
 	pulsar.MessageID
+}
+
+// PulsarID returns the pulsar message id.
+// Don't delete this function until conversion logic removed.
+// TODO: remove in future.
+func (id pulsarID) PulsarID() pulsar.MessageID {
+	return id.MessageID
 }
 
 func (id pulsarID) WALName() string {
@@ -61,6 +81,6 @@ func (id pulsarID) EQ(other message.MessageID) bool {
 		id.BatchIdx() == id2.BatchIdx()
 }
 
-func (id pulsarID) Marshal() []byte {
-	return id.Serialize()
+func (id pulsarID) Marshal() string {
+	return base64.StdEncoding.EncodeToString(id.Serialize())
 }

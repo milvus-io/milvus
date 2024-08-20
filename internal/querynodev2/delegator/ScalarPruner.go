@@ -203,62 +203,81 @@ func NewParseContext(keyField FieldID, dType schemapb.DataType) *ParseContext {
 	return &ParseContext{keyField, dType}
 }
 
-func ParseExpr(exprPb *planpb.Expr, parseCtx *ParseContext) Expr {
+func ParseExpr(exprPb *planpb.Expr, parseCtx *ParseContext) (Expr, error) {
 	var res Expr
+	var err error
 	switch exp := exprPb.GetExpr().(type) {
 	case *planpb.Expr_BinaryExpr:
-		res = ParseLogicalBinaryExpr(exp.BinaryExpr, parseCtx)
+		res, err = ParseLogicalBinaryExpr(exp.BinaryExpr, parseCtx)
 	case *planpb.Expr_UnaryExpr:
-		res = ParseLogicalUnaryExpr(exp.UnaryExpr, parseCtx)
+		res, err = ParseLogicalUnaryExpr(exp.UnaryExpr, parseCtx)
 	case *planpb.Expr_BinaryRangeExpr:
-		res = ParseBinaryRangeExpr(exp.BinaryRangeExpr, parseCtx)
+		res, err = ParseBinaryRangeExpr(exp.BinaryRangeExpr, parseCtx)
 	case *planpb.Expr_UnaryRangeExpr:
-		res = ParseUnaryRangeExpr(exp.UnaryRangeExpr, parseCtx)
+		res, err = ParseUnaryRangeExpr(exp.UnaryRangeExpr, parseCtx)
 	case *planpb.Expr_TermExpr:
-		res = ParseTermExpr(exp.TermExpr, parseCtx)
+		res, err = ParseTermExpr(exp.TermExpr, parseCtx)
 	}
-	return res
+	return res, err
 }
 
-func ParseLogicalBinaryExpr(exprPb *planpb.BinaryExpr, parseCtx *ParseContext) Expr {
-	leftExpr := ParseExpr(exprPb.Left, parseCtx)
-	rightExpr := ParseExpr(exprPb.Right, parseCtx)
-	return NewLogicalBinaryExpr(leftExpr, rightExpr, exprPb.GetOp())
+func ParseLogicalBinaryExpr(exprPb *planpb.BinaryExpr, parseCtx *ParseContext) (Expr, error) {
+	leftExpr, err := ParseExpr(exprPb.Left, parseCtx)
+	if err != nil {
+		return nil, err
+	}
+	rightExpr, err := ParseExpr(exprPb.Right, parseCtx)
+	if err != nil {
+		return nil, err
+	}
+	return NewLogicalBinaryExpr(leftExpr, rightExpr, exprPb.GetOp()), nil
 }
 
-func ParseLogicalUnaryExpr(exprPb *planpb.UnaryExpr, parseCtx *ParseContext) Expr {
+func ParseLogicalUnaryExpr(exprPb *planpb.UnaryExpr, parseCtx *ParseContext) (Expr, error) {
 	// currently we don't handle NOT expr, this part of code is left for logical integrity
-	return nil
+	return nil, nil
 }
 
-func ParseBinaryRangeExpr(exprPb *planpb.BinaryRangeExpr, parseCtx *ParseContext) Expr {
+func ParseBinaryRangeExpr(exprPb *planpb.BinaryRangeExpr, parseCtx *ParseContext) (Expr, error) {
 	if exprPb.GetColumnInfo().GetFieldId() != parseCtx.keyFieldIDToPrune {
-		return nil
+		return nil, nil
 	}
-	lower := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetLowerValue())
-	upper := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetUpperValue())
-	return NewBinaryRangeExpr(lower, upper, exprPb.LowerInclusive, exprPb.UpperInclusive)
+	lower, err := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetLowerValue())
+	if err != nil {
+		return nil, err
+	}
+	upper, err := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetUpperValue())
+	if err != nil {
+		return nil, err
+	}
+	return NewBinaryRangeExpr(lower, upper, exprPb.LowerInclusive, exprPb.UpperInclusive), nil
 }
 
-func ParseUnaryRangeExpr(exprPb *planpb.UnaryRangeExpr, parseCtx *ParseContext) Expr {
+func ParseUnaryRangeExpr(exprPb *planpb.UnaryRangeExpr, parseCtx *ParseContext) (Expr, error) {
 	if exprPb.GetColumnInfo().GetFieldId() != parseCtx.keyFieldIDToPrune {
-		return nil
+		return nil, nil
 	}
 	if exprPb.GetOp() == planpb.OpType_NotEqual {
-		return nil
+		return nil, nil
 		// segment-prune based on min-max cannot support not equal semantic
 	}
-	innerVal := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetValue())
-	return NewUnaryRangeExpr(innerVal, exprPb.GetOp())
+	innerVal, err := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, exprPb.GetValue())
+	if err != nil {
+		return nil, err
+	}
+	return NewUnaryRangeExpr(innerVal, exprPb.GetOp()), nil
 }
 
-func ParseTermExpr(exprPb *planpb.TermExpr, parseCtx *ParseContext) Expr {
+func ParseTermExpr(exprPb *planpb.TermExpr, parseCtx *ParseContext) (Expr, error) {
 	if exprPb.GetColumnInfo().GetFieldId() != parseCtx.keyFieldIDToPrune {
-		return nil
+		return nil, nil
 	}
 	scalarVals := make([]storage.ScalarFieldValue, 0)
 	for _, val := range exprPb.GetValues() {
-		scalarVals = append(scalarVals, storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, val))
+		innerVal, err := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, val)
+		if err == nil {
+			scalarVals = append(scalarVals, innerVal)
+		}
 	}
-	return NewTermExpr(scalarVals)
+	return NewTermExpr(scalarVals), nil
 }

@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
@@ -420,6 +420,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		Condition:            NewTaskCondition(ctx),
 		AlterDatabaseRequest: request,
 		rootCoord:            node.rootCoord,
+		replicateMsgStream:   node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -2515,7 +2516,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -2592,7 +2593,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	dbName := request.DbName
 	collectionName := request.CollectionName
 
-	v := Extension.Report(map[string]any{
+	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
 		hookutil.DatabaseKey:        dbName,
 		hookutil.UsernameKey:        username,
@@ -2696,7 +2697,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
-	v := Extension.Report(map[string]any{
+	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
 		hookutil.DatabaseKey:   dbName,
 		hookutil.UsernameKey:   username,
@@ -2829,7 +2830,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
-	v := Extension.Report(map[string]any{
+	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
@@ -2959,9 +2960,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	guaranteeTs := request.GuaranteeTimestamp
-
-	log := log.Ctx(ctx).With(
+	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2970,14 +2969,15 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields),
 		zap.Any("search_params", request.SearchParams),
-		zap.Uint64("guarantee_timestamp", guaranteeTs),
+		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
 	defer func() {
 		span := tr.ElapseSpan()
 		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
+			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
+				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -3073,7 +3073,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.result)
-		v := Extension.Report(map[string]any{
+		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
@@ -3162,22 +3162,20 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	guaranteeTs := request.GuaranteeTimestamp
-
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("OutputFields", request.OutputFields),
-		zap.Uint64("guarantee_timestamp", guaranteeTs),
+		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
 	defer func() {
 		span := tr.ElapseSpan()
 		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Duration("duration", span))
+			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()), zap.Duration("duration", span))
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3272,7 +3270,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
 		username := GetCurUserFromContextOrDefault(ctx)
-		v := Extension.Report(map[string]any{
+		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
@@ -3433,6 +3431,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames),
+		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
@@ -3441,7 +3440,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		zap.String("expr", request.Expr),
 		zap.Strings("OutputFields", request.OutputFields),
 		zap.Uint64("travel_timestamp", request.TravelTimestamp),
-		zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
 	)
 
 	tr := timerecord.NewTimeRecorder(method)
@@ -3454,7 +3452,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 				zap.String("expr", request.Expr),
 				zap.Strings("OutputFields", request.OutputFields),
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
-				zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
+				zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Duration("duration", span))
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3598,7 +3596,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
-	v := Extension.Report(map[string]any{
+	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeQuery,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
@@ -4001,11 +3999,8 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 					DbName:          dbName,
 					CollectionNames: []string{collection},
 				})
-				if err != nil {
+				if err = merr.CheckRPCCall(flushRsp, err); err != nil {
 					return err
-				}
-				if flushRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					return merr.Error(flushRsp.GetStatus())
 				}
 				return nil
 			})
@@ -4116,6 +4111,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			PartitionID:  info.PartitionID,
 			NumRows:      info.NumOfRows,
 			State:        info.State,
+			Level:        commonpb.SegmentLevel(info.Level),
 		}
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -4188,6 +4184,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			IndexID:      info.IndexID,
 			State:        info.SegmentState,
 			NodeIds:      info.NodeIds,
+			Level:        commonpb.SegmentLevel(info.Level),
 		}
 	}
 
@@ -4757,18 +4754,33 @@ func convertToV1ListImportResponse(rsp *internalpb.ListImportsResponse) *milvusp
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	rsp, err := node.ImportV2(ctx, convertToV2ImportRequest(req))
+	if err != nil {
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1ImportResponse(rsp), err
 }
 
 // GetImportState checks import task state from RootCoord.
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	rsp, err := node.GetImportProgress(ctx, convertToV2GetImportRequest(req))
+	if err != nil {
+		return &milvuspb.GetImportStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1GetImportResponse(rsp), err
 }
 
 // ListImportTasks get id array of all import tasks from rootcoord
 func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	rsp, err := node.ListImports(ctx, convertToV2ListImportRequest(req))
+	if err != nil {
+		return &milvuspb.ListImportTasksResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return convertToV1ListImportResponse(rsp), err
 }
 
@@ -4857,6 +4869,10 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		err = errors.Wrap(err, "encrypt password failed")
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_CreateCredential
 
 	credInfo := &internalpb.CredentialInfo{
 		Username:          req.Username,
@@ -4868,6 +4884,9 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		log.Error("create credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, err
 }
@@ -4926,6 +4945,10 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		err = errors.Wrap(err, "encrypt password failed")
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_UpdateCredential
 	updateCredReq := &internalpb.CredentialInfo{
 		Username:          req.Username,
 		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
@@ -4936,6 +4959,9 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		log.Error("update credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, err
 }
@@ -4957,11 +4983,18 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 		err := merr.WrapErrPrivilegeNotPermitted("root user cannot be deleted")
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_DeleteCredential
 	result, err := node.rootCoord.DeleteCredential(ctx, req)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("delete credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, err
 }
@@ -4977,6 +5010,10 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListCredUsersResponse{Status: merr.Status(err)}, nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_ListCredUsernames
 	rootCoordReq := &milvuspb.ListCredUsersRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ListCredUsernames),
@@ -5012,11 +5049,18 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	if err := ValidateRoleName(roleName); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_CreateRole
 
 	result, err := node.rootCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5035,6 +5079,10 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	if err := ValidateRoleName(req.RoleName); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_DropRole
 	if IsDefaultRole(req.RoleName) {
 		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be dropped", req.GetRoleName())
 		return merr.Status(err), nil
@@ -5045,6 +5093,9 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 			zap.String("role_name", req.RoleName),
 			zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5065,11 +5116,18 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	if err := ValidateRoleName(req.RoleName); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_OperateUserRole
 
 	result, err := node.rootCoord.OperateUserRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate user role", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5092,6 +5150,10 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 			}, nil
 		}
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_SelectRole
 
 	result, err := node.rootCoord.SelectRole(ctx, req)
 	if err != nil {
@@ -5122,6 +5184,10 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 			}, nil
 		}
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_SelectUser
 
 	result, err := node.rootCoord.SelectUser(ctx, req)
 	if err != nil {
@@ -5179,6 +5245,10 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	if err := node.validPrivilegeParams(req); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_OperatePrivilege
 	curUser, err := GetCurUserFromContext(ctx)
 	if err != nil {
 		log.Warn("fail to get current user", zap.Error(err))
@@ -5205,6 +5275,9 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 				return result, nil
 			}
 		}
+	}
+	if merr.Ok(result) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5252,6 +5325,10 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 			Status: merr.Status(err),
 		}, nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_SelectGrant
 
 	result, err := node.rootCoord.SelectGrant(ctx, req)
 	if err != nil {
@@ -5259,6 +5336,46 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 		return &milvuspb.SelectGrantResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-BackupRBAC")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Debug("BackupRBAC", zap.Any("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.BackupRBACMetaResponse{Status: merr.Status(err)}, nil
+	}
+
+	result, err := node.rootCoord.BackupRBAC(ctx, req)
+	if err != nil {
+		log.Warn("fail to backup rbac", zap.Error(err))
+		return &milvuspb.BackupRBACMetaResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Debug("RestoreRBAC", zap.Any("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	result, err := node.rootCoord.RestoreRBAC(ctx, req)
+	if err != nil {
+		log.Warn("fail to restore rbac", zap.Error(err))
+		return merr.Status(err), nil
 	}
 	return result, nil
 }

@@ -21,8 +21,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type NodeManagerSuite struct {
@@ -63,24 +61,9 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 
 	s.nodeManager.Stopping(2)
 	s.True(s.nodeManager.IsStoppingNode(2))
-	err := s.nodeManager.Resume(2)
-	s.ErrorIs(err, merr.ErrNodeStateUnexpected)
-	s.True(s.nodeManager.IsStoppingNode(2))
 	node := s.nodeManager.Get(2)
 	node.SetState(NodeStateNormal)
 	s.False(s.nodeManager.IsStoppingNode(2))
-
-	err = s.nodeManager.Resume(3)
-	s.ErrorIs(err, merr.ErrNodeStateUnexpected)
-
-	s.nodeManager.Suspend(3)
-	node = s.nodeManager.Get(3)
-	s.NotNil(node)
-	s.Equal(NodeStateSuspend, node.GetState())
-	s.nodeManager.Resume(3)
-	node = s.nodeManager.Get(3)
-	s.NotNil(node)
-	s.Equal(NodeStateNormal, node.GetState())
 }
 
 func (s *NodeManagerSuite) TestNodeInfo() {

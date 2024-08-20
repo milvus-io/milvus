@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -890,6 +890,10 @@ func (coord *RootCoordMock) ShowSegments(ctx context.Context, req *milvuspb.Show
 	}, nil
 }
 
+func (coord *RootCoordMock) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	panic("implement me")
+}
+
 func (coord *RootCoordMock) DescribeSegments(ctx context.Context, req *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	panic("implement me")
 }
@@ -1119,6 +1123,14 @@ func (coord *RootCoordMock) DescribeDatabase(ctx context.Context, in *rootcoordp
 }
 
 func (coord *RootCoordMock) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	return &milvuspb.BackupRBACMetaResponse{}, nil
+}
+
+func (coord *RootCoordMock) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
 

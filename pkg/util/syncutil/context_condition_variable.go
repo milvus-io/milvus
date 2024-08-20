@@ -33,6 +33,15 @@ func (cv *ContextCond) LockAndBroadcast() {
 	}
 }
 
+// UnsafeBroadcast performs a broadcast without locking.
+// !!! Must be called with the lock held !!!
+func (cv *ContextCond) UnsafeBroadcast() {
+	if cv.ch != nil {
+		close(cv.ch)
+		cv.ch = nil
+	}
+}
+
 // Wait waits for a broadcast or context timeout.
 // It blocks until either a broadcast is received or the context is canceled or times out.
 // Returns an error if the context is canceled or times out.
@@ -61,6 +70,18 @@ func (cv *ContextCond) Wait(ctx context.Context) error {
 	}
 	cv.L.Lock()
 	return nil
+}
+
+// WaitChan returns a channel that can be used to wait for a broadcast.
+// Should be called after Lock.
+// The channel is closed when a broadcast is received.
+func (cv *ContextCond) WaitChan() <-chan struct{} {
+	if cv.ch == nil {
+		cv.ch = make(chan struct{})
+	}
+	ch := cv.ch
+	cv.L.Unlock()
+	return ch
 }
 
 // noCopy may be added to structs which must not be copied

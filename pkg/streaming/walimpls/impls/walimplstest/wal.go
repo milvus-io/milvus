@@ -6,8 +6,8 @@ package walimplstest
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
 )
@@ -29,15 +29,23 @@ func (w *walImpls) Append(ctx context.Context, msg message.MutableMessage) (mess
 
 func (w *walImpls) Read(ctx context.Context, opts walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 	offset := int64(0)
-	switch opts.DeliverPolicy.Policy() {
-	case options.DeliverPolicyTypeAll:
+	switch t := opts.DeliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_All:
 		offset = 0
-	case options.DeliverPolicyTypeLatest:
+	case *streamingpb.DeliverPolicy_Latest:
 		offset = w.datas.Len()
-	case options.DeliverPolicyTypeStartFrom:
-		offset = int64(opts.DeliverPolicy.MessageID().(testMessageID))
-	case options.DeliverPolicyTypeStartAfter:
-		offset = int64(opts.DeliverPolicy.MessageID().(testMessageID)) + 1
+	case *streamingpb.DeliverPolicy_StartFrom:
+		id, err := unmarshalTestMessageID(t.StartFrom.GetId())
+		if err != nil {
+			return nil, err
+		}
+		offset = int64(id)
+	case *streamingpb.DeliverPolicy_StartAfter:
+		id, err := unmarshalTestMessageID(t.StartAfter.GetId())
+		if err != nil {
+			return nil, err
+		}
+		offset = int64(id) + 1
 	}
 	return newScannerImpls(
 		opts, w.datas, int(offset),

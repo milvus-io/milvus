@@ -31,4 +31,4 @@ set(MILVUS_QUERY_SRCS
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
 
-target_link_libraries(milvus_query milvus_index milvus_bitset)
+target_link_libraries(milvus_query milvus_index milvus_bitset milvus_monitor)

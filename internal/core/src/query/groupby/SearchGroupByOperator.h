@@ -41,8 +41,7 @@ class GrowingDataGetter : public DataGetter<T> {
     const segcore::ConcurrentVector<T>* growing_raw_data_;
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId) {
-        growing_raw_data_ =
-            segment.get_insert_record().get_field_data<T>(fieldId);
+        growing_raw_data_ = segment.get_insert_record().get_data<T>(fieldId);
     }
 
     GrowingDataGetter(const GrowingDataGetter<T>& other)
@@ -69,11 +68,12 @@ class SealedDataGetter : public DataGetter<T> {
             if constexpr (std::is_same_v<T, std::string>) {
                 str_field_data_ =
                     std::make_shared<std::vector<std::string_view>>(
-                        segment.chunk_view<std::string_view>(field_id, 0));
+                        segment.chunk_view<std::string_view>(field_id, 0)
+                            .first);
             } else {
                 auto span = segment.chunk_data<T>(field_id, 0);
-                field_data_ =
-                    std::make_shared<Span<T>>(span.data(), span.row_count());
+                field_data_ = std::make_shared<Span<T>>(
+                    span.data(), span.valid_data(), span.row_count());
             }
         } else if (segment.HasIndex(field_id)) {
             this->field_index_ = &(segment.chunk_scalar_index<T>(field_id, 0));
@@ -133,7 +133,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 const index::VectorIndex& index) {
     if (search_info.group_by_field_id_.has_value()) {
         try {
-            auto search_conf = search_info.search_params_;
+            auto search_conf = index.PrepareSearchParams(search_info);
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
                 iterators_val =
                     index.VectorIterators(dataset, search_conf, bitset);
@@ -207,7 +207,7 @@ struct GroupByMap {
     }
     bool
     Push(const T& t) {
-        if (group_map_.size() >= group_capacity_ && group_map_[t] == 0){
+        if (group_map_.size() >= group_capacity_ && group_map_[t] == 0) {
             return false;
         }
         if (group_map_[t] >= group_size_) {

@@ -7,20 +7,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ typeutil.HeapInterface = (*timestampWithAckArray)(nil)
-
-// newAcker creates a new acker.
-func newAcker(ts uint64, lastConfirmedMessageID message.MessageID) *Acker {
-	return &Acker{
-		acknowledged: atomic.NewBool(false),
-		detail:       newAckDetail(ts, lastConfirmedMessageID),
-	}
-}
+var (
+	_ typeutil.HeapInterface = (*ackersOrderByTimestamp)(nil)
+	_ typeutil.HeapInterface = (*ackersOrderByEndTimestamp)(nil)
+)
 
 // Acker records the timestamp and last confirmed message id that has not been acknowledged.
 type Acker struct {
 	acknowledged *atomic.Bool // is acknowledged.
 	detail       *AckDetail   // info is available after acknowledged.
+	manager      *AckManager  // the manager of the acker.
 }
 
 // LastConfirmedMessageID returns the last confirmed message id.
@@ -30,7 +26,7 @@ func (ta *Acker) LastConfirmedMessageID() message.MessageID {
 
 // Timestamp returns the timestamp.
 func (ta *Acker) Timestamp() uint64 {
-	return ta.detail.Timestamp
+	return ta.detail.BeginTimestamp
 }
 
 // Ack marks the timestamp as acknowledged.
@@ -39,6 +35,7 @@ func (ta *Acker) Ack(opts ...AckOption) {
 		opt(ta.detail)
 	}
 	ta.acknowledged.Store(true)
+	ta.manager.ack(ta)
 }
 
 // ackDetail returns the ack info, only can be called after acknowledged.
@@ -49,31 +46,46 @@ func (ta *Acker) ackDetail() *AckDetail {
 	return ta.detail
 }
 
-// timestampWithAckArray is a heap underlying represent of timestampAck.
-type timestampWithAckArray []*Acker
-
-// Len returns the length of the heap.
-func (h timestampWithAckArray) Len() int {
-	return len(h)
+// ackersOrderByTimestamp is a heap underlying represent of timestampAck.
+type ackersOrderByTimestamp struct {
+	ackers
 }
 
 // Less returns true if the element at index i is less than the element at index j.
-func (h timestampWithAckArray) Less(i, j int) bool {
-	return h[i].detail.Timestamp < h[j].detail.Timestamp
+func (h ackersOrderByTimestamp) Less(i, j int) bool {
+	return h.ackers[i].detail.BeginTimestamp < h.ackers[j].detail.BeginTimestamp
+}
+
+// ackersOrderByEndTimestamp is a heap underlying represent of timestampAck.
+type ackersOrderByEndTimestamp struct {
+	ackers
+}
+
+// Less returns true if the element at index i is less than the element at index j.
+func (h ackersOrderByEndTimestamp) Less(i, j int) bool {
+	return h.ackers[i].detail.EndTimestamp < h.ackers[j].detail.EndTimestamp
+}
+
+// ackers is a heap underlying represent of timestampAck.
+type ackers []*Acker
+
+// Len returns the length of the heap.
+func (h ackers) Len() int {
+	return len(h)
 }
 
 // Swap swaps the elements at indexes i and j.
-func (h timestampWithAckArray) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h ackers) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
 // Push pushes the last one at len.
-func (h *timestampWithAckArray) Push(x interface{}) {
+func (h *ackers) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	*h = append(*h, x.(*Acker))
 }
 
 // Pop pop the last one at len.
-func (h *timestampWithAckArray) Pop() interface{} {
+func (h *ackers) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -82,6 +94,6 @@ func (h *timestampWithAckArray) Pop() interface{} {
 }
 
 // Peek returns the element at the top of the heap.
-func (h *timestampWithAckArray) Peek() interface{} {
+func (h *ackers) Peek() interface{} {
 	return (*h)[0]
 }

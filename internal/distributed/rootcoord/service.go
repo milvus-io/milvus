@@ -454,6 +454,11 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	return s.rootCoord.ShowSegments(ctx, in)
 }
 
+// GetPChannelInfo gets the physical channel information
+func (s *Server) GetPChannelInfo(ctx context.Context, in *rootcoordpb.GetPChannelInfoRequest) (*rootcoordpb.GetPChannelInfoResponse, error) {
+	return s.rootCoord.GetPChannelInfo(ctx, in)
+}
+
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)
@@ -527,4 +532,12 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.RenameCollection(ctx, request)
+}
+
+func (s *Server) BackupRBAC(ctx context.Context, request *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+	return s.rootCoord.BackupRBAC(ctx, request)
+}
+
+func (s *Server) RestoreRBAC(ctx context.Context, request *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	return s.rootCoord.RestoreRBAC(ctx, request)
 }

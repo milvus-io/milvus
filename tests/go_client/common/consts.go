@@ -1,5 +1,7 @@
 package common
 
+import "github.com/milvus-io/milvus/client/v2/index"
+
 // cost default field name
 const (
 	DefaultInt8FieldName        = "int8"
@@ -64,4 +66,13 @@ const (
 	MaxTopK                 = 16384
 	MaxVectorFieldNum       = 4
 	MaxShardNum             = 16
+)
+
+const (
+	IndexStateIndexStateNone index.IndexState = 0
+	IndexStateUnissued       index.IndexState = 1
+	IndexStateInProgress     index.IndexState = 2
+	IndexStateFinished       index.IndexState = 3
+	IndexStateFailed         index.IndexState = 4
+	IndexStateRetry          index.IndexState = 5
 )

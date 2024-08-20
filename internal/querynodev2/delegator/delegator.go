@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -796,8 +796,14 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 	colID := sd.Collection()
 	log := log.Ctx(ctx)
 	for partID, newVersion := range partStatsVersions {
-		curStats, exist := sd.partitionStats[partID]
-		if exist && curStats.Version >= newVersion {
+		var curStats *storage.PartitionStatsSnapshot
+		var exist bool
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			curStats, exist = sd.partitionStats[partID]
+		}()
+		if exist && curStats != nil && curStats.Version >= newVersion {
 			log.RatedWarn(60, "Input partition stats' version is less or equal than current partition stats, skip",
 				zap.Int64("partID", partID),
 				zap.Int64("curVersion", curStats.Version),

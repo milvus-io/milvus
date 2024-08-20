@@ -221,7 +221,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			switch dataType {
 			// just for backward compatibility
 			case schemapb.DataType_Int8:
-				// todo: smellthemoon, valid_data may need to check when create index
+				// todo: valid_data may need to check when create index
 				content, _, err := eventReader.GetByteFromPayload()
 				if err != nil {
 					log.Warn("failed to get byte from payload",

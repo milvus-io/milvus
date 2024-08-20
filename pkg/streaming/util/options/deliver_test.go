@@ -6,59 +6,142 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 func TestDeliverPolicy(t *testing.T) {
 	policy := DeliverPolicyAll()
-	assert.Equal(t, DeliverPolicyTypeAll, policy.Policy())
-	assert.Panics(t, func() {
-		policy.MessageID()
-	})
+	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 
 	policy = DeliverPolicyLatest()
-	assert.Equal(t, DeliverPolicyTypeLatest, policy.Policy())
-	assert.Panics(t, func() {
-		policy.MessageID()
-	})
+	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_Latest)
 
 	messageID := mock_message.NewMockMessageID(t)
+	messageID.EXPECT().Marshal().Return("messageID")
 	policy = DeliverPolicyStartFrom(messageID)
-	assert.Equal(t, DeliverPolicyTypeStartFrom, policy.Policy())
-	assert.Equal(t, messageID, policy.MessageID())
+	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
 
 	policy = DeliverPolicyStartAfter(messageID)
-	assert.Equal(t, DeliverPolicyTypeStartAfter, policy.Policy())
-	assert.Equal(t, messageID, policy.MessageID())
+	_ = policy.GetPolicy().(*streamingpb.DeliverPolicy_StartAfter)
 }
 
 func TestDeliverFilter(t *testing.T) {
 	filter := DeliverFilterTimeTickGT(1)
-	assert.Equal(t, uint64(1), filter.(interface{ TimeTick() uint64 }).TimeTick())
-	assert.Equal(t, DeliverFilterTypeTimeTickGT, filter.Type())
-	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(uint64(1))
-	assert.False(t, filter.Filter(msg))
-	msg.EXPECT().TimeTick().Unset()
-	msg.EXPECT().TimeTick().Return(uint64(2))
-	assert.True(t, filter.Filter(msg))
+	_ = filter.GetFilter().(*streamingpb.DeliverFilter_TimeTickGt)
 
 	filter = DeliverFilterTimeTickGTE(2)
-	assert.Equal(t, uint64(2), filter.(interface{ TimeTick() uint64 }).TimeTick())
-	assert.Equal(t, DeliverFilterTypeTimeTickGTE, filter.Type())
-	msg.EXPECT().TimeTick().Unset()
-	msg.EXPECT().TimeTick().Return(uint64(1))
-	assert.False(t, filter.Filter(msg))
-	msg.EXPECT().TimeTick().Unset()
-	msg.EXPECT().TimeTick().Return(uint64(2))
-	assert.True(t, filter.Filter(msg))
+	_ = filter.GetFilter().(*streamingpb.DeliverFilter_TimeTickGte)
 
 	filter = DeliverFilterVChannel("vchannel")
-	assert.Equal(t, "vchannel", filter.(interface{ VChannel() string }).VChannel())
-	assert.Equal(t, DeliverFilterTypeVChannel, filter.Type())
-	msg.EXPECT().VChannel().Unset()
-	msg.EXPECT().VChannel().Return("vchannel2")
-	assert.False(t, filter.Filter(msg))
-	msg.EXPECT().VChannel().Unset()
-	msg.EXPECT().VChannel().Return("vchannel")
-	assert.True(t, filter.Filter(msg))
+	_ = filter.GetFilter().(*streamingpb.DeliverFilter_Vchannel)
+
+	filter = DeliverFilterMessageType(message.MessageTypeDelete)
+	_ = filter.GetFilter().(*streamingpb.DeliverFilter_MessageType)
+}
+
+func TestNewMessageFilter(t *testing.T) {
+	filters := []DeliverFilter{
+		DeliverFilterTimeTickGT(1),
+		DeliverFilterVChannel("test"),
+	}
+	filterFunc := GetFilterFunc(filters)
+
+	msg := mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(2).Maybe()
+	msg.EXPECT().VChannel().Return("test2").Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	assert.False(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	assert.False(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("").Maybe() // vchannel == "" should not be filtered.
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	assert.False(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(2).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	// if message is a txn message, it should be only filterred by time tick when the message type is commit.
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeCommitTxn).Maybe()
+	assert.False(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	// if message is a txn message, it should be only filterred by time tick when the message type is commit.
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeCommitTxn).Maybe()
+	assert.False(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	filters = []*streamingpb.DeliverFilter{
+		DeliverFilterTimeTickGTE(1),
+		DeliverFilterVChannel("test"),
+	}
+	filterFunc = GetFilterFunc(filters)
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	// if message is a txn message, it should be only filterred by time tick when the message type is commit.
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeCommitTxn).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().TimeTick().Return(1).Maybe()
+	msg.EXPECT().VChannel().Return("test").Maybe()
+	msg.EXPECT().TxnContext().Return(&message.TxnContext{}).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	filters = []*streamingpb.DeliverFilter{
+		DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete),
+	}
+	filterFunc = GetFilterFunc(filters)
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().MessageType().Return(message.MessageTypeDelete).Maybe()
+	assert.True(t, filterFunc(msg))
+
+	msg = mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().MessageType().Return(message.MessageTypeFlush).Maybe()
+	assert.False(t, filterFunc(msg))
 }

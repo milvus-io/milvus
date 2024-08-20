@@ -357,8 +357,10 @@ SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
                                                  int64_t chunk_id,
                                                  milvus::DataType data_type,
                                                  const void* chunk_data,
+                                                 const bool* valid_data,
                                                  int64_t count) {
-    skip_index_.LoadPrimitive(field_id, chunk_id, data_type, chunk_data, count);
+    skip_index_.LoadPrimitive(
+        field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
 void

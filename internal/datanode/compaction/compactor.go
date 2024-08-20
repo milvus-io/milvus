@@ -29,4 +29,6 @@ type Compactor interface {
 	GetPlanID() typeutil.UniqueID
 	GetCollection() typeutil.UniqueID
 	GetChannelName() string
+	GetCompactionType() datapb.CompactionType
+	GetSlotUsage() int64
 }

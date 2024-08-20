@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 const (

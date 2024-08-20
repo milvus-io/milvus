@@ -76,7 +76,7 @@ TEST(Util, GetDeleteBitmap) {
     }
     auto insert_offset = insert_record.reserved.fetch_add(N);
     insert_record.timestamps_.set_data_raw(insert_offset, tss.data(), N);
-    auto field_data = insert_record.get_field_data_base(i64_fid);
+    auto field_data = insert_record.get_data_base(i64_fid);
     field_data->set_data_raw(insert_offset, age_data.data(), N);
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
@@ -213,7 +213,7 @@ TEST(Util, get_common_prefix) {
     EXPECT_STREQ(common_prefix.c_str(), "");
 }
 
-TEST(Util, dis_closer){
+TEST(Util, dis_closer) {
     EXPECT_TRUE(milvus::query::dis_closer(0.1, 0.2, "L2"));
     EXPECT_FALSE(milvus::query::dis_closer(0.2, 0.1, "L2"));
     EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.1, "L2"));

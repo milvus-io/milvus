@@ -22,12 +22,11 @@
 namespace milvus::query {
 class SubSearchResult {
  public:
-    SubSearchResult(
-        int64_t num_queries,
-        int64_t topk,
-        const MetricType& metric_type,
-        int64_t round_decimal,
-        const std::vector<knowhere::IndexNode::IteratorPtr>& iters)
+    SubSearchResult(int64_t num_queries,
+                    int64_t topk,
+                    const MetricType& metric_type,
+                    int64_t round_decimal,
+                    const std::vector<knowhere::IndexNode::IteratorPtr>& iters)
         : num_queries_(num_queries),
           topk_(topk),
           round_decimal_(round_decimal),
@@ -41,12 +40,11 @@ class SubSearchResult {
                     int64_t topk,
                     const MetricType& metric_type,
                     int64_t round_decimal)
-        : SubSearchResult(
-              num_queries,
-              topk,
-              metric_type,
-              round_decimal,
-              std::vector<knowhere::IndexNode::IteratorPtr>{}) {
+        : SubSearchResult(num_queries,
+                          topk,
+                          metric_type,
+                          round_decimal,
+                          std::vector<knowhere::IndexNode::IteratorPtr>{}) {
     }
 
     SubSearchResult(SubSearchResult&& other) noexcept
@@ -130,8 +128,7 @@ class SubSearchResult {
     knowhere::MetricType metric_type_;
     std::vector<int64_t> seg_offsets_;
     std::vector<float> distances_;
-    std::vector<knowhere::IndexNode::IteratorPtr>
-        chunk_iterators_;
+    std::vector<knowhere::IndexNode::IteratorPtr> chunk_iterators_;
 };
 
 }  // namespace milvus::query

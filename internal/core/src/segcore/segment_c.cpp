@@ -29,7 +29,6 @@
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
-#include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -326,20 +325,6 @@ LoadFieldData(CSegmentInterface c_segment,
     }
 }
 
-CStatus
-LoadFieldDataV2(CSegmentInterface c_segment,
-                CLoadFieldDataInfo c_load_field_data_info) {
-    try {
-        auto segment =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
-        segment->LoadFieldDataV2(*load_info);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
 // just for test
 CStatus
 LoadFieldRawData(CSegmentInterface c_segment,
@@ -366,7 +351,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
                 dim = field_meta.get_dim();
             }
         }
-        auto field_data = milvus::storage::CreateFieldData(data_type, dim);
+        auto field_data =
+            milvus::storage::CreateFieldData(data_type, false, dim);
         field_data->FillFieldData(data, row_count);
         milvus::FieldDataChannelPtr channel =
             std::make_shared<milvus::FieldDataChannel>();

@@ -147,16 +147,14 @@ func (_c *MockMessageID_LTE_Call) RunAndReturn(run func(message.MessageID) bool)
 }
 
 // Marshal provides a mock function with given fields:
-func (_m *MockMessageID) Marshal() []byte {
+func (_m *MockMessageID) Marshal() string {
 	ret := _m.Called()
 
-	var r0 []byte
-	if rf, ok := ret.Get(0).(func() []byte); ok {
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]byte)
-		}
+		r0 = ret.Get(0).(string)
 	}
 
 	return r0
@@ -179,12 +177,12 @@ func (_c *MockMessageID_Marshal_Call) Run(run func()) *MockMessageID_Marshal_Cal
 	return _c
 }
 
-func (_c *MockMessageID_Marshal_Call) Return(_a0 []byte) *MockMessageID_Marshal_Call {
+func (_c *MockMessageID_Marshal_Call) Return(_a0 string) *MockMessageID_Marshal_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockMessageID_Marshal_Call) RunAndReturn(run func() []byte) *MockMessageID_Marshal_Call {
+func (_c *MockMessageID_Marshal_Call) RunAndReturn(run func() string) *MockMessageID_Marshal_Call {
 	_c.Call.Return(run)
 	return _c
 }

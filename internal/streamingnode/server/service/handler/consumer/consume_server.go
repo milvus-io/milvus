@@ -7,15 +7,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/typeconverter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -31,24 +32,13 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	if err != nil {
 		return nil, status.NewInvaildArgument("create consumer request is required")
 	}
-
-	pchanelInfo := typeconverter.NewPChannelInfoFromProto(createReq.Pchannel)
-	l, err := walManager.GetAvailableWAL(pchanelInfo)
+	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
 		return nil, err
 	}
-
-	deliverPolicy, err := typeconverter.NewDeliverPolicyFromProto(l.WALName(), createReq.GetDeliverPolicy())
-	if err != nil {
-		return nil, status.NewInvaildArgument("at convert deliver policy, err: %s", err.Error())
-	}
-	deliverFilters, err := newMessageFilter(createReq.DeliverFilters)
-	if err != nil {
-		return nil, status.NewInvaildArgument("at convert deliver filters, err: %s", err.Error())
-	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
-		DeliverPolicy: deliverPolicy,
-		MessageFilter: deliverFilters,
+		DeliverPolicy: createReq.GetDeliverPolicy(),
+		MessageFilter: createReq.DeliverFilters,
 	})
 	if err != nil {
 		return nil, err
@@ -116,24 +106,28 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			if !ok {
 				return status.NewInner("scanner error: %s", c.scanner.Error())
 			}
-			// Send Consumed message to client and do metrics.
-			messageSize := msg.EstimateSize()
-			if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
-				Id: &streamingpb.MessageID{
-					Id: msg.MessageID().Marshal(),
-				},
-				Message: &streamingpb.Message{
-					Payload:    msg.Payload(),
-					Properties: msg.Properties().ToRawMap(),
-				},
-			}); err != nil {
-				return status.NewInner("send consume message failed: %s", err.Error())
+			// If the message is a transaction message, we should send the sub messages one by one,
+			// Otherwise we can send the full message directly.
+			if txnMsg, ok := msg.(message.ImmutableTxnMessage); ok {
+				if err := c.sendImmutableMessage(txnMsg.Begin()); err != nil {
+					return err
+				}
+				if err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
+					if err := c.sendImmutableMessage(im); err != nil {
+						return err
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				if err := c.sendImmutableMessage(txnMsg.Commit()); err != nil {
+					return err
+				}
+			} else {
+				if err := c.sendImmutableMessage(msg); err != nil {
+					return err
+				}
 			}
-			metrics.StreamingNodeConsumeBytes.WithLabelValues(
-				paramtable.GetStringNodeID(),
-				c.scanner.Channel().Name,
-				strconv.FormatInt(c.scanner.Channel().Term, 10),
-			).Observe(float64(messageSize))
 		case <-c.closeCh:
 			c.logger.Info("close channel notified")
 			if err := c.consumeServer.SendClosed(); err != nil {
@@ -145,6 +139,28 @@ func (c *ConsumeServer) sendLoop() (err error) {
 			return c.consumeServer.Context().Err()
 		}
 	}
+}
+
+func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) error {
+	// Send Consumed message to client and do metrics.
+	messageSize := msg.EstimateSize()
+	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
+		Message: &messagespb.ImmutableMessage{
+			Id: &messagespb.MessageID{
+				Id: msg.MessageID().Marshal(),
+			},
+			Payload:    msg.Payload(),
+			Properties: msg.Properties().ToRawMap(),
+		},
+	}); err != nil {
+		return status.NewInner("send consume message failed: %s", err.Error())
+	}
+	metrics.StreamingNodeConsumeBytes.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		c.scanner.Channel().Name,
+		strconv.FormatInt(c.scanner.Channel().Term, 10),
+	).Observe(float64(messageSize))
+	return nil
 }
 
 // recvLoop receives messages from client.
@@ -175,19 +191,4 @@ func (c *ConsumeServer) recvLoop() (err error) {
 			c.logger.Warn("unknown request type", zap.Any("request", req))
 		}
 	}
-}
-
-func newMessageFilter(filters []*streamingpb.DeliverFilter) (wal.MessageFilter, error) {
-	fs, err := typeconverter.NewDeliverFiltersFromProtos(filters)
-	if err != nil {
-		return nil, err
-	}
-	return func(msg message.ImmutableMessage) bool {
-		for _, f := range fs {
-			if !f.Filter(msg) {
-				return false
-			}
-		}
-		return true
-	}, nil
 }

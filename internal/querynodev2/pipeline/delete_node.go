@@ -66,14 +66,13 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Dec()
 	nodeMsg := in.(*deleteNodeMsg)
 
-	// partition id = > DeleteData
-	deleteDatas := make(map[UniqueID]*delegator.DeleteData)
+	if len(nodeMsg.deleteMsgs) > 0 {
+		// partition id = > DeleteData
+		deleteDatas := make(map[UniqueID]*delegator.DeleteData)
 
-	for _, msg := range nodeMsg.deleteMsgs {
-		dNode.addDeleteData(deleteDatas, msg)
-	}
-
-	if len(deleteDatas) > 0 {
+		for _, msg := range nodeMsg.deleteMsgs {
+			dNode.addDeleteData(deleteDatas, msg)
+		}
 		// do Delete, use ts range max as ts
 		dNode.delegator.ProcessDelete(lo.Values(deleteDatas), nodeMsg.timeRange.timestampMax)
 	}

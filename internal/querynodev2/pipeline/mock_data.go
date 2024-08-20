@@ -53,7 +53,7 @@ func buildInsertMsg(collectionID int64, partitionID int64, segmentID int64, chan
 }
 
 func emptyDeleteMsg(collectionID int64, partitionID int64, channel string) *msgstream.DeleteMsg {
-	deleteReq := msgpb.DeleteRequest{
+	deleteReq := &msgpb.DeleteRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 			commonpbutil.WithTimeStamp(0),
@@ -70,7 +70,7 @@ func emptyDeleteMsg(collectionID int64, partitionID int64, channel string) *msgs
 }
 
 func emptyInsertMsg(collectionID int64, partitionID int64, segmentID int64, channel string) *msgstream.InsertMsg {
-	insertReq := msgpb.InsertRequest{
+	insertReq := &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 			commonpbutil.WithTimeStamp(0),

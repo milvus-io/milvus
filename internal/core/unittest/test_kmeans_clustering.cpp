@@ -194,7 +194,7 @@ test_run() {
     for (int64_t i = 0; i < nb * dim; ++i) {
         data_gen[i] = rand();
     }
-    auto field_data = storage::CreateFieldData(dtype, dim);
+    auto field_data = storage::CreateFieldData(dtype, false, dim);
     field_data->FillFieldData(data_gen.data(), data_gen.size() / dim);
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(field_meta);

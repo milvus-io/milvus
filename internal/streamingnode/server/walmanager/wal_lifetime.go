@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -17,6 +18,7 @@ func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
 	l := &walLifetime{
 		ctx:       ctx,
 		cancel:    cancel,
+		channel:   channel,
 		finish:    make(chan struct{}),
 		opener:    opener,
 		statePair: newWALStatePair(),
@@ -33,8 +35,9 @@ func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
 // term is always increasing, available is always before unavailable in same term, such as:
 // (-1, false) -> (0, true) -> (1, true) -> (2, true) -> (3, false) -> (7, true) -> ...
 type walLifetime struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx     context.Context
+	cancel  context.CancelFunc
+	channel string
 
 	finish    chan struct{}
 	opener    wal.Opener
@@ -129,6 +132,7 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
+		resource.Resource().Flusher().UnregisterPChannel(w.channel)
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.
@@ -156,6 +160,14 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 		return
 	}
 	logger.Info("open new wal done")
+	err = resource.Resource().Flusher().RegisterPChannel(w.channel, l)
+	if err != nil {
+		logger.Warn("open flusher fail", zap.Error(err))
+		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
+		// wal is opened, if register flusher failure, we should close the wal.
+		l.Close()
+		return
+	}
 	// -> (expectedTerm,true)
 	w.statePair.SetCurrentState(newAvailableCurrentState(l))
 }

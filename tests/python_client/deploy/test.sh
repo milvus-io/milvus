@@ -42,7 +42,7 @@ done
 
 ROOT_FOLDER=$(cd "$(dirname "$0")";pwd)
 
-# to export docker-compose logs before exit
+# to export docker compose logs before exit
 function error_exit {
     pushd ${ROOT_FOLDER}/${Deploy_Dir}
     echo "test failed"
@@ -51,8 +51,8 @@ function error_exit {
     then
         mkdir logs
     fi
-    docker-compose ps
-    docker-compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log 2>&1
+    docker compose ps
+    docker compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log 2>&1
     echo "log saved to $(pwd)/logs/${Deploy_Dir}-${Task}-${current}.log"
     popd
     exit 1
@@ -75,8 +75,8 @@ function replace_image_tag {
 
 #to check containers all running and minio is healthy
 function check_healthy {
-    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=$(docker-compose ps | grep "healthy" | wc -l)
+    cnt=$(docker compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker compose ps | grep "healthy" | wc -l)
     time_cnt=0
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
@@ -91,8 +91,8 @@ function check_healthy {
         printf "timeout,there are some issue with deployment!"
         error_exit
     fi
-    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=$(docker-compose ps | grep "healthy" | wc -l)
+    cnt=$(docker compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker compose ps | grep "healthy" | wc -l)
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
     done
@@ -129,14 +129,14 @@ pushd ${Deploy_Dir}
 wget https://github.com/milvus-io/milvus/releases/download/${latest_rc_tag}/milvus-${Mode}-docker-compose.yml -O docker-compose.yml
 ls
 # clean env to deploy a fresh milvus
-docker-compose down
-docker-compose ps
+docker compose down
+docker compose ps
 echo "$pw"| sudo -S rm -rf ./volumes
 
 # first deployment
 if [ "$Task" == "reinstall" ];
 then
-    printf "download latest milvus docker-compose yaml file from github\n"
+    printf "download latest milvus docker compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
     replace_image_tag "milvusdb\/milvus" $latest_tag
@@ -150,9 +150,9 @@ fi
 cat docker-compose.yml|grep milvusdb
 Expect=$(grep "container_name" docker-compose.yml | wc -l)
 Expect_health=$(grep "healthcheck" docker-compose.yml | wc -l)
-docker-compose up -d
+docker compose up -d
 check_healthy
-docker-compose ps
+docker compose ps
 popd
 
 # test for first deployment
@@ -169,10 +169,10 @@ fi
 pushd ${Deploy_Dir}
 # uninstall milvus
 printf "start to uninstall milvus\n"
-docker-compose down
+docker compose down
 sleep 10
 printf "check all containers removed\n"
-docker-compose ps
+docker compose ps
 
 # second deployment
 if [ "$Task" == "reinstall" ];
@@ -184,16 +184,16 @@ if [ "$Task" == "upgrade" ];
 then
     printf "start to upgrade milvus\n"
     # because the task is upgrade, so replace image tag to latest, like rc4-->rc5
-    printf "download latest milvus docker-compose yaml file from github\n"
+    printf "download latest milvus docker compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
     replace_image_tag "milvusdb\/milvus" $latest_tag
 
 fi
 cat docker-compose.yml|grep milvusdb
-docker-compose up -d
+docker compose up -d
 check_healthy
-docker-compose ps
+docker compose ps
 popd
 
 # wait for milvus ready
@@ -211,12 +211,12 @@ then
 fi
 
 
-# test for third deployment(after docker-compose restart)
+# test for third deployment(after docker compose restart)
 pushd ${Deploy_Dir}
 printf "start to restart milvus\n"
-docker-compose restart
+docker compose restart
 check_healthy
-docker-compose ps
+docker compose ps
 popd
 
 # wait for milvus ready
@@ -234,9 +234,9 @@ fi
 
 pushd ${Deploy_Dir}
 # clean env
-docker-compose ps
-docker-compose down
+docker compose ps
+docker compose down
 sleep 10
-docker-compose ps
+docker compose ps
 echo "$pw"|sudo -S rm -rf ./volumes
 popd

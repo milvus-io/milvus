@@ -110,6 +110,38 @@ func (_c *MockSubConn_GetOrBuildProducer_Call) RunAndReturn(run func(balancer.Pr
 	return _c
 }
 
+// Shutdown provides a mock function with given fields:
+func (_m *MockSubConn) Shutdown() {
+	_m.Called()
+}
+
+// MockSubConn_Shutdown_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Shutdown'
+type MockSubConn_Shutdown_Call struct {
+	*mock.Call
+}
+
+// Shutdown is a helper method to define mock.On call
+func (_e *MockSubConn_Expecter) Shutdown() *MockSubConn_Shutdown_Call {
+	return &MockSubConn_Shutdown_Call{Call: _e.mock.On("Shutdown")}
+}
+
+func (_c *MockSubConn_Shutdown_Call) Run(run func()) *MockSubConn_Shutdown_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSubConn_Shutdown_Call) Return() *MockSubConn_Shutdown_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSubConn_Shutdown_Call) RunAndReturn(run func()) *MockSubConn_Shutdown_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateAddresses provides a mock function with given fields: _a0
 func (_m *MockSubConn) UpdateAddresses(_a0 []resolver.Address) {
 	_m.Called(_a0)

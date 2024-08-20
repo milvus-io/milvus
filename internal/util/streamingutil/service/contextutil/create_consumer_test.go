@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 func TestWithCreateConsumer(t *testing.T) {
@@ -35,7 +35,7 @@ func TestWithCreateConsumer(t *testing.T) {
 	assert.Equal(t, req.DeliverPolicy.String(), req2.DeliverPolicy.String())
 
 	// panic case.
-	assert.Panics(t, func() { WithCreateConsumer(context.Background(), nil) })
+	assert.NotPanics(t, func() { WithCreateConsumer(context.Background(), nil) })
 }
 
 func TestGetCreateConsumer(t *testing.T) {

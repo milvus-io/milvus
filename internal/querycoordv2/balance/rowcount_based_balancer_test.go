@@ -146,61 +146,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegment() {
 	}
 }
 
-func (suite *RowCountBasedBalancerTestSuite) TestSuspendNode() {
-	cases := []struct {
-		name          string
-		distributions map[int64][]*meta.Segment
-		assignments   []*meta.Segment
-		nodes         []int64
-		segmentCnts   []int
-		states        []session.State
-		expectPlans   []SegmentAssignPlan
-	}{
-		{
-			name: "test suspend node",
-			distributions: map[int64][]*meta.Segment{
-				2: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20}, Node: 2}},
-				3: {{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 30}, Node: 3}},
-			},
-			assignments: []*meta.Segment{
-				{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 5}},
-				{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 10}},
-				{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 15}},
-			},
-			nodes:       []int64{1, 2, 3, 4},
-			states:      []session.State{session.NodeStateSuspend, session.NodeStateSuspend, session.NodeStateSuspend, session.NodeStateSuspend},
-			segmentCnts: []int{0, 1, 1, 0},
-			expectPlans: []SegmentAssignPlan{},
-		},
-	}
-
-	for _, c := range cases {
-		suite.Run(c.name, func() {
-			// I do not find a better way to do the setup and teardown work for subtests yet.
-			// If you do, please replace with it.
-			suite.SetupSuite()
-			defer suite.TearDownTest()
-			balancer := suite.balancer
-			for node, s := range c.distributions {
-				balancer.dist.SegmentDistManager.Update(node, s...)
-			}
-			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
-					NodeID:   c.nodes[i],
-					Address:  "localhost",
-					Hostname: "localhost",
-				})
-				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
-				nodeInfo.SetState(c.states[i])
-				suite.balancer.nodeManager.Add(nodeInfo)
-			}
-			plans := balancer.AssignSegment(0, c.assignments, c.nodes, false)
-			// all node has been suspend, so no node to assign segment
-			suite.ElementsMatch(c.expectPlans, plans)
-		})
-	}
-}
-
 func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 	cases := []struct {
 		name                 string
@@ -463,7 +408,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -819,7 +763,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -1051,7 +994,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
-			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -1178,7 +1120,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
-			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.segmentDist {

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SegmentAssignPlan struct {
@@ -82,6 +83,8 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 		delta1, delta2 := b.scheduler.GetSegmentTaskDelta(id1, -1), b.scheduler.GetSegmentTaskDelta(id2, -1)
 		return cnt1+delta1 < cnt2+delta2
 	})
+
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 	for i, s := range segments {
 		plan := SegmentAssignPlan{
@@ -90,6 +93,9 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 			To:      nodesInfo[i%len(nodesInfo)].ID(),
 		}
 		ret = append(ret, plan)
+		if len(ret) > balanceBatchSize {
+			break
+		}
 	}
 	return ret
 }

@@ -63,6 +63,9 @@ type upsertTask struct {
 	schema           *schemaInfo
 	partitionKeyMode bool
 	partitionKeys    *schemapb.FieldData
+	// automatic generate pk as new pk wehen autoID == true
+	// delete task need use the oldIds
+	oldIds *schemapb.IDs
 }
 
 // TraceCtx returns upsertTask context
@@ -134,6 +137,11 @@ func (it *upsertTask) getChannels() []pChan {
 }
 
 func (it *upsertTask) OnEnqueue() error {
+	if it.req.Base == nil {
+		it.req.Base = commonpbutil.NewMsgBase()
+	}
+	it.req.Base.MsgType = commonpb.MsgType_Upsert
+	it.req.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -182,7 +190,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
 	var err error
-	it.result.IDs, err = checkPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg, false)
+	it.result.IDs, it.oldIds, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
@@ -215,7 +223,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
-		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema, it.upsertMsg.InsertMsg.NRows()); err != nil {
+		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
 
@@ -316,7 +324,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -330,7 +338,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			},
 		},
 		DeleteMsg: &msgstream.DeleteMsg{
-			DeleteRequest: msgpb.DeleteRequest{
+			DeleteRequest: &msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -440,7 +448,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.result.IDs
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIds
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
 	// repack delete msg by dmChannel
@@ -458,7 +466,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 			if err != nil {
 				errors.Wrap(err, "failed to allocate MsgID for delete of upsert")
 			}
-			sliceRequest := msgpb.DeleteRequest{
+			sliceRequest := &msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithTimeStamp(ts),

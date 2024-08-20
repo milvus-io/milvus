@@ -83,6 +83,12 @@ class ScalarIndex : public IndexBase {
     In(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
+    IsNull() = 0;
+
+    virtual const TargetBitmap
+    IsNotNull() = 0;
+
+    virtual const TargetBitmap
     InApplyFilter(size_t n,
                   const T* values,
                   const std::function<bool(size_t /* offset */)>& filter) {
@@ -113,6 +119,16 @@ class ScalarIndex : public IndexBase {
 
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
+
+    virtual bool
+    SupportPatternMatch() const {
+        return false;
+    }
+
+    virtual const TargetBitmap
+    PatternMatch(const std::string& pattern) {
+        PanicInfo(Unsupported, "pattern match is not supported");
+    }
 
     virtual int64_t
     Size() = 0;

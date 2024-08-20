@@ -204,7 +204,6 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
-	t.Parallel()
 
 	for _, fieldType := range []entity.FieldType{entity.FieldTypeVarChar, entity.FieldTypeInt64} {
 		partitionKeyField := entity.NewField().WithName("par_key").WithDataType(fieldType).WithIsPartitionKey(true).WithMaxLength(common.TestMaxLen)
@@ -517,7 +516,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
-	t.Parallel()
+
 	// create collection with autoID true or not
 	collName := common.GenRandomString(prefix, 6)
 
@@ -937,7 +936,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	}
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
-		{schema: nil, errMsg: "duplicated field name"},
+		{schema: nil, errMsg: "schema does not contain vector field"},
 		{schema: entity.NewSchema().WithField(vecField), errMsg: "collection name should not be empty"},          // no collection name
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
 		{schema: entity.NewSchema().WithName("aaa").WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},

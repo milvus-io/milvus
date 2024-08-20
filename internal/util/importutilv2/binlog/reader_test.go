@@ -81,7 +81,7 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		dim = 1
 	}
 
-	evt, err := w.NextInsertEventWriter(false, int(dim))
+	evt, err := w.NextInsertEventWriter(storage.WithDim(int(dim)))
 	assert.NoError(t, err)
 
 	evt.SetEventTimestamp(1, math.MaxInt64)

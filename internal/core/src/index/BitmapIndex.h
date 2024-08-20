@@ -21,11 +21,11 @@
 #include <string>
 #include <roaring/roaring.hh>
 
+#include "common/RegexQuery.h"
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus {
 namespace index {
@@ -46,10 +46,6 @@ class BitmapIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    explicit BitmapIndex(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
-
     ~BitmapIndex() override = default;
 
     BinarySet
@@ -60,9 +56,6 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -83,14 +76,17 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
-    void
-    BuildV2(const Config& config = {}) override;
-
     const TargetBitmap
     In(size_t n, const T* values) override;
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override;
+
+    const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
 
     const TargetBitmap
     Range(T value, OpType op) override;
@@ -112,17 +108,40 @@ class BitmapIndex : public ScalarIndex<T> {
     BinarySet
     Upload(const Config& config = {}) override;
 
-    BinarySet
-    UploadV2(const Config& config = {}) override;
-
     const bool
     HasRawData() const override {
+        if (schema_.data_type() == proto::schema::DataType::Array) {
+            return false;
+        }
         return true;
     }
 
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
+
+    const TargetBitmap
+    Query(const DatasetPtr& dataset) override;
+
+    bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportRegexQuery() const override {
+        return std::is_same_v<T, std::string>;
+    }
+
+    const TargetBitmap
+    RegexQuery(const std::string& regex_pattern) override;
 
  public:
     int64_t
@@ -157,7 +176,7 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
 
     void
-    ChooseIndexBuildMode();
+    ChooseIndexLoadMode(int64_t index_length);
 
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
@@ -192,7 +211,9 @@ class BitmapIndex : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
-    std::shared_ptr<milvus_storage::Space> space_;
+
+    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset;
 };
 
 }  // namespace index

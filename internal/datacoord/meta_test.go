@@ -21,11 +21,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -589,16 +589,16 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check TotalBinlogSize
-		total, collectionBinlogSize, _ := meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo := meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
 		meta.collections[collID] = collInfo
-		total, collectionBinlogSize, _ = meta.GetCollectionBinlogSize()
-		assert.Len(t, collectionBinlogSize, 1)
-		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
-		assert.Equal(t, int64(size0+size1), total)
+		quotaInfo = meta.GetQuotaInfo()
+		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {

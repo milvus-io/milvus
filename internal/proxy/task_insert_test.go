@@ -22,7 +22,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	// passed NumRows is less than 0
 	case1 := insertTask{
 		insertMsg: &BaseInsertTask{
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -52,7 +52,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	dim := 128
 	case2 := insertTask{
 		insertMsg: &BaseInsertTask{
-			InsertRequest: msgpb.InsertRequest{
+			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -275,7 +275,7 @@ func TestInsertTask(t *testing.T) {
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					CollectionName: collectionName,
 				},
 			},
@@ -297,7 +297,7 @@ func TestMaxInsertSize(t *testing.T) {
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: msgpb.InsertRequest{
+				InsertRequest: &msgpb.InsertRequest{
 					DbName:         "hooooooo",
 					CollectionName: "fooooo",
 				},

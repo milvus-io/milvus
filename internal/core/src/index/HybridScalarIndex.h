@@ -28,7 +28,6 @@
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/space.h"
 
 namespace milvus {
 namespace index {
@@ -46,10 +45,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
-    explicit HybridScalarIndex(
-        const storage::FileManagerContext& file_manager_context,
-        std::shared_ptr<milvus_storage::Space> space);
-
     ~HybridScalarIndex() override = default;
 
     BinarySet
@@ -60,9 +55,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
-
-    void
-    LoadV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -85,9 +77,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     void
     Build(const Config& config = {}) override;
 
-    void
-    BuildV2(const Config& config = {}) override;
-
     const TargetBitmap
     In(size_t n, const T* values) override {
         return internal_index_->In(n, values);
@@ -96,6 +85,38 @@ class HybridScalarIndex : public ScalarIndex<T> {
     const TargetBitmap
     NotIn(size_t n, const T* values) override {
         return internal_index_->NotIn(n, values);
+    }
+
+    const TargetBitmap
+    IsNull() override {
+        return internal_index_->IsNull();
+    }
+
+    const TargetBitmap
+    IsNotNull() override {
+        return internal_index_->IsNotNull();
+    }
+
+    const TargetBitmap
+    Query(const DatasetPtr& dataset) override {
+        return internal_index_->Query(dataset);
+    }
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern) override {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        return RegexQuery(regex_pattern);
+    }
+
+    bool
+    SupportRegexQuery() const override {
+        return internal_index_->SupportRegexQuery();
+    }
+
+    const TargetBitmap
+    RegexQuery(const std::string& pattern) override {
+        return internal_index_->RegexQuery(pattern);
     }
 
     const TargetBitmap
@@ -132,9 +153,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
-
-    BinarySet
-    UploadV2(const Config& config = {}) override;
 
  private:
     ScalarIndexType
@@ -173,7 +191,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
     std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
-    std::shared_ptr<milvus_storage::Space> space_{nullptr};
 };
 
 }  // namespace index

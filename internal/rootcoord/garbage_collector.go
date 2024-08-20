@@ -21,8 +21,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
@@ -30,10 +33,10 @@ import (
 type GarbageCollector interface {
 	ReDropCollection(collMeta *model.Collection, ts Timestamp)
 	RemoveCreatingCollection(collMeta *model.Collection)
-	ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts Timestamp)
+	ReDropPartition(dbID int64, pChannels, vchannels []string, partition *model.Partition, ts Timestamp)
 	RemoveCreatingPartition(dbID int64, partition *model.Partition, ts Timestamp)
 	GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error)
-	GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error)
+	GcPartitionData(ctx context.Context, pChannels, vchannels []string, partition *model.Partition) (ddlTs Timestamp, err error)
 }
 
 type bgGarbageCollector struct {
@@ -110,7 +113,7 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 	_ = redo.Execute(context.Background())
 }
 
-func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts Timestamp) {
+func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels, vchannels []string, partition *model.Partition, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
 	c.s.chanTimeTick.addDmlChannels(pChannels...)
 
@@ -118,6 +121,7 @@ func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels []string, par
 	redo.AddAsyncStep(&deletePartitionDataStep{
 		baseStep:  baseStep{core: c.s},
 		pchans:    pChannels,
+		vchans:    vchannels,
 		partition: partition,
 		isSkip:    !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
@@ -176,7 +180,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropCollectionRequest: msgpb.DropCollectionRequest{
+		DropCollectionRequest: &msgpb.DropCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 				commonpbutil.WithTimeStamp(ts),
@@ -208,7 +212,7 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropPartitionRequest: msgpb.DropPartitionRequest{
+		DropPartitionRequest: &msgpb.DropPartitionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
 				commonpbutil.WithTimeStamp(ts),
@@ -227,6 +231,46 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 	return ts, nil
 }
 
+func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Context, vchannels []string, partition *model.Partition) (uint64, error) {
+	ts, err := c.s.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return 0, err
+	}
+	req := &msgpb.DropPartitionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
+			commonpbutil.WithTimeStamp(ts),
+			commonpbutil.WithSourceID(c.s.session.ServerID),
+		),
+		PartitionName: partition.PartitionName,
+		CollectionID:  partition.CollectionID,
+		PartitionID:   partition.PartitionID,
+	}
+
+	msgs := make([]message.MutableMessage, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		msg, err := message.NewDropPartitionMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.DropPartitionMessageHeader{
+				CollectionId: partition.CollectionID,
+				PartitionId:  partition.PartitionID,
+			}).
+			WithBody(req).
+			BuildMutable()
+		if err != nil {
+			return 0, err
+		}
+		msgs = append(msgs, msg)
+	}
+	// Ts is used as barrier time tick to ensure the message's time tick are given after the barrier time tick.
+	if err := streaming.WAL().Utility().AppendMessagesWithOption(ctx, streaming.AppendOption{
+		BarrierTimeTick: ts,
+	}, msgs...).UnwrapFirstError(); err != nil {
+		return 0, err
+	}
+	return ts, nil
+}
+
 func (c *bgGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
 	c.s.ddlTsLockManager.Lock()
 	c.s.ddlTsLockManager.AddRefCnt(1)
@@ -241,13 +285,17 @@ func (c *bgGarbageCollector) GcCollectionData(ctx context.Context, coll *model.C
 	return ddlTs, nil
 }
 
-func (c *bgGarbageCollector) GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error) {
+func (c *bgGarbageCollector) GcPartitionData(ctx context.Context, pChannels, vchannels []string, partition *model.Partition) (ddlTs Timestamp, err error) {
 	c.s.ddlTsLockManager.Lock()
 	c.s.ddlTsLockManager.AddRefCnt(1)
 	defer c.s.ddlTsLockManager.AddRefCnt(-1)
 	defer c.s.ddlTsLockManager.Unlock()
 
-	ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
+	if streamingutil.IsStreamingServiceEnabled() {
+		ddlTs, err = c.notifyPartitionGcByStreamingService(ctx, vchannels, partition)
+	} else {
+		ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
+	}
 	if err != nil {
 		return 0, err
 	}

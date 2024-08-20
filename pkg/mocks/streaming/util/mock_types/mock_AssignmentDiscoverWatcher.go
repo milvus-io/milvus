@@ -65,6 +65,50 @@ func (_c *MockAssignmentDiscoverWatcher_AssignmentDiscover_Call) RunAndReturn(ru
 	return _c
 }
 
+// ReportAssignmentError provides a mock function with given fields: ctx, pchannel, err
+func (_m *MockAssignmentDiscoverWatcher) ReportAssignmentError(ctx context.Context, pchannel types.PChannelInfo, err error) error {
+	ret := _m.Called(ctx, pchannel, err)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.PChannelInfo, error) error); ok {
+		r0 = rf(ctx, pchannel, err)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAssignmentDiscoverWatcher_ReportAssignmentError_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportAssignmentError'
+type MockAssignmentDiscoverWatcher_ReportAssignmentError_Call struct {
+	*mock.Call
+}
+
+// ReportAssignmentError is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel types.PChannelInfo
+//   - err error
+func (_e *MockAssignmentDiscoverWatcher_Expecter) ReportAssignmentError(ctx interface{}, pchannel interface{}, err interface{}) *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call {
+	return &MockAssignmentDiscoverWatcher_ReportAssignmentError_Call{Call: _e.mock.On("ReportAssignmentError", ctx, pchannel, err)}
+}
+
+func (_c *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call) Run(run func(ctx context.Context, pchannel types.PChannelInfo, err error)) *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.PChannelInfo), args[2].(error))
+	})
+	return _c
+}
+
+func (_c *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call) Return(_a0 error) *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call) RunAndReturn(run func(context.Context, types.PChannelInfo, error) error) *MockAssignmentDiscoverWatcher_ReportAssignmentError_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockAssignmentDiscoverWatcher creates a new instance of MockAssignmentDiscoverWatcher. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockAssignmentDiscoverWatcher(t interface {

@@ -1,11 +1,11 @@
 package service
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 

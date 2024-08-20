@@ -28,8 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -66,7 +66,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		UnsetAutoID(req.GetSchema())
 	}
 	// Setting end as math.MaxInt64 to incrementally allocate logID.
-	alloc := allocator.NewLocalAllocator(req.GetAutoIDRange().GetBegin(), math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), math.MaxInt64)
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),

@@ -362,7 +362,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// Load with 3 replica on 3 rg
 	req = &querypb.LoadCollectionRequest{
@@ -384,7 +384,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -414,71 +414,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
-	}
-}
-
-func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
-	ctx := context.Background()
-
-	// Test load collection
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		// Load with 1 replica
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-			FieldIndexID: map[int64]int64{
-				defaultVecFieldID: defaultIndexID,
-			},
-		}
-		job := NewLoadCollectionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
-		suite.assertCollectionLoaded(collection)
-	}
-
-	// Test load with different index
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-			FieldIndexID: map[int64]int64{
-				defaultVecFieldID: -defaultIndexID,
-			},
-		}
-		job := NewLoadCollectionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -660,7 +596,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// test load 3 replica in 3 rg, should pass rg check
 	req = &querypb.LoadPartitionsRequest{
@@ -683,7 +619,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestDynamicLoad() {
@@ -830,74 +766,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
-	}
-}
-
-func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
-	ctx := context.Background()
-
-	// Test load partition
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-		// Load with 1 replica
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-			FieldIndexID: map[int64]int64{
-				defaultVecFieldID: defaultIndexID,
-			},
-		}
-		job := NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
-		suite.assertCollectionLoaded(collection)
-	}
-
-	// Test load partition with different index
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-		// Load with 1 replica
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-			FieldIndexID: map[int64]int64{
-				defaultVecFieldID: -defaultIndexID,
-			},
-		}
-		job := NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.collectionObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		suite.ErrorIs(err, merr.ErrParameterInvalid)
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -1238,7 +1107,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, meta.ErrNodeNotEnough)
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 

@@ -11,8 +11,6 @@ import (
 func Test_BitmapIndexChecker(t *testing.T) {
 	c := newBITMAPChecker()
 
-	assert.NoError(t, c.CheckTrain(map[string]string{"bitmap_cardinality_limit": "100"}))
-
 	assert.NoError(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Bool}))
 	assert.NoError(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Int8}))
 	assert.NoError(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Int16}))
@@ -31,6 +29,4 @@ func Test_BitmapIndexChecker(t *testing.T) {
 	assert.Error(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Double}))
 	assert.Error(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}))
 	assert.Error(t, c.CheckValidDataType(&schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}))
-	assert.Error(t, c.CheckTrain(map[string]string{}))
-	assert.Error(t, c.CheckTrain(map[string]string{"bitmap_cardinality_limit": "0"}))
 }

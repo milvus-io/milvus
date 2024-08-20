@@ -1971,6 +1971,38 @@ func TestCore_InitRBAC(t *testing.T) {
 	})
 }
 
+func TestCore_BackupRBAC(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	meta.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(&milvuspb.RBACMeta{}, nil)
+	resp, err := c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+
+	meta.ExpectedCalls = nil
+	meta.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	resp, err = c.BackupRBAC(context.Background(), &milvuspb.BackupRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp.GetStatus()))
+}
+
+func TestCore_RestoreRBAC(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	resp, err := c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+
+	meta.ExpectedCalls = nil
+	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+	resp, err = c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
 type RootCoordSuite struct {
 	suite.Suite
 }
@@ -1980,7 +2012,7 @@ func (s *RootCoordSuite) TestRestore() {
 	gc := mockrootcoord.NewGarbageCollector(s.T())
 
 	finishCh := make(chan struct{}, 4)
-	gc.EXPECT().ReDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Once().
+	gc.EXPECT().ReDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Once().
 		Run(func(args mock.Arguments) {
 			finishCh <- struct{}{}
 		})

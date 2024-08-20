@@ -84,6 +84,7 @@ InitTrace(CTraceConfig* config) {
                                                    config->sampleFraction,
                                                    config->jaegerURL,
                                                    config->otlpEndpoint,
+                                                   config->otlpMethod,
                                                    config->oltpSecure,
                                                    config->nodeID};
     std::call_once(
@@ -100,6 +101,7 @@ SetTrace(CTraceConfig* config) {
                                                    config->sampleFraction,
                                                    config->jaegerURL,
                                                    config->otlpEndpoint,
+                                                   config->otlpMethod,
                                                    config->oltpSecure,
                                                    config->nodeID};
     milvus::tracer::initTelemetry(traceConfig);

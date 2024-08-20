@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -64,6 +65,21 @@ func calBySchemaPolicyWithDiskIndex(schema *schemapb.CollectionSchema) (int, err
 	}
 	threshold := Params.DataCoordCfg.DiskSegmentMaxSize.GetAsFloat() * 1024 * 1024
 	return int(threshold / float64(sizePerRecord)), nil
+}
+
+func calBySegmentSizePolicy(schema *schemapb.CollectionSchema, segmentSize int64) (int, error) {
+	if schema == nil {
+		return -1, errors.New("nil schema")
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil {
+		return -1, err
+	}
+	// check zero value, preventing panicking
+	if sizePerRecord == 0 {
+		return -1, errors.New("zero size record schema found")
+	}
+	return int(segmentSize) / sizePerRecord, nil
 }
 
 // AllocatePolicy helper function definition to allocate Segment space
@@ -172,20 +188,47 @@ func sealL1SegmentByIdleTime(idleTimeTolerance time.Duration, minSizeToSealIdleS
 }
 
 // channelSealPolicy seal policy applies to channel
-type channelSealPolicy func(string, []*SegmentInfo, Timestamp) []*SegmentInfo
+type channelSealPolicy func(string, []*SegmentInfo, Timestamp) ([]*SegmentInfo, string)
 
 // getChannelOpenSegCapacityPolicy get channelSealPolicy with channel segment capacity policy
 func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
-	return func(channel string, segs []*SegmentInfo, ts Timestamp) []*SegmentInfo {
+	return func(channel string, segs []*SegmentInfo, ts Timestamp) ([]*SegmentInfo, string) {
 		if len(segs) <= limit {
-			return []*SegmentInfo{}
+			return []*SegmentInfo{}, ""
 		}
 		sortSegmentsByLastExpires(segs)
 		offLen := len(segs) - limit
 		if offLen > len(segs) {
 			offLen = len(segs)
 		}
-		return segs[0:offLen]
+		return segs[0:offLen], fmt.Sprintf("seal by channel segment capacity, len(segs)=%d, limit=%d", len(segs), limit)
+	}
+}
+
+// sealByTotalGrowingSegmentsSize seals the largest growing segment
+// if the total size of growing segments exceeds the threshold.
+func sealByTotalGrowingSegmentsSize() channelSealPolicy {
+	return func(channel string, segments []*SegmentInfo, ts Timestamp) ([]*SegmentInfo, string) {
+		growingSegments := lo.Filter(segments, func(segment *SegmentInfo, _ int) bool {
+			return segment != nil && segment.GetState() == commonpb.SegmentState_Growing
+		})
+
+		var totalSize int64
+		sizeMap := lo.SliceToMap(growingSegments, func(segment *SegmentInfo) (int64, int64) {
+			size := segment.getSegmentSize()
+			totalSize += size
+			return segment.GetID(), size
+		})
+
+		threshold := paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.GetAsInt64() * 1024 * 1024
+		if totalSize >= threshold {
+			target := lo.MaxBy(growingSegments, func(s1, s2 *SegmentInfo) bool {
+				return sizeMap[s1.GetID()] > sizeMap[s2.GetID()]
+			})
+			return []*SegmentInfo{target}, fmt.Sprintf("seal by total growing segments size, "+
+				"totalSize=%d, threshold=%d", totalSize, threshold)
+		}
+		return nil, ""
 	}
 }
 

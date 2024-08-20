@@ -9,20 +9,22 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{
-	streamingpb.StreamingCode_STREAMING_CODE_OK:                     codes.OK,
-	streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST:      codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED:         codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN:            codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_INVALID_REQUEST_SEQ:    codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM: codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION:      codes.FailedPrecondition,
-	streamingpb.StreamingCode_STREAMING_CODE_INNER:                  codes.Internal,
-	streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT:       codes.InvalidArgument,
-	streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN:                codes.Unknown,
+	streamingpb.StreamingCode_STREAMING_CODE_OK:                        codes.OK,
+	streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST:         codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED:            codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN:               codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_INVALID_REQUEST_SEQ:       codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM:    codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_IGNORED_OPERATION:         codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_INNER:                     codes.Internal,
+	streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT:          codes.InvalidArgument,
+	streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED:       codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE: codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN:                   codes.Unknown,
 }
 
 // NewGRPCStatusFromStreamingError converts StreamingError to grpc status.

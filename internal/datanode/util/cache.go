@@ -28,33 +28,33 @@ import (
 //	 After the flush procedure, whether the segment successfully flushed or not,
 //	 it'll be removed from the cache. So if flush failed, the secondary flush can be triggered.
 type Cache struct {
-	*typeutil.ConcurrentSet[UniqueID]
+	*typeutil.ConcurrentSet[typeutil.UniqueID]
 }
 
 // NewCache returns a new Cache
 func NewCache() *Cache {
 	return &Cache{
-		ConcurrentSet: typeutil.NewConcurrentSet[UniqueID](),
+		ConcurrentSet: typeutil.NewConcurrentSet[typeutil.UniqueID](),
 	}
 }
 
 // checkIfCached returns whether unique id is in cache
-func (c *Cache) checkIfCached(key UniqueID) bool {
+func (c *Cache) checkIfCached(key typeutil.UniqueID) bool {
 	return c.Contain(key)
 }
 
 // Cache caches a specific ID into the cache
-func (c *Cache) Cache(ID UniqueID) {
+func (c *Cache) Cache(ID typeutil.UniqueID) {
 	c.Insert(ID)
 }
 
 // checkOrCache returns true if `key` is present.
 // Otherwise, it returns false and stores `key` into cache.
-func (c *Cache) checkOrCache(key UniqueID) bool {
+func (c *Cache) checkOrCache(key typeutil.UniqueID) bool {
 	return !c.Insert(key)
 }
 
 // Remove removes a set of IDs from the cache
-func (c *Cache) Remove(IDs ...UniqueID) {
+func (c *Cache) Remove(IDs ...typeutil.UniqueID) {
 	c.ConcurrentSet.Remove(IDs...)
 }

@@ -282,58 +282,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
-    // TODO(SPARSE): support storage v2
-    // NOTE: lock only when data is ready to avoid starvation
-    // only one field for now, parallel load field data in golang
-    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
-
-    for (auto& [id, info] : load_info.field_infos) {
-        AssertInfo(info.row_count > 0, "The row count of field data is 0");
-
-        auto field_id = FieldId(id);
-        auto insert_files = info.insert_files;
-        auto field_data_info =
-            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-
-        LOG_INFO("segment {} loads field {} with num_rows {}",
-                 this->get_segment_id(),
-                 field_id.get(),
-                 num_rows);
-
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-        field_data_info.channel->set_capacity(parallel_degree * 2);
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        // auto load_future = pool.Submit(
-        //     LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-
-        auto res = milvus_storage::Space::Open(
-            load_info.url,
-            milvus_storage::Options{nullptr, load_info.storage_version});
-        AssertInfo(res.ok(),
-                   fmt::format("init space failed: {}, error: {}",
-                               load_info.url,
-                               res.status().ToString()));
-        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
-        auto load_future = pool.Submit(
-            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_INFO("segment {} submits load field {} task to thread pool",
-                 this->get_segment_id(),
-                 field_id.get());
-        if (load_info.mmap_dir_path.empty() ||
-            SystemProperty::Instance().IsSystem(field_id)) {
-            LoadFieldData(field_id, field_data_info);
-        } else {
-            MapFieldData(field_id, field_data_info);
-        }
-        LOG_INFO("segment {} loads field {} done",
-                 this->get_segment_id(),
-                 field_id.get());
-    }
-}
-void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -382,6 +330,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // Don't allow raw data and index exist at the same time
         //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
         //                   "field data can't be loaded when indexing exists");
+        auto get_block_size = [&]() -> size_t {
+            return schema_->get_primary_field_id() == field_id
+                       ? DEFAULT_PK_VRCOL_BLOCK_SIZE
+                       : DEFAULT_MEM_VRCOL_BLOCK_SIZE;
+        };
 
         std::shared_ptr<ColumnBase> column{};
         if (IsVariableDataType(data_type)) {
@@ -391,7 +344,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::VARCHAR: {
                     auto var_column =
                         std::make_shared<VariableColumn<std::string>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -406,7 +359,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::JSON: {
                     auto var_column =
                         std::make_shared<VariableColumn<milvus::Json>>(
-                            num_rows, field_meta);
+                            num_rows, field_meta, get_block_size());
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
@@ -426,7 +379,12 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto rawValue = field_data->RawValue(i);
                             auto array =
                                 static_cast<const milvus::Array*>(rawValue);
-                            var_column->Append(*array);
+                            if (field_data->IsNullable()) {
+                                var_column->Append(*array,
+                                                   field_data->is_valid(i));
+                            } else {
+                                var_column->Append(*array);
+                            }
 
                             // we stores the offset for each array element, so there is a additional uint64_t for each array element
                             field_data_size =
@@ -463,11 +421,14 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
-
                 stats_.mem_size += field_data->Size();
             }
-            LoadPrimitiveSkipIndex(
-                field_id, 0, data_type, column->Span().data(), num_rows);
+            LoadPrimitiveSkipIndex(field_id,
+                                   0,
+                                   data_type,
+                                   column->Span().data(),
+                                   column->Span().valid_data(),
+                                   num_rows);
         }
 
         AssertInfo(column->NumRows() == num_rows,
@@ -533,24 +494,28 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
+    FixedVector<bool> valid_data{};
     while (data.channel->pop(field_data)) {
         WriteFieldData(file,
                        data_type,
                        field_data,
                        total_written,
                        indices,
-                       element_indices);
+                       element_indices,
+                       valid_data);
     }
     WriteFieldPadding(file, data_type, total_written);
-
-    auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
+    auto num_rows = data.row_count;
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case milvus::DataType::STRING:
             case milvus::DataType::VARCHAR: {
                 auto var_column = std::make_shared<VariableColumn<std::string>>(
-                    file, total_written, field_meta);
+                    file,
+                    total_written,
+                    field_meta,
+                    DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -558,7 +523,10 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<VariableColumn<milvus::Json>>(
-                        file, total_written, field_meta);
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -586,6 +554,8 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     } else {
         column = std::make_shared<Column>(file, total_written, field_meta);
     }
+
+    column->SetValidData(std::move(valid_data));
 
     {
         std::unique_lock lck(mutex_);
@@ -662,7 +632,7 @@ SegmentSealedImpl::size_per_chunk() const {
     return get_row_count();
 }
 
-BufferView
+std::pair<BufferView, FixedVector<bool>>
 SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
                                     int64_t chunk_id,
                                     int64_t start_offset,
@@ -673,7 +643,15 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
-        return field_data->GetBatchBuffer(start_offset, length);
+        FixedVector<bool> valid_data;
+        if (field_data->IsNullable()) {
+            valid_data.reserve(length);
+            for (int i = 0; i < length; i++) {
+                valid_data.push_back(field_data->IsValid(start_offset + i));
+            }
+        }
+        return std::make_pair(field_data->GetBatchBuffer(start_offset, length),
+                              valid_data);
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
@@ -695,13 +673,14 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
         auto& field_data = it->second;
         return field_data->Span();
     }
-    auto field_data = insert_record_.get_field_data_base(field_id);
+    auto field_data = insert_record_.get_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
+    // system field
     return field_data->get_span_base(0);
 }
 
-std::vector<std::string_view>
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
 SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
@@ -1235,6 +1214,13 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
     auto ret = fill_with_empty(field_id, count);
+    if (column->IsNullable()) {
+        auto dst = ret->mutable_valid_data()->mutable_data();
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            dst[i] = column->IsValid(offset);
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING: {

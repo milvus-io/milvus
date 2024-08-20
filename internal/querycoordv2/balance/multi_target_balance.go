@@ -9,7 +9,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -270,6 +269,9 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			})
 		}
 		maxNode, minNode := nodesWithRowCount[len(nodesWithRowCount)-1], nodesWithRowCount[0]
+		if len(maxNode.segments) == 0 {
+			break
+		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
 		plan := SegmentAssignPlan{
 			Segment: segment,
@@ -347,6 +349,9 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			})
 		}
 		maxNode, minNode := nodesWithSegmentCount[len(nodesWithSegmentCount)-1], nodesWithSegmentCount[0]
+		if len(maxNode.segments) == 0 {
+			break
+		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
 		plan := SegmentAssignPlan{
 			Segment: segment,
@@ -400,6 +405,9 @@ func newRandomPlanGenerator(maxSteps int) *randomPlanGenerator {
 func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 	g.currClusterCost = g.calClusterCost(g.replicaNodeSegments, g.globalNodeSegments)
 	nodes := lo.Keys(g.replicaNodeSegments)
+	if len(nodes) == 0 {
+		return g.plans
+	}
 	for i := 0; i < g.maxSteps; i++ {
 		// random select two nodes and two segments
 		node1 := nodes[rand.Intn(len(nodes))]
@@ -409,6 +417,9 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 		}
 		segments1 := g.replicaNodeSegments[node1]
 		segments2 := g.replicaNodeSegments[node2]
+		if len(segments1) == 0 || len(segments2) == 0 {
+			continue
+		}
 		segment1 := segments1[rand.Intn(len(segments1))]
 		segment2 := segments2[rand.Intn(len(segments2))]
 
@@ -453,7 +464,7 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 type MultiTargetBalancer struct {
 	*ScoreBasedBalancer
 	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 }
 
 func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -511,9 +522,7 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []in
 	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
-				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
-				segment.GetLevel() != datapb.SegmentLevel_L0
+			return b.targetMgr.CanSegmentBeMoved(segment.GetCollectionID(), segment.GetID())
 		})
 		nodeSegments[node] = segments
 		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
@@ -551,7 +560,7 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 	return plans
 }
 
-func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr *meta.TargetManager) *MultiTargetBalancer {
+func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
 	return &MultiTargetBalancer{
 		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
 		dist:               dist,

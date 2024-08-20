@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
-#include "storage/prometheus_client.h"
+#include "monitor/prometheus_client.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -105,14 +105,4 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 void
 CleanRemoteChunkManagerSingleton() {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
-}
-
-char*
-GetStorageMetrics() {
-    auto str = milvus::storage::prometheusClient->GetMetrics();
-    auto len = str.length();
-    char* res = (char*)malloc(len + 1);
-    memcpy(res, str.data(), len);
-    res[len] = '\0';
-    return res;
 }

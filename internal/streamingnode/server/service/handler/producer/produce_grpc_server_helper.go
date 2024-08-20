@@ -1,7 +1,7 @@
 package producer
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 )
 
 // produceGrpcServerHelper is a wrapped producer server of log messages.
@@ -19,12 +19,10 @@ func (p *produceGrpcServerHelper) SendProduceMessage(resp *streamingpb.ProduceMe
 }
 
 // SendCreated sends the create response to client.
-func (p *produceGrpcServerHelper) SendCreated(walName string) error {
+func (p *produceGrpcServerHelper) SendCreated(resp *streamingpb.CreateProducerResponse) error {
 	return p.Send(&streamingpb.ProduceResponse{
 		Response: &streamingpb.ProduceResponse_Create{
-			Create: &streamingpb.CreateProducerResponse{
-				WalName: walName,
-			},
+			Create: resp,
 		},
 	})
 }

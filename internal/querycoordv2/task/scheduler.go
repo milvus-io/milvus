@@ -157,7 +157,7 @@ type taskScheduler struct {
 
 	distMgr   *meta.DistributionManager
 	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 	broker    meta.Broker
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
@@ -177,7 +177,7 @@ type taskScheduler struct {
 func NewScheduler(ctx context.Context,
 	meta *meta.Meta,
 	distMgr *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
@@ -821,6 +821,12 @@ func (scheduler *taskScheduler) remove(task Task) {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("status", task.Status()),
 	)
+
+	if errors.Is(task.Err(), merr.ErrSegmentNotFound) {
+		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
+		scheduler.targetMgr.UpdateCollectionNextTarget(task.CollectionID())
+	}
+
 	task.Cancel(nil)
 	scheduler.tasks.Remove(task.ID())
 	scheduler.waitQueue.Remove(task)

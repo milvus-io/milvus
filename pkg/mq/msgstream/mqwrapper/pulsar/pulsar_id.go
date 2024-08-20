@@ -24,12 +24,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
+// NewPulsarID creates a new pulsarID
+func NewPulsarID(id pulsar.MessageID) *pulsarID {
+	return &pulsarID{
+		messageID: id,
+	}
+}
+
 type pulsarID struct {
 	messageID pulsar.MessageID
 }
 
 // Check if pulsarID implements and MessageID interface
 var _ common.MessageID = &pulsarID{}
+
+func (pid *pulsarID) PulsarID() pulsar.MessageID {
+	return pid.messageID
+}
 
 func (pid *pulsarID) Serialize() []byte {
 	return pid.messageID.Serialize()

@@ -29,7 +29,7 @@ import (
 
 func TestFlushMsg(t *testing.T) {
 	var msg TsMsg = &FlushMsg{
-		FlushRequest: milvuspb.FlushRequest{
+		FlushRequest: &milvuspb.FlushRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_Flush,
 				MsgID:         100,
@@ -68,7 +68,7 @@ func TestFlushMsg(t *testing.T) {
 
 func TestLoadCollection(t *testing.T) {
 	var msg TsMsg = &LoadCollectionMsg{
-		LoadCollectionRequest: milvuspb.LoadCollectionRequest{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_LoadCollection,
 				MsgID:         100,
@@ -107,7 +107,7 @@ func TestLoadCollection(t *testing.T) {
 
 func TestReleaseCollection(t *testing.T) {
 	var msg TsMsg = &ReleaseCollectionMsg{
-		ReleaseCollectionRequest: milvuspb.ReleaseCollectionRequest{
+		ReleaseCollectionRequest: &milvuspb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:       commonpb.MsgType_ReleaseCollection,
 				MsgID:         100,

@@ -110,7 +110,7 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	}
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: hashValues},
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, MsgID: msgID},
 			ShardName:  vchannel,
 			Timestamps: genTimestamps(numRows),
@@ -132,7 +132,7 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstream.DeleteMsg {
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: make([]uint32, numRows)},
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete, MsgID: msgID},
 			ShardName: vchannel,
 			PrimaryKeys: &schemapb.IDs{
@@ -148,34 +148,38 @@ func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	}
 }
 
-func genDDLMsg(msgType commonpb.MsgType) msgstream.TsMsg {
+func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
 	switch msgType {
 	case commonpb.MsgType_CreateCollection:
 		return &msgstream.CreateCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			CreateCollectionRequest: msgpb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CreateCollectionRequest: &msgpb.CreateCollectionRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_DropCollection:
 		return &msgstream.DropCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			DropCollectionRequest: msgpb.DropCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			DropCollectionRequest: &msgpb.DropCollectionRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_CreatePartition:
 		return &msgstream.CreatePartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			CreatePartitionRequest: msgpb.CreatePartitionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+			CreatePartitionRequest: &msgpb.CreatePartitionRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+				CollectionID: collectionID,
 			},
 		}
 	case commonpb.MsgType_DropPartition:
 		return &msgstream.DropPartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-			DropPartitionRequest: msgpb.DropPartitionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+			DropPartitionRequest: &msgpb.DropPartitionRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+				CollectionID: collectionID,
 			},
 		}
 	}
@@ -185,7 +189,7 @@ func genDDLMsg(msgType commonpb.MsgType) msgstream.TsMsg {
 func genTimeTickMsg(ts typeutil.Timestamp) *msgstream.TimeTickMsg {
 	return &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
-		TimeTickMsg: msgpb.TimeTickMsg{
+		TimeTickMsg: &msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				Timestamp: ts,

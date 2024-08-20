@@ -1,50 +1,67 @@
 package message_test
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 )
 
 func TestMessage(t *testing.T) {
-	b := message.NewMutableMessageBuilder()
-	mutableMessage := b.
-		WithMessageType(message.MessageTypeTimeTick).
-		WithPayload([]byte("payload")).
+	b := message.NewTimeTickMessageBuilderV1()
+	mutableMessage, err := b.WithHeader(&message.TimeTickMessageHeader{}).
 		WithProperties(map[string]string{"key": "value"}).
-		BuildMutable()
+		WithProperty("key2", "value2").
+		WithVChannel("v1").
+		WithBody(&msgpb.TimeTickMsg{}).BuildMutable()
+	assert.NoError(t, err)
 
-	assert.Equal(t, "payload", string(mutableMessage.Payload()))
+	payload, err := proto.Marshal(&message.TimeTickMessageHeader{})
+	assert.NoError(t, err)
+
+	assert.True(t, bytes.Equal(payload, mutableMessage.Payload()))
 	assert.True(t, mutableMessage.Properties().Exist("key"))
 	v, ok := mutableMessage.Properties().Get("key")
+	assert.True(t, mutableMessage.Properties().Exist("key2"))
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 21, mutableMessage.EstimateSize())
+	assert.Equal(t, 31, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
+	mutableMessage.WithBarrierTimeTick(456)
+	mutableMessage.WithWALTerm(1)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
-	tt, n := proto.DecodeVarint([]byte(v))
+	tt, err := message.DecodeUint64(v)
 	assert.Equal(t, uint64(123), tt)
-	assert.Equal(t, len([]byte(v)), n)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(123), mutableMessage.TimeTick())
+	assert.Equal(t, uint64(456), mutableMessage.BarrierTimeTick())
 
 	lcMsgID := mock_message.NewMockMessageID(t)
-	lcMsgID.EXPECT().Marshal().Return([]byte("lcMsgID"))
+	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
 	mutableMessage.WithLastConfirmed(lcMsgID)
 	v, ok = mutableMessage.Properties().Get("_lc")
 	assert.True(t, ok)
 	assert.Equal(t, v, "lcMsgID")
 
+	v, ok = mutableMessage.Properties().Get("_vc")
+	assert.True(t, ok)
+	assert.Equal(t, "v1", v)
+	assert.Equal(t, "v1", mutableMessage.VChannel())
+
 	msgID := mock_message.NewMockMessageID(t)
 	msgID.EXPECT().EQ(msgID).Return(true)
 	msgID.EXPECT().WALName().Return("testMsgID")
-	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data []byte) (message.MessageID, error) {
-		if string(data) == "lcMsgID" {
+	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data string) (message.MessageID, error) {
+		if data == "lcMsgID" {
 			return msgID, nil
 		}
 		panic(fmt.Sprintf("unexpected data: %s", data))
@@ -55,7 +72,7 @@ func TestMessage(t *testing.T) {
 		map[string]string{
 			"key": "value",
 			"_t":  "1",
-			"_tt": string(proto.EncodeVarint(456)),
+			"_tt": message.EncodeUint64(456),
 			"_v":  "1",
 			"_lc": "lcMsgID",
 		})
@@ -97,6 +114,19 @@ func TestMessage(t *testing.T) {
 	})
 
 	assert.Panics(t, func() {
-		message.NewMutableMessageBuilder().BuildMutable()
+		message.NewTimeTickMessageBuilderV1().BuildMutable()
 	})
+}
+
+func TestLastConfirmed(t *testing.T) {
+	flush, _ := message.NewFlushMessageBuilderV2().
+		WithVChannel("vchan").
+		WithHeader(&message.FlushMessageHeader{}).
+		WithBody(&message.FlushMessageBody{}).
+		BuildMutable()
+
+	imFlush := flush.WithTimeTick(1).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	assert.True(t, imFlush.LastConfirmedMessageID().EQ(walimplstest.NewTestMessageID(1)))
 }

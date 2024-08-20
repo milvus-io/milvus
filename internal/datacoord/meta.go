@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -220,6 +221,9 @@ func (m *meta) reloadFromKV() error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
+		ts, _ := tsoutil.ParseTS(pos.Timestamp)
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			Set(float64(ts.Unix()))
 	}
 
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -383,15 +387,19 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
-// GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
+func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
+	// collection id => l0 delta entry count
+	collectionL0RowCounts := make(map[UniqueID]int64)
+
 	segments := m.segments.GetSegments()
 	var total int64
+	metrics.DataCoordStoredBinlogSize.Reset()
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
@@ -408,7 +416,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
-					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID()), segment.GetState().String()).Set(float64(segmentSize))
 			} else {
 				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
@@ -417,6 +425,10 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
+
+			if segment.GetLevel() == datapb.SegmentLevel_L0 {
+				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
+			}
 		}
 	}
 
@@ -429,7 +441,13 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			}
 		}
 	}
-	return total, collectionBinlogSize, partitionBinlogSize
+
+	info.TotalBinlogSize = total
+	info.CollectionBinlogSize = collectionBinlogSize
+	info.PartitionsBinlogSize = partitionBinlogSize
+	info.CollectionL0RowCount = collectionL0RowCounts
+
+	return info
 }
 
 // GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
@@ -772,6 +790,10 @@ func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) Upda
 			log.Warn("meta update: update level fail - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
+		}
+		if segment.LastLevel == segment.Level && segment.Level == level {
+			log.Debug("segment already is this level", zap.Int64("segID", segmentID), zap.String("level", level.String()))
+			return true
 		}
 		segment.LastLevel = segment.Level
 		segment.Level = level

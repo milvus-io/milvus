@@ -17,7 +17,7 @@ import (
 
 var _ balancer.Picker = &serverIDPicker{}
 
-var ErrNoSubConnNotExist = status.New(codes.Unavailable, "sub connection not exist").Err()
+var ErrSubConnNotExist = status.New(codes.Unavailable, "subConn not exist").Err()
 
 type subConnInfo struct {
 	serverID    int64
@@ -107,18 +107,18 @@ func (p *serverIDPicker) useGivenAddr(_ balancer.PickInfo, serverID int64) (*sub
 	// FailPrecondition will be converted to Internal by grpc framework in function `IsRestrictedControlPlaneCode`.
 	// Use Unavailable here.
 	// Unavailable code is retried in many cases, so it's better to be used here to avoid when Subconn is not ready scene.
-	return nil, ErrNoSubConnNotExist
+	return nil, ErrSubConnNotExist
 }
 
-// IsErrNoSubConnForPick checks whether the error is ErrNoSubConnForPick.
-func IsErrNoSubConnForPick(err error) bool {
-	if errors.Is(err, ErrNoSubConnNotExist) {
+// IsErrSubConnNoExist checks whether the error is ErrNoSubConnForPick.
+func IsErrSubConnNoExist(err error) bool {
+	if errors.Is(err, ErrSubConnNotExist) {
 		return true
 	}
 	if se, ok := err.(interface {
 		GRPCStatus() *status.Status
 	}); ok {
-		return errors.Is(se.GRPCStatus().Err(), ErrNoSubConnNotExist)
+		return errors.Is(se.GRPCStatus().Err(), ErrSubConnNotExist)
 	}
 	return false
 }

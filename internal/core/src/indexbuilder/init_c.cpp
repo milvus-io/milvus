@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
+#include "fmt/core.h"
 #include "indexbuilder/init_c.h"
 
 void
@@ -23,6 +25,7 @@ char*
 IndexBuilderSetSimdType(const char* value) {
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
+    AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
     memcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;

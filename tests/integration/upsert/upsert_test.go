@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -49,6 +49,7 @@ func (s *UpsertSuite) TestUpsertAutoIDFalse() {
 	collectionName := prefix + funcutil.GenRandomStr()
 	dim := 128
 	rowNum := 3000
+	start := 0
 
 	schema := integration.ConstructSchema(collectionName, dim, false)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -73,7 +74,7 @@ func (s *UpsertSuite) TestUpsertAutoIDFalse() {
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, int64(start))
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
@@ -141,9 +142,21 @@ func (s *UpsertSuite) TestUpsertAutoIDFalse() {
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
+	checkFunc := func(data int) error {
+		if data < start || data > start+rowNum {
+			return fmt.Errorf("upsert check pk fail")
+		}
+		return nil
+	}
+	for _, id := range searchResult.Results.Ids.GetIntId().GetData() {
+		s.NoError(checkFunc(int(id)))
+	}
+	for _, data := range searchResult.Results.FieldsData[0].GetScalars().GetLongData().GetData() {
+		s.NoError(checkFunc(int(data)))
+	}
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -168,6 +181,7 @@ func (s *UpsertSuite) TestUpsertAutoIDTrue() {
 	collectionName := prefix + funcutil.GenRandomStr()
 	dim := 128
 	rowNum := 3000
+	start := 0
 
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -192,7 +206,7 @@ func (s *UpsertSuite) TestUpsertAutoIDTrue() {
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, 0)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
@@ -260,9 +274,21 @@ func (s *UpsertSuite) TestUpsertAutoIDTrue() {
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
+	checkFunc := func(data int) error {
+		if data >= start && data <= start+rowNum {
+			return fmt.Errorf("upsert check pk fail")
+		}
+		return nil
+	}
+	for _, id := range searchResult.Results.Ids.GetIntId().GetData() {
+		s.NoError(checkFunc(int(id)))
+	}
+	for _, data := range searchResult.Results.FieldsData[0].GetScalars().GetLongData().GetData() {
+		s.NoError(checkFunc(int(data)))
+	}
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {

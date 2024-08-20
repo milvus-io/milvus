@@ -22,6 +22,7 @@ import (
 
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -117,6 +118,8 @@ type DataCoord interface {
 //go:generate mockery --name=DataCoordComponent --structname=MockDataCoord --output=../mocks  --filename=mock_datacoord.go --with-expecter
 type DataCoordComponent interface {
 	DataCoord
+
+	RegisterStreamingCoordGRPCService(s *grpc.Server)
 
 	SetAddress(address string)
 	// SetEtcdClient set EtcdClient for DataCoord

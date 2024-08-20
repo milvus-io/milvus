@@ -1,17 +1,43 @@
 package message
 
-import "strconv"
+import (
+	"strconv"
 
-type MessageType int32
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+)
+
+type MessageType messagespb.MessageType
 
 const (
-	MessageTypeUnknown  MessageType = 0
-	MessageTypeTimeTick MessageType = 1
+	MessageTypeUnknown          MessageType = MessageType(messagespb.MessageType_Unknown)
+	MessageTypeTimeTick         MessageType = MessageType(messagespb.MessageType_TimeTick)
+	MessageTypeInsert           MessageType = MessageType(messagespb.MessageType_Insert)
+	MessageTypeDelete           MessageType = MessageType(messagespb.MessageType_Delete)
+	MessageTypeFlush            MessageType = MessageType(messagespb.MessageType_Flush)
+	MessageTypeCreateCollection MessageType = MessageType(messagespb.MessageType_CreateCollection)
+	MessageTypeDropCollection   MessageType = MessageType(messagespb.MessageType_DropCollection)
+	MessageTypeCreatePartition  MessageType = MessageType(messagespb.MessageType_CreatePartition)
+	MessageTypeDropPartition    MessageType = MessageType(messagespb.MessageType_DropPartition)
+	MessageTypeTxn              MessageType = MessageType(messagespb.MessageType_Txn)
+	MessageTypeBeginTxn         MessageType = MessageType(messagespb.MessageType_BeginTxn)
+	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
+	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
 )
 
 var messageTypeName = map[MessageType]string{
-	MessageTypeUnknown:  "MESSAGE_TYPE_UNKNOWN",
-	MessageTypeTimeTick: "MESSAGE_TYPE_TIME_TICK",
+	MessageTypeUnknown:          "UNKNOWN",
+	MessageTypeTimeTick:         "TIME_TICK",
+	MessageTypeInsert:           "INSERT",
+	MessageTypeDelete:           "DELETE",
+	MessageTypeFlush:            "FLUSH",
+	MessageTypeCreateCollection: "CREATE_COLLECTION",
+	MessageTypeDropCollection:   "DROP_COLLECTION",
+	MessageTypeCreatePartition:  "CREATE_PARTITION",
+	MessageTypeDropPartition:    "DROP_PARTITION",
+	MessageTypeTxn:              "TXN",
+	MessageTypeBeginTxn:         "BEGIN_TXN",
+	MessageTypeCommitTxn:        "COMMIT_TXN",
+	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
 }
 
 // String implements fmt.Stringer interface.
@@ -26,8 +52,14 @@ func (t MessageType) marshal() string {
 
 // Valid checks if the MessageType is valid.
 func (t MessageType) Valid() bool {
-	return t == MessageTypeTimeTick
-	// TODO: fill more.
+	_, ok := messageTypeName[t]
+	return t != MessageTypeUnknown && ok
+}
+
+// IsSysmtem checks if the MessageType is a system type.
+func (t MessageType) IsSystem() bool {
+	_, ok := systemMessageType[t]
+	return ok
 }
 
 // unmarshalMessageType unmarshal MessageType from string.

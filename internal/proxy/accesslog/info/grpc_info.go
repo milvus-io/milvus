@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -161,12 +162,17 @@ type SizeResponse interface {
 }
 
 func (i *GrpcAccessInfo) ResponseSize() string {
-	message, ok := i.resp.(SizeResponse)
-	if !ok {
+	var size int
+	switch r := i.resp.(type) {
+	case SizeResponse:
+		size = r.XXX_Size()
+	case proto.Message:
+		size = proto.Size(r)
+	default:
 		return Unknown
 	}
 
-	return fmt.Sprint(message.XXX_Size())
+	return fmt.Sprint(size)
 }
 
 type BaseResponse interface {

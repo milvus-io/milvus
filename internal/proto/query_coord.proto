@@ -548,6 +548,7 @@ message SegmentInfo {
     repeated int64 node_ids = 15;
     bool enable_index = 16;
     bool is_fake = 17;
+    data.SegmentLevel level = 18;
 }
 
 message CollectionInfo {
@@ -625,6 +626,7 @@ message SegmentVersionInfo {
     int64 version = 5;
     uint64 last_delta_timestamp = 6;
     map<int64, FieldIndexInfo> index_info = 7;
+    data.SegmentLevel level = 8; 
 }
 
 message ChannelVersionInfo {

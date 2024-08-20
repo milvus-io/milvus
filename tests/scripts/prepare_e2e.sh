@@ -31,8 +31,8 @@ done
 ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 
 pushd "${ROOT}/tests/docker"
-  docker-compose pull --ignore-pull-failures pytest
+  docker compose pull pytest
   if [[ -z "${SKIP_CHECK_PYTEST_ENV:-}" ]]; then
-    docker-compose build pytest
+    docker compose build pytest
   fi
 popd

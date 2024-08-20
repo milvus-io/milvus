@@ -90,7 +90,7 @@ func testInsertWithRepack(t *testing.T, f []Factory) {
 }
 
 func testInsertRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
-	insertRequest := msgpb.InsertRequest{
+	insertRequest := &msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     1,
@@ -119,7 +119,7 @@ func testInsertRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
 }
 
 func testDeleteRepackFuncWithDifferentClient(t *testing.T, f []Factory) {
-	deleteRequest := msgpb.DeleteRequest{
+	deleteRequest := &msgpb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Delete,
 			MsgID:     1,

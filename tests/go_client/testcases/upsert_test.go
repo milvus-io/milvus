@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -31,7 +33,7 @@ func TestUpsertAllFields(t *testing.T) {
 	// create -> insert [0, 3000) -> flush -> index -> load
 	// create -> insert -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 0), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -100,7 +102,7 @@ func TestUpsertSparse(t *testing.T) {
 	// create -> insert [0, 3000) -> flush -> index -> load
 	// create -> insert -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 0), hp.TNewDataOption().TWithSparseMaxLen(128))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128).TWithNb(0))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
 	upsertNb := 200
@@ -164,7 +166,7 @@ func TestUpsertVarcharPk(t *testing.T) {
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -216,8 +218,8 @@ func TestUpsertMultiPartitions(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// insert [0, nb) into default, insert [nb, nb*2) into new
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithPartitionName(parName), hp.TNewDataOption().TWithStart(common.DefaultNb))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
@@ -248,7 +250,7 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 
 	// create and insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 
 	var _columns []column.Column
 	upsertNb := 10
@@ -284,19 +286,49 @@ func TestUpsertAutoID(t *testing.T) {
 	*/
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
+	nb := 100
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 100), hp.TNewDataOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	_, insertRes := prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(nb))
 
-	// upsert without pks
-	vecColumn := hp.GenColumnData(100, entity.FieldTypeFloatVector, *hp.TNewDataOption())
-	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
-	common.CheckErr(t, err, false, "upsert can not assign primary field data when auto id enabled")
+	// upsert autoID collection with existed pks -> actually delete passed pks and auto generate new pks ? So weired
+	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(insertRes.IDs, vecColumn))
+	common.CheckErr(t, err, true)
+	log.Debug("upsertRes", zap.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
 
-	// upsert with pks
+	// insertRes pks were deleted
+	expr := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, insertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
+	log.Debug("expr", zap.String("expr", expr))
+	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{common.DefaultFloatVecFieldName}).WithFilter(expr))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 0, resSet.ResultCount)
+
+	exprUpsert := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, upsertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
+	log.Debug("expr", zap.String("expr", expr))
+	resSet1, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{common.DefaultFloatVecFieldName}).WithFilter(exprUpsert))
+	common.CheckErr(t, err, true)
+	common.EqualColumn(t, vecColumn, resSet1.GetColumn(common.DefaultFloatVecFieldName))
+
+	// upsert with not existing pks -> actually auto generate id ?? so weired
 	pkColumn := hp.GenColumnData(100, entity.FieldTypeInt64, *hp.TNewDataOption())
-	_, err1 := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn, vecColumn))
-	common.CheckErr(t, err1, false, "upsert can not assign primary field data when auto id enabled")
+	upsertRes, err1 := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn, vecColumn))
+	common.CheckErr(t, err1, true)
+	require.EqualValues(t, nb, upsertRes.UpsertCount)
+
+	// query and verify upsert result
+	upsertPks := upsertRes.IDs.(*column.ColumnInt64).Data()
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields([]string{common.DefaultFloatVecFieldName}).
+		WithFilter(fmt.Sprintf("%d <= %s", upsertPks[0], common.DefaultInt64FieldName)))
+	common.CheckErr(t, err, true)
+	common.EqualColumn(t, vecColumn, resSet.GetColumn(common.DefaultFloatVecFieldName))
+
+	// upsert without pks -> error
+	vecColumn = hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
+	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
 }
 
 // test upsert with invalid collection / partition name
@@ -379,7 +411,7 @@ func TestUpsertDynamicField(t *testing.T) {
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
@@ -422,7 +454,7 @@ func TestUpsertWithoutLoading(t *testing.T) {
 
 	// create and insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 
 	// upsert
 	upsertNb := 10

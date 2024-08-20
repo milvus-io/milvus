@@ -23,9 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -33,14 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
-	"github.com/milvus-io/milvus-storage/go/storage/options"
-	"github.com/milvus-io/milvus-storage/go/storage/schema"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -910,153 +903,4 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
-}
-
-type SegmentLoaderV2Suite struct {
-	suite.Suite
-	loader *segmentLoaderV2
-
-	// Dependencies
-	manager      *Manager
-	rootPath     string
-	chunkManager storage.ChunkManager
-
-	// Data
-	collectionID int64
-	partitionID  int64
-	segmentID    int64
-	schema       *schemapb.CollectionSchema
-	segmentNum   int
-}
-
-func (suite *SegmentLoaderV2Suite) SetupSuite() {
-	paramtable.Init()
-	suite.rootPath = suite.T().Name()
-	suite.collectionID = rand.Int63()
-	suite.partitionID = rand.Int63()
-	suite.segmentID = rand.Int63()
-	suite.segmentNum = 5
-}
-
-func (suite *SegmentLoaderV2Suite) SetupTest() {
-	paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("true")
-	// Dependencies
-	suite.manager = NewManager()
-	ctx := context.Background()
-	// TODO:: cpp chunk manager not support local chunk manager
-	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
-	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
-	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoaderV2(suite.manager, suite.chunkManager)
-	initcore.InitRemoteChunkManager(paramtable.Get())
-
-	// Data
-	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
-	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
-	loadMeta := &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		CollectionID: suite.collectionID,
-		PartitionIDs: []int64{suite.partitionID},
-	}
-	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
-}
-
-func (suite *SegmentLoaderV2Suite) TearDownTest() {
-	ctx := context.Background()
-	for i := 0; i < suite.segmentNum; i++ {
-		suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
-	}
-	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
-	paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
-}
-
-func (suite *SegmentLoaderV2Suite) TestLoad() {
-	tmpDir := suite.T().TempDir()
-	paramtable.Get().CommonCfg.StorageScheme.SwapTempValue("file")
-	paramtable.Get().CommonCfg.StoragePathPrefix.SwapTempValue(tmpDir)
-	ctx := context.Background()
-
-	msgLength := 4
-
-	arrowSchema, err := typeutil.ConvertToArrowSchema(suite.schema.Fields)
-	suite.NoError(err)
-	opt := options.NewSpaceOptionBuilder().
-		SetSchema(schema.NewSchema(
-			arrowSchema,
-			&schema.SchemaOptions{
-				PrimaryColumn: "int64Field",
-				VectorColumn:  "floatVectorField",
-				VersionColumn: "Timestamp",
-			})).
-		Build()
-	uri, err := typeutil.GetStorageURI("file", tmpDir, suite.segmentID)
-	suite.NoError(err)
-	space, err := milvus_storage.Open(uri, opt)
-	suite.NoError(err)
-
-	b := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-	defer b.Release()
-	insertData, err := genInsertData(msgLength, suite.schema)
-	suite.NoError(err)
-
-	err = typeutil.BuildRecord(b, insertData, suite.schema.Fields)
-	suite.NoError(err)
-	rec := b.NewRecord()
-	defer rec.Release()
-	reader, err := array.NewRecordReader(arrowSchema, []arrow.Record{rec})
-	suite.NoError(err)
-	err = space.Write(reader, &options.DefaultWriteOptions)
-	suite.NoError(err)
-
-	collMeta := genCollectionMeta(suite.collectionID, suite.partitionID, suite.schema)
-	inCodec := storage.NewInsertCodecWithSchema(collMeta)
-	statsLog, err := inCodec.SerializePkStatsByData(insertData)
-	suite.NoError(err)
-
-	err = space.WriteBlob(statsLog.Value, statsLog.Key, false)
-	suite.NoError(err)
-
-	dschema := space.Manifest().GetSchema().DeleteSchema()
-	dbuilder := array.NewRecordBuilder(memory.DefaultAllocator, dschema)
-	defer dbuilder.Release()
-	dbuilder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
-	dbuilder.Field(1).(*array.Int64Builder).AppendValues([]int64{100, 200}, nil)
-
-	drec := dbuilder.NewRecord()
-	defer drec.Release()
-
-	dreader, err := array.NewRecordReader(dschema, []arrow.Record{drec})
-	suite.NoError(err)
-
-	err = space.Delete(dreader)
-	suite.NoError(err)
-
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:      suite.segmentID,
-		PartitionID:    suite.partitionID,
-		CollectionID:   suite.collectionID,
-		NumOfRows:      int64(msgLength),
-		StorageVersion: 3,
-		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	})
-	suite.NoError(err)
-
-	_, err = suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, 0, &querypb.SegmentLoadInfo{
-		SegmentID:      suite.segmentID,
-		PartitionID:    suite.partitionID,
-		CollectionID:   suite.collectionID,
-		NumOfRows:      int64(msgLength),
-		StorageVersion: 3,
-		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	})
-	suite.NoError(err)
-
-	segment := segments[0]
-	suite.EqualValues(4, segment.InsertCount())
-	suite.Equal(int64(msgLength-2), segment.RowNum())
-}
-
-func TestSegmentLoaderV2(t *testing.T) {
-	suite.Run(t, &SegmentLoaderV2Suite{})
 }
