@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -153,8 +155,10 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 
 	rc := NewRootCoordMock()
 	defer rc.Close()
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
-	err := InitMetaCache(ctx, rc, nil, nil)
+	err := InitMetaCache(ctx, rc, qc, nil)
 	assert.NoError(t, err)
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())

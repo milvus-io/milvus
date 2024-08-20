@@ -369,6 +369,17 @@ func (m *CollectionManager) GetFieldIndex(collectionID typeutil.UniqueID) map[in
 	return nil
 }
 
+func (m *CollectionManager) GetLoadFields(collectionID typeutil.UniqueID) []int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	collection, ok := m.collections[collectionID]
+	if ok {
+		return collection.GetLoadFields()
+	}
+	return nil
+}
+
 func (m *CollectionManager) Exist(collectionID typeutil.UniqueID) bool {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
