@@ -29,7 +29,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -95,7 +97,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		return data, typeutil.VerifyFloats64(data.([]float64))
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		return ReadStringData(c, count)
+		return ReadVarcharData(c, count)
 	case schemapb.DataType_JSON:
 		return ReadJSONData(c, count)
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -206,6 +208,35 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
+			data = append(data, stringReader.Value(i))
+		}
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
+}
+
+func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]string, 0, count)
+	maxLength, err := parameterutil.GetMaxLength(pcr.field)
+	if err != nil {
+		return nil, err
+	}
+	for _, chunk := range chunked.Chunks() {
+		dataNums := chunk.Data().Len()
+		stringReader, ok := chunk.(*array.String)
+		if !ok {
+			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
+		}
+		for i := 0; i < dataNums; i++ {
+			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength); err != nil {
+				return nil, err
+			}
 			data = append(data, stringReader.Value(i))
 		}
 	}
@@ -471,6 +502,10 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 
 func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 	data := make([]*schemapb.ScalarField, 0, count)
+	maxCapacity, err := parameterutil.GetMaxCapacity(pcr.field)
+	if err != nil {
+		return nil, err
+	}
 	elementType := pcr.field.GetElementType()
 	switch elementType {
 	case schemapb.DataType_Bool:
@@ -482,6 +517,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range boolArray.([][]bool) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
@@ -499,6 +537,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int8Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -516,6 +557,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int16Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -533,6 +577,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int32Array.([][]int32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
@@ -550,6 +597,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int64Array.([][]int64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
@@ -567,6 +617,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float32Array.([][]float32) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
@@ -584,6 +637,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float64Array.([][]float64) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
@@ -601,6 +657,9 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range stringArray.([][]string) {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+				return nil, err
+			}
 			data = append(data, &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
