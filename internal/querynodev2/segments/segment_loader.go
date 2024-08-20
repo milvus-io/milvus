@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -662,7 +661,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				zap.String("index", info.IndexInfo.GetIndexName()),
 			)
 			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
@@ -816,11 +815,7 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 		fieldBinLog := field
 		fieldID := field.FieldID
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx,
-				fieldID,
-				rowCount,
-				fieldBinLog,
-				false)
+			return segment.LoadFieldData(ctx, fieldID, rowCount, fieldBinLog)
 		})
 	}
 	err := runningGroup.Wait()
@@ -1207,17 +1202,30 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	var indexMemorySize uint64
 	var mmapFieldCount int
 
-	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
 		fieldID := fieldIndexInfo.FieldID
-		vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
+		fieldID2IndexInfo[fieldID] = fieldIndexInfo
 	}
 
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
+		return nil, err
+	}
 	for _, fieldBinlog := range loadInfo.BinlogPaths {
 		fieldID := fieldBinlog.FieldID
 		var mmapEnabled bool
-		if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-			mmapEnabled = isIndexMmapEnable(fieldIndexInfo)
+		// TODO retrieve_enable should be considered
+		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+			return nil, err
+		}
+		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+
+		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
+			mmapEnabled = isIndexMmapEnable(fieldSchema, fieldIndexInfo)
 			neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
@@ -1231,10 +1239,18 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			} else {
 				segmentDiskSize += neededDiskSize
 			}
+			if !hasRawData(fieldIndexInfo) {
+				dataMmapEnable := isDataMmapEnable(fieldSchema)
+				segmentMemorySize += binlogSize
+				if dataMmapEnable {
+					segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+				} else {
+					segmentMemorySize += binlogSize
+				}
+			}
 		} else {
-			mmapEnabled = common.IsFieldMmapEnabled(schema, fieldID) ||
-				(!common.FieldHasMmapKey(schema, fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
-			binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+			mmapEnabled = isDataMmapEnable(fieldSchema)
+
 			segmentMemorySize += binlogSize
 			if mmapEnabled {
 				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))

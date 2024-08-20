@@ -182,22 +182,34 @@ func IsSystemField(fieldID int64) bool {
 	return fieldID < StartOfUserFieldID
 }
 
-func IsMmapEnabled(kvs ...*commonpb.KeyValuePair) bool {
+func IsMmapDataEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 	for _, kv := range kvs {
-		if kv.Key == MmapEnabledKey && strings.ToLower(kv.Value) == "true" {
-			return true
+		if kv.Key == MmapEnabledKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
 		}
 	}
-	return false
+	return false, false
 }
 
-func IsFieldMmapEnabled(schema *schemapb.CollectionSchema, fieldID int64) bool {
-	for _, field := range schema.GetFields() {
-		if field.GetFieldID() == fieldID {
-			return IsMmapEnabled(field.GetTypeParams()...)
+func IsMmapIndexEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.Key == MmapEnabledKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
 		}
 	}
-	return false
+	return false, false
+}
+
+func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
+	for _, param := range indexParams {
+		if param.Key == IndexTypeKey {
+			return param.Value
+		}
+	}
+	log.Warn("IndexType not found in indexParams")
+	return ""
 }
 
 func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
