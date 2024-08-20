@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -29,7 +30,8 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		return req, nil
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetReq().GetCollectionID()))
+	collectionId := req.GetReq().GetCollectionID()
+	log := log.Ctx(ctx).With(zap.Int64("collection", collectionId))
 
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
 	// plan not found
@@ -55,6 +57,8 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	case *planpb.PlanNode_VectorAnns:
 		// use shardNum * segments num in shard to estimate total segment number
 		estSegmentNum := numSegments * int(channelNum)
+		metrics.QueryNodeSearchHitSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(collectionId), metrics.SearchLabel).Observe(float64(estSegmentNum))
+
 		withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
 		params := map[string]any{
