@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	sio "io"
 	"math"
 	"sync"
 
@@ -391,9 +392,27 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 	for _, blob := range blobBytes {
 		blobs = append(blobs, &storage.Blob{Value: blob})
 	}
-	_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
+
+	reader, err := storage.CreateDeltalogReader(blobs)
 	if err != nil {
+		log.Error("malformed delta file", zap.Error(err))
 		return nil, err
+	}
+	defer reader.Close()
+
+	dData := &storage.DeleteData{}
+	for {
+		err := reader.Next()
+		if err != nil {
+			if err == sio.EOF {
+				break
+			}
+			log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
+			return nil, err
+		}
+
+		dl := reader.Value()
+		dData.Append(dl.Pk, dl.Ts)
 	}
 
 	return dData, nil
