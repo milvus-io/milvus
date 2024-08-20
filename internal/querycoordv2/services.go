@@ -216,7 +216,9 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
 		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
@@ -333,7 +335,9 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
 		// when replica number or resource groups is not set, use database level config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
