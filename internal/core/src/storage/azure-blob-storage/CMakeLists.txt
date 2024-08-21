@@ -35,6 +35,8 @@ find_package(azure-identity-cpp CONFIG REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter -Wno-return-type -Wno-pedantic -fPIC")
 add_library(blob-chunk-manager SHARED AzureBlobChunkManager.cpp)
 target_link_libraries(blob-chunk-manager PUBLIC Azure::azure-identity Azure::azure-storage-blobs)
+# should be link directly into libmilvus_core in future.
+install(TARGETS blob-chunk-manager DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     add_subdirectory(test)
