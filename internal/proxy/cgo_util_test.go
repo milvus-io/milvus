@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 func Test_CheckVecIndexWithDataTypeExist(t *testing.T) {
@@ -29,25 +28,25 @@ func Test_CheckVecIndexWithDataTypeExist(t *testing.T) {
 		dataType  schemapb.DataType
 		want      bool
 	}{
-		{indexparamcheck.IndexHNSW, schemapb.DataType_FloatVector, true},
-		{indexparamcheck.IndexHNSW, schemapb.DataType_BinaryVector, false},
-		{indexparamcheck.IndexHNSW, schemapb.DataType_Float16Vector, true},
+		{"HNSW", schemapb.DataType_FloatVector, true},
+		{"HNSW", schemapb.DataType_BinaryVector, false},
+		{"HNSW", schemapb.DataType_Float16Vector, true},
 
-		{indexparamcheck.IndexSparseWand, schemapb.DataType_SparseFloatVector, true},
-		{indexparamcheck.IndexSparseWand, schemapb.DataType_FloatVector, false},
-		{indexparamcheck.IndexSparseWand, schemapb.DataType_Float16Vector, false},
+		{"SPARSE_WAND", schemapb.DataType_SparseFloatVector, true},
+		{"SPARSE_WAND", schemapb.DataType_FloatVector, false},
+		{"SPARSE_WAND", schemapb.DataType_Float16Vector, false},
 
-		{indexparamcheck.IndexGpuBF, schemapb.DataType_FloatVector, true},
-		{indexparamcheck.IndexGpuBF, schemapb.DataType_Float16Vector, false},
-		{indexparamcheck.IndexGpuBF, schemapb.DataType_BinaryVector, false},
+		{"GPU_BRUTE_FORCE", schemapb.DataType_FloatVector, true},
+		{"GPU_BRUTE_FORCE", schemapb.DataType_Float16Vector, false},
+		{"GPU_BRUTE_FORCE", schemapb.DataType_BinaryVector, false},
 
-		{indexparamcheck.IndexFaissBinIvfFlat, schemapb.DataType_BinaryVector, true},
-		{indexparamcheck.IndexFaissBinIvfFlat, schemapb.DataType_FloatVector, false},
+		{"BIN_IVF_FLAT", schemapb.DataType_BinaryVector, true},
+		{"BIN_IVF_FLAT", schemapb.DataType_FloatVector, false},
 
-		{indexparamcheck.IndexDISKANN, schemapb.DataType_FloatVector, true},
-		{indexparamcheck.IndexDISKANN, schemapb.DataType_Float16Vector, true},
-		{indexparamcheck.IndexDISKANN, schemapb.DataType_BFloat16Vector, true},
-		{indexparamcheck.IndexDISKANN, schemapb.DataType_BinaryVector, false},
+		{"DISKANN", schemapb.DataType_FloatVector, true},
+		{"DISKANN", schemapb.DataType_Float16Vector, true},
+		{"DISKANN", schemapb.DataType_BFloat16Vector, true},
+		{"DISKANN", schemapb.DataType_BinaryVector, false},
 	}
 
 	for _, test := range cases {

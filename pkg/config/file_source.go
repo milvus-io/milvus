@@ -17,14 +17,14 @@
 package config
 
 import (
+	"github.com/spf13/cast"
 	"os"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/spf13/cast"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -114,8 +114,60 @@ func (fs *FileSource) UpdateOptions(opts Options) {
 	fs.files = opts.FileInfo.Files
 }
 
+func (fs *FileSource) extractConfigFromNode(node *yaml.Node, config map[string]string, prefix string) error {
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		// Assuming keys are always strings
+		key := keyNode.Value
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		switch valueNode.Kind {
+		case yaml.ScalarNode:
+			// If it's a scalar, just cast it to string
+			str, err := cast.ToStringE(valueNode.Value)
+			if err != nil {
+				return err
+			}
+			config[fullKey] = str
+			config[formatKey(fullKey)] = str
+
+		case yaml.SequenceNode:
+			// Handle a list of values
+			var combinedStr string
+			for _, item := range valueNode.Content {
+				str, err := cast.ToStringE(item.Value)
+				if err != nil {
+					zap.L().Warn("cast to string failed", zap.Any("value", item.Value))
+					continue
+				}
+				if combinedStr == "" {
+					combinedStr = str
+				} else {
+					combinedStr = combinedStr + "," + str
+				}
+			}
+			config[fullKey] = combinedStr
+			config[formatKey(fullKey)] = combinedStr
+
+		case yaml.MappingNode:
+			// Recursively process nested mappings
+			if err := fs.extractConfigFromNode(valueNode, config, fullKey); err != nil {
+				return err
+			}
+
+		default:
+			zap.L().Warn("Unhandled YAML node type", zap.Any("node", valueNode))
+		}
+	}
+	return nil
+}
+
 func (fs *FileSource) loadFromFile() error {
-	yamlReader := viper.New()
 	newConfig := make(map[string]string)
 	var configFiles []string
 
@@ -128,37 +180,28 @@ func (fs *FileSource) loadFromFile() error {
 			continue
 		}
 
-		yamlReader.SetConfigFile(configFile)
-		if err := yamlReader.ReadInConfig(); err != nil {
-			return errors.Wrap(err, "Read config failed: "+configFile)
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return errors.Wrap(err, "Failed to read config file: "+configFile)
 		}
 
-		for _, key := range yamlReader.AllKeys() {
-			val := yamlReader.Get(key)
-			str, err := cast.ToStringE(val)
-			if err != nil {
-				switch val := val.(type) {
-				case []any:
-					str = str[:0]
-					for _, v := range val {
-						ss, err := cast.ToStringE(v)
-						if err != nil {
-							log.Warn("cast to string failed", zap.Any("value", v))
-						}
-						if str == "" {
-							str = ss
-						} else {
-							str = str + "," + ss
-						}
-					}
+		var rootNode yaml.Node
+		if err := yaml.Unmarshal(data, &rootNode); err != nil {
+			return errors.Wrap(err, "Failed to unmarshal YAML: "+configFile)
+		}
 
-				default:
-					log.Warn("val is not a slice", zap.Any("value", val))
-					continue
-				}
-			}
-			newConfig[key] = str
-			newConfig[formatKey(key)] = str
+		if rootNode.Kind != yaml.DocumentNode || len(rootNode.Content) == 0 {
+			return errors.New("Invalid YAML structure in file: " + configFile)
+		}
+
+		// Assuming the top-level node is a map
+		if rootNode.Content[0].Kind != yaml.MappingNode {
+			return errors.New("YAML content is not a map in file: " + configFile)
+		}
+
+		err = fs.extractConfigFromNode(rootNode.Content[0], newConfig, "")
+		if err != nil {
+			return errors.Wrap(err, "Failed to extract config: "+configFile)
 		}
 	}
 

@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"encoding/json"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"strconv"
 	"testing"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 const (
@@ -187,7 +187,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.COSINE, metricType)
 	})
 
 	t.Run("normal case, binary vector", func(t *testing.T) {
@@ -204,7 +204,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.BinaryIndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.HAMMING, metricType)
 	})
 
 	t.Run("normal case, sparse vector", func(t *testing.T) {
@@ -221,7 +221,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.SparseIndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.SparseFloatVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.IP, metricType)
 	})
 
 	t.Run("normal case, ivf flat", func(t *testing.T) {
@@ -238,7 +238,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.COSINE, metricType)
 	})
 
 	t.Run("normal case, ivf flat", func(t *testing.T) {
@@ -255,7 +255,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.COSINE, metricType)
 	})
 
 	t.Run("normal case, diskann", func(t *testing.T) {
@@ -272,7 +272,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.COSINE, metricType)
 	})
 
 	t.Run("normal case, bin flat", func(t *testing.T) {
@@ -289,7 +289,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.HAMMING, metricType)
 	})
 
 	t.Run("normal case, bin ivf flat", func(t *testing.T) {
@@ -306,7 +306,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		})
 		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
 		assert.True(t, exist)
-		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+		assert.Equal(t, metric.HAMMING, metricType)
 	})
 }
 

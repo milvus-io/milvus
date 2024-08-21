@@ -209,6 +209,12 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}
 
+	log.Debug("ectd info", zap.String("username", info.UserName), zap.String("password", info.PassWord))
+
+	info.UserName = ""
+	info.PassWord = ""
+
+	log.Warn("etcd endpoints ", zap.Strings("list", etcdConfig.Endpoints.GetAsStrings()))
 	s, err := config.NewEtcdSource(info)
 	if err != nil {
 		log.Info("init with etcd failed", zap.Error(err))

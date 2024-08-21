@@ -243,6 +243,7 @@ default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe
 Handler_type = ["GRPC", "HTTP"]
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]
 sparse_support = ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"]
+gpu_support = ["GPU_IVF_FLAT", "GPU_IVF_PQ"]
 default_L0_metric = "COSINE"
 float_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]

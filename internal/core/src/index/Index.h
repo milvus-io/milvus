@@ -63,13 +63,8 @@ class IndexBase {
     virtual const bool
     HasRawData() const = 0;
 
-    bool
-    IsMmapSupported() const {
-        return  knowhere::IndexFactory::Instance().FeatureCheck(index_type_, knowhere::feature::MMAP) ||
-                    // support mmap for bitmap/hybrid index
-                       index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
-                       index_type_ == milvus::index::HYBRID_INDEX_TYPE;
-    }
+    virtual bool
+    IsMmapSupported() const = 0;
 
     const IndexType&
     Type() const {

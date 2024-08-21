@@ -1056,3 +1056,23 @@ streaming:
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+
+knowhere:
+  enable: true
+  HNSW:
+    build:
+      efConstruction : 360
+      M: 30
+    search:
+      ef: 30
+  DISKANN:
+    build:
+      max_degree: 56
+      search_list_size: 100
+      pq_code_budget_gb_ratio: 0.125
+      search_cache_budget_gb_ratio: 0.1
+      beam_width_ratio: 4
+    load:
+      cacheRatio: 0.1
+    search:
+      beamRatio: 4.0

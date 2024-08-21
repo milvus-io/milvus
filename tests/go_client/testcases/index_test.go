@@ -607,7 +607,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 	// create vector index on json field
 	idx := index.NewSCANNIndex(entity.L2, 8, false)
 	_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idx).WithIndexName("json_index"))
-	common.CheckErr(t, err, false, "data type should be FloatVector, Float16Vector or BFloat16Vector")
+	common.CheckErr(t, err, false, "index SCANN only supports vector data type")
 
 	// create scalar index on json field
 	type scalarIndexError struct {

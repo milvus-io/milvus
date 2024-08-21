@@ -11,9 +11,63 @@
 
 #include "segcore/vector_index_c.h"
 
+#include "common/Types.h"
+#include "common/EasyAssert.h"
 #include "knowhere/utils.h"
+#include "knowhere/config.h"
+#include "knowhere/version.h"
 #include "index/Meta.h"
 #include "index/IndexFactory.h"
+#include "pb/index_cgo_msg.pb.h"
+
+CStatus
+ValidateIndexParams(const char* index_type, enum CDataType data_type, const uint8_t* serialized_index_params, const uint64_t length) {
+    try {
+        auto index_params =
+                std::make_unique<milvus::proto::indexcgo::IndexParams>();
+        auto res = index_params->ParseFromArray(serialized_index_params, length);
+        AssertInfo(res, "Unmarshall index params failed");
+
+        knowhere::Json json;
+
+        for (size_t i = 0; i < index_params->params_size(); i++) {
+            auto& param = index_params->params(i);
+            json[param.key()] = param.value();
+        }
+
+        milvus::DataType dataType(static_cast<milvus::DataType>(data_type));
+
+        knowhere::Status status;
+        std::string error_msg;
+        if (dataType == milvus::DataType::VECTOR_BINARY) {
+             status = knowhere::CheckConfig<knowhere::bin1>(index_type, knowhere::Version::GetCurrentVersion().VersionNumber(), json, knowhere::PARAM_TYPE::TRAIN, error_msg);
+        } else if (dataType == milvus::DataType::VECTOR_FLOAT) {
+            status = knowhere::CheckConfig<knowhere::fp32>(index_type, knowhere::Version::GetCurrentVersion().VersionNumber(), json, knowhere::PARAM_TYPE::TRAIN, error_msg);
+        } else if (dataType == milvus::DataType::VECTOR_BFLOAT16) {
+            status = knowhere::CheckConfig<knowhere::bf16>(index_type, knowhere::Version::GetCurrentVersion().VersionNumber(), json, knowhere::PARAM_TYPE::TRAIN, error_msg);
+        } else if (dataType == milvus::DataType::VECTOR_FLOAT16) {
+            status = knowhere::CheckConfig<knowhere::fp16>(index_type, knowhere::Version::GetCurrentVersion().VersionNumber(), json, knowhere::PARAM_TYPE::TRAIN, error_msg);
+        } else if (dataType == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+            status = knowhere::CheckConfig<knowhere::fp32>(index_type, knowhere::Version::GetCurrentVersion().VersionNumber(), json, knowhere::PARAM_TYPE::TRAIN, error_msg);
+        } else {
+            status = knowhere::Status::invalid_args;
+        }
+        CStatus cStatus;
+        if (status == knowhere::Status::success) {
+            cStatus.error_code = milvus::Success;
+            cStatus.error_msg = "";
+        } else {
+            cStatus.error_code = milvus::ConfigInvalid;
+            cStatus.error_msg = strdup(error_msg.c_str());
+        }
+        return cStatus;
+    } catch (std::exception& e) {
+        auto cStatus = CStatus();
+        cStatus.error_code = milvus::UnexpectedError;
+        cStatus.error_msg = strdup(e.what());
+        return cStatus;
+    }
+}
 
 int
 GetIndexListSize() {

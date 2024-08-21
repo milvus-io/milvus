@@ -115,6 +115,11 @@ class VectorIndex : public IndexBase {
             err_msg);
     }
 
+    virtual bool
+    IsMmapSupported() const {
+        return  knowhere::IndexFactory::Instance().FeatureCheck(index_type_, knowhere::feature::MMAP);
+    }
+
     knowhere::Json
     PrepareSearchParams(const SearchInfo& search_info) const {
         knowhere::Json search_cfg = search_info.search_params_;

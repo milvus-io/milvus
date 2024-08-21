@@ -76,6 +76,7 @@ type ComponentParam struct {
 	DataCoordCfg  dataCoordConfig
 	DataNodeCfg   dataNodeConfig
 	IndexNodeCfg  indexNodeConfig
+	IndexEngineConfig indexEngineConfig
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
 	RoleCfg       roleConfig
@@ -134,6 +135,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
 	p.GpuConfig.init(bt)
+	p.IndexEngineConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
