@@ -4085,8 +4085,9 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute get import state",
 			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return &milvuspb.GetImportStateResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	log.Debug("successfully received get import state response",
@@ -4121,8 +4122,9 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute list import tasks",
 			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return &milvuspb.ListImportTasksResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	log.Debug("successfully received list import tasks response",
