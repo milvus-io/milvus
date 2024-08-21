@@ -1,66 +1,18 @@
+#include <assert.h>
 #include <sstream>
 #include <fmt/format.h>
 #include <set>
 #include <iostream>
+#include <map>
+
 #include "tantivy-binding.h"
+#include "rust-binding.h"
+#include "rust-array.h"
 
 namespace milvus::tantivy {
-struct RustArrayWrapper {
-    explicit RustArrayWrapper(RustArray array) : array_(array) {
-    }
-
-    RustArrayWrapper(RustArrayWrapper&) = delete;
-    RustArrayWrapper&
-    operator=(RustArrayWrapper&) = delete;
-
-    RustArrayWrapper(RustArrayWrapper&& other) noexcept {
-        array_.array = other.array_.array;
-        array_.len = other.array_.len;
-        array_.cap = other.array_.cap;
-        other.array_.array = nullptr;
-        other.array_.len = 0;
-        other.array_.cap = 0;
-    }
-
-    RustArrayWrapper&
-    operator=(RustArrayWrapper&& other) noexcept {
-        if (this != &other) {
-            free();
-            array_.array = other.array_.array;
-            array_.len = other.array_.len;
-            array_.cap = other.array_.cap;
-            other.array_.array = nullptr;
-            other.array_.len = 0;
-            other.array_.cap = 0;
-        }
-        return *this;
-    }
-
-    ~RustArrayWrapper() {
-        free();
-    }
-
-    void
-    debug() {
-        std::stringstream ss;
-        ss << "[ ";
-        for (int i = 0; i < array_.len; i++) {
-            ss << array_.array[i] << " ";
-        }
-        ss << "]";
-        std::cout << ss.str() << std::endl;
-    }
-
-    RustArray array_;
-
- private:
-    void
-    free() {
-        if (array_.array != nullptr) {
-            free_rust_array(array_);
-        }
-    }
-};
+static constexpr uintptr_t DEFAULT_NUM_THREADS = 4;
+static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
+    DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
 
 template <typename T>
 inline TantivyDataType
@@ -81,15 +33,14 @@ guess_data_type() {
                       typeid(T).name());
 }
 
+// TODO: should split this into IndexWriter & IndexReader.
 struct TantivyIndexWrapper {
     using IndexWriter = void*;
     using IndexReader = void*;
 
-    TantivyIndexWrapper() = default;
+    NO_COPY_OR_ASSIGN(TantivyIndexWrapper);
 
-    TantivyIndexWrapper(TantivyIndexWrapper&) = delete;
-    TantivyIndexWrapper&
-    operator=(TantivyIndexWrapper&) = delete;
+    TantivyIndexWrapper() = default;
 
     TantivyIndexWrapper(TantivyIndexWrapper&& other) noexcept {
         writer_ = other.writer_;
@@ -120,11 +71,19 @@ struct TantivyIndexWrapper {
 
     TantivyIndexWrapper(const char* field_name,
                         TantivyDataType data_type,
-                        const char* path) {
-        writer_ = tantivy_create_index(field_name, data_type, path);
+                        const char* path,
+                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
+                        uintptr_t overall_memory_budget_in_bytes =
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        writer_ = tantivy_create_index(field_name,
+                                       data_type,
+                                       path,
+                                       num_threads,
+                                       overall_memory_budget_in_bytes);
         path_ = std::string(path);
     }
 
+    // load index. create index reader.
     explicit TantivyIndexWrapper(const char* path) {
         assert(tantivy_index_exist(path));
         reader_ = tantivy_load_index(path);
@@ -137,49 +96,51 @@ struct TantivyIndexWrapper {
 
     template <typename T>
     void
-    add_data(const T* array, uintptr_t len) {
+    add_data(const T* array, uintptr_t len, int64_t offset_begin) {
         assert(!finished_);
 
         if constexpr (std::is_same_v<T, bool>) {
-            tantivy_index_add_bools(writer_, array, len);
+            tantivy_index_add_bools(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, int8_t>) {
-            tantivy_index_add_int8s(writer_, array, len);
+            tantivy_index_add_int8s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, int16_t>) {
-            tantivy_index_add_int16s(writer_, array, len);
+            tantivy_index_add_int16s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, int32_t>) {
-            tantivy_index_add_int32s(writer_, array, len);
+            tantivy_index_add_int32s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, int64_t>) {
-            tantivy_index_add_int64s(writer_, array, len);
+            tantivy_index_add_int64s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, float>) {
-            tantivy_index_add_f32s(writer_, array, len);
+            tantivy_index_add_f32s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, double>) {
-            tantivy_index_add_f64s(writer_, array, len);
+            tantivy_index_add_f64s(writer_, array, len, offset_begin);
             return;
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
             // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
-                tantivy_index_add_keyword(
-                    writer_, static_cast<const std::string*>(array)[i].c_str());
+                tantivy_index_add_string(
+                    writer_,
+                    static_cast<const std::string*>(array)[i].c_str(),
+                    offset_begin + i);
             }
             return;
         }
@@ -190,41 +151,41 @@ struct TantivyIndexWrapper {
 
     template <typename T>
     void
-    add_multi_data(const T* array, uintptr_t len) {
+    add_multi_data(const T* array, uintptr_t len, int64_t offset) {
         assert(!finished_);
 
         if constexpr (std::is_same_v<T, bool>) {
-            tantivy_index_add_multi_bools(writer_, array, len);
+            tantivy_index_add_multi_bools(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, int8_t>) {
-            tantivy_index_add_multi_int8s(writer_, array, len);
+            tantivy_index_add_multi_int8s(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, int16_t>) {
-            tantivy_index_add_multi_int16s(writer_, array, len);
+            tantivy_index_add_multi_int16s(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, int32_t>) {
-            tantivy_index_add_multi_int32s(writer_, array, len);
+            tantivy_index_add_multi_int32s(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, int64_t>) {
-            tantivy_index_add_multi_int64s(writer_, array, len);
+            tantivy_index_add_multi_int64s(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, float>) {
-            tantivy_index_add_multi_f32s(writer_, array, len);
+            tantivy_index_add_multi_f32s(writer_, array, len, offset);
             return;
         }
 
         if constexpr (std::is_same_v<T, double>) {
-            tantivy_index_add_multi_f64s(writer_, array, len);
+            tantivy_index_add_multi_f64s(writer_, array, len, offset);
             return;
         }
 
@@ -233,7 +194,8 @@ struct TantivyIndexWrapper {
             for (uintptr_t i = 0; i < len; i++) {
                 views.push_back(array[i].c_str());
             }
-            tantivy_index_add_multi_keywords(writer_, views.data(), len);
+            tantivy_index_add_multi_keywords(
+                writer_, views.data(), len, offset);
             return;
         }
 
@@ -244,12 +206,14 @@ struct TantivyIndexWrapper {
 
     inline void
     finish() {
-        if (!finished_) {
-            tantivy_finish_index(writer_);
-            writer_ = nullptr;
-            reader_ = tantivy_load_index(path_.c_str());
-            finished_ = true;
+        if (finished_) {
+            return;
         }
+
+        tantivy_finish_index(writer_);
+        writer_ = nullptr;
+        reader_ = tantivy_load_index(path_.c_str());
+        finished_ = true;
     }
 
     inline uint32_t

@@ -33,7 +33,7 @@ run() {
     T arr[] = {1, 2, 3, 4, 5, 6};
     auto l = sizeof(arr) / sizeof(T);
 
-    w.add_data(arr, l);
+    w.add_data(arr, l, 0);
 
     w.finish();
 
@@ -83,7 +83,7 @@ run<bool>() {
     bool arr[] = {true, false, false, true, false, true};
     auto l = sizeof(arr) / sizeof(bool);
 
-    w.add_data(arr, l);
+    w.add_data(arr, l, 0);
 
     w.finish();
 
@@ -118,7 +118,7 @@ run<std::string>() {
     std::vector<std::string> arr = {"a", "b", "aaa", "abbb"};
     auto l = arr.size();
 
-    w.add_data<std::string>(arr.data(), l);
+    w.add_data<std::string>(arr.data(), l, 0);
 
     w.finish();
 
@@ -188,7 +188,7 @@ test_32717() {
         inverted[n].insert(i);
     }
 
-    w.add_data(arr.data(), l);
+    w.add_data(arr.data(), l, 0);
     w.finish();
     assert(w.count() == l);
 
@@ -233,8 +233,9 @@ test_array_int() {
         {10, 50, 60},
     };
 
+    int64_t offset = 0;
     for (const auto& arr : vec_of_array) {
-        w.add_multi_data(arr.data(), arr.size());
+        w.add_multi_data(arr.data(), arr.size(), offset++);
     }
     w.finish();
 
@@ -263,8 +264,9 @@ test_array_string() {
         {"10", "50", "60"},
     };
 
+    int64_t offset = 0;
     for (const auto& arr : vec_of_array) {
-        w.add_multi_data(arr.data(), arr.size());
+        w.add_multi_data(arr.data(), arr.size(), offset++);
     }
     w.finish();
 

@@ -419,10 +419,10 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
         // only used in ut.
         auto arr = static_cast<const boost::container::vector<T>*>(values);
         for (size_t i = 0; i < n; i++) {
-            wrapper_->template add_multi_data(arr[i].data(), arr[i].size());
+            wrapper_->template add_multi_data(arr[i].data(), arr[i].size(), i);
         }
     } else {
-        wrapper_->add_data<T>(static_cast<const T*>(values), n);
+        wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
     }
     finish();
 }
@@ -448,20 +448,27 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                if (schema_.nullable()) {
+            int64_t offset = 0;
+            if (schema_.nullable()) {
+                for (const auto& data : field_datas) {
+                    auto n = data->get_num_rows();
                     for (int i = 0; i < n; i++) {
                         if (!data->is_valid(i)) {
                             null_offset.push_back(i);
                         }
                         wrapper_->add_multi_data<T>(
                             static_cast<const T*>(data->RawValue(i)),
-                            data->is_valid(i));
+                            data->is_valid(i),
+                            offset++);
                     }
-                    continue;
                 }
-                wrapper_->add_data<T>(static_cast<const T*>(data->Data()), n);
+            } else {
+                for (const auto& data : field_datas) {
+                    auto n = data->get_num_rows();
+                    wrapper_->add_data<T>(
+                        static_cast<const T*>(data->Data()), n, offset);
+                    offset += n;
+                }
             }
             break;
         }
@@ -482,6 +489,7 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -493,7 +501,9 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             wrapper_->template add_multi_data(
-                reinterpret_cast<const T*>(array_column[i].data()), length);
+                reinterpret_cast<const T*>(array_column[i].data()),
+                length,
+                offset++);
         }
     }
 }
@@ -502,6 +512,7 @@ template <>
 void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -518,7 +529,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                     array_column[i].template get_data<std::string>(j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
-            wrapper_->template add_multi_data(output.data(), length);
+            wrapper_->template add_multi_data(output.data(), length, offset++);
         }
     }
 }
