@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
@@ -111,7 +112,7 @@ type Server struct {
 	kv               kv.MetaKv
 	meta             *meta
 	segmentManager   Manager
-	allocator        allocator
+	allocator        allocator.Allocator
 	cluster          Cluster
 	sessionManager   SessionManager
 	channelManager   ChannelManager
@@ -337,7 +338,7 @@ func (s *Server) initDataCoord() error {
 	log.Info("init rootcoord client done")
 
 	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
-	s.allocator = newRootCoordAllocator(s.rootCoordClient)
+	s.allocator = allocator.NewRootCoordAllocator(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {

@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -43,7 +44,7 @@ type importChecker struct {
 	meta    *meta
 	broker  broker.Broker
 	cluster Cluster
-	alloc   allocator
+	alloc   allocator.Allocator
 	sm      Manager
 	imeta   ImportMeta
 
@@ -54,7 +55,7 @@ type importChecker struct {
 func NewImportChecker(meta *meta,
 	broker broker.Broker,
 	cluster Cluster,
-	alloc allocator,
+	alloc allocator.Allocator,
 	sm Manager,
 	imeta ImportMeta,
 ) ImportChecker {

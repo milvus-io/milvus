@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -45,7 +46,7 @@ type ClusteringCompactionTaskSuite struct {
 	suite.Suite
 
 	mockID           atomic.Int64
-	mockAlloc        *NMockAllocator
+	mockAlloc        *allocator.MockAllocator
 	meta             *meta
 	mockSessMgr      *MockSessionManager
 	handler          *NMockHandler
@@ -64,13 +65,13 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockSessMgr = NewMockSessionManager(s.T())
 
 	s.mockID.Store(time.Now().UnixMilli())
-	s.mockAlloc = NewNMockAllocator(s.T())
-	s.mockAlloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
 		start := s.mockID.Load()
 		end := s.mockID.Add(int64(x))
 		return start, end, nil
 	}).Maybe()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
 		end := s.mockID.Add(1)
 		return end, nil
 	}).Maybe()

@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -22,7 +23,7 @@ type mixCompactionTask struct {
 	result *datapb.CompactionPlanResult
 
 	span       trace.Span
-	allocator  allocator
+	allocator  allocator.Allocator
 	sessions   SessionManager
 	meta       CompactionMeta
 	newSegment *SegmentInfo
@@ -330,7 +331,7 @@ func (t *mixCompactionTask) CleanLogPath() {
 }
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.allocN(1)
+	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -26,7 +27,7 @@ func TestCompactionTriggerManagerSuite(t *testing.T) {
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
-	mockAlloc       *NMockAllocator
+	mockAlloc       *allocator.MockAllocator
 	handler         Handler
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
@@ -36,7 +37,7 @@ type CompactionTriggerManagerSuite struct {
 }
 
 func (s *CompactionTriggerManagerSuite) SetupTest() {
-	s.mockAlloc = NewNMockAllocator(s.T())
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.mockPlanContext = NewMockCompactionPlanContext(s.T())
 
@@ -83,7 +84,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
 
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
@@ -100,7 +101,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 			s.ElementsMatch(expectedSegs, task.GetInputSegments())
 			return nil
 		}).Return(nil).Once()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroView)
 }
 
@@ -127,7 +128,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
 
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
@@ -143,7 +144,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 			s.ElementsMatch(expectedSegs, task.GetInputSegments())
 			return nil
 		}).Return(nil).Once()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
 }
 
