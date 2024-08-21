@@ -245,7 +245,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	insertRequest := msgpb.InsertRequest{
+	insertRequest := &msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     1,
@@ -299,7 +299,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	deleteRequest := msgpb.DeleteRequest{
+	deleteRequest := &msgpb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Delete,
 			MsgID:     1,
@@ -1251,7 +1251,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 	time := uint64(reqID)
 	switch msgType {
 	case commonpb.MsgType_Insert:
-		insertRequest := msgpb.InsertRequest{
+		insertRequest := &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     reqID,
@@ -1276,7 +1276,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 		}
 		return insertMsg
 	case commonpb.MsgType_Delete:
-		deleteRequest := msgpb.DeleteRequest{
+		deleteRequest := &msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     reqID,
@@ -1299,7 +1299,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 		}
 		return deleteMsg
 	case commonpb.MsgType_CreateCollection:
-		createCollectionRequest := msgpb.CreateCollectionRequest{
+		createCollectionRequest := &msgpb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
 				MsgID:     reqID,
@@ -1326,7 +1326,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 		}
 		return createCollectionMsg
 	case commonpb.MsgType_TimeTick:
-		timeTickResult := msgpb.TimeTickMsg{
+		timeTickResult := &msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     reqID,
@@ -1350,7 +1350,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 func getTimeTickMsg(reqID UniqueID) TsMsg {
 	hashValue := uint32(reqID)
 	time := uint64(reqID)
-	timeTickResult := msgpb.TimeTickMsg{
+	timeTickResult := &msgpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     reqID,
@@ -1399,7 +1399,7 @@ func getInsertMsgUniqueID(ts UniqueID) TsMsg {
 	hashValue := uint32(ts)
 	time := uint64(ts)
 
-	insertRequest := msgpb.InsertRequest{
+	insertRequest := &msgpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     idCounter.Inc(),

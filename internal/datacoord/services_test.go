@@ -77,7 +77,7 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		DataNodeTtMsg: msgpb.DataNodeTtMsg{
+		DataNodeTtMsg: &msgpb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   msgType,
 				Timestamp: t,
@@ -142,7 +142,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 	s.testServer.cluster = mockCluster
 	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Twice()
 
-	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
+	err = s.testServer.handleDataNodeTtMsg(context.TODO(), msg.DataNodeTtMsg)
 	s.NoError(err)
 
 	tt := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, 48*time.Hour)
@@ -152,7 +152,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 		NumRows:   1,
 	})
 
-	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
+	err = s.testServer.handleDataNodeTtMsg(context.TODO(), msg.DataNodeTtMsg)
 	s.Error(err)
 }
 

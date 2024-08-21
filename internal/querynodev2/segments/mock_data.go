@@ -27,8 +27,9 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -585,9 +586,12 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				Dim:  dim,
 			}
 		case schemapb.DataType_SparseFloatVector:
-			sparseData := testutils.GenerateSparseFloatVectors(msgLength)
+			contents, dim := testutils.GenerateSparseFloatVectorsData(msgLength)
 			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
-				SparseFloatArray: *sparseData,
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: contents,
+					Dim:      dim,
+				},
 			}
 		default:
 			err := errors.New("data type not supported")
@@ -693,9 +697,12 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 	case schemapb.DataType_BFloat16Vector:
 		dataset = indexcgowrapper.GenBFloat16VecDataset(testutils.GenerateBFloat16Vectors(msgLength, defaultDim))
 	case schemapb.DataType_SparseFloatVector:
-		data := testutils.GenerateSparseFloatVectors(msgLength)
+		contents, dim := testutils.GenerateSparseFloatVectorsData(msgLength)
 		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
-			SparseFloatArray: *data,
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Contents: contents,
+				Dim:      dim,
+			},
 		})
 	}
 
@@ -869,7 +876,8 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 		return nil, err2
 	}
 	var planpb planpb.PlanNode
-	proto.UnmarshalText(planStr, &planpb)
+	// proto.UnmarshalText(planStr, &planpb)
+	prototext.Unmarshal([]byte(planStr), &planpb)
 	serializedPlan, err3 := proto.Marshal(&planpb)
 	if err3 != nil {
 		return nil, err3
@@ -1108,7 +1116,7 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 
 	return &msgstream.InsertMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			Base:           genCommonMsgBase(commonpb.MsgType_Insert, 0),
 			CollectionName: "test-collection",
 			PartitionName:  "test-partition",

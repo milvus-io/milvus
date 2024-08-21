@@ -103,7 +103,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 		}
 	}
 	return tss, &msgstream.InsertMsg{
-		InsertRequest: msgpb.InsertRequest{
+		InsertRequest: &msgpb.InsertRequest{
 			SegmentID:  segmentID,
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 			RowIDs:     tss,
@@ -154,7 +154,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 
 func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstream.DeleteMsg {
 	delMsg := &msgstream.DeleteMsg{
-		DeleteRequest: msgpb.DeleteRequest{
+		DeleteRequest: &msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
 			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
 		},

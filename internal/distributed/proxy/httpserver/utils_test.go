@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -27,8 +27,8 @@ const (
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
 
-func generatePrimaryField(datatype schemapb.DataType) schemapb.FieldSchema {
-	return schemapb.FieldSchema{
+func generatePrimaryField(datatype schemapb.DataType) *schemapb.FieldSchema {
+	return &schemapb.FieldSchema{
 		FieldID:      common.StartOfUserFieldID,
 		Name:         FieldBookID,
 		IsPrimaryKey: true,
@@ -69,12 +69,12 @@ func generateIDs(dataType schemapb.DataType, num int) *schemapb.IDs {
 	return nil
 }
 
-func generateVectorFieldSchema(dataType schemapb.DataType) schemapb.FieldSchema {
+func generateVectorFieldSchema(dataType schemapb.DataType) *schemapb.FieldSchema {
 	dim := "2"
 	if dataType == schemapb.DataType_BinaryVector {
 		dim = "8"
 	}
-	return schemapb.FieldSchema{
+	return &schemapb.FieldSchema{
 		FieldID:      common.StartOfUserFieldID + int64(dataType),
 		IsPrimaryKey: false,
 		DataType:     dataType,
@@ -97,14 +97,14 @@ func generateCollectionSchema(primaryDataType schemapb.DataType) *schemapb.Colle
 		Description: "",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, {
+			primaryField, {
 				FieldID:      common.StartOfUserFieldID + 1,
 				Name:         FieldWordCount,
 				IsPrimaryKey: false,
 				Description:  "",
 				DataType:     5,
 				AutoID:       false,
-			}, &vectorField,
+			}, vectorField,
 		},
 		EnableDynamicField: true,
 	}
@@ -465,14 +465,14 @@ func TestPrimaryField(t *testing.T) {
 	primaryField := generatePrimaryField(schemapb.DataType_Int64)
 	field, ok := getPrimaryField(coll)
 	assert.Equal(t, true, ok)
-	assert.Equal(t, primaryField, *field)
+	assert.EqualExportedValues(t, primaryField, field)
 
 	assert.Equal(t, "1,2,3", joinArray([]int64{1, 2, 3}))
 	assert.Equal(t, "1,2,3", joinArray([]string{"1", "2", "3"}))
 
 	jsonStr := "{\"id\": [1, 2, 3]}"
 	idStr := gjson.Get(jsonStr, "id")
-	rangeStr, err := convertRange(&primaryField, idStr)
+	rangeStr, err := convertRange(primaryField, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "1,2,3", rangeStr)
 	filter, err := checkGetPrimaryKey(coll, idStr)
@@ -482,7 +482,7 @@ func TestPrimaryField(t *testing.T) {
 	primaryField = generatePrimaryField(schemapb.DataType_VarChar)
 	jsonStr = "{\"id\": [\"1\", \"2\", \"3\"]}"
 	idStr = gjson.Get(jsonStr, "id")
-	rangeStr, err = convertRange(&primaryField, idStr)
+	rangeStr, err = convertRange(primaryField, idStr)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, `"1","2","3"`, rangeStr)
 	coll2 := generateCollectionSchema(schemapb.DataType_VarChar)
@@ -524,7 +524,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &floatVectorField,
+			primaryField, floatVectorField,
 		},
 		EnableDynamicField: true,
 	})
@@ -533,7 +533,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &binaryVectorField,
+			primaryField, binaryVectorField,
 		},
 		EnableDynamicField: true,
 	})
@@ -542,7 +542,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &float16VectorField,
+			primaryField, float16VectorField,
 		},
 		EnableDynamicField: true,
 	})
@@ -551,7 +551,7 @@ func TestInsertWithoutVector(t *testing.T) {
 	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &bfloat16VectorField,
+			primaryField, bfloat16VectorField,
 		},
 		EnableDynamicField: true,
 	})
@@ -1293,7 +1293,7 @@ func TestVector(t *testing.T) {
 		Description: "",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &floatVectorField, &binaryVectorField, &float16VectorField, &bfloat16VectorField, &sparseFloatVectorField,
+			primaryField, floatVectorField, binaryVectorField, float16VectorField, bfloat16VectorField, sparseFloatVectorField,
 		},
 		EnableDynamicField: true,
 	}

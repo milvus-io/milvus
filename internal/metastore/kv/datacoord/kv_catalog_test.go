@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1364,7 +1364,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SaveImportJob(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
@@ -1418,7 +1418,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SavePreImportTask(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
@@ -1472,7 +1472,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = kc.SaveImportTask(nil)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)

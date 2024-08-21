@@ -177,9 +177,12 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.Ins
 				Dim:  int(dim),
 			}
 		case schemapb.DataType_SparseFloatVector:
-			sparseFloatVecData := testutils.GenerateSparseFloatVectors(rows)
+			data, dim := testutils.GenerateSparseFloatVectorsData(rows)
 			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
-				SparseFloatArray: *sparseFloatVecData,
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: data,
+					Dim:      dim,
+				},
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID] = &storage.StringFieldData{
