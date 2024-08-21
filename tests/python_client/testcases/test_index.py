@@ -1304,7 +1304,7 @@ class TestIndexInvalid(TestcaseBase):
         """
         target: test create scalar index on array field
         method: 1.create collection, and create index
-        expected: Raise exception
+        expected: supported create inverted index on array since 2.4.x
         """
         # 1. create a collection
         schema = cf.gen_array_collection_schema()
@@ -1312,6 +1312,9 @@ class TestIndexInvalid(TestcaseBase):
         # 2. create index
         scalar_index_params = {"index_type": "INVERTED"}
         collection_w.create_index(ct.default_int32_array_field_name, index_params=scalar_index_params)
+        res, _ = self.utility_wrap.index_building_progress(collection_w.name, ct.default_int32_array_field_name)
+        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 'Finished'}
+        assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_no_vector_index(self):
