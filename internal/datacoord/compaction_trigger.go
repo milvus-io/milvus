@@ -285,23 +285,6 @@ func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 	return t.allocator.AllocID(ctx)
 }
 
-func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	collMeta, err := t.handler.GetCollection(ctx, collectionID)
-	if err != nil {
-		log.Warn("failed to get collection", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	}
-	allDiskIndex := t.meta.indexMeta.AreAllDiskIndex(collectionID, collMeta.Schema)
-	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
-	}
-	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-}
-
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
@@ -735,45 +718,13 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func isDeltalogTooManySegment(segment *SegmentInfo) bool {
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	log.Debug("isDeltalogTooManySegment",
-		zap.Int64("collectionID", segment.CollectionID),
-		zap.Int64("segmentID", segment.ID),
-		zap.Int("deltaLogCount", deltaLogCount))
-	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
-}
-
-func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
-	totalDeletedRows := 0
-	totalDeleteLogSize := int64(0)
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetMemorySize()
-		}
-	}
-
-	// currently delta log size and delete ratio policy is applied
-	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
-	if is {
-		log.Info("total delete entities is too much",
-			zap.Int64("segmentID", segment.ID),
-			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
-	}
-	return is
-}
-
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
-
-	binlogCount := GetBinlogCount(segment.GetBinlogs())
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	if isDeltalogTooManySegment(segment) {
-		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
+	segmentView := GetViewsByInfo(segment)[0]
+	if picked, reason := isSegmentDeltaTooMuch(segmentView); picked {
+		log.Info("too much delta in segment, trigger compaction",
+			zap.Int64("segmentID", segment.ID),
+			zap.String("reason", reason))
 		return true
 	}
 
@@ -800,11 +751,6 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
 			zap.Int("expiredRows", totalExpiredRows), zap.Int64("expiredLogSize", totalExpiredSize),
 			zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom))
-		return true
-	}
-
-	// currently delta log size and delete ratio policy is applied
-	if isDeleteRowsTooManySegment(segment) {
 		return true
 	}
 

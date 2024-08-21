@@ -86,6 +86,10 @@ func (h *spyCompactionHandler) isFull() bool {
 	return false
 }
 
+func (h *spyCompactionHandler) isEmpty() bool {
+	return false
+}
+
 func (h *spyCompactionHandler) start() {}
 
 func (h *spyCompactionHandler) stop() {}

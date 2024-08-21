@@ -21,6 +21,40 @@ func (_m *MockTriggerManager) EXPECT() *MockTriggerManager_Expecter {
 	return &MockTriggerManager_Expecter{mock: &_m.Mock}
 }
 
+// IDLETrigger provides a mock function with given fields: ctx, collectionID
+func (_m *MockTriggerManager) IDLETrigger(ctx context.Context, collectionID int64) {
+	_m.Called(ctx, collectionID)
+}
+
+// MockTriggerManager_IDLETrigger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IDLETrigger'
+type MockTriggerManager_IDLETrigger_Call struct {
+	*mock.Call
+}
+
+// IDLETrigger is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MockTriggerManager_Expecter) IDLETrigger(ctx interface{}, collectionID interface{}) *MockTriggerManager_IDLETrigger_Call {
+	return &MockTriggerManager_IDLETrigger_Call{Call: _e.mock.On("IDLETrigger", ctx, collectionID)}
+}
+
+func (_c *MockTriggerManager_IDLETrigger_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTriggerManager_IDLETrigger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_IDLETrigger_Call) Return() *MockTriggerManager_IDLETrigger_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTriggerManager_IDLETrigger_Call) RunAndReturn(run func(context.Context, int64)) *MockTriggerManager_IDLETrigger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualTrigger provides a mock function with given fields: ctx, collectionID, clusteringCompaction
 func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (int64, error) {
 	ret := _m.Called(ctx, collectionID, clusteringCompaction)

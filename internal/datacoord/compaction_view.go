@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -29,10 +30,7 @@ import (
 type CompactionView interface {
 	GetGroupLabel() *CompactionGroupLabel
 	GetSegmentsView() []*SegmentView
-	Append(segments ...*SegmentView)
 	String() string
-	Trigger() (CompactionView, string)
-	ForceTrigger() (CompactionView, string)
 }
 
 type FullViews struct {
@@ -100,16 +98,15 @@ type SegmentView struct {
 	ExpireSize float64
 	DeltaSize  float64
 
-	NumOfRows int64
-	MaxRowNum int64
+	// row count
+	NumOfRows     int64
+	DeltaRowCount int64
+	MaxRowNum     int64
 
 	// file numbers
-	BinlogCount   int
-	StatslogCount int
-	DeltalogCount int
-
-	// row count
-	DeltaRowCount int
+	BinlogCount   int64
+	StatslogCount int64
+	DeltalogCount int64
 }
 
 func (s *SegmentView) Clone() *SegmentView {
@@ -149,18 +146,18 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 			startPos: segment.GetStartPosition(),
 			dmlPos:   segment.GetDmlPosition(),
 
-			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
-			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
-			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
+			Size:      GetBinlogSizeAsBytes(segment.GetBinlogs()),
+			DeltaSize: GetBinlogSizeAsBytes(segment.GetDeltalogs()),
+			// TODO: set the following
+			// ExpireSize float64
 
-			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
+			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
 			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
-			NumOfRows: segment.NumOfRows,
-			MaxRowNum: segment.MaxRowNum,
-			// TODO: set the following
-			// ExpireSize float64
+			NumOfRows:     segment.NumOfRows,
+			MaxRowNum:     segment.MaxRowNum,
+			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
 		}
 	})
 }
@@ -186,19 +183,19 @@ func (v *SegmentView) LevelZeroString() string {
 		v.ID, v.Level.String(), v.DeltaSize, v.DeltalogCount, v.DeltaRowCount)
 }
 
-func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
-	var num int
+func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int64 {
+	var num int64
 	for _, binlog := range fieldBinlogs {
-		num += len(binlog.GetBinlogs())
+		num += int64(len(binlog.GetBinlogs()))
 	}
 	return num
 }
 
-func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int {
-	var num int
+func GetBinlogEntriesNum(fieldBinlogs []*datapb.FieldBinlog) int64 {
+	var num int64
 	for _, fbinlog := range fieldBinlogs {
 		for _, binlog := range fbinlog.GetBinlogs() {
-			num += int(binlog.GetEntriesNum())
+			num += binlog.GetEntriesNum()
 		}
 	}
 	return num
@@ -212,4 +209,52 @@ func GetBinlogSizeAsBytes(fieldBinlogs []*datapb.FieldBinlog) float64 {
 		}
 	}
 	return deltaSize
+}
+
+var _ CompactionView = (*MixSegmentView)(nil)
+
+type MixSegmentView struct {
+	label         *CompactionGroupLabel
+	segments      []*SegmentView
+	collectionTTL time.Duration
+	triggerID     int64
+}
+
+func (v *MixSegmentView) GetGroupLabel() *CompactionGroupLabel {
+	if v == nil {
+		return &CompactionGroupLabel{}
+	}
+	return v.label
+}
+
+func (v *MixSegmentView) GetSegmentsView() []*SegmentView {
+	if v == nil {
+		return nil
+	}
+
+	return v.segments
+}
+
+func (v *MixSegmentView) Append(segments ...*SegmentView) {
+	if v.segments == nil {
+		v.segments = segments
+		return
+	}
+
+	v.segments = append(v.segments, segments...)
+}
+
+func (v *MixSegmentView) String() string {
+	strs := lo.Map(v.segments, func(segView *SegmentView, _ int) string {
+		return segView.String()
+	})
+	return fmt.Sprintf("label=<%s>,  segments=%v", v.label.String(), strs)
+}
+
+func (v *MixSegmentView) Trigger() (CompactionView, string) {
+	return v, ""
+}
+
+func (v *MixSegmentView) ForceTrigger() (CompactionView, string) {
+	panic("implement me")
 }
