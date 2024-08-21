@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_common milvus_segcore
+#cgo pkg-config: milvus_core
 
 #include "segcore/load_index_c.h"
 #include "common/binary_set_c.h"

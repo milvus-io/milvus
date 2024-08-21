@@ -9,15 +9,5 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-milvus_add_pkg_config("milvus_monitor")
-
-set(MONITOR_SRC
-        monitor_c.cpp
-        prometheus_client.cpp
-        )
-
-add_library(milvus_monitor SHARED ${MONITOR_SRC})
-
-target_link_libraries(milvus_monitor PUBLIC ${CONAN_LIBS})
-
-install(TARGETS milvus_monitor DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+add_source_at_current_directory_recursively()
+add_library(milvus_monitor OBJECT ${SOURCE_FILES})

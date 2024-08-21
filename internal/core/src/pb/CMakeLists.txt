@@ -11,11 +11,5 @@
 
 find_package(Protobuf REQUIRED)
 
-file(GLOB_RECURSE milvus_proto_srcs
-        "${CMAKE_CURRENT_SOURCE_DIR}/*.cc")
-add_library(milvus_proto STATIC
-    ${milvus_proto_srcs}
-)
-message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
-
-target_link_libraries( milvus_proto PUBLIC ${CONAN_LIBS} )
+add_source_at_current_directory_recursively()
+add_library(milvus_pb OBJECT ${SOURCE_FILES})
