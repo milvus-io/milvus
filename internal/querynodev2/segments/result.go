@@ -55,9 +55,13 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	defer sp.End()
 
 	channelsMvcc := make(map[string]uint64)
+	isTopkReduce := false
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
+		}
+		if r.GetIsTopkReduce() {
+			isTopkReduce = true
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
 		if metricType == "" {
@@ -111,6 +115,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}, 0)
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
+	searchResults.IsTopkReduce = isTopkReduce
 	return searchResults, nil
 }
 
@@ -124,6 +129,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)
+	isTopkReduce := false
 	searchResults := &internalpb.SearchResults{
 		IsAdvanced: true,
 	}
@@ -132,6 +138,9 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
+		}
+		if result.GetIsTopkReduce() {
+			isTopkReduce = true
 		}
 		if !result.GetIsAdvanced() {
 			continue
@@ -158,6 +167,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		searchResults.CostAggregation = &internalpb.CostAggregation{}
 	}
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
+	searchResults.IsTopkReduce = isTopkReduce
 	return searchResults, nil
 }
 

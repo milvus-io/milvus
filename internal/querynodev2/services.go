@@ -730,6 +730,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	if req.GetReq().GetIsTopkReduce() {
+		resp.IsTopkReduce = true
+	}
 	return resp, nil
 }
 
