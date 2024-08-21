@@ -1,7 +1,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore milvus_common
+#cgo pkg-config: milvus_core
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"

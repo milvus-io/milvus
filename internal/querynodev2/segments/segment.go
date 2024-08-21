@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore milvus_futures
+#cgo pkg-config: milvus_core
 
 #include "futures/future_c.h"
 #include "segcore/collection_c.h"

@@ -27,7 +27,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
-#include "storage/AzureChunkManager.h"
+#include "storage/azure/AzureChunkManager.h"
 #endif
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -36,7 +36,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
 #ifdef USE_OPENDAL
-#include "storage/OpenDALChunkManager.h"
+#include "storage/opendal/OpenDALChunkManager.h"
 #endif
 #include "storage/Types.h"
 #include "storage/Util.h"
