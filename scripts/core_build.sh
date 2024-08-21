@@ -195,10 +195,6 @@ if [ -z "$BUILD_WITHOUT_AZURE" ]; then
     cat vcpkg-bootstrap.log
     exit 1
   fi
-  if [ ! -e ${INSTALL_PREFIX}/lib/libblob-chunk-manager* ]; then
-    echo "install blob-chunk-manager fail..."
-    exit 1
-  fi
   popd
   SYSTEM_NAME=$(uname -s)
   if [[ ${SYSTEM_NAME} == "Darwin" ]]; then

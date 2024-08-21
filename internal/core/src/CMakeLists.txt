@@ -49,17 +49,6 @@ add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
 
-
-foreach(args IN ITEMS ${CONAN_LIBS})
-    set(CONAN_LIBS_LINK_ARGS_LIST ${CONAN_LIBS_LINK_ARGS_LIST} "-l${args}")
-endforeach()
-string(REPLACE ";" " " CONAN_LIBS_LINK_ARGS "${CONAN_LIBS_LINK_ARGS_LIST}")
-
-foreach(args IN ITEMS ${CONAN_LIB_DIRS})
-    set(CONAN_LIB_DIRS_LINK_ARGS_LIST ${CONAN_LIB_DIRS_LINK_ARGS_LIST} "-L${args}")
-endforeach()
-string(REPLACE ";" " " CONAN_LIB_DIRS_LINK_ARGS "${CONAN_LIB_DIRS_LINK_ARGS_LIST}")
-
 milvus_add_pkg_config("milvus_core")
 
 add_library(milvus_core SHARED
