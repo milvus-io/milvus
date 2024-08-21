@@ -159,8 +159,8 @@ class FieldDataImpl : public FieldDataBase {
         : FieldDataBase(type, nullable), dim_(is_type_entire_row ? 1 : dim) {
         AssertInfo(!nullable, "need to fill valid_data when nullable is true");
         data_ = std::move(data);
-        Assert(data.size() % dim == 0);
-        num_rows_ = data.size() / dim;
+        Assert(data_.size() % dim == 0);
+        num_rows_ = data_.size() / dim;
     }
 
     explicit FieldDataImpl(size_t dim,
@@ -173,8 +173,8 @@ class FieldDataImpl : public FieldDataBase {
                    "no need to fill valid_data when nullable is false");
         data_ = std::move(data);
         valid_data_ = std::move(valid_data);
-        Assert(data.size() % dim == 0);
-        num_rows_ = data.size() / dim;
+        Assert(data_.size() % dim == 0);
+        num_rows_ = data_.size() / dim;
     }
 
     void
