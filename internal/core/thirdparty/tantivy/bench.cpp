@@ -29,7 +29,7 @@ build_index(size_t n = 1000000) {
         arr.push_back(std::to_string(x));
     }
 
-    w.add_data<std::string>(arr.data(), arr.size());
+    w.add_data<std::string>(arr.data(), arr.size(), 0);
 
     w.finish();
     assert(w.count() == n);
