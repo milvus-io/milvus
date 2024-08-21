@@ -13,12 +13,24 @@ FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
-    g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
+# Set environment variables to avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common wget curl ca-certificates gnupg2 \
+    gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
     pkg-config uuid-dev libaio-dev libopenblas-dev && \
-    apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get remove --purge -y
+
+# Install GCC 11 and G++ 11 separately
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    gcc-11 g++-11 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Set GCC 11 as the default compiler
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
 RUN pip3 install conan==1.64.1
 
