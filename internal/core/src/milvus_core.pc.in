@@ -5,5 +5,5 @@ Name: Milvus Core
 Description: Core modules for Milvus
 Version: @MILVUS_VERSION@
 
-Libs: -L${libdir} -lmilvus_core -lknowhere
+Libs: -L${libdir} -lmilvus_core
 Cflags: -I${includedir}

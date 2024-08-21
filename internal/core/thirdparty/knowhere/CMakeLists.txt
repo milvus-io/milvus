@@ -60,4 +60,4 @@ endif()
 get_property( var DIRECTORY "${knowhere_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
 message( STATUS "knowhere src compile options: ${var}" )
 
-set( KNOWHERE_INCLUDE_DIR ${knowhere_SOURCE_DIR}/include CACHE PATH "Path to knowhere include directory" )
+set( KNOWHERE_INCLUDE_DIR ${knowhere_SOURCE_DIR}/include CACHE INTERNAL "Path to knowhere include directory" )

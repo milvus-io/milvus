@@ -72,6 +72,8 @@ set(LINK_TARGETS
     boost_bitset_ext
     simdjson
     tantivy_binding
+    knowhere
+    ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS})
 
 if(USE_OPENDAL)
