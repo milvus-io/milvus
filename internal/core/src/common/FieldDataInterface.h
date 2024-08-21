@@ -124,8 +124,8 @@ class FieldDataImpl : public FieldDataBase {
                            FixedVector<Type>&& field_data)
         : FieldDataBase(type), dim_(is_type_entire_row ? 1 : dim) {
         field_data_ = std::move(field_data);
-        Assert(field_data.size() % dim == 0);
-        num_rows_ = field_data.size() / dim;
+        Assert(field_data_.size() % dim == 0);
+        num_rows_ = field_data_.size() / dim;
     }
 
     void
