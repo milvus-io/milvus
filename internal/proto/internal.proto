@@ -120,6 +120,7 @@ message SearchRequest {
   bool   is_advanced = 20;
   int64 offset = 21;
   common.ConsistencyLevel consistency_level = 22;
+  bool is_topk_reduce = 23;
 }
 
 message SubSearchResults {
@@ -155,6 +156,7 @@ message SearchResults {
   repeated SubSearchResults sub_results = 15;
   bool is_advanced = 16;
   int64 all_search_count = 17;
+  bool is_topk_reduce = 18;
 }
 
 message CostAggregation {

@@ -389,6 +389,14 @@ var (
 			Name:      "max_insert_rate",
 			Help:      "max insert rate",
 		}, []string{"node_id", "scope"})
+
+	ProxyRetrySearchCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "retry_search_cnt",
+			Help:      "counter of retry search",
+		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -447,6 +455,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReqInQueueLatency)
 
 	registry.MustRegister(MaxInsertRate)
+	registry.MustRegister(ProxyRetrySearchCount)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
@@ -549,5 +558,10 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 	ProxyReceiveBytes.Delete(prometheus.Labels{
 		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName: UpsertLabel, collectionName: collection,
+	})
+	ProxyRetrySearchCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel,
+		collectionName:     collection,
 	})
 }
