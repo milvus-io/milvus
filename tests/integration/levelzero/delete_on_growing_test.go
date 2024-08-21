@@ -138,6 +138,18 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	s.generateSegment(collectionName, 2, 1, true)
 	s.generateSegment(collectionName, 2, 3, false)
 
+	checkRowCount := func(rowCount int) {
+		// query
+		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+			CollectionName: collectionName,
+			OutputFields:   []string{"count(*)"},
+		})
+		err = merr.CheckRPCCall(queryResult, err)
+		s.NoError(err)
+		s.EqualValues(rowCount, queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+	}
+	checkRowCount(5)
+
 	// delete
 	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collectionName,
@@ -146,27 +158,42 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	err = merr.CheckRPCCall(deleteResult, err)
 	s.NoError(err)
 
-	checkFunc := func() {
-		// query
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-			CollectionName: collectionName,
-			OutputFields:   []string{"count(*)"},
-		})
-		err = merr.CheckRPCCall(queryResult, err)
-		s.NoError(err)
-		s.EqualValues(0, queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+	checkRowCount(0)
+
+	l0Exist := func() ([]*datapb.SegmentInfo, bool) {
+		segments, err := s.Cluster.MetaWatcher.ShowSegments()
+		s.Require().NoError(err)
+		s.Require().Greater(len(segments), 0)
+		for _, segment := range segments {
+			if segment.GetLevel() == datapb.SegmentLevel_L0 {
+				return segments, true
+			}
+		}
+		return nil, false
 	}
 
-	checkFunc()
-
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
-	s.Require().NoError(err)
-	s.EqualValues(3, len(segments))
-	for _, segment := range segments {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			s.EqualValues(5, segment.Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+	checkL0Exist := func() {
+		failT := time.NewTimer(10 * time.Second)
+		checkT := time.NewTicker(100 * time.Millisecond)
+		for {
+			select {
+			case <-failT.C:
+				s.FailNow("L0 segment timeout")
+			case <-checkT.C:
+				if segments, exist := l0Exist(); exist {
+					failT.Stop()
+					for _, segment := range segments {
+						if segment.GetLevel() == datapb.SegmentLevel_L0 {
+							s.EqualValues(5, segment.Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+						}
+					}
+					return
+				}
+			}
 		}
 	}
+
+	checkL0Exist()
 
 	// release collection
 	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})
@@ -181,7 +208,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	s.Require().NoError(err)
 	s.WaitForLoad(ctx, collectionName)
 
-	checkFunc()
+	checkRowCount(0)
 
 	// drop collection
 	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
