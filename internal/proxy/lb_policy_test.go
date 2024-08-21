@@ -67,6 +67,7 @@ func (s *LBPolicySuite) SetupTest() {
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc := mocks.NewMockQueryCoordClient(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &successStatus,

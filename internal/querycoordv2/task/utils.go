@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/samber/lo"
@@ -135,12 +136,12 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled := common.IsMmapEnabled(collectionProperties...)
+	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
-		if collectionMmapEnabled {
+		if exist {
 			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 				Key:   common.MmapEnabledKey,
-				Value: "true",
+				Value: strconv.FormatBool(collectionMmapEnabled),
 			})
 		}
 	}
@@ -182,13 +183,14 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:      loadType,
 		CollectionID:  collectionID,
 		PartitionIDs:  partitions,
 		DbName:        databaseName,
 		ResourceGroup: resourceGroup,
+		LoadFields:    loadFields,
 	}
 }
 

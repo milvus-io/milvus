@@ -587,6 +587,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.targetObserver,
 		suite.server.checkerController,
+		suite.server.proxyClientManager,
 	)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{}}, nil).Maybe()

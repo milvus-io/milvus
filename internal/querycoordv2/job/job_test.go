@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -71,6 +72,7 @@ type JobSuite struct {
 	broker             *meta.MockBroker
 	nodeMgr            *session.NodeManager
 	checkerController  *checkers.CheckerController
+	proxyManager       *proxyutil.MockProxyClientManager
 
 	// Test objects
 	scheduler *Scheduler
@@ -140,6 +142,9 @@ func (suite *JobSuite) SetupSuite() {
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil).Maybe()
+
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *JobSuite) SetupTest() {
@@ -199,6 +204,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.targetMgr,
 		suite.targetObserver,
 		suite.checkerController,
+		suite.proxyManager,
 	)
 }
 

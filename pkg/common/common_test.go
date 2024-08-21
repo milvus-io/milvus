@@ -149,3 +149,31 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 		assert.False(t, res)
 	})
 }
+
+func TestShouldFieldBeLoaded(t *testing.T) {
+	type testCase struct {
+		tag          string
+		input        []*commonpb.KeyValuePair
+		expectOutput bool
+		expectError  bool
+	}
+
+	testcases := []testCase{
+		{tag: "no_params", expectOutput: true},
+		{tag: "skipload_true", input: []*commonpb.KeyValuePair{{Key: FieldSkipLoadKey, Value: "true"}}, expectOutput: false},
+		{tag: "skipload_false", input: []*commonpb.KeyValuePair{{Key: FieldSkipLoadKey, Value: "false"}}, expectOutput: true},
+		{tag: "bad_skip_load_value", input: []*commonpb.KeyValuePair{{Key: FieldSkipLoadKey, Value: "abc"}}, expectError: true},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result, err := ShouldFieldBeLoaded(tc.input)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectOutput, result)
+			}
+		})
+	}
+}

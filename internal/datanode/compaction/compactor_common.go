@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	sio "io"
 	"strconv"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -55,12 +55,12 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 		return pk2ts, nil
 	}
 
-	allIters := make([]*iter.DeltalogIterator, 0)
+	blobs := make([]*storage.Blob, 0)
 	for segID, paths := range dpaths {
 		if len(paths) == 0 {
 			continue
 		}
-		blobs, err := io.Download(ctx, paths)
+		binaries, err := io.Download(ctx, paths)
 		if err != nil {
 			log.Warn("compact wrong, fail to download deltalogs",
 				zap.Int64("segment", segID),
@@ -69,18 +69,33 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 			return nil, err
 		}
 
-		allIters = append(allIters, iter.NewDeltalogIterator(blobs, nil))
-	}
-
-	for _, deltaIter := range allIters {
-		for deltaIter.HasNext() {
-			labeled, _ := deltaIter.Next()
-			ts := labeled.GetTimestamp()
-			if lastTs, ok := pk2ts[labeled.GetPk().GetValue()]; ok && lastTs > ts {
-				ts = lastTs
-			}
-			pk2ts[labeled.GetPk().GetValue()] = ts
+		for i := range binaries {
+			blobs = append(blobs, &storage.Blob{Value: binaries[i]})
 		}
+	}
+	reader, err := storage.CreateDeltalogReader(blobs)
+	if err != nil {
+		log.Error("malformed delta file", zap.Error(err))
+		return nil, err
+	}
+	defer reader.Close()
+
+	for {
+		err := reader.Next()
+		if err != nil {
+			if err == sio.EOF {
+				break
+			}
+			log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
+			return nil, err
+		}
+
+		dl := reader.Value()
+		// If pk already exists in pk2ts, record the later one.
+		if ts, ok := pk2ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
+			continue
+		}
+		pk2ts[dl.Pk.GetValue()] = dl.Ts
 	}
 
 	log.Info("compact mergeDeltalogs end",

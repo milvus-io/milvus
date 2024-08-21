@@ -2339,10 +2339,14 @@ type queryNodeConfig struct {
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
-	CacheEnabled                        ParamItem `refreshable:"false"`
-	CacheMemoryLimit                    ParamItem `refreshable:"false"`
-	MmapDirPath                         ParamItem `refreshable:"false"`
+	CacheMemoryLimit ParamItem `refreshable:"false"`
+	MmapDirPath      ParamItem `refreshable:"false"`
+	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
 	MmapEnabled                         ParamItem `refreshable:"false"`
+	MmapVectorField                     ParamItem `refreshable:"false"`
+	MmapVectorIndex                     ParamItem `refreshable:"false"`
+	MmapScalarField                     ParamItem `refreshable:"false"`
+	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2578,14 +2582,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.CacheMemoryLimit.Init(base.mgr)
 
-	p.CacheEnabled = ParamItem{
-		Key:          "queryNode.cache.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "",
-		Export:       true,
-	}
-	p.CacheEnabled.Init(base.mgr)
-
 	p.MmapDirPath = ParamItem{
 		Key:          "queryNode.mmap.mmapDirPath",
 		Version:      "2.3.0",
@@ -2606,10 +2602,70 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.4.0",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.mmapEnabled"},
-		Doc:          "Enable mmap for loading data",
-		Export:       true,
+		Doc:          "Deprecated: Enable mmap for loading data, including vector/scalar data and index",
+		Export:       false,
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.MmapVectorField = ParamItem{
+		Key:          "queryNode.mmap.vectorField",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading vector data",
+		Export: true,
+	}
+	p.MmapVectorField.Init(base.mgr)
+
+	p.MmapVectorIndex = ParamItem{
+		Key:          "queryNode.mmap.vectorIndex",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading vector index",
+		Export: true,
+	}
+	p.MmapVectorIndex.Init(base.mgr)
+
+	p.MmapScalarField = ParamItem{
+		Key:          "queryNode.mmap.scalarField",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading scalar data",
+		Export: true,
+	}
+	p.MmapScalarField.Init(base.mgr)
+
+	p.MmapScalarIndex = ParamItem{
+		Key:          "queryNode.mmap.scalarIndex",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading scalar index",
+		Export: true,
+	}
+	p.MmapScalarIndex.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
@@ -4047,6 +4103,8 @@ type dataNodeConfig struct {
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	DeltalogFormat ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4393,7 +4451,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyParallelFactor",
+		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
@@ -4401,6 +4459,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.DeltalogFormat = ParamItem{
+		Key:          "dataNode.storage.deltalog",
+		Version:      "2.5.0",
+		DefaultValue: "json",
+		Doc:          "deltalog format, options: [json, parquet]",
+		Export:       true,
+	}
+	p.DeltalogFormat.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
