@@ -58,24 +58,12 @@ func IsScalarIndexType(indexType IndexType) bool {
 }
 
 func IsGpuIndex(indexType IndexType) bool {
-	return indexType == IndexGpuBF ||
-		indexType == IndexRaftIvfFlat ||
-		indexType == IndexRaftIvfPQ ||
-		indexType == IndexRaftCagra
+	return GetVecIndexMgrInstance().IsGPUVecIndex(indexType)
 }
 
 // IsVectorMmapIndex check if the vector index can be mmaped
 func IsVectorMmapIndex(indexType IndexType) bool {
-	return indexType == IndexFaissIDMap ||
-		indexType == IndexFaissIvfFlat ||
-		indexType == IndexFaissIvfPQ ||
-		indexType == IndexFaissIvfSQ8 ||
-		indexType == IndexFaissBinIDMap ||
-		indexType == IndexFaissBinIvfFlat ||
-		indexType == IndexHNSW ||
-		indexType == IndexScaNN ||
-		indexType == IndexSparseInverted ||
-		indexType == IndexSparseWand
+	return GetVecIndexMgrInstance().IsMMapSupported(indexType)
 }
 
 func IsOffsetCacheSupported(indexType IndexType) bool {
@@ -83,7 +71,7 @@ func IsOffsetCacheSupported(indexType IndexType) bool {
 }
 
 func IsDiskIndex(indexType IndexType) bool {
-	return indexType == IndexDISKANN
+	return GetVecIndexMgrInstance().IsDiskANN(indexType)
 }
 
 func IsScalarMmapIndex(indexType IndexType) bool {

@@ -210,7 +210,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Warn("IndexNode don't support build disk index",

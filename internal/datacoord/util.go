@@ -203,16 +203,16 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	return invalidIndex
 }
 
-func isFlatIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
+func isBruteForce(indexType string) bool {
+	return indexparamcheck.GetVecIndexMgrInstance().IsBruteForce(indexType)
 }
 
 func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
+	return indexparamcheck.GetVecIndexMgrInstance().IsMvSupported(indexType)
 }
 
 func isDiskANNIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexDISKANN
+	return indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(indexType)
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

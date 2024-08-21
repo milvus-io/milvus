@@ -146,7 +146,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 	indexParams := dependency.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
-	if isFlatIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
+	if isBruteForce(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 		log.Ctx(ctx).Info("segment does not need index really", zap.Int64("taskID", it.taskID),
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("num rows", segIndex.NumRows))
 		it.SetStartTime(time.Now())

@@ -346,7 +346,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if indexType == indexparamcheck.IndexDISKANN {
+		if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err

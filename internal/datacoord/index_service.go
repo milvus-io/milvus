@@ -231,10 +231,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
-		if GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
+		if indexparamcheck.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
 			errMsg := "all IndexNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(indexparamcheck.IndexDISKANN)
+			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
