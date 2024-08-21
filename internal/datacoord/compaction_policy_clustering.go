@@ -90,7 +90,7 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 }
 
 func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, int64, error) {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := log.With(zap.Int64("collectionID", collectionID), zap.Bool("byManual", manual))
 	log.Info("start trigger collection clustering compaction")
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
@@ -299,12 +299,4 @@ func (v *ClusteringSegmentsView) String() string {
 		return segView.String()
 	})
 	return fmt.Sprintf("label=<%s>,  segments=%v", v.label.String(), strs)
-}
-
-func (v *ClusteringSegmentsView) Trigger() (CompactionView, string) {
-	return v, ""
-}
-
-func (v *ClusteringSegmentsView) ForceTrigger() (CompactionView, string) {
-	panic("implement me")
 }

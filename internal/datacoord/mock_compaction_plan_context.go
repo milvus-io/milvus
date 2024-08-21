@@ -148,6 +148,47 @@ func (_c *MockCompactionPlanContext_getCompactionTasksNumBySignalID_Call) RunAnd
 	return _c
 }
 
+// isEmpty provides a mock function with given fields:
+func (_m *MockCompactionPlanContext) isEmpty() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCompactionPlanContext_isEmpty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'isEmpty'
+type MockCompactionPlanContext_isEmpty_Call struct {
+	*mock.Call
+}
+
+// isEmpty is a helper method to define mock.On call
+func (_e *MockCompactionPlanContext_Expecter) isEmpty() *MockCompactionPlanContext_isEmpty_Call {
+	return &MockCompactionPlanContext_isEmpty_Call{Call: _e.mock.On("isEmpty")}
+}
+
+func (_c *MockCompactionPlanContext_isEmpty_Call) Run(run func()) *MockCompactionPlanContext_isEmpty_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_isEmpty_Call) Return(_a0 bool) *MockCompactionPlanContext_isEmpty_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_isEmpty_Call) RunAndReturn(run func() bool) *MockCompactionPlanContext_isEmpty_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // isFull provides a mock function with given fields:
 func (_m *MockCompactionPlanContext) isFull() bool {
 	ret := _m.Called()

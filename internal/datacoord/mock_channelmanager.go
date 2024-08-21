@@ -376,58 +376,6 @@ func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) RunAndReturn(ru
 	return _c
 }
 
-// GetNodeIDByChannelName provides a mock function with given fields: channel
-func (_m *MockChannelManager) GetNodeIDByChannelName(channel string) (int64, bool) {
-	ret := _m.Called(channel)
-
-	var r0 int64
-	var r1 bool
-	if rf, ok := ret.Get(0).(func(string) (int64, bool)); ok {
-		return rf(channel)
-	}
-	if rf, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = rf(channel)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	if rf, ok := ret.Get(1).(func(string) bool); ok {
-		r1 = rf(channel)
-	} else {
-		r1 = ret.Get(1).(bool)
-	}
-
-	return r0, r1
-}
-
-// MockChannelManager_GetNodeIDByChannelName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeIDByChannelName'
-type MockChannelManager_GetNodeIDByChannelName_Call struct {
-	*mock.Call
-}
-
-// GetNodeIDByChannelName is a helper method to define mock.On call
-//   - channel string
-func (_e *MockChannelManager_Expecter) GetNodeIDByChannelName(channel interface{}) *MockChannelManager_GetNodeIDByChannelName_Call {
-	return &MockChannelManager_GetNodeIDByChannelName_Call{Call: _e.mock.On("GetNodeIDByChannelName", channel)}
-}
-
-func (_c *MockChannelManager_GetNodeIDByChannelName_Call) Run(run func(channel string)) *MockChannelManager_GetNodeIDByChannelName_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockChannelManager_GetNodeIDByChannelName_Call) Return(_a0 int64, _a1 bool) *MockChannelManager_GetNodeIDByChannelName_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockChannelManager_GetNodeIDByChannelName_Call) RunAndReturn(run func(string) (int64, bool)) *MockChannelManager_GetNodeIDByChannelName_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Match provides a mock function with given fields: nodeID, channel
 func (_m *MockChannelManager) Match(nodeID int64, channel string) bool {
 	ret := _m.Called(nodeID, channel)

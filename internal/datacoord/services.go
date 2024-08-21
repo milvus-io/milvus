@@ -1089,7 +1089,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	var id int64
 	var err error
 	if req.MajorCompaction {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, TriggerTypeClustering)
 	} else {
 		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
 	}
