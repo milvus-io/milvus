@@ -253,7 +253,7 @@ func assertTestDeltalogData(t *testing.T, i int, value *DeleteLog) {
 
 func TestDeltalogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewDeltalogDeserializeReader(nil)
+		reader, err := newDeltalogDeserializeReader(nil)
 		assert.NoError(t, err)
 		defer reader.Close()
 		err = reader.Next()
@@ -264,7 +264,7 @@ func TestDeltalogDeserializeReader(t *testing.T) {
 		size := 3
 		blob, err := generateTestDeltalogData(size)
 		assert.NoError(t, err)
-		reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+		reader, err := newDeltalogDeserializeReader([]*Blob{blob})
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -283,7 +283,7 @@ func TestDeltalogDeserializeReader(t *testing.T) {
 
 func TestDeltalogSerializeWriter(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewDeltalogDeserializeReader(nil)
+		reader, err := newDeltalogDeserializeReader(nil)
 		assert.NoError(t, err)
 		defer reader.Close()
 		err = reader.Next()
@@ -294,13 +294,13 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 		size := 16
 		blob, err := generateTestDeltalogData(size)
 		assert.NoError(t, err)
-		reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+		reader, err := newDeltalogDeserializeReader([]*Blob{blob})
 		assert.NoError(t, err)
 		defer reader.Close()
 
 		// Copy write the generated data
-		eventWriter := NewDeltalogStreamWriter(0, 0, 0)
-		writer, err := NewDeltalogSerializeWriter(0, 0, eventWriter, 7)
+		eventWriter := newDeltalogStreamWriter(0, 0, 0)
+		writer, err := newDeltalogSerializeWriter(eventWriter, 7)
 		assert.NoError(t, err)
 
 		for i := 0; i < size; i++ {
@@ -323,7 +323,7 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, newblob)
 		// assert.Equal(t, blobs[0].Value, newblobs[0].Value)
-		reader, err = NewDeltalogDeserializeReader([]*Blob{newblob})
+		reader, err = newDeltalogDeserializeReader([]*Blob{newblob})
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 0; i < size; i++ {
@@ -338,8 +338,8 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 
 func TestDeltalogPkTsSeparateFormat(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, nil)
-		writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, 7)
+		eventWriter := newMultiFieldDeltalogStreamWriter(0, 0, 0, schemapb.DataType_Int64)
+		writer, err := newDeltalogMultiFieldWriter(eventWriter, 7)
 		assert.NoError(t, err)
 		defer writer.Close()
 		err = writer.Close()
@@ -380,7 +380,7 @@ func TestDeltalogPkTsSeparateFormat(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Deserialize data
-			reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+			reader, err := newDeltalogDeserializeReader([]*Blob{blob})
 			assert.NoError(t, err)
 			defer reader.Close()
 			for i := 0; i < size; i++ {
@@ -424,8 +424,8 @@ func BenchmarkDeltalogFormatWriter(b *testing.B) {
 	b.Run("one string format writer", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			eventWriter := NewDeltalogStreamWriter(0, 0, 0)
-			writer, _ := NewDeltalogSerializeWriter(0, 0, eventWriter, size)
+			eventWriter := newDeltalogStreamWriter(0, 0, 0)
+			writer, _ := newDeltalogSerializeWriter(eventWriter, size)
 			var value *DeleteLog
 			for j := 0; j < size; j++ {
 				value = NewDeleteLog(NewInt64PrimaryKey(int64(j)), uint64(j+1))
@@ -448,11 +448,8 @@ func BenchmarkDeltalogFormatWriter(b *testing.B) {
 
 func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (*Blob, error) {
 	var err error
-	eventWriter := NewMultiFieldDeltalogStreamWriter(0, 0, 0, []*schemapb.FieldSchema{
-		{FieldID: common.RowIDField, Name: "pk", DataType: pkType},
-		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
-	})
-	writer, err := NewDeltalogMultiFieldWriter(0, 0, eventWriter, batchSize)
+	eventWriter := newMultiFieldDeltalogStreamWriter(0, 0, 0, pkType)
+	writer, err := newDeltalogMultiFieldWriter(eventWriter, batchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +476,7 @@ func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (
 }
 
 func readDeltaLog(size int, blob *Blob) error {
-	reader, err := NewDeltalogDeserializeReader([]*Blob{blob})
+	reader, err := newDeltalogDeserializeReader([]*Blob{blob})
 	if err != nil {
 		return err
 	}

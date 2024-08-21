@@ -26,7 +26,7 @@ func (t *Tickler) Progress() int32 {
 	if t.total.Load() == 0 {
 		return t.count.Load()
 	}
-	return (t.count.Load() / t.total.Load()) * 100
+	return t.count.Load() * 100 / t.total.Load()
 }
 
 func (t *Tickler) Close() {

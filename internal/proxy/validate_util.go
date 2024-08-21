@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -56,12 +57,10 @@ func (v *validateUtil) apply(opts ...validateOption) {
 	}
 }
 
-func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.CollectionSchema, numRows uint64) error {
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return err
+func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.SchemaHelper, numRows uint64) error {
+	if helper == nil {
+		return merr.WrapErrServiceInternal("nil schema helper provided for Validation")
 	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -122,7 +121,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		}
 	}
 
-	err = v.fillWithValue(data, helper, int(numRows))
+	err := v.fillWithValue(data, helper, int(numRows))
 	if err != nil {
 		return err
 	}
@@ -933,4 +932,16 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 	v.apply(opts...)
 
 	return v
+}
+
+func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
+	if !Params.AutoIndexConfig.Enable.GetAsBool() {
+		return nil
+	}
+
+	_, ok := indexParams[common.MmapEnabledKey]
+	if ok && isVectorField {
+		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
+	}
+	return nil
 }

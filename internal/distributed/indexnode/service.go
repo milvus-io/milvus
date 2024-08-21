@@ -168,7 +168,8 @@ func (s *Server) init() error {
 		return err
 	}
 
-	etcdCli, err := etcd.CreateEtcdClient(
+	var etcdCli *clientv3.Client
+	etcdCli, err = etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
 		etcdConfig.EtcdEnableAuth.GetAsBool(),
 		etcdConfig.EtcdAuthUserName.GetValue(),

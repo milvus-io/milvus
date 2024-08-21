@@ -77,7 +77,13 @@ func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) bool {
 	// update the total stats if inserted.
 	if inserted {
 		m.totalStats.Collect(insert)
+		if _, ok := m.pchannelStats[info.PChannel]; !ok {
+			m.pchannelStats[info.PChannel] = &InsertMetrics{}
+		}
 		m.pchannelStats[info.PChannel].Collect(insert)
+		if _, ok := m.vchannelStats[info.VChannel]; !ok {
+			m.vchannelStats[info.VChannel] = &InsertMetrics{}
+		}
 		m.vchannelStats[info.VChannel].Collect(insert)
 		return true
 	}
@@ -128,17 +134,21 @@ func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 	}
 
 	stats := m.segmentStats[segmentID]
-	m.pchannelStats[info.PChannel].Subtract(stats.Insert)
-	m.vchannelStats[info.VChannel].Subtract(stats.Insert)
 
-	m.totalStats.Collect(stats.Insert)
+	m.totalStats.Subtract(stats.Insert)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
-	if m.pchannelStats[info.PChannel].BinarySize == 0 {
-		delete(m.pchannelStats, info.PChannel)
+	if _, ok := m.pchannelStats[info.PChannel]; ok {
+		m.pchannelStats[info.PChannel].Subtract(stats.Insert)
+		if m.pchannelStats[info.PChannel].BinarySize == 0 {
+			delete(m.pchannelStats, info.PChannel)
+		}
 	}
-	if m.vchannelStats[info.VChannel].BinarySize == 0 {
-		delete(m.vchannelStats, info.VChannel)
+	if _, ok := m.vchannelStats[info.VChannel]; ok {
+		m.vchannelStats[info.VChannel].Subtract(stats.Insert)
+		if m.vchannelStats[info.VChannel].BinarySize == 0 {
+			delete(m.vchannelStats, info.VChannel)
+		}
 	}
 	return stats
 }

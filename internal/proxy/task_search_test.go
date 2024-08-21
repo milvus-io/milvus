@@ -60,6 +60,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -191,6 +194,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -335,6 +339,7 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 
 	defer rc.Close()
 	mgr := newShardClientMgr()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
@@ -1786,6 +1791,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	)
 
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()

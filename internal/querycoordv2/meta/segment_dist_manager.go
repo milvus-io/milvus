@@ -57,7 +57,7 @@ func (f *ReplicaSegDistFilter) Match(s *Segment) bool {
 	return f.GetCollectionID() == s.GetCollectionID() && f.Contains(s.Node)
 }
 
-func (f ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
+func (f *ReplicaSegDistFilter) AddFilter(filter *segDistCriterion) {
 	filter.nodes = f.GetNodes()
 	filter.collectionID = f.GetCollectionID()
 }

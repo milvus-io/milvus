@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -202,11 +203,11 @@ func (i *GrpcAccessInfo) respStatus() *commonpb.Status {
 
 func (i *GrpcAccessInfo) ErrorMsg() string {
 	if i.err != nil {
-		return i.err.Error()
+		return strings.ReplaceAll(i.err.Error(), "\n", "\\n")
 	}
 
 	if status := i.respStatus(); status != nil {
-		return status.GetReason()
+		return strings.ReplaceAll(status.GetReason(), "\n", "\\n")
 	}
 
 	return Unknown

@@ -213,7 +213,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
         auto index_chunks = GetObjectData(rcm_.get(), batch_remote_files);
         for (auto& chunk : index_chunks) {
             auto index_data = chunk.get()->GetFieldData();
-            auto index_size = index_data->Size();
+            auto index_size = index_data->DataSize();
             auto chunk_data = reinterpret_cast<uint8_t*>(
                 const_cast<void*>(index_data->Data()));
             file.Write(chunk_data, index_size);

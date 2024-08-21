@@ -68,6 +68,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 			},
 		},
 	}, nil).Maybe()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Success(),
 		PartitionIDs: []int64{1, 2, 3},

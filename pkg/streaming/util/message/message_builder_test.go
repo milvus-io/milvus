@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 )
 
 func TestMessage(t *testing.T) {
@@ -32,14 +33,17 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, mutableMessage.MessageType())
-	assert.Equal(t, 32, mutableMessage.EstimateSize())
+	assert.Equal(t, 31, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
+	mutableMessage.WithBarrierTimeTick(456)
+	mutableMessage.WithWALTerm(1)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
 	tt, err := message.DecodeUint64(v)
 	assert.Equal(t, uint64(123), tt)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(123), mutableMessage.TimeTick())
+	assert.Equal(t, uint64(456), mutableMessage.BarrierTimeTick())
 
 	lcMsgID := mock_message.NewMockMessageID(t)
 	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
@@ -112,4 +116,17 @@ func TestMessage(t *testing.T) {
 	assert.Panics(t, func() {
 		message.NewTimeTickMessageBuilderV1().BuildMutable()
 	})
+}
+
+func TestLastConfirmed(t *testing.T) {
+	flush, _ := message.NewFlushMessageBuilderV2().
+		WithVChannel("vchan").
+		WithHeader(&message.FlushMessageHeader{}).
+		WithBody(&message.FlushMessageBody{}).
+		BuildMutable()
+
+	imFlush := flush.WithTimeTick(1).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	assert.True(t, imFlush.LastConfirmedMessageID().EQ(walimplstest.NewTestMessageID(1)))
 }

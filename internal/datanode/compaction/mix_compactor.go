@@ -244,7 +244,7 @@ func (t *mixCompactionTask) merge(
 	}
 
 	serWriteStart := time.Now()
-	sPath, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, writer, remainingRowCount)
+	sPath, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, writer)
 	if err != nil {
 		log.Warn("compact wrong, failed to serialize write segment stats",
 			zap.Int64("remaining row count", remainingRowCount), zap.Error(err))

@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -20,6 +21,8 @@ import (
 
 var _ wal.WAL = (*walAdaptorImpl)(nil)
 
+type gracefulCloseFunc func()
+
 // adaptImplsToWAL creates a new wal from wal impls.
 func adaptImplsToWAL(
 	basicWAL walimpls.WALImpls,
@@ -30,15 +33,13 @@ func adaptImplsToWAL(
 		WALImpls: basicWAL,
 		WAL:      syncutil.NewFuture[wal.WAL](),
 	}
-	interceptor := buildInterceptor(builders, param)
-
 	wal := &walAdaptorImpl{
 		lifetime:    lifetime.NewLifetime(lifetime.Working),
 		idAllocator: typeutil.NewIDAllocator(),
 		inner:       basicWAL,
 		// TODO: make the pool size configurable.
-		appendExecutionPool: conc.NewPool[struct{}](10),
-		interceptor:         interceptor,
+		appendExecutionPool:    conc.NewPool[struct{}](10),
+		interceptorBuildResult: buildInterceptor(builders, param),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),
@@ -52,14 +53,14 @@ func adaptImplsToWAL(
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
-	lifetime            lifetime.Lifetime[lifetime.State]
-	idAllocator         *typeutil.IDAllocator
-	inner               walimpls.WALImpls
-	appendExecutionPool *conc.Pool[struct{}]
-	interceptor         interceptors.InterceptorWithReady
-	scannerRegistry     scannerRegistry
-	scanners            *typeutil.ConcurrentMap[int64, wal.Scanner]
-	cleanup             func()
+	lifetime               lifetime.Lifetime[lifetime.State]
+	idAllocator            *typeutil.IDAllocator
+	inner                  walimpls.WALImpls
+	appendExecutionPool    *conc.Pool[struct{}]
+	interceptorBuildResult interceptorBuildResult
+	scannerRegistry        scannerRegistry
+	scanners               *typeutil.ConcurrentMap[int64, wal.Scanner]
+	cleanup                func()
 }
 
 func (w *walAdaptorImpl) WALName() string {
@@ -72,7 +73,7 @@ func (w *walAdaptorImpl) Channel() types.PChannelInfo {
 }
 
 // Append writes a record to the log.
-func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if w.lifetime.Add(lifetime.IsWorking) != nil {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
@@ -82,15 +83,39 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-w.interceptor.Ready():
+	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
+	// Setup the term of wal.
+	msg = msg.WithWALTerm(w.Channel().Term)
 
 	// Execute the interceptor and wal append.
-	return w.interceptor.DoAppend(ctx, msg, w.inner.Append)
+	var extraAppendResult utility.ExtraAppendResult
+	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
+	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
+				// do not persist the message if the hint is set.
+				// only used by time tick sync operator.
+				return notPersistHint.MessageID, nil
+			}
+			return w.inner.Append(ctx, msg)
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	// unwrap the messageID if needed.
+	r := &wal.AppendResult{
+		MessageID: messageID,
+		TimeTick:  extraAppendResult.TimeTick,
+		TxnCtx:    extraAppendResult.TxnCtx,
+		Extra:     extraAppendResult.Extra,
+	}
+	return r, nil
 }
 
 // AppendAsync writes a record to the log asynchronously.
-func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(message.MessageID, error)) {
+func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*wal.AppendResult, error)) {
 	if w.lifetime.Add(lifetime.IsWorking) != nil {
 		cb(nil, status.NewOnShutdownError("wal is on shutdown"))
 		return
@@ -119,9 +144,13 @@ func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Sca
 	}
 	// wrap the scanner with cleanup function.
 	id := w.idAllocator.Allocate()
-	s := newScannerAdaptor(name, w.inner, opts, func() {
-		w.scanners.Remove(id)
-	})
+	s := newScannerAdaptor(
+		name,
+		w.inner,
+		opts,
+		func() {
+			w.scanners.Remove(id)
+		})
 	w.scanners.Insert(id, s)
 	return s, nil
 }
@@ -138,6 +167,10 @@ func (w *walAdaptorImpl) Available() <-chan struct{} {
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
+	// graceful close the interceptors before wal closing.
+	w.interceptorBuildResult.GracefulCloseFunc()
+
+	// begin to close the wal.
 	w.lifetime.SetState(lifetime.Stopped)
 	w.lifetime.Wait()
 	w.lifetime.Close()
@@ -149,17 +182,35 @@ func (w *walAdaptorImpl) Close() {
 		return true
 	})
 	w.inner.Close()
-	w.interceptor.Close()
+	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
 	w.cleanup()
 }
 
+type interceptorBuildResult struct {
+	Interceptor       interceptors.InterceptorWithReady
+	GracefulCloseFunc gracefulCloseFunc
+}
+
+func (r interceptorBuildResult) Close() {
+	r.Interceptor.Close()
+}
+
 // newWALWithInterceptors creates a new wal with interceptors.
-func buildInterceptor(builders []interceptors.InterceptorBuilder, param interceptors.InterceptorBuildParam) interceptors.InterceptorWithReady {
+func buildInterceptor(builders []interceptors.InterceptorBuilder, param interceptors.InterceptorBuildParam) interceptorBuildResult {
 	// Build all interceptors.
-	builtIterceptors := make([]interceptors.BasicInterceptor, 0, len(builders))
+	builtIterceptors := make([]interceptors.Interceptor, 0, len(builders))
 	for _, b := range builders {
 		builtIterceptors = append(builtIterceptors, b.Build(param))
 	}
-	return interceptors.NewChainedInterceptor(builtIterceptors...)
+	return interceptorBuildResult{
+		Interceptor: interceptors.NewChainedInterceptor(builtIterceptors...),
+		GracefulCloseFunc: func() {
+			for _, i := range builtIterceptors {
+				if c, ok := i.(interceptors.InterceptorWithGracefulClose); ok {
+					c.GracefulClose()
+				}
+			}
+		},
+	}
 }

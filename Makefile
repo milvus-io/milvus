@@ -62,11 +62,11 @@ GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
 # protoc-gen-go
 PROTOC_GEN_GO_VERSION := 1.33.0
-PROTOC_GEN_GO_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go --version 2>/dev/null)
+PROTOC_GEN_GO_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go --version 2>/dev/null)
 INSTALL_PROTOC_GEN_GO := $(findstring $(PROTOC_GEN_GO_VERSION),$(PROTOC_GEN_GO_OUTPUT))
 # protoc-gen-go-grpc
 PROTOC_GEN_GO_GRPC_VERSION := 1.3.0
-PROTOC_GEN_GO_GRPC_OUTPUT := $(shell print | $(INSTALL_PATH)/protoc-gen-go-grpc  --version 2>/dev/null)
+PROTOC_GEN_GO_GRPC_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go-grpc  --version 2>/dev/null)
 INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
@@ -188,7 +188,7 @@ static-check: getdeps
 	@echo "Start check client package"
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
-	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
+	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 
@@ -529,11 +529,11 @@ generate-mockery-utils: getdeps
 	$(INSTALL_PATH)/mockery --name=ProxyWatcherInterface --dir=$(PWD)/internal/util/proxyutil --output=$(PWD)/internal/util/proxyutil --filename=mock_proxy_watcher.go --with-expecter --structname=MockProxyWatcher --inpackage
 
 generate-mockery-kv: getdeps
-	$(INSTALL_PATH)/mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=txn_kv.go --with-expecter
-	$(INSTALL_PATH)/mockery --name=MetaKv --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=meta_kv.go --with-expecter
-	$(INSTALL_PATH)/mockery --name=WatchKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=watch_kv.go --with-expecter
-	$(INSTALL_PATH)/mockery --name=SnapShotKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=snapshot_kv.go --with-expecter
-	$(INSTALL_PATH)/mockery --name=Predicate --dir=$(PWD)/internal/kv/predicates --output=$(PWD)/internal/kv/predicates --filename=mock_predicate.go --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=TxnKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=txn_kv.go --with-expecter
+	$(INSTALL_PATH)/mockery --name=MetaKv --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=meta_kv.go --with-expecter
+	$(INSTALL_PATH)/mockery --name=WatchKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=watch_kv.go --with-expecter
+	$(INSTALL_PATH)/mockery --name=SnapShotKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=snapshot_kv.go --with-expecter
+	$(INSTALL_PATH)/mockery --name=Predicate --dir=$(PWD)/pkg/kv/predicates --output=$(PWD)/internal/kv/predicates --filename=mock_predicate.go --with-expecter --inpackage
 
 generate-mockery-chunk-manager: getdeps
 	$(INSTALL_PATH)/mockery --name=ChunkManager --dir=$(PWD)/internal/storage --output=$(PWD)/internal/mocks --filename=mock_chunk_manager.go --with-expecter

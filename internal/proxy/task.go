@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -360,7 +361,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		// validate dense vector field type parameters
-		if typeutil.IsVectorType(field.DataType) {
+		isVectorType := typeutil.IsVectorType(field.DataType)
+		if isVectorType {
 			err = validateDimension(field)
 			if err != nil {
 				return err
@@ -381,6 +383,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			if err = validateMaxCapacityPerRow(t.schema.Name, field); err != nil {
 				return err
 			}
+		}
+		// TODO should remove the index params in the field schema
+		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
+		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
 		}
 	}
 
@@ -1611,6 +1618,13 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	// TODO use load collection load field list after proto merged
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
+
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1658,6 +1672,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema))
@@ -1855,6 +1870,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1908,6 +1928,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {

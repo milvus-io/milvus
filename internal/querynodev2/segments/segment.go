@@ -873,7 +873,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, useMmap bool) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -911,9 +911,13 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}
 	}
 
+	// TODO retrieve_enable should be considered
 	collection := s.collection
-	mmapEnabled := useMmap || common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
-		(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
+	fieldSchema, err := getFieldSchema(collection.Schema(), fieldID)
+	if err != nil {
+		return err
+	}
+	mmapEnabled := isDataMmapEnable(fieldSchema)
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
@@ -1116,12 +1120,14 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 
+	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:       s.Collection(),
 		PartitionID:        s.Partition(),
 		SegmentID:          s.ID(),
 		Field:              fieldSchema,
-		EnableMmap:         isIndexMmapEnable(indexInfo),
+		EnableMmap:         enableMmap,
 		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		IndexID:            indexInfo.GetIndexID(),
 		IndexBuildID:       indexInfo.GetBuildID(),

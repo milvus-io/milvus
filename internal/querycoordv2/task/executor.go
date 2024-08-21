@@ -343,6 +343,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
@@ -358,6 +359,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -649,6 +651,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		log.Warn("failed to get collection info", zap.Error(err))
 		return nil, nil, nil, err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
@@ -660,6 +663,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -674,12 +678,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 
 func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
 	log := log.Ctx(ctx)
-	resp, err := ex.broker.GetSegmentInfo(ctx, segmentID)
-	if err != nil || len(resp.GetInfos()) == 0 {
+	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
+	if err != nil || len(segmentInfos) == 0 {
 		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 		return nil, nil, err
 	}
-	segment := resp.GetInfos()[0]
+	segment := segmentInfos[0]
 	log = log.With(zap.String("level", segment.GetLevel().String()))
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())

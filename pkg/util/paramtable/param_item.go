@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/config"
@@ -335,7 +336,8 @@ func getAsStrings(v string) []string {
 		return []string{}
 	}
 	return getAndConvert(v, func(value string) ([]string, error) {
-		return strings.Split(value, ","), nil
+		ret := strings.Split(value, ",")
+		return lo.Map(ret, func(rg string, _ int) string { return strings.TrimSpace(rg) }), nil
 	}, []string{})
 }
 

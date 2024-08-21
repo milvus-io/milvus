@@ -19,7 +19,10 @@ package task
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
+
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -133,12 +136,12 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled := common.IsMmapEnabled(collectionProperties...)
+	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
-		if collectionMmapEnabled {
+		if exist {
 			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 				Key:   common.MmapEnabledKey,
-				Value: "true",
+				Value: strconv.FormatBool(collectionMmapEnabled),
 			})
 		}
 	}
@@ -180,13 +183,14 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:      loadType,
 		CollectionID:  collectionID,
 		PartitionIDs:  partitions,
 		DbName:        databaseName,
 		ResourceGroup: resourceGroup,
+		LoadFields:    loadFields,
 	}
 }
 
@@ -233,15 +237,14 @@ func fillSubChannelRequest(
 		return nil
 	}
 
-	resp, err := broker.GetSegmentInfo(ctx, segmentIDs.Collect()...)
+	segmentInfos, err := broker.GetSegmentInfo(ctx, segmentIDs.Collect()...)
 	if err != nil {
 		return err
 	}
-	segmentInfos := make(map[int64]*datapb.SegmentInfo)
-	for _, info := range resp.GetInfos() {
-		segmentInfos[info.GetID()] = info
-	}
-	req.SegmentInfos = segmentInfos
+
+	req.SegmentInfos = lo.SliceToMap(segmentInfos, func(info *datapb.SegmentInfo) (int64, *datapb.SegmentInfo) {
+		return info.GetID(), info
+	})
 	return nil
 }
 

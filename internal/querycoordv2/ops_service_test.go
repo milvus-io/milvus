@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -66,6 +67,7 @@ type OpsServiceSuite struct {
 	jobScheduler   *job.Scheduler
 	taskScheduler  *task.MockScheduler
 	balancer       balance.Balance
+	proxyManager   *proxyutil.MockProxyClientManager
 
 	distMgr           *meta.DistributionManager
 	distController    *dist.MockController
@@ -77,6 +79,8 @@ type OpsServiceSuite struct {
 
 func (suite *OpsServiceSuite) SetupSuite() {
 	paramtable.Init()
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *OpsServiceSuite) SetupTest() {
@@ -151,6 +155,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.server.targetMgr,
 		suite.targetObserver,
 		&checkers.CheckerController{},
+		suite.proxyManager,
 	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -433,6 +438,10 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
+	suite.meta.ResourceManager.HandleNodeUp(1)
+	nodes, err := suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Contains(nodes, int64(1))
 	// test success
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{
@@ -440,16 +449,18 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	node := suite.nodeMgr.Get(1)
-	suite.Equal(session.NodeStateSuspend, node.GetState())
+	nodes, err = suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.NotContains(nodes, int64(1))
 
 	resp, err = suite.server.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: 1,
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	node = suite.nodeMgr.Get(1)
-	suite.Equal(session.NodeStateNormal, node.GetState())
+	nodes, err = suite.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Contains(nodes, int64(1))
 }
 
 func (suite *OpsServiceSuite) TestTransferSegment() {

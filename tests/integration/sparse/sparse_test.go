@@ -183,7 +183,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 	s.NotEqual(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	sparseVecs.Contents[0] = sparseVecs.Contents[0][:len(sparseVecs.Contents[0])-4]
 
-	// empty row is not allowed
+	// empty row is allowed
 	sparseVecs.Contents[0] = []byte{}
 	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
@@ -193,7 +193,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 		NumRows:        uint32(rowNum),
 	})
 	s.NoError(err)
-	s.NotEqual(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// unsorted column index is not allowed
 	sparseVecs.Contents[0] = make([]byte, 16)

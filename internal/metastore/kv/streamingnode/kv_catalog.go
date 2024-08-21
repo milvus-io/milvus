@@ -83,10 +83,13 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 // buildSegmentAssignmentMetaPath builds the path for segment assignment
 // streamingnode-meta/segment-assign/${pChannelName}
 func buildSegmentAssignmentMetaPath(pChannelName string) string {
-	return path.Join(SegmentAssignMeta, pChannelName)
+	// !!! bad implementation here, but we can't make compatibility for underlying meta kv.
+	// underlying meta kv will remove the last '/' of the path, cause the pchannel lost.
+	// So we add a special sub path to avoid this.
+	return path.Join(SegmentAssignMeta, pChannelName, SegmentAssignSubFolder) + "/"
 }
 
 // buildSegmentAssignmentMetaPathOfSegment builds the path for segment assignment
 func buildSegmentAssignmentMetaPathOfSegment(pChannelName string, segmentID int64) string {
-	return path.Join(SegmentAssignMeta, pChannelName, strconv.FormatInt(segmentID, 10))
+	return path.Join(SegmentAssignMeta, pChannelName, SegmentAssignSubFolder, strconv.FormatInt(segmentID, 10))
 }

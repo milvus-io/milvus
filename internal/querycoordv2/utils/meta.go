@@ -17,6 +17,8 @@
 package utils
 
 import (
+	"strings"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -25,13 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-var (
-	ErrGetNodesFromRG       = errors.New("failed to get node from rg")
-	ErrNoReplicaFound       = errors.New("no replica found during assign nodes")
-	ErrReplicasInconsistent = errors.New("all replicas should belong to same collection during assign nodes")
-	ErrUseWrongNumRG        = errors.New("resource group num can only be 0, 1 or same as replica number")
 )
 
 func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
@@ -117,7 +112,8 @@ func RecoverAllCollection(m *meta.Meta) {
 
 func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int32) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return nil, ErrUseWrongNumRG
+		return nil, errors.Errorf(
+			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
 	replicaNumInRG := make(map[string]int)
@@ -140,15 +136,16 @@ func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int
 	// 3. replica1 spawn finished, but cannot find related resource group.
 	for rgName, num := range replicaNumInRG {
 		if !m.ContainResourceGroup(rgName) {
-			return nil, ErrGetNodesFromRG
+			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
 		nodes, err := m.ResourceManager.GetNodes(rgName)
 		if err != nil {
 			return nil, err
 		}
 		if num > len(nodes) {
-			log.Warn("node not enough", zap.Error(meta.ErrNodeNotEnough), zap.Int("replicaNum", num), zap.Int("nodeNum", len(nodes)), zap.String("rgName", rgName))
-			return nil, meta.ErrNodeNotEnough
+			err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
+			log.Warn("failed to check resource group", zap.Error(err))
+			return nil, err
 		}
 	}
 	return replicaNumInRG, nil

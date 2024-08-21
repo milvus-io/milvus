@@ -99,7 +99,7 @@ func (m *PChannelSegmentAllocManager) AssignSegment(ctx context.Context, req *As
 	if err != nil {
 		return nil, err
 	}
-	return manager.AssignSegment(ctx, req.InsertMetrics)
+	return manager.AssignSegment(ctx, req)
 }
 
 // RemoveCollection removes the specified collection.
@@ -136,6 +136,36 @@ func (m *PChannelSegmentAllocManager) RemovePartition(ctx context.Context, colle
 
 	// wait for all segment has been flushed.
 	return m.helper.WaitUntilNoWaitSeal(ctx)
+}
+
+// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick and return the segmentIDs.
+func (m *PChannelSegmentAllocManager) SealAllSegmentsAndFenceUntil(ctx context.Context, collectionID int64, timetick uint64) ([]int64, error) {
+	if err := m.checkLifetime(); err != nil {
+		return nil, err
+	}
+	defer m.lifetime.Done()
+
+	// All message's timetick less than incoming timetick is all belong to the output sealed segment.
+	// So the output sealed segment transfer into flush == all message's timetick less than incoming timetick are flushed.
+	sealedSegments, err := m.managers.SealAllSegmentsAndFenceUntil(collectionID, timetick)
+	if err != nil {
+		return nil, err
+	}
+
+	segmentIDs := make([]int64, 0, len(sealedSegments))
+	for _, segment := range sealedSegments {
+		segmentIDs = append(segmentIDs, segment.GetSegmentID())
+	}
+
+	// trigger a seal operation in background rightnow.
+	m.helper.AsyncSeal(sealedSegments...)
+
+	// wait for all segment has been flushed.
+	if err := m.helper.WaitUntilNoWaitSeal(ctx); err != nil {
+		return nil, err
+	}
+
+	return segmentIDs, nil
 }
 
 // TryToSealSegments tries to seal the specified segments.

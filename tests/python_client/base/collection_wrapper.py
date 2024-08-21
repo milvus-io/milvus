@@ -339,10 +339,10 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def compact(self, timeout=None, check_task=None, check_items=None, **kwargs):
+    def compact(self, is_clustering=False, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.compact, timeout], **kwargs)
+        res, check = api_request([self.collection.compact, is_clustering, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 

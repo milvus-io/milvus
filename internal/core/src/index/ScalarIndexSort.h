@@ -47,7 +47,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     int64_t
     Count() override {
-        return data_.size();
+        return total_num_rows_;
     }
 
     ScalarIndexType
@@ -66,6 +66,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override;
+
+    const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
 
     const TargetBitmap
     Range(T value, OpType op) override;
@@ -120,6 +126,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
     std::vector<IndexStructure<T>> data_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    size_t total_num_rows_{0};
+    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset;
 };
 
 template <typename T>

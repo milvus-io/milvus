@@ -398,7 +398,6 @@ queryNode:
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
-    enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
     # options: async, sync, disable. 
@@ -409,7 +408,10 @@ queryNode:
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
     warmup: disable
   mmap:
-    mmapEnabled: false # Enable mmap for loading data
+    vectorField: false # Enable mmap for loading vector data
+    vectorIndex: false # Enable mmap for loading vector index
+    scalarField: false # Enable mmap for loading scalar data
+    scalarIndex: false # Enable mmap for loading scalar index
     growingMmapEnabled: false # Enable mmap for using in growing raw data
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
@@ -642,6 +644,9 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
+  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  storage:
+    deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
@@ -649,6 +654,54 @@ dataNode:
     serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the dataNode can receive, unit: byte
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on dataNode can send, unit: byte
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataNode can receive, unit: byte
+
+# This topic introduces the message channel-related configurations of Milvus.
+msgChannel:
+  chanNamePrefix:
+    # Root name prefix of the channel when a message channel is created.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    # To share a Pulsar instance among multiple Milvus instances, consider changing this to a name rather than the default one for each Milvus instance before you start them.
+    cluster: by-dev
+    # Sub-name prefix of the message channel where the root coord publishes time tick messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordTimeTick}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    rootCoordTimeTick: rootcoord-timetick
+    # Sub-name prefix of the message channel where the root coord publishes its own statistics messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordStatistics}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    rootCoordStatistics: rootcoord-statistics
+    # Sub-name prefix of the message channel where the root coord publishes Data Manipulation Language (DML) messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordDml}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    rootCoordDml: rootcoord-dml
+    replicateMsg: replicate-msg
+    # Sub-name prefix of the message channel where the query node publishes time tick messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    queryTimeTick: queryTimeTick
+    # Sub-name prefix of the message channel where the data coord publishes time tick messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordTimeTick}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    dataCoordTimeTick: datacoord-timetick-channel
+    # Sub-name prefix of the message channel where the data coord publishes segment information messages.
+    # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordSegmentInfo}
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    dataCoordSegmentInfo: segment-info-channel
+  subNamePrefix:
+    # Subscription name prefix of the data coord.
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    dataCoordSubNamePrefix: dataCoord
+    # Subscription name prefix of the data node.
+    # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+    # It is recommended to change this parameter before starting Milvus for the first time.
+    dataNodeSubNamePrefix: dataNode
 
 # Configures the system log output.
 log:

@@ -74,10 +74,9 @@ class TestAliasOperation(TestcaseBase):
 
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
-        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                   check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name,
-                                                                                exp_schema: default_schema})
+        collection_alias = self.init_collection_wrap(name=alias_name,
+                                                     check_task=CheckTasks.check_collection_property,
+                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [
             p.name for p in collection_alias.partitions]
@@ -110,10 +109,9 @@ class TestAliasOperation(TestcaseBase):
 
         alias_a_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_1.name, alias_a_name)
-        collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_a_name,
-                                                                                  exp_schema: default_schema})
+        collection_alias_a = self.init_collection_wrap(name=alias_a_name,
+                                                       check_task=CheckTasks.check_collection_property,
+                                                       check_items={exp_name: alias_a_name, exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_1.partitions] == [
             p.name for p in collection_alias_a.partitions]
@@ -132,10 +130,9 @@ class TestAliasOperation(TestcaseBase):
 
         alias_b_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_2.name, alias_b_name)
-        collection_alias_b, _ = self.collection_wrap.init_collection(name=alias_b_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_b_name,
-                                                                                  exp_schema: default_schema})
+        collection_alias_b = self.init_collection_wrap(name=alias_b_name,
+                                                       check_task=CheckTasks.check_collection_property,
+                                                       check_items={exp_name: alias_b_name, exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_2.partitions] == [
             p.name for p in collection_alias_b.partitions]
@@ -177,10 +174,9 @@ class TestAliasOperation(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         # collection_w.create_alias(alias_name)
-        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                   check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name,
-                                                                                exp_schema: default_schema})
+        collection_alias = self.init_collection_wrap(name=alias_name,
+                                                     check_task=CheckTasks.check_collection_property,
+                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [
             p.name for p in collection_alias.partitions]
@@ -406,7 +402,7 @@ class TestAliasOperation(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         alias_name = cf.gen_unique_str(prefix)
         self.utility_wrap.create_alias(collection_w.name, alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
@@ -414,7 +410,7 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         collection_alias.set_properties({'mmap.enabled': True})
-        pro = collection_w.describe().get("properties")
+        pro = collection_w.describe()[0].get("properties")
         assert pro["mmap.enabled"] == 'True'
         collection_w.set_properties({'mmap.enabled': False})
         pro = collection_alias.describe().get("properties")

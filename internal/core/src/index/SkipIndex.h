@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <cstddef>
 #include <unordered_map>
 
 #include "common/Types.h"
@@ -29,6 +30,7 @@ struct FieldChunkMetrics {
     Metrics min_;
     Metrics max_;
     bool hasValue_;
+    int64_t null_count_;
 
     FieldChunkMetrics() : hasValue_(false){};
 };
@@ -73,6 +75,7 @@ class SkipIndex {
                   int64_t chunk_id,
                   milvus::DataType data_type,
                   const void* chunk_data,
+                  const bool* valid_data,
                   int64_t count);
 
     void
@@ -217,17 +220,43 @@ class SkipIndex {
         return should_skip;
     }
 
+    // todo: support some null_count_ skip
+
     template <typename T>
-    std::pair<T, T>
-    ProcessFieldMetrics(const T* data, int64_t count) {
+    struct metricInfo {
+        T min_;
+        T max_;
+        int64_t null_count_;
+    };
+
+    template <typename T>
+    metricInfo<T>
+    ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
         //double check to avoid crush
         if (data == nullptr || count == 0) {
             return {T(), T()};
         }
-        T minValue = data[0];
-        T maxValue = data[0];
-        for (size_t i = 0; i < count; i++) {
+        // find first not null value
+        int64_t start = 0;
+        for (int64_t i = start; i < count; i++) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                start++;
+                continue;
+            }
+            break;
+        }
+        if (start > count - 1) {
+            return {T(), T(), count};
+        }
+        T minValue = data[start];
+        T maxValue = data[start];
+        int64_t null_count = start;
+        for (int64_t i = start; i < count; i++) {
             T value = data[i];
+            if (valid_data != nullptr && !valid_data[i]) {
+                null_count++;
+                continue;
+            }
             if (value < minValue) {
                 minValue = value;
             }
@@ -235,7 +264,42 @@ class SkipIndex {
                 maxValue = value;
             }
         }
-        return {minValue, maxValue};
+        return {minValue, maxValue, null_count};
+    }
+
+    metricInfo<std::string_view>
+    ProcessStringFieldMetrics(
+        const milvus::VariableColumn<std::string>& var_column) {
+        int num_rows = var_column.NumRows();
+        // find first not null value
+        int64_t start = 0;
+        for (int64_t i = start; i < num_rows; i++) {
+            if (!var_column.IsValid(i)) {
+                start++;
+                continue;
+            }
+            break;
+        }
+        if (start > num_rows - 1) {
+            return {std::string_view(), std::string_view(), num_rows};
+        }
+        std::string_view min_string = var_column.RawAt(start);
+        std::string_view max_string = var_column.RawAt(start);
+        int64_t null_count = start;
+        for (int64_t i = start; i < num_rows; i++) {
+            const auto& val = var_column.RawAt(i);
+            if (!var_column.IsValid(i)) {
+                null_count++;
+                continue;
+            }
+            if (val < min_string) {
+                min_string = val;
+            }
+            if (val > max_string) {
+                max_string = val;
+            }
+        }
+        return {min_string, max_string, null_count};
     }
 
  private:

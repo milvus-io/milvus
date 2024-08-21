@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -17,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var _ interceptors.AppendInterceptor = (*segmentInterceptor)(nil)
+var _ interceptors.InterceptorWithReady = (*segmentInterceptor)(nil)
 
 // segmentInterceptor is the implementation of segment assignment interceptor.
 type segmentInterceptor struct {
@@ -137,8 +138,10 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			PartitionID:  partition.GetPartitionId(),
 			InsertMetrics: stats.InsertMetrics{
 				Rows:       partition.GetRows(),
-				BinarySize: partition.GetBinarySize(),
+				BinarySize: uint64(msg.EstimateSize()), // TODO: Use parition.BinarySize in future when merge partitions together in one message.
 			},
+			TimeTick:   msg.TimeTick(),
+			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
 		if err != nil {
 			return nil, status.NewInner("segment assignment failure with error: %s", err.Error())
@@ -161,9 +164,12 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 
 // Close closes the segment interceptor.
 func (impl *segmentInterceptor) Close() {
-	// unregister the pchannels
-	resource.Resource().SegmentSealedInspector().UnregisterPChannelManager(impl.assignManager.Get())
-	impl.assignManager.Get().Close(context.Background())
+	assignManager := impl.assignManager.Get()
+	if assignManager != nil {
+		// unregister the pchannels
+		resource.Resource().SegmentSealedInspector().UnregisterPChannelManager(assignManager)
+		assignManager.Close(context.Background())
+	}
 }
 
 // recoverPChannelManager recovers PChannel Assignment Manager.
@@ -185,6 +191,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.Interc
 			select {
 			case <-impl.ctx.Done():
 				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.ctx.Err()))
+				impl.assignManager.Set(nil)
 				return
 			case <-ch:
 				continue

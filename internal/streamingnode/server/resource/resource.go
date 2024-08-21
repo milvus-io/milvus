@@ -5,18 +5,17 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
+	sinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-var r *resourceImpl // singleton resource instance
+var r = &resourceImpl{} // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -25,20 +24,6 @@ type optResourceInit func(r *resourceImpl)
 func OptFlusher(flusher flusher.Flusher) optResourceInit {
 	return func(r *resourceImpl) {
 		r.flusher = flusher
-	}
-}
-
-// OptSyncManager provides the sync manager to the resource.
-func OptSyncManager(syncMgr syncmgr.SyncManager) optResourceInit {
-	return func(r *resourceImpl) {
-		r.syncMgr = syncMgr
-	}
-}
-
-// OptBufferManager provides the write buffer manager to the resource.
-func OptBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
-	return func(r *resourceImpl) {
-		r.wbMgr = wbMgr
 	}
 }
 
@@ -60,6 +45,8 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 func OptRootCoordClient(rootCoordClient types.RootCoordClient) optResourceInit {
 	return func(r *resourceImpl) {
 		r.rootCoordClient = rootCoordClient
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
 }
 
@@ -77,24 +64,26 @@ func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResource
 	}
 }
 
-// Init initializes the singleton of resources.
+// Apply initializes the singleton of resources.
 // Should be call when streaming node startup.
-func Init(opts ...optResourceInit) {
-	r = &resourceImpl{}
+func Apply(opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
-	r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-	r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
-	r.segmentAssignStatsManager = stats.NewStatsManager()
-	r.segmentSealedInspector = inspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
+}
 
+// Done finish all initialization of resources.
+func Done() {
+	r.segmentAssignStatsManager = stats.NewStatsManager()
+	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
+	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.RootCoordClient())
 	assertNotNil(r.DataCoordClient())
 	assertNotNil(r.StreamingNodeCatalog())
 	assertNotNil(r.SegmentAssignStatsManager())
 	assertNotNil(r.SegmentSealedInspector())
+	assertNotNil(r.TimeTickInspector())
 }
 
 // Resource access the underlying singleton of resources.
@@ -105,10 +94,7 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	flusher flusher.Flusher
-	syncMgr syncmgr.SyncManager
-	wbMgr   writebuffer.BufferManager
-
+	flusher                   flusher.Flusher
 	timestampAllocator        idalloc.Allocator
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
@@ -117,22 +103,13 @@ type resourceImpl struct {
 	dataCoordClient           types.DataCoordClient
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
-	segmentSealedInspector    inspector.SealOperationInspector
+	segmentSealedInspector    sinspector.SealOperationInspector
+	timeTickInspector         tinspector.TimeTickSyncInspector
 }
 
 // Flusher returns the flusher.
 func (r *resourceImpl) Flusher() flusher.Flusher {
 	return r.flusher
-}
-
-// SyncManager returns the sync manager.
-func (r *resourceImpl) SyncManager() syncmgr.SyncManager {
-	return r.syncMgr
-}
-
-// BufferManager returns the write buffer manager.
-func (r *resourceImpl) BufferManager() writebuffer.BufferManager {
-	return r.wbMgr
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.
@@ -176,8 +153,12 @@ func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 }
 
 // SegmentSealedInspector returns the segment sealed inspector.
-func (r *resourceImpl) SegmentSealedInspector() inspector.SealOperationInspector {
+func (r *resourceImpl) SegmentSealedInspector() sinspector.SealOperationInspector {
 	return r.segmentSealedInspector
+}
+
+func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
+	return r.timeTickInspector
 }
 
 // assertNotNil panics if the resource is nil.

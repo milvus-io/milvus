@@ -76,7 +76,7 @@ type ResumableProducer struct {
 }
 
 // Produce produce a new message to log service.
-func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (msgID message.MessageID, err error) {
+func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (*producer.ProduceResult, error) {
 	if p.lifetime.Add(lifetime.IsWorking) != nil {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
@@ -89,13 +89,20 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 			return nil, err
 		}
 
-		msgID, err := producerHandler.Produce(ctx, msg)
+		produceResult, err := producerHandler.Produce(ctx, msg)
 		if err == nil {
-			return msgID, nil
+			return produceResult, nil
 		}
 		// It's ok to stop retry if the error is canceled or deadline exceed.
 		if status.IsCanceled(err) {
 			return nil, errors.Mark(err, errs.ErrCanceled)
+		}
+		if sErr := status.AsStreamingError(err); sErr != nil {
+			// if the error is txn unavailable, it cannot be retried forever.
+			// we should mark it and return.
+			if sErr.IsTxnUnavilable() {
+				return nil, errors.Mark(err, errs.ErrTxnUnavailable)
+			}
 		}
 	}
 }

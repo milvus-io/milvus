@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
@@ -86,6 +87,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 		collection := s.meta.CollectionManager.GetCollection(collectionID)
 		percentage := s.meta.CollectionManager.CalculateLoadPercentage(collectionID)
+		loadFields := s.meta.CollectionManager.GetLoadFields(collectionID)
 		refreshProgress := int64(0)
 		if percentage < 0 {
 			if isGetAll {
@@ -118,6 +120,9 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
 		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
+		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
+			Data: loadFields,
+		})
 	}
 
 	return resp, nil
@@ -216,7 +221,9 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
 		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {
@@ -333,7 +340,9 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		return merr.Status(err), nil
 	}
 
-	if req.GetReplicaNumber() <= 0 || len(req.GetResourceGroups()) == 0 {
+	// to be compatible with old sdk, which set replica=1 if replica is not specified
+	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
+	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
 		// when replica number or resource groups is not set, use database level config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, req.GetCollectionID())
 		if err != nil {

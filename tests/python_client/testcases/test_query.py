@@ -3853,7 +3853,7 @@ class TestQueryCount(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_sparse_schema()
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        collection_w = self.init_collection_wrap(c_name, schema=schema)
         data = cf.gen_default_list_sparse_data()
         collection_w.insert(data)
         params = cf.get_index_params_params(index)

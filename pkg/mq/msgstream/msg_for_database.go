@@ -131,3 +131,57 @@ func (d *DropDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 func (d *DropDatabaseMsg) Size() int {
 	return proto.Size(d.DropDatabaseRequest)
 }
+
+type AlterDatabaseMsg struct {
+	BaseMsg
+	*milvuspb.AlterDatabaseRequest
+}
+
+var _ TsMsg = &AlterDatabaseMsg{}
+
+func (a *AlterDatabaseMsg) ID() UniqueID {
+	return a.Base.MsgID
+}
+
+func (a *AlterDatabaseMsg) SetID(id UniqueID) {
+	a.Base.MsgID = id
+}
+
+func (a *AlterDatabaseMsg) Type() MsgType {
+	return a.Base.MsgType
+}
+
+func (a *AlterDatabaseMsg) SourceID() int64 {
+	return a.Base.SourceID
+}
+
+func (a *AlterDatabaseMsg) Marshal(input TsMsg) (MarshalType, error) {
+	alterDataBaseMsg := input.(*AlterDatabaseMsg)
+	alterDatabaseRequest := alterDataBaseMsg.AlterDatabaseRequest
+	mb, err := proto.Marshal(alterDatabaseRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (a *AlterDatabaseMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	alterDatabaseRequest := &milvuspb.AlterDatabaseRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, alterDatabaseRequest)
+	if err != nil {
+		return nil, err
+	}
+	alterDatabaseMsg := &AlterDatabaseMsg{AlterDatabaseRequest: alterDatabaseRequest}
+	alterDatabaseMsg.BeginTimestamp = alterDatabaseMsg.GetBase().GetTimestamp()
+	alterDatabaseMsg.EndTimestamp = alterDatabaseMsg.GetBase().GetTimestamp()
+
+	return alterDatabaseMsg, nil
+}
+
+func (a *AlterDatabaseMsg) Size() int {
+	return proto.Size(a.AlterDatabaseRequest)
+}

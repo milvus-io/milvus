@@ -424,8 +424,12 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 column->AppendBatch(field_data);
                 stats_.mem_size += field_data->Size();
             }
-            LoadPrimitiveSkipIndex(
-                field_id, 0, data_type, column->Span().data(), num_rows);
+            LoadPrimitiveSkipIndex(field_id,
+                                   0,
+                                   data_type,
+                                   column->Span().data(),
+                                   column->Span().valid_data(),
+                                   num_rows);
         }
 
         AssertInfo(column->NumRows() == num_rows,

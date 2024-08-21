@@ -50,9 +50,9 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n, const T* values) {
         distinct_vals.insert(values[i]);
     }
 
-    // Decide whether to select bitmap index or stl sort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -71,9 +71,9 @@ HybridScalarIndex<std::string>::SelectIndexBuildType(
         }
     }
 
-    // Decide whether to select bitmap index or marisa index
+    // Decide whether to select bitmap index or inverted index
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::MARISA;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -96,9 +96,9 @@ HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
         }
     }
 
-    // Decide whether to select bitmap index or stl sort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -121,9 +121,9 @@ HybridScalarIndex<std::string>::SelectBuildTypeForPrimitiveType(
         }
     }
 
-    // Decide whether to select bitmap index or marisa sort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::MARISA;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -358,7 +358,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
+        auto size = data->DataSize();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);

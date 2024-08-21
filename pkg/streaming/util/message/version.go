@@ -5,7 +5,7 @@ import "strconv"
 var (
 	VersionOld Version = 0 // old version before streamingnode.
 	VersionV1  Version = 1 // The message marshal unmarshal still use msgstream.
-	VersionV2  Version = 2 // The message marshal unmsarhsl is not rely on msgstream.
+	VersionV2  Version = 2 // The message marshal unmarshal never rely on msgstream.
 )
 
 type Version int // message version for compatibility.

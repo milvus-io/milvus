@@ -83,6 +83,12 @@ class BitmapIndex : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
+
+    const TargetBitmap
     Range(T value, OpType op) override;
 
     const TargetBitmap
@@ -117,6 +123,11 @@ class BitmapIndex : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    bool
+    SupportPatternMatch() const override {
+        return SupportRegexQuery();
+    }
+
     const TargetBitmap
     PatternMatch(const std::string& pattern) override {
         PatternMatchTranslator translator;
@@ -126,7 +137,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     bool
     SupportRegexQuery() const override {
-        return true;
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap
@@ -200,6 +211,9 @@ class BitmapIndex : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+
+    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset;
 };
 
 }  // namespace index

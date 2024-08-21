@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -71,6 +72,7 @@ type JobSuite struct {
 	broker             *meta.MockBroker
 	nodeMgr            *session.NodeManager
 	checkerController  *checkers.CheckerController
+	proxyManager       *proxyutil.MockProxyClientManager
 
 	// Test objects
 	scheduler *Scheduler
@@ -140,6 +142,9 @@ func (suite *JobSuite) SetupSuite() {
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil).Maybe()
+
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *JobSuite) SetupTest() {
@@ -199,6 +204,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.targetMgr,
 		suite.targetObserver,
 		suite.checkerController,
+		suite.proxyManager,
 	)
 }
 
@@ -362,7 +368,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// Load with 3 replica on 3 rg
 	req = &querypb.LoadCollectionRequest{
@@ -384,7 +390,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -414,7 +420,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -596,7 +602,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 
 	// test load 3 replica in 3 rg, should pass rg check
 	req = &querypb.LoadPartitionsRequest{
@@ -619,7 +625,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+	suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 }
 
 func (suite *JobSuite) TestDynamicLoad() {
@@ -766,7 +772,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 
@@ -1107,7 +1113,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, meta.ErrNodeNotEnough)
+		suite.ErrorIs(err, merr.ErrResourceGroupNodeNotEnough)
 	}
 }
 

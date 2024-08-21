@@ -130,6 +130,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.MaximumGOGCConfig.GetAsInt())
 		params.Save("common.gchelper.minimumGoGC", "80")
 		assert.Equal(t, 80, Params.MinimumGOGCConfig.GetAsInt())
+
+		assert.Equal(t, 0, len(Params.ReadOnlyPrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.ReadWritePrivileges.GetAsStrings()))
+		assert.Equal(t, 0, len(Params.AdminPrivileges.GetAsStrings()))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -644,4 +648,12 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
+
+	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
+	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuota.GetAsFloat())
+	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	params.Save(params.QuotaConfig.DiskQuota.Key, "256")
+	assert.Equal(t, float64(256*1024*1024), params.QuotaConfig.DiskQuota.GetAsFloat())
+	assert.Equal(t, float64(256*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
 }

@@ -360,9 +360,12 @@ func WrapErrServiceUnavailable(reason string, msg ...string) error {
 }
 
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
+	toMB := func(mem float32) float32 {
+		return mem / 1024 / 1024
+	}
 	err := wrapFields(ErrServiceMemoryLimitExceeded,
-		value("predict", predict),
-		value("limit", limit),
+		value("predict(MB)", toMB(predict)),
+		value("limit(MB)", toMB(limit)),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -400,9 +403,12 @@ func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, ms
 }
 
 func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
+	toMB := func(mem float32) float32 {
+		return mem / 1024 / 1024
+	}
 	err := wrapFields(ErrServiceDiskLimitExceeded,
-		value("predict", predict),
-		value("limit", limit),
+		value("predict(MB)", toMB(predict)),
+		value("limit(MB)", toMB(limit)),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))

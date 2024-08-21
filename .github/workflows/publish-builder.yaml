@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu22.04, amazonlinux2023, rockylinux8]
+        os: [ubuntu20.04, ubuntu22.04, amazonlinux2023, rockylinux8]
     env:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
