@@ -233,3 +233,25 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 		zap.String("state", result.GetState().String()), zap.String("failReason", t.GetFailReason()))
 	return nil
 }
+
+func (stm *statsTaskMeta) GetStatsTaskState(taskID int64) indexpb.JobState {
+	stm.RLock()
+	defer stm.RUnlock()
+
+	t, ok := stm.tasks[taskID]
+	if !ok {
+		return indexpb.JobState_JobStateNone
+	}
+	return t.GetState()
+}
+
+func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64) indexpb.JobState {
+	stm.RLock()
+	defer stm.RUnlock()
+
+	t, ok := stm.segmentStatsTaskIndex[segmentID]
+	if !ok {
+		return indexpb.JobState_JobStateNone
+	}
+	return t.GetState()
+}

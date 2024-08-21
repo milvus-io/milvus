@@ -244,6 +244,30 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 	})
 
+	s.Run("GetStatsTaskState", func() {
+		s.Run("task not exist", func() {
+			state := m.GetStatsTaskState(100)
+			s.Equal(indexpb.JobState_JobStateNone, state)
+		})
+
+		s.Run("normal case", func() {
+			state := m.GetStatsTaskState(1)
+			s.Equal(indexpb.JobState_JobStateFinished, state)
+		})
+	})
+
+	s.Run("GetStatsTaskStateBySegmentID", func() {
+		s.Run("task not exist", func() {
+			state := m.GetStatsTaskStateBySegmentID(100)
+			s.Equal(indexpb.JobState_JobStateNone, state)
+		})
+
+		s.Run("normal case", func() {
+			state := m.GetStatsTaskStateBySegmentID(s.segmentID)
+			s.Equal(indexpb.JobState_JobStateFinished, state)
+		})
+	})
+
 	s.Run("RemoveStatsTask", func() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()

@@ -40,8 +40,9 @@ type statsTaskSuite struct {
 	suite.Suite
 	mt *meta
 
-	segID  int64
-	taskID int64
+	segID    int64
+	taskID   int64
+	targetID int64
 }
 
 func Test_statsTaskSuite(t *testing.T) {
@@ -51,6 +52,7 @@ func Test_statsTaskSuite(t *testing.T) {
 func (s *statsTaskSuite) SetupSuite() {
 	s.taskID = 1178
 	s.segID = 1179
+	s.targetID = 1180
 
 	s.mt = &meta{
 		segments: &SegmentsInfo{
@@ -137,7 +139,7 @@ func (s *statsTaskSuite) SetupSuite() {
 }
 
 func (s *statsTaskSuite) TestTaskStats_PreCheck() {
-	st := newStatsTask(s.taskID, s.segID)
+	st := newStatsTask(s.taskID, s.segID, s.targetID)
 
 	s.Equal(s.taskID, st.GetTaskID())
 

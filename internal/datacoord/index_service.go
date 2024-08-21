@@ -95,7 +95,7 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 
 func (s *Server) getUnIndexTaskSegments() []*SegmentInfo {
 	flushedSegments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetIsSorted()
+		return isFlush(seg)
 	}))
 
 	unindexedSegments := make([]*SegmentInfo, 0)

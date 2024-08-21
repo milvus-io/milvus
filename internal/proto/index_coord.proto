@@ -310,4 +310,5 @@ message StatsTask {
     int64 nodeID = 7;
     JobState state = 8;
     string fail_reason = 9;
+    int64 target_segmentID = 10;
 }

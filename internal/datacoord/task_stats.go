@@ -65,33 +65,35 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 }
 
 func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
-	taskID, err := s.allocator.allocID(context.Background())
+	start, _, err := s.allocator.allocN(2)
 	if err != nil {
 		return err
 	}
 	t := &indexpb.StatsTask{
-		CollectionID:  segment.GetCollectionID(),
-		PartitionID:   segment.GetPartitionID(),
-		SegmentID:     segment.GetID(),
-		InsertChannel: segment.GetInsertChannel(),
-		TaskID:        taskID,
-		Version:       0,
-		NodeID:        0,
-		State:         indexpb.JobState_JobStateInit,
-		FailReason:    "",
+		CollectionID:    segment.GetCollectionID(),
+		PartitionID:     segment.GetPartitionID(),
+		SegmentID:       segment.GetID(),
+		InsertChannel:   segment.GetInsertChannel(),
+		TaskID:          start,
+		Version:         0,
+		NodeID:          0,
+		State:           indexpb.JobState_JobStateInit,
+		FailReason:      "",
+		TargetSegmentID: start + 1,
 	}
 	if err = s.meta.statsTaskMeta.AddStatsTask(t); err != nil {
 		return err
 	}
-	s.taskScheduler.enqueue(newStatsTask(taskID, segment.GetID()))
+	s.taskScheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID()))
 	return nil
 }
 
 type statsTask struct {
-	taskID    int64
-	segmentID int64
-	nodeID    int64
-	taskInfo  *workerpb.StatsResult
+	taskID          int64
+	segmentID       int64
+	targetSegmentID int64
+	nodeID          int64
+	taskInfo        *workerpb.StatsResult
 
 	queueTime time.Time
 	startTime time.Time
@@ -102,10 +104,11 @@ type statsTask struct {
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID int64) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64) *statsTask {
 	return &statsTask{
-		taskID:    taskID,
-		segmentID: segmentID,
+		taskID:          taskID,
+		segmentID:       segmentID,
+		targetSegmentID: targetSegmentID,
 		taskInfo: &workerpb.StatsResult{
 			TaskID: taskID,
 			State:  indexpb.JobState_JobStateInit,
@@ -132,31 +135,31 @@ func (st *statsTask) ResetTask(mt *meta) {
 	mt.SetSegmentsCompacting([]UniqueID{st.segmentID}, false)
 }
 
-func (at *statsTask) SetQueueTime(t time.Time) {
-	at.queueTime = t
+func (st *statsTask) SetQueueTime(t time.Time) {
+	st.queueTime = t
 }
 
-func (at *statsTask) GetQueueTime() time.Time {
-	return at.queueTime
+func (st *statsTask) GetQueueTime() time.Time {
+	return st.queueTime
 }
 
-func (at *statsTask) SetStartTime(t time.Time) {
-	at.startTime = t
+func (st *statsTask) SetStartTime(t time.Time) {
+	st.startTime = t
 }
 
-func (at *statsTask) GetStartTime() time.Time {
-	return at.startTime
+func (st *statsTask) GetStartTime() time.Time {
+	return st.startTime
 }
 
-func (at *statsTask) SetEndTime(t time.Time) {
-	at.endTime = t
+func (st *statsTask) SetEndTime(t time.Time) {
+	st.endTime = t
 }
 
-func (at *statsTask) GetEndTime() time.Time {
-	return at.endTime
+func (st *statsTask) GetEndTime() time.Time {
+	return st.endTime
 }
 
-func (it *statsTask) GetTaskType() string {
+func (st *statsTask) GetTaskType() string {
 	return indexpb.JobType_JobTypeStatsJob.String()
 }
 
@@ -244,8 +247,8 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		DeltaLogs:       segment.GetDeltalogs(),
 		StorageConfig:   createStorageConfig(),
 		Schema:          collInfo.Schema,
-		TargetSegmentID: start,
-		StartLogID:      start + 1,
+		TargetSegmentID: st.targetSegmentID,
+		StartLogID:      start,
 		EndLogID:        end,
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
