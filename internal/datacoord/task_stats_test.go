@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -284,9 +285,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("alloc failed", func() {
-			alloc := FailsAllocator{
-				allocIDSucceed: false,
-			}
+			alloc := allocator.NewMockAllocator(s.T())
+			alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, fmt.Errorf("mock error"))
 
 			handler := NewNMockHandler(s.T())
 			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
@@ -319,16 +319,15 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
 				meta:      s.mt,
 				handler:   handler,
-				allocator: &alloc,
+				allocator: alloc,
 			})
 
 			s.False(checkPass)
 		})
 
 		s.Run("normal case", func() {
-			alloc := FailsAllocator{
-				allocIDSucceed: true,
-			}
+			alloc := allocator.NewMockAllocator(s.T())
+			alloc.EXPECT().AllocN(mock.Anything).Return(1, 100, nil)
 
 			handler := NewNMockHandler(s.T())
 			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
@@ -361,7 +360,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
 				meta:      s.mt,
 				handler:   handler,
-				allocator: &alloc,
+				allocator: alloc,
 			})
 
 			s.True(checkPass)

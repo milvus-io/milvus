@@ -2608,6 +2608,7 @@ func TestPostFlush(t *testing.T) {
 			CollectionID: 1,
 			PartitionID:  1,
 			State:        commonpb.SegmentState_Flushing,
+			IsSorted:     true,
 		}))
 
 		assert.NoError(t, err)

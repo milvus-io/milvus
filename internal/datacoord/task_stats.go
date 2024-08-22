@@ -76,7 +76,11 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 }
 
 func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
-	start, _, err := s.allocator.allocN(2)
+	if segment.GetIsSorted() {
+		log.Info("segment is sorted by segmentID", zap.Int64("segmentID", segment.GetID()))
+		return nil
+	}
+	start, _, err := s.allocator.AllocN(2)
 	if err != nil {
 		return err
 	}
@@ -243,7 +247,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
-	start, end, err := dependency.allocator.allocN(segment.getSegmentSize() / Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() * int64(len(collInfo.Schema.GetFields())) * 2)
+	start, end, err := dependency.allocator.AllocN(segment.getSegmentSize() / Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() * int64(len(collInfo.Schema.GetFields())) * 2)
 	if err != nil {
 		log.Warn("stats task alloc logID failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())
