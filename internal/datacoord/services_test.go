@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -43,7 +44,7 @@ type ServerSuite struct {
 
 func WithChannelManager(cm ChannelManager) Option {
 	return func(svr *Server) {
-		svr.sessionManager = NewSessionManagerImpl(withSessionCreator(svr.dataNodeCreator))
+		svr.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(svr.dataNodeCreator))
 		svr.channelManager = cm
 		svr.cluster = NewClusterImpl(svr.sessionManager, svr.channelManager)
 	}

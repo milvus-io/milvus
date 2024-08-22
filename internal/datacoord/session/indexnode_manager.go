@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package session
 
 import (
 	"context"
@@ -24,46 +24,53 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+	return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+}
+
 type WorkerManager interface {
-	AddNode(nodeID UniqueID, address string) error
-	RemoveNode(nodeID UniqueID)
-	StoppingNode(nodeID UniqueID)
-	PickClient() (UniqueID, types.IndexNodeClient)
+	AddNode(nodeID typeutil.UniqueID, address string) error
+	RemoveNode(nodeID typeutil.UniqueID)
+	StoppingNode(nodeID typeutil.UniqueID)
+	PickClient() (typeutil.UniqueID, types.IndexNodeClient)
 	ClientSupportDisk() bool
-	GetAllClients() map[UniqueID]types.IndexNodeClient
-	GetClientByID(nodeID UniqueID) (types.IndexNodeClient, bool)
+	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
+	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
 }
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
-	nodeClients      map[UniqueID]types.IndexNodeClient
-	stoppingNodes    map[UniqueID]struct{}
+	nodeClients      map[typeutil.UniqueID]types.IndexNodeClient
+	stoppingNodes    map[typeutil.UniqueID]struct{}
 	lock             lock.RWMutex
 	ctx              context.Context
-	indexNodeCreator indexNodeCreatorFunc
+	indexNodeCreator IndexNodeCreatorFunc
 }
 
 // NewNodeManager is used to create a new IndexNodeManager.
-func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) *IndexNodeManager {
+func NewNodeManager(ctx context.Context, indexNodeCreator IndexNodeCreatorFunc) *IndexNodeManager {
 	return &IndexNodeManager{
-		nodeClients:      make(map[UniqueID]types.IndexNodeClient),
-		stoppingNodes:    make(map[UniqueID]struct{}),
+		nodeClients:      make(map[typeutil.UniqueID]types.IndexNodeClient),
+		stoppingNodes:    make(map[typeutil.UniqueID]struct{}),
 		lock:             lock.RWMutex{},
 		ctx:              ctx,
 		indexNodeCreator: indexNodeCreator,
 	}
 }
 
-// setClient sets IndexNode client to node manager.
-func (nm *IndexNodeManager) setClient(nodeID UniqueID, client types.IndexNodeClient) {
+// SetClient sets IndexNode client to node manager.
+func (nm *IndexNodeManager) SetClient(nodeID typeutil.UniqueID, client types.IndexNodeClient) {
 	log.Debug("set IndexNode client", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -73,7 +80,7 @@ func (nm *IndexNodeManager) setClient(nodeID UniqueID, client types.IndexNodeCli
 }
 
 // RemoveNode removes the unused client of IndexNode.
-func (nm *IndexNodeManager) RemoveNode(nodeID UniqueID) {
+func (nm *IndexNodeManager) RemoveNode(nodeID typeutil.UniqueID) {
 	log.Debug("remove IndexNode", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -82,7 +89,7 @@ func (nm *IndexNodeManager) RemoveNode(nodeID UniqueID) {
 	metrics.IndexNodeNum.WithLabelValues().Set(float64(len(nm.nodeClients)))
 }
 
-func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
+func (nm *IndexNodeManager) StoppingNode(nodeID typeutil.UniqueID) {
 	log.Debug("IndexCoord", zap.Int64("Stopping node with ID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -90,7 +97,7 @@ func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
 }
 
 // AddNode adds the client of IndexNode.
-func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
+func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) error {
 	log.Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
 	var (
 		nodeClient types.IndexNodeClient
@@ -103,18 +110,18 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 		return err
 	}
 
-	nm.setClient(nodeID, nodeClient)
+	nm.SetClient(nodeID, nodeClient)
 	return nil
 }
 
-func (nm *IndexNodeManager) PickClient() (UniqueID, types.IndexNodeClient) {
+func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClient) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
 	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
-		pickNodeID = UniqueID(0)
+		pickNodeID = typeutil.UniqueID(0)
 		nodeMutex  = sync.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
@@ -209,11 +216,11 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 	return false
 }
 
-func (nm *IndexNodeManager) GetAllClients() map[UniqueID]types.IndexNodeClient {
+func (nm *IndexNodeManager) GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 
-	allClients := make(map[UniqueID]types.IndexNodeClient, len(nm.nodeClients))
+	allClients := make(map[typeutil.UniqueID]types.IndexNodeClient, len(nm.nodeClients))
 	for nodeID, client := range nm.nodeClients {
 		if _, ok := nm.stoppingNodes[nodeID]; !ok {
 			allClients[nodeID] = client
@@ -223,7 +230,7 @@ func (nm *IndexNodeManager) GetAllClients() map[UniqueID]types.IndexNodeClient {
 	return allClients
 }
 
-func (nm *IndexNodeManager) GetClientByID(nodeID UniqueID) (types.IndexNodeClient, bool) {
+func (nm *IndexNodeManager) GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool) {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 

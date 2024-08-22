@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
@@ -321,7 +322,7 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	cm := NewMockChannelManager(s.T())
 	cm.EXPECT().FindWatcher(mock.Anything).Return(100, nil)
 
-	sm := NewMockSessionManager(s.T())
+	sm := session.NewMockDataNodeManager(s.T())
 	sm.EXPECT().SyncSegments(mock.Anything, mock.Anything).RunAndReturn(func(i int64, request *datapb.SyncSegmentsRequest) error {
 		for _, seg := range request.GetSegmentInfos() {
 			if seg.GetState() == commonpb.SegmentState_Flushed {
@@ -348,7 +349,7 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 
 func (s *SyncSegmentsSchedulerSuite) Test_SyncSegmentsFail() {
 	cm := NewMockChannelManager(s.T())
-	sm := NewMockSessionManager(s.T())
+	sm := session.NewMockDataNodeManager(s.T())
 
 	sss := newSyncSegmentsScheduler(s.m, cm, sm)
 
