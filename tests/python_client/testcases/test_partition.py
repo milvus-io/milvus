@@ -369,7 +369,8 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to load partitions: failed to spawn replica for collection: nodes not enough"}
+                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"
+                             "[rg=__default_resource_group]"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
@@ -396,8 +397,8 @@ class TestPartitionParams(TestcaseBase):
         partition_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
-        error = {ct.err_code: 1100, ct.err_msg: "failed to load partitions: can't change the replica number for "
-                                                "loaded partitions: expected=1, actual=2: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
+                                                " for loaded collection: invalid parameter[expected=1][actual=2]"}
         partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()
