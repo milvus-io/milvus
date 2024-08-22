@@ -40,6 +40,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -1990,6 +1991,9 @@ func TestCore_BackupRBAC(t *testing.T) {
 func TestCore_RestoreRBAC(t *testing.T) {
 	meta := mockrootcoord.NewIMetaTable(t)
 	c := newTestCore(withHealthyCode(), withMeta(meta))
+	mockProxyClientManager := proxyutil.NewMockProxyClientManager(t)
+	mockProxyClientManager.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(nil)
+	c.proxyClientManager = mockProxyClientManager
 
 	meta.EXPECT().RestoreRBAC(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	resp, err := c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})

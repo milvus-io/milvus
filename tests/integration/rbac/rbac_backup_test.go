@@ -87,7 +87,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 			DbName:     util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
 			},
 		},
 	})
@@ -131,7 +131,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 			DbName:     util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: util.UserRoot},
-				Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
 			},
 		},
 	})
@@ -159,6 +159,35 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.NoError(err)
 	s.True(merr.Ok(resp11.GetStatus()))
 	s.Equal(resp11.GetRBACMeta().String(), resp5.GetRBACMeta().String())
+
+	// clean rbac meta
+	resp12, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+		Type: milvuspb.OperatePrivilegeType_Revoke,
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: roleName},
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+			ObjectName: util.AnyWord,
+			DbName:     util.AnyWord,
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: util.UserRoot},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Search"},
+			},
+		},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp12))
+
+	resp13, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+		RoleName: roleName,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp13))
+
+	resp14, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
+		Username: userName,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp14))
 }
 
 func TestRBACBackup(t *testing.T) {
