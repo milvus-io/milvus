@@ -132,19 +132,15 @@ func (m *Manager) CASCachedValue(key string, origin string, value interface{}) b
 func (m *Manager) EvictCachedValue(key string) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-	delete(m.configCache, key)
+	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
+	clear(m.configCache)
 }
 
 func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-
-	set := typeutil.NewSet(keys...)
-	for key := range m.configCache {
-		if set.Contain(formatKey(key)) {
-			delete(m.configCache, key)
-		}
-	}
+	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
+	clear(m.configCache)
 }
 
 func (m *Manager) GetConfig(key string) (string, error) {
