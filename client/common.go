@@ -32,6 +32,11 @@ func (c *CollectionCache) GetCollection(ctx context.Context, collName string) (*
 	return coll, err
 }
 
+// Reset clears all cached info, used when client switching env.
+func (c *CollectionCache) Reset() {
+	c.collections = typeutil.NewConcurrentMap[string, *entity.Collection]()
+}
+
 func NewCollectionCache(fetcher func(context.Context, string) (*entity.Collection, error)) *CollectionCache {
 	return &CollectionCache{
 		collections: typeutil.NewConcurrentMap[string, *entity.Collection](),

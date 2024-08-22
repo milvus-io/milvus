@@ -202,6 +202,7 @@ func (c *Client) connectInternal(ctx context.Context) error {
 
 	c.config.setServerInfo(resp.GetServerInfo().GetBuildTags())
 	c.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
+	c.collCache.Reset()
 
 	return nil
 }
