@@ -701,6 +701,10 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 }
 
 func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
+	validData := make([]bool, len(data))
+	for i := range validData {
+		validData[i] = true
+	}
 	return &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
@@ -713,6 +717,7 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 				},
 			},
 		},
+		ValidData: validData,
 		IsDynamic: true,
 	}
 }
@@ -1553,6 +1558,11 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
 				}
 			}
+			validData := make([]bool, len(field.GetScalars().GetJsonData().GetData()))
+			for i := range validData {
+				validData[i] = true
+			}
+			field.ValidData = append(field.ValidData, validData...)
 		}
 	}
 

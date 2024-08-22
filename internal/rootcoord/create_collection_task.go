@@ -260,6 +260,7 @@ func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSch
 			Description: "dynamic schema",
 			DataType:    schemapb.DataType_JSON,
 			IsDynamic:   true,
+			Nullable:    true,
 		})
 		log.Info("append dynamic field", zap.String("collection", schema.Name))
 	}
