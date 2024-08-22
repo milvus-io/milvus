@@ -165,6 +165,21 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 	return
 }
 
+func (d *distribution) PeekSegmentsBySnapshot(snapVersion int64, readable bool, partitions ...int64) ([]SnapshotItem, []SegmentEntry, error) {
+	snapshot, ok := d.snapshots.Get(snapVersion)
+	if !ok {
+		//hc--need refine error handling here
+		return nil, nil, merr.ErrParameterInvalid
+	}
+	sealed, growing := snapshot.Peek(partitions...)
+	if readable {
+		targetVersion := snapshot.GetTargetVersion()
+		filterReadable := d.readableFilter(targetVersion)
+		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
+	}
+	return sealed, growing, nil
+}
+
 // Unpin notifies snapshot one reference is released.
 func (d *distribution) Unpin(version int64) {
 	snapshot, ok := d.snapshots.Get(version)

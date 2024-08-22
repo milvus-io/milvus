@@ -133,6 +133,14 @@ type shardDelegator struct {
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
+
+	//Managing snapshot context used by external clients
+	readCtxMap  map[int64]*ReadContext
+	readCtxLock sync.RWMutex
+}
+
+type ReadContext struct {
+	snapshotID int64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -451,6 +459,31 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	return nil
 }
 
+func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []SegmentEntry, segmentIdx int64) ([]SnapshotItem, []SegmentEntry, error) {
+	idx := 0
+	targetSealed := make([]SnapshotItem, 0)
+	targetGrowing := make([]SegmentEntry, 0)
+	for _, sealedItem := range sealed {
+		nextIdx := idx + len(sealedItem.Segments)
+		if int64(nextIdx) >= segmentIdx {
+			targetIdx := int(segmentIdx - int64(idx)) // hc--need handle int vs int64 here
+			targetSegment := sealedItem.Segments[targetIdx]
+			targetSealed = append(targetSealed, SnapshotItem{
+				NodeID:   sealedItem.NodeID,
+				Segments: []SegmentEntry{targetSegment},
+			})
+			return targetSealed, targetGrowing, nil
+		}
+		idx = nextIdx
+	}
+	targetIdx := int(segmentIdx - int64(idx))
+	if targetIdx >= len(growing) {
+		return nil, nil, merr.ErrParameterInvalid
+	}
+	targetGrowing = append(targetGrowing, growing[targetIdx])
+	return targetSealed, targetGrowing, nil
+}
+
 // Query performs query operation on shard.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
@@ -485,12 +518,41 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
-	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	var sealed []SnapshotItem
+	var growing []SegmentEntry
+	var version int64
+	//handle scan request
+	if req.GetReq().GetScanCtx() != nil {
+		scanCtx := req.GetReq().GetScanCtx()
+		scanCtxId := scanCtx.GetScanCtxId()
+		scanSegmentIdx := scanCtx.GetSegmentIdx()
+		scanOffset := scanCtx.GetOffset()
+		{
+			sd.readCtxLock.RLock()
+			scanCtx := sd.readCtxMap[scanCtxId]
+			if scanCtx == nil {
+				return nil, merr.ErrParameterInvalid
+				//refine error handle here
+			}
+			sealed, growing, err = sd.distribution.PeekSegmentsBySnapshot(scanCtx.snapshotID, true, req.GetReq().GetPartitionIDs()...)
+			if err != nil {
+				return nil, err
+			}
+			sealed, growing, err = sd.modifyRequestForScan(sealed, growing, scanSegmentIdx)
+			if err != nil {
+				return nil, err
+			}
+			sd.readCtxLock.RUnlock()
+		}
+	} else {
+		sealed, growing, version, err = sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+		if err != nil {
+			log.Warn("delegator failed to query, current distribution is not serviceable")
+			return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
+		}
+		defer sd.distribution.Unpin(version)
 	}
-	defer sd.distribution.Unpin(version)
+
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	} else {

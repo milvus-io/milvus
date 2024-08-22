@@ -17,8 +17,8 @@ package proxy
 
 import (
 	"context"
-
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -51,6 +51,8 @@ type CollectionWorkLoad struct {
 	collectionID   int64
 	nq             int64
 	exec           executeFunc
+	internalReq    *internalpb.RetrieveRequest
+	milvusReq      *milvuspb.QueryRequest
 }
 
 type LBPolicy interface {
@@ -196,9 +198,22 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	return err
 }
 
+func (lb *LBPolicyImpl) targetDml2Leaders(ctx context.Context, workload *CollectionWorkLoad) (map[string][]nodeInfo, error) {
+	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collectionName, workload.collectionID)
+	if workload.milvusReq.GetScanReqCtx() != nil {
+		scanCtx := workload.milvusReq.GetScanReqCtx()
+		for ch, item := range scanCtx.GetScanMap() {
+			dml2leaders[ch] = lo.Filter(dml2leaders[ch], func(info nodeInfo, _ int) bool {
+				return info.nodeID == item.GetNode()
+			})
+		}
+	}
+	return dml2leaders, err
+}
+
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
-	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collectionName, workload.collectionID)
+	dml2leaders, err := lb.targetDml2Leaders(ctx, &workload)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
 		return err
