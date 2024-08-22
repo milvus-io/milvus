@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -37,7 +38,7 @@ type ImportSchedulerSuite struct {
 	collectionID int64
 
 	catalog   *mocks.DataCoordCatalog
-	alloc     *NMockAllocator
+	alloc     *allocator.MockAllocator
 	cluster   *MockCluster
 	meta      *meta
 	imeta     ImportMeta
@@ -62,7 +63,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
-	s.alloc = NewNMockAllocator(s.T())
+	s.alloc = allocator.NewMockAllocator(s.T())
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
@@ -174,8 +175,8 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 
 	// pending -> inProgress
 	const nodeID = 10
-	s.alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
-	s.alloc.EXPECT().allocTimestamp(mock.Anything).Return(300, nil)
+	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
+	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)

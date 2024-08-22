@@ -102,7 +102,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.allocTimestamp(ctx)
+	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
 		log.Warn("unable to alloc timestamp", zap.Error(err))
 		return &datapb.FlushResponse{
@@ -1699,7 +1699,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
-	idStart, _, err := s.allocator.allocN(int64(len(files)) + 1)
+	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
 		return resp, nil

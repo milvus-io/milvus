@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -39,7 +40,7 @@ func TestL0CompactionTaskSuite(t *testing.T) {
 type L0CompactionTaskSuite struct {
 	suite.Suite
 
-	mockAlloc   *NMockAllocator
+	mockAlloc   *allocator.MockAllocator
 	mockMeta    *MockCompactionMeta
 	mockSessMgr *MockSessionManager
 }
@@ -47,7 +48,7 @@ type L0CompactionTaskSuite struct {
 func (s *L0CompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockSessMgr = NewMockSessionManager(s.T())
-	s.mockAlloc = NewNMockAllocator(s.T())
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
 }
 
 func (s *L0CompactionTaskSuite) SetupSubTest() {
@@ -100,8 +101,8 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 		},
 		meta: s.mockMeta,
 	}
-	alloc := NewNMockAllocator(s.T())
-	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
@@ -133,8 +134,8 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		},
 		meta: s.mockMeta,
 	}
-	alloc := NewNMockAllocator(s.T())
-	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
 
 	_, err := task.BuildCompactionRequest()
@@ -169,8 +170,8 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		},
 		meta: s.mockMeta,
 	}
-	alloc := NewNMockAllocator(s.T())
-	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
@@ -179,7 +180,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 	var task CompactionTask
 
-	s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
 
 	task = &l0CompactionTask{
 		allocator: s.mockAlloc,
@@ -233,7 +234,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining BuildCompactionRequest failed", func() {
-		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"
@@ -269,7 +270,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 	s.Run("test pipelining saveTaskMeta failed", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t.NodeID = 100
 		channel := "ch-1"
 		deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
@@ -300,7 +301,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining Compaction failed", func() {
-		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"
@@ -339,7 +340,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 	})
 
 	s.Run("test pipelining success", func() {
-		s.mockAlloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
 		t.NodeID = 100
 		channel := "ch-1"

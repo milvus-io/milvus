@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -79,7 +80,7 @@ type compactionPlanHandler struct {
 	executingTasks map[int64]CompactionTask // planID -> task
 
 	meta             CompactionMeta
-	allocator        allocator
+	allocator        allocator.Allocator
 	chManager        ChannelManager
 	sessions         SessionManager
 	cluster          Cluster
@@ -176,7 +177,7 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler, handler Handler,
+func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       make(map[int64]CompactionTask),

@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -34,11 +35,11 @@ import (
 
 type clusteringCompactionPolicy struct {
 	meta      *meta
-	allocator allocator
+	allocator allocator.Allocator
 	handler   Handler
 }
 
-func newClusteringCompactionPolicy(meta *meta, allocator allocator, handler Handler) *clusteringCompactionPolicy {
+func newClusteringCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
 	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
@@ -113,7 +114,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, triggerID, nil
 	}
 
-	newTriggerID, err := policy.allocator.allocID(ctx)
+	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn("fail to allocate triggerID", zap.Error(err))
 		return nil, 0, err

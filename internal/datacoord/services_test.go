@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -1317,14 +1318,14 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
 		// alloc failed
-		alloc := NewNMockAllocator(t)
-		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 		s.allocator = alloc
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		alloc = NewNMockAllocator(t)
-		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+		alloc = allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 		s.allocator = alloc
 
 		// add job failed

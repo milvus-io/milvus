@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -46,7 +47,7 @@ type clusteringCompactionTask struct {
 	result *datapb.CompactionPlanResult
 
 	span             trace.Span
-	allocator        allocator
+	allocator        allocator.Allocator
 	meta             CompactionMeta
 	sessions         SessionManager
 	handler          Handler
@@ -55,7 +56,7 @@ type clusteringCompactionTask struct {
 	maxRetryTimes int32
 }
 
-func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator, meta CompactionMeta, session SessionManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
+func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session SessionManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
 	return &clusteringCompactionTask{
 		CompactionTask:   t,
 		allocator:        allocator,
@@ -151,7 +152,7 @@ func (t *clusteringCompactionTask) retryableProcess() error {
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.allocN(1)
+	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {
 		return nil, err
 	}
