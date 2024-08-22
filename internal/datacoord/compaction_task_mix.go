@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -18,12 +19,12 @@ var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
 	*datapb.CompactionTask
-	plan       *datapb.CompactionPlan
-	result     *datapb.CompactionPlanResult
-	span       trace.Span
-	sessions   SessionManager
-	meta       CompactionMeta
-	newSegment *SegmentInfo
+	plan          *datapb.CompactionPlan
+	result        *datapb.CompactionPlanResult
+	span          trace.Span
+	sessions      SessionManager
+	meta          CompactionMeta
+	newSegmentIDs []int64
 }
 
 func (t *mixCompactionTask) processPipelining() bool {
@@ -86,7 +87,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 		}
 	case datapb.CompactionTaskState_completed:
 		t.result = result
-		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
+		if len(result.GetSegments()) == 0 {
 			log.Info("illegal compaction results")
 			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
 			if err != nil {
@@ -107,8 +108,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 			}
 			return false
 		}
-		segments := []UniqueID{t.newSegment.GetID()}
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(segments))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(t.newSegmentIDs))
 		if err != nil {
 			log.Warn("mixCompaction failed to setState meta saved", zap.Error(err))
 			return false
@@ -140,7 +140,7 @@ func (t *mixCompactionTask) saveSegmentMeta() error {
 		return err
 	}
 	// Apply metrics after successful meta update.
-	t.newSegment = newSegments[0]
+	t.newSegmentIDs = lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
 	metricMutation.commit()
 	log.Info("mixCompactionTask success to save segment meta")
 	return nil
@@ -232,6 +232,7 @@ func (t *mixCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compa
 		FailReason:       t.GetFailReason(),
 		RetryTimes:       t.GetRetryTimes(),
 		Pos:              t.GetPos(),
+		MaxSize:          t.GetMaxSize(),
 	}
 	for _, opt := range opts {
 		opt(taskClone)
@@ -338,6 +339,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
 		SlotUsage:        Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+		MaxSize:          t.GetMaxSize(),
 	}
 	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
@@ -359,6 +361,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}
-	log.Info("Compaction handler refreshed mix compaction plan", zap.Any("segID2DeltaLogs", segIDMap))
+	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
 }
