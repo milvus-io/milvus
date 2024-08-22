@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -939,8 +939,8 @@ func (s *MockDataSuiteBase) PrepareData() {
 	}
 }
 
-func EmptyBfsFactory(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
-	return metacache.NewBloomFilterSet()
+func EmptyBfsFactory(info *datapb.SegmentInfo) pkoracle.PkStat {
+	return pkoracle.NewBloomFilterSet()
 }
 
 func GetWatchInfoByOpID(opID typeutil.UniqueID, channel string, state datapb.ChannelWatchState) *datapb.ChannelWatchInfo {

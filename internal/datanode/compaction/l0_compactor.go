@@ -30,7 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -240,7 +240,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
 	allDelta *storage.DeleteData,
-	segmentBfs map[int64]*metacache.BloomFilterSet,
+	segmentBfs map[int64]*pkoracle.BloomFilterSet,
 ) map[int64]*SegmentDeltaWriter {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
@@ -281,7 +281,7 @@ type BatchApplyRet = struct {
 	Segment2Hits map[int64][]bool
 }
 
-func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*pkoracle.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -418,7 +418,7 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 	return dData, nil
 }
 
-func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
+func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*pkoracle.BloomFilterSet, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadBF")
 	defer span.End()
 
@@ -427,7 +427,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 		pool    = io.GetOrCreateStatsPool()
 
 		mu  = &sync.Mutex{}
-		bfs = make(map[int64]*metacache.BloomFilterSet)
+		bfs = make(map[int64]*pkoracle.BloomFilterSet)
 	)
 
 	for _, segment := range targetSegments {
@@ -445,7 +445,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 					zap.Error(err))
 				return err, err
 			}
-			bf := metacache.NewBloomFilterSet(pks...)
+			bf := pkoracle.NewBloomFilterSet(pks...)
 			mu.Lock()
 			defer mu.Unlock()
 			bfs[segment.GetSegmentID()] = bf

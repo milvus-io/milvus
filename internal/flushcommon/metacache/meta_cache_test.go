@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -56,8 +57,8 @@ func (s *MetaCacheSuite) SetupSuite() {
 	s.growingSegments = []int64{5, 6, 7, 8}
 	s.newSegments = []int64{9, 10, 11, 12}
 	s.invaliedSeg = 111
-	s.bfsFactory = func(*datapb.SegmentInfo) *BloomFilterSet {
-		return NewBloomFilterSet()
+	s.bfsFactory = func(*datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
 	}
 	s.collSchema = &schemapb.CollectionSchema{
 		Name: "test_collection",
@@ -110,8 +111,8 @@ func (s *MetaCacheSuite) TestAddSegment() {
 			ID:          segID,
 			PartitionID: 10,
 		}
-		s.cache.AddSegment(info, func(info *datapb.SegmentInfo) *BloomFilterSet {
-			return NewBloomFilterSet()
+		s.cache.AddSegment(info, func(info *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		}, UpdateState(commonpb.SegmentState_Flushed))
 	}
 
@@ -208,8 +209,8 @@ func (s *MetaCacheSuite) Test_UpdateSegmentView() {
 			NumOfRows:  10240,
 		},
 	}
-	addSegmentsBF := []*BloomFilterSet{
-		NewBloomFilterSet(),
+	addSegmentsBF := []*pkoracle.BloomFilterSet{
+		pkoracle.NewBloomFilterSet(),
 	}
 	segments := map[int64]struct{}{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 100: {},
@@ -259,8 +260,8 @@ func BenchmarkGetSegmentsBy(b *testing.B) {
 		Vchan: &datapb.VchannelInfo{
 			FlushedSegments: flushSegmentInfos,
 		},
-	}, func(*datapb.SegmentInfo) *BloomFilterSet {
-		return NewBloomFilterSet()
+	}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
 	})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -291,8 +292,8 @@ func BenchmarkGetSegmentsByWithoutIDs(b *testing.B) {
 		Vchan: &datapb.VchannelInfo{
 			FlushedSegments: flushSegmentInfos,
 		},
-	}, func(*datapb.SegmentInfo) *BloomFilterSet {
-		return NewBloomFilterSet()
+	}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
 	})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
