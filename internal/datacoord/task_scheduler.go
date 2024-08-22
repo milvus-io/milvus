@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -53,7 +54,7 @@ type taskScheduler struct {
 	meta *meta
 
 	policy                    buildIndexPolicy
-	nodeManager               WorkerManager
+	nodeManager               session.WorkerManager
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
 	handler                   Handler
@@ -61,7 +62,7 @@ type taskScheduler struct {
 
 func newTaskScheduler(
 	ctx context.Context,
-	metaTable *meta, nodeManager WorkerManager,
+	metaTable *meta, nodeManager session.WorkerManager,
 	chunkManager storage.ChunkManager,
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,

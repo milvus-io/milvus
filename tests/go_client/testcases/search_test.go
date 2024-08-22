@@ -937,11 +937,6 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 		_, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{}).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, errSearch, false, "nq (number of search vector per search request) should be in range [1, 16384]")
 
-		vector1, err := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
-		common.CheckErr(t, err, true)
-		_, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector1}).WithConsistencyLevel(entity.ClStrong))
-		common.CheckErr(t, errSearch1, false, "Sparse row data should not be empty")
-
 		positions := make([]uint32, 100)
 		values := make([]float32, 100)
 		for i := 0; i < 100; i++ {
@@ -951,6 +946,74 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 		vector, _ := entity.NewSliceSparseEmbedding(positions, values)
 		_, errSearch2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, errSearch2, false, "Invalid sparse row: id should be strict ascending")
+	}
+}
+
+// test search with empty sparse vector
+func TestSearchWithEmptySparseVector(t *testing.T) {
+	t.Parallel()
+	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
+	idxWand := index.NewSparseWANDIndex(entity.IP, 0.1)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	for _, idx := range []index.Index{idxInverted, idxWand} {
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
+			TWithEnableDynamicField(true))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128))
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		// An empty sparse vector is considered to be uncorrelated with any other vector.
+		vector1, err := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
+		common.CheckErr(t, err, true)
+		searchRes, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector1}).WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, errSearch1, true)
+		common.CheckSearchResult(t, searchRes, 1, 0)
+	}
+}
+
+// test search from empty sparse vectors collection
+func TestSearchFromEmptySparseVector(t *testing.T) {
+	t.Parallel()
+	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	for _, idx := range []index.Index{idxInverted} {
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
+			TWithEnableDynamicField(true))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		// insert sparse vector: empty position and values
+		columnOpt := hp.TNewDataOption()
+		data := []column.Column{
+			hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *columnOpt),
+			hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, *columnOpt),
+		}
+		sparseVecs := make([]entity.SparseEmbedding, 0, common.DefaultNb)
+		for i := 0; i < common.DefaultNb; i++ {
+			vec, _ := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
+			sparseVecs = append(sparseVecs, vec)
+		}
+
+		data = append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, sparseVecs))
+		insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data...))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, common.DefaultNb, insertRes.InsertCount)
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+		// search vector is or not empty sparse vector
+		vector1, _ := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
+		vector2, _ := entity.NewSliceSparseEmbedding([]uint32{0, 2, 5, 10, 100}, []float32{rand.Float32(), rand.Float32(), rand.Float32(), rand.Float32(), rand.Float32()})
+
+		for _, vector := range []entity.Vector{vector1, vector2} {
+			searchRes, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, errSearch1, true)
+			common.CheckSearchResult(t, searchRes, 1, 0)
+		}
 	}
 }
 

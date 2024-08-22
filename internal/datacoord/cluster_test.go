@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -50,19 +51,19 @@ type ClusterSuite struct {
 
 	mockKv        *mocks.WatchKV
 	mockChManager *MockChannelManager
-	mockSession   *MockSessionManager
+	mockSession   *session.MockDataNodeManager
 }
 
 func (suite *ClusterSuite) SetupTest() {
 	suite.mockKv = mocks.NewWatchKV(suite.T())
 	suite.mockChManager = NewMockChannelManager(suite.T())
-	suite.mockSession = NewMockSessionManager(suite.T())
+	suite.mockSession = session.NewMockDataNodeManager(suite.T())
 }
 
 func (suite *ClusterSuite) TearDownTest() {}
 
 func (suite *ClusterSuite) TestStartup() {
-	nodes := []*NodeInfo{
+	nodes := []*session.NodeInfo{
 		{NodeID: 1, Address: "addr1"},
 		{NodeID: 2, Address: "addr2"},
 		{NodeID: 3, Address: "addr3"},
@@ -71,7 +72,7 @@ func (suite *ClusterSuite) TestStartup() {
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Times(len(nodes))
 	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, legacys []int64, nodeIDs []int64) error {
-			suite.ElementsMatch(lo.Map(nodes, func(info *NodeInfo, _ int) int64 { return info.NodeID }), nodeIDs)
+			suite.ElementsMatch(lo.Map(nodes, func(info *session.NodeInfo, _ int) int64 { return info.NodeID }), nodeIDs)
 			return nil
 		}).Once()
 
@@ -81,7 +82,7 @@ func (suite *ClusterSuite) TestStartup() {
 }
 
 func (suite *ClusterSuite) TestRegister() {
-	info := &NodeInfo{NodeID: 1, Address: "addr1"}
+	info := &session.NodeInfo{NodeID: 1, Address: "addr1"}
 
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Once()
 	suite.mockChManager.EXPECT().AddNode(mock.Anything).
@@ -96,7 +97,7 @@ func (suite *ClusterSuite) TestRegister() {
 }
 
 func (suite *ClusterSuite) TestUnregister() {
-	info := &NodeInfo{NodeID: 1, Address: "addr1"}
+	info := &session.NodeInfo{NodeID: 1, Address: "addr1"}
 
 	suite.mockSession.EXPECT().DeleteSession(mock.Anything).Return().Once()
 	suite.mockChManager.EXPECT().DeleteNode(mock.Anything).

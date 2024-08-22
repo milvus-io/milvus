@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -49,14 +50,14 @@ type clusteringCompactionTask struct {
 	span             trace.Span
 	allocator        allocator.Allocator
 	meta             CompactionMeta
-	sessions         SessionManager
+	sessions         session.DataNodeManager
 	handler          Handler
 	analyzeScheduler *taskScheduler
 
 	maxRetryTimes int32
 }
 
-func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session SessionManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
+func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, session session.DataNodeManager, handler Handler, analyzeScheduler *taskScheduler) *clusteringCompactionTask {
 	return &clusteringCompactionTask{
 		CompactionTask:   t,
 		allocator:        allocator,

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -57,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -2463,7 +2463,7 @@ func TestOptions(t *testing.T) {
 	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		sessionManager := NewSessionManagerImpl()
+		sessionManager := session.NewDataNodeManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, allocator.NewMockAllocator(t))
 		assert.NoError(t, err)
 
@@ -2505,7 +2505,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cancel()
 	alloc := allocator.NewMockAllocator(t)
 
-	sessionManager := NewSessionManagerImpl()
+	sessionManager := session.NewDataNodeManagerImpl()
 	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, alloc)
 	assert.NoError(t, err)
 
@@ -2549,7 +2549,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.cluster.GetSessions()
 		assert.EqualValues(t, 1, len(dataNodes))
-		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].info.Address)
+		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].Address())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionDelEvent,
@@ -3126,7 +3126,7 @@ func closeTestServer(t *testing.T, svr *Server) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	getSessionManager := func(isHealthy bool) *SessionManagerImpl {
+	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
 		var client *mockDataNodeClient
 		if isHealthy {
 			client = &mockDataNodeClient{
@@ -3140,16 +3140,12 @@ func Test_CheckHealth(t *testing.T) {
 			}
 		}
 
-		sm := NewSessionManagerImpl()
-		sm.sessions = struct {
-			lock.RWMutex
-			data map[int64]*Session
-		}{data: map[int64]*Session{1: {
-			client: client,
-			clientCreator: func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-				return client, nil
-			},
-		}}}
+		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			return client, nil
+		}))
+		sm.AddSession(&session.NodeInfo{
+			NodeID: 1,
+		})
 		return sm
 	}
 

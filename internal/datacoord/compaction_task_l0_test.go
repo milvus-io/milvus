@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -42,12 +43,12 @@ type L0CompactionTaskSuite struct {
 
 	mockAlloc   *allocator.MockAllocator
 	mockMeta    *MockCompactionMeta
-	mockSessMgr *MockSessionManager
+	mockSessMgr *session.MockDataNodeManager
 }
 
 func (s *L0CompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
-	s.mockSessMgr = NewMockSessionManager(s.T())
+	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 }
 
