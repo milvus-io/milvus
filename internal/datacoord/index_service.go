@@ -75,7 +75,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 }
 
 func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
-	if !segment.GetIsSorted() {
+	if !segment.GetIsSorted() && !segment.GetIsImporting() {
 		log.Debug("segment is not sorted by pk, skip create index", zap.Int64("segmentID", segment.ID))
 		return nil
 	}
