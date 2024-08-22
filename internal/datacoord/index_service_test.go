@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -214,7 +215,7 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "DISKANN",
 			},
 		}
-		s.indexNodeManager = NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		s.indexNodeManager = session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
 		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
@@ -232,12 +233,10 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "true",
 			},
 		}
-		nodeManager := NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		nodeManager := session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
 		s.indexNodeManager = nodeManager
 		mockNode := mocks.NewMockIndexNodeClient(t)
-		s.indexNodeManager.lock.Lock()
-		s.indexNodeManager.nodeClients[1001] = mockNode
-		s.indexNodeManager.lock.Unlock()
+		nodeManager.SetClient(1001, mockNode)
 		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
 			Status:     merr.Success(),
 			EnableDisk: true,

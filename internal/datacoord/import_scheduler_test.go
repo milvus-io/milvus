@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -106,12 +107,11 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		Slots: 1,
 	}, nil)
 	s.cluster.EXPECT().PreImport(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: nodeID,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: nodeID,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
@@ -181,12 +181,11 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		Slots: 1,
 	}, nil)
 	s.cluster.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: nodeID,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: nodeID,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
@@ -243,12 +242,11 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: 6,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: 6,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := &SegmentInfo{

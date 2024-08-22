@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -24,7 +25,7 @@ type mixCompactionTask struct {
 
 	span       trace.Span
 	allocator  allocator.Allocator
-	sessions   SessionManager
+	sessions   session.DataNodeManager
 	meta       CompactionMeta
 	newSegment *SegmentInfo
 }

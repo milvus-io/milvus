@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -44,7 +45,7 @@ type CompactionPlanHandlerSuite struct {
 	mockMeta    *MockCompactionMeta
 	mockAlloc   *allocator.MockAllocator
 	mockCm      *MockChannelManager
-	mockSessMgr *MockSessionManager
+	mockSessMgr *session.MockDataNodeManager
 	handler     *compactionPlanHandler
 	cluster     Cluster
 }
@@ -53,7 +54,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockCm = NewMockChannelManager(s.T())
-	s.mockSessMgr = NewMockSessionManager(s.T())
+	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
 	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil, nil)
 }
