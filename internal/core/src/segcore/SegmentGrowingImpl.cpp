@@ -451,6 +451,27 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
 }
 
 std::unique_ptr<DataArray>
+SegmentGrowingImpl::bulk_subscript(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
+    Assert(!dynamic_field_names.empty());
+    auto& field_meta = schema_->operator[](field_id);
+    auto vec_ptr = insert_record_.get_field_data_base(field_id);
+    auto result = CreateScalarDataArray(count, field_meta);
+    auto vec = dynamic_cast<const ConcurrentVector<Json>*>(vec_ptr);
+    auto dst = result->mutable_scalars()->mutable_json_data()->mutable_data();
+    auto& src = *vec;
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        dst->at(i) =
+            ExtractSubJson(std::string(src[offset]), dynamic_field_names);
+    }
+    return result;
+}
+
+std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {

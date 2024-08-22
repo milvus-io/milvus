@@ -199,6 +199,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const override;
+
  public:
     friend std::unique_ptr<SegmentGrowing>
     CreateGrowingSegment(SchemaPtr schema,

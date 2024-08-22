@@ -210,4 +210,5 @@ message PlanNode {
     QueryPlanNode query = 4;
   }
   repeated int64 output_field_ids = 3;
+  repeated string dynamic_fields = 5;
 }
