@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -138,7 +139,8 @@ func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParam
 func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
-	segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
+	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
+	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -149,7 +151,6 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				zap.String("segmentType", segType),
 			)
 			segment := item
-
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 				var stats []*storage.PkStatistics
 				var err error
@@ -157,7 +158,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				if err != nil {
 					return nil, err
 				}
-				segmentPks.Insert(segment.GetID(), stats)
+				segmentPks.Insert(segment.GetID(), pkoracle.NewBloomFilterSet(stats...))
 				if tickler != nil {
 					tickler.Inc()
 				}
@@ -168,9 +169,46 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			futures = append(futures, future)
 		}
 	}
+	lazyLoadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
+		for _, item := range segments {
+			log.Info("lazy load pk stats for segment",
+				zap.String("vChannelName", item.GetInsertChannel()),
+				zap.Int64("segmentID", item.GetID()),
+				zap.Int64("numRows", item.GetNumOfRows()),
+				zap.String("segmentType", segType),
+			)
+			segment := item
 
+			lazy := pkoracle.NewLazyPkstats()
+
+			// ignore lazy load future
+			_ = io.GetOrCreateStatsPool().Submit(func() (any, error) {
+				var stats []*storage.PkStatistics
+				var err error
+				stats, err = compaction.LoadStats(context.Background(), chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
+				if err != nil {
+					return nil, err
+				}
+				pkStats := pkoracle.NewBloomFilterSet(stats...)
+				lazy.SetPkStats(pkStats)
+				return struct{}{}, nil
+			})
+			segmentPks.Insert(segment.GetID(), lazy)
+			if tickler != nil {
+				tickler.Inc()
+			}
+		}
+	}
+
+	// growing segment cannot use lazy mode
 	loadSegmentStats("growing", unflushed)
-	loadSegmentStats("sealed", flushed)
+	lazy := paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()
+	// check paramtable to decide whether skip load BF stage when initializing
+	if lazy {
+		lazyLoadSegmentStats("sealed", flushed)
+	} else {
+		loadSegmentStats("sealed", flushed)
+	}
 
 	// use fetched segment info
 	info.Vchan.FlushedSegments = flushed
@@ -181,9 +219,9 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	}
 
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-		entries, _ := segmentPks.Get(segment.GetID())
-		return metacache.NewBloomFilterSet(entries...)
+	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+		pkStat, _ := segmentPks.Get(segment.GetID())
+		return pkStat
 	})
 
 	return metacache, nil

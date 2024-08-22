@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -52,12 +53,12 @@ type MetaCache interface {
 	// DetectMissingSegments returns the segment ids which is missing in datanode.
 	DetectMissingSegments(segments map[int64]struct{}) []int64
 	// UpdateSegmentView updates the segments BF from datacoord view.
-	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, allSegments map[int64]struct{})
+	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{})
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
 
-type PkStatsFactory func(vchannel *datapb.SegmentInfo) *BloomFilterSet
+type PkStatsFactory func(vchannel *datapb.SegmentInfo) pkoracle.PkStat
 
 type metaCacheImpl struct {
 	collectionID int64
@@ -266,7 +267,7 @@ func (c *metaCacheImpl) DetectMissingSegments(segments map[int64]struct{}) []int
 
 func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 	newSegments []*datapb.SyncSegmentInfo,
-	newSegmentsBF []*BloomFilterSet,
+	newSegmentsBF []*pkoracle.BloomFilterSet,
 	allSegments map[int64]struct{},
 ) {
 	c.mu.Lock()

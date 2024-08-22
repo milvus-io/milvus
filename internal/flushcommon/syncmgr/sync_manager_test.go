@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -153,7 +154,7 @@ func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
 
 func (s *SyncManagerSuite) TestSubmit() {
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
-	bfs := metacache.NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
@@ -182,7 +183,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Run(func(_ context.Context, req *datapb.SaveBinlogPathsRequest) {
 		segmentID.Store(req.GetSegmentID())
 	}).Return(nil)
-	bfs := metacache.NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
