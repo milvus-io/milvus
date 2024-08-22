@@ -129,6 +129,7 @@ type Server struct {
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
+	statsCh         chan UniqueID
 	buildIndexCh    chan UniqueID
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
@@ -205,6 +206,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
+		statsCh:                make(chan UniqueID, 1024),
 		buildIndexCh:           make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
@@ -393,7 +395,7 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.buildIndexCh)
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.statsCh)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
@@ -987,7 +989,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	select {
-	case s.buildIndexCh <- segmentID:
+	case s.statsCh <- segmentID:
 	default:
 	}
 

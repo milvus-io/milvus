@@ -139,7 +139,7 @@ func (s *statsTaskSuite) SetupSuite() {
 }
 
 func (s *statsTaskSuite) TestTaskStats_PreCheck() {
-	st := newStatsTask(s.taskID, s.segID, s.targetID)
+	st := newStatsTask(s.taskID, s.segID, s.targetID, nil)
 
 	s.Equal(s.taskID, st.GetTaskID())
 

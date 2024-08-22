@@ -55,10 +55,21 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 				}))
 				for _, segment := range segments {
 					if err := s.createStatsSegmentTask(segment); err != nil {
-						log.Warn("create stats task for segment fail, wait for retry", zap.Int64("segmentID", segment.GetID()))
+						log.Warn("create stats task for segment failed, wait for retry", zap.Int64("segmentID", segment.GetID()))
 						continue
 					}
 				}
+			}
+		case segID := <-s.statsCh:
+			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
+			segment := s.meta.GetSegment(segID)
+			if segment == nil {
+				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
+				continue
+			}
+			if err := s.createStatsSegmentTask(segment); err != nil {
+				log.Warn("create stats task for segment failed, wait for retry", zap.Int64("segmentID", segment.ID))
+				continue
 			}
 		}
 	}
@@ -84,7 +95,7 @@ func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
 	if err = s.meta.statsTaskMeta.AddStatsTask(t); err != nil {
 		return err
 	}
-	s.taskScheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID()))
+	s.taskScheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), s.buildIndexCh))
 	return nil
 }
 
@@ -100,11 +111,13 @@ type statsTask struct {
 	endTime   time.Time
 
 	req *workerpb.CreateStatsRequest
+
+	buildIndexCh chan UniqueID
 }
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID, targetSegmentID int64) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64, buildIndexCh chan UniqueID) *statsTask {
 	return &statsTask{
 		taskID:          taskID,
 		segmentID:       segmentID,
@@ -113,6 +126,7 @@ func newStatsTask(taskID int64, segmentID, targetSegmentID int64) *statsTask {
 			TaskID: taskID,
 			State:  indexpb.JobState_JobStateInit,
 		},
+		buildIndexCh: buildIndexCh,
 	}
 }
 
@@ -343,7 +357,6 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	}
 
 	// second update the task meta
-	// TODO: @xiaocai2333 no need to save, delete it
 	if err = meta.statsTaskMeta.FinishTask(st.taskID, st.taskInfo); err != nil {
 		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID), zap.Error(err))
 		return err
@@ -351,5 +364,12 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 
 	metricMutation.commit()
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+
+	if st.buildIndexCh != nil {
+		select {
+		case st.buildIndexCh <- st.taskInfo.GetSegmentID():
+		default:
+		}
+	}
 	return nil
 }
