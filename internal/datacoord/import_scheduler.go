@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -46,7 +47,7 @@ type ImportScheduler interface {
 type importScheduler struct {
 	meta    *meta
 	cluster Cluster
-	alloc   allocator
+	alloc   allocator.Allocator
 	imeta   ImportMeta
 
 	buildIndexCh chan UniqueID
@@ -57,7 +58,7 @@ type importScheduler struct {
 
 func NewImportScheduler(meta *meta,
 	cluster Cluster,
-	alloc allocator,
+	alloc allocator.Allocator,
 	imeta ImportMeta,
 	buildIndexCh chan UniqueID,
 ) ImportScheduler {

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package allocator
 
 import (
 	"context"
@@ -24,50 +24,52 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// allocator is the interface that allocating `UniqueID` or `Timestamp`
-type allocator interface {
-	allocTimestamp(context.Context) (Timestamp, error)
-	allocID(context.Context) (UniqueID, error)
-	allocN(n int64) (UniqueID, UniqueID, error)
+// Allocator is the interface that allocating `UniqueID` or `Timestamp`
+type Allocator interface {
+	AllocTimestamp(context.Context) (typeutil.Timestamp, error)
+	AllocID(context.Context) (typeutil.UniqueID, error)
+	AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error)
 }
 
 // make sure rootCoordAllocator implements allocator interface
-var _ allocator = (*rootCoordAllocator)(nil)
+var _ Allocator = (*rootCoordAllocator)(nil)
 
 // rootCoordAllocator use RootCoord as allocator
 type rootCoordAllocator struct {
 	types.RootCoordClient
 }
 
-// newRootCoordAllocator gets an allocator from RootCoord
-func newRootCoordAllocator(rootCoordClient types.RootCoordClient) allocator {
+// NewRootCoordAllocator gets an allocator from RootCoord
+func NewRootCoordAllocator(rootCoordClient types.RootCoordClient) Allocator {
 	return &rootCoordAllocator{
 		RootCoordClient: rootCoordClient,
 	}
 }
 
-// allocTimestamp allocates a Timestamp
+// AllocTimestamp allocates a Timestamp
 // invoking RootCoord `AllocTimestamp`
-func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
-	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+func (alloc *rootCoordAllocator) AllocTimestamp(ctx context.Context) (typeutil.Timestamp, error) {
+	resp, err := alloc.RootCoordClient.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})
-	if err = VerifyResponse(resp, err); err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return 0, err
 	}
 	return resp.Timestamp, nil
 }
 
-// allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
-func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) {
-	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+// AllocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
+func (alloc *rootCoordAllocator) AllocID(ctx context.Context) (typeutil.UniqueID, error) {
+	resp, err := alloc.RootCoordClient.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -75,21 +77,21 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 		Count: 1,
 	})
 
-	if err = VerifyResponse(resp, err); err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return 0, err
 	}
 
 	return resp.ID, nil
 }
 
-// allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
-func (alloc *rootCoordAllocator) allocN(n int64) (UniqueID, UniqueID, error) {
+// AllocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
+func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if n <= 0 {
 		n = 1
 	}
-	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+	resp, err := alloc.RootCoordClient.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -97,7 +99,7 @@ func (alloc *rootCoordAllocator) allocN(n int64) (UniqueID, UniqueID, error) {
 		Count: uint32(n),
 	})
 
-	if err = VerifyResponse(resp, err); err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return 0, 0, err
 	}
 	start, count := resp.GetID(), resp.GetCount()

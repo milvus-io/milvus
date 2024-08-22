@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -2344,7 +2345,7 @@ func TestManualCompaction(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
 	t.Run("test manual compaction successfully", func(t *testing.T) {
-		svr := &Server{allocator: &MockAllocator{}}
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
@@ -2366,7 +2367,7 @@ func TestManualCompaction(t *testing.T) {
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
-		svr := &Server{allocator: &MockAllocator{}}
+		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
@@ -2463,7 +2464,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, allocator.NewMockAllocator(t))
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2502,9 +2503,10 @@ func TestHandleSessionEvent(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
+	alloc := allocator.NewMockAllocator(t)
 
 	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, alloc)
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)

@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -40,7 +41,7 @@ func TestClusteringCompactionPolicySuite(t *testing.T) {
 type ClusteringCompactionPolicySuite struct {
 	suite.Suite
 
-	mockAlloc          *NMockAllocator
+	mockAlloc          *allocator.MockAllocator
 	mockTriggerManager *MockTriggerManager
 	handler            *NMockHandler
 	mockPlanContext    *MockCompactionPlanContext
@@ -73,7 +74,8 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	}
 	s.meta = meta
 
-	mockAllocator := newMockAllocator()
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
 	s.clusteringCompactionPolicy = newClusteringCompactionPolicy(s.meta, mockAllocator, mockHandler)

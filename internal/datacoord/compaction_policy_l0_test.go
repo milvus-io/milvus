@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -34,7 +35,7 @@ func TestL0CompactionPolicySuite(t *testing.T) {
 type L0CompactionPolicySuite struct {
 	suite.Suite
 
-	mockAlloc          *NMockAllocator
+	mockAlloc          *allocator.MockAllocator
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
 	handler            Handler
