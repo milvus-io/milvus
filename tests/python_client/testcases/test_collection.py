@@ -616,7 +616,7 @@ class TestCollectionParams(TestcaseBase):
         int_field = cf.gen_int64_field(is_primary=True, auto_id=auto_id)
         vec_field = cf.gen_float_vec_field(name='vec')
         schema, _ = self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=not auto_id)
-        collection_w = self.collection_wrap.init_collection(cf.gen_unique_str(prefix), schema=schema)[0]
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
 
         assert collection_w.schema.auto_id is auto_id
 
