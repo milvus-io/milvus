@@ -29,10 +29,12 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestIndexNodeManager_AddNode(t *testing.T) {
+	paramtable.Init()
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 
 	t.Run("success", func(t *testing.T) {
@@ -47,6 +49,7 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 }
 
 func TestIndexNodeManager_PickClient(t *testing.T) {
+	paramtable.Init()
 	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
@@ -98,6 +101,7 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 }
 
 func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
+	paramtable.Init()
 	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
@@ -186,6 +190,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 }
 
 func TestNodeManager_StoppingNode(t *testing.T) {
+	paramtable.Init()
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 	err := nm.AddNode(1, "indexnode-1")
 	assert.NoError(t, err)

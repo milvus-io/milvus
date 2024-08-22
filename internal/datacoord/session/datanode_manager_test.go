@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -42,6 +43,10 @@ type DataNodeManagerSuite struct {
 	dn *mocks.MockDataNodeClient
 
 	m *DataNodeManagerImpl
+}
+
+func (s *DataNodeManagerSuite) SetupSuite() {
+	paramtable.Init()
 }
 
 func (s *DataNodeManagerSuite) SetupTest() {
