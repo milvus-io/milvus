@@ -30,12 +30,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storage/io"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	_ "github.com/milvus-io/milvus/pkg/util/funcutil"

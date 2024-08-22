@@ -194,6 +194,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			FieldBinlogs:        segInfo.GetBinlogs(),
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
+			IsSorted:            segInfo.GetIsSorted(),
 		})
 	}
 	log.Info("Compaction handler build clustering compaction plan")

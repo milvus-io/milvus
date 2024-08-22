@@ -10,10 +10,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storage/io"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -22,14 +22,14 @@ import (
 func mergeSortMultipleSegments(ctx context.Context,
 	planID int64,
 	binlogIO io.BinlogIO,
-	allocator allocator.Allocator,
+	allocator allocator.Interface,
 	binlogs []*datapb.CompactionSegmentBinlogs,
 	delta map[interface{}]typeutil.Timestamp,
 	writer *storage.SegmentWriter,
 	tr *timerecord.TimeRecorder,
 	currentTs typeutil.Timestamp,
 	collectionTtl int64,
-) (*datapb.CompactionSegment, error) {
+) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "mergeSortMultipleSegments")
@@ -63,7 +63,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	uploadTimeCost := time.Duration(0)
 
 	//SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
-	segmentReaders := make([]*storage.SegmentDeserializeReader, len(binlogs))
+	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
 	for i, s := range binlogs {
 		var binlogBatchCount int
 		for _, b := range s.GetFieldBinlogs() {
@@ -86,7 +86,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			}
 			binlogPaths[idx] = batchPaths
 		}
-		segmentReaders[i] = storage.NewSegmentDeserializeReader(binlogPaths, binlogIO, writer.GetPkID())
+		segmentReaders[i] = NewSegmentDeserializeReader(binlogPaths, binlogIO, writer.GetPkID())
 	}
 
 	pq := make(PriorityQueue, 0)
@@ -175,7 +175,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	serWriteStart := time.Now()
-	sPath, err := statSerializeWrite(ctx, binlogIO, allocator, writer, remainingRowCount)
+	sPath, err := statSerializeWrite(ctx, binlogIO, allocator, writer)
 	if err != nil {
 		log.Warn("compact wrong, failed to serialize write segment stats",
 			zap.Int64("remaining row count", remainingRowCount), zap.Error(err))
@@ -203,5 +203,5 @@ func mergeSortMultipleSegments(ctx context.Context,
 		zap.Duration("deRead elapse", totalElapse-serWriteTimeCost-downloadTimeCost-uploadTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	return pack, nil
+	return []*datapb.CompactionSegment{pack}, nil
 }

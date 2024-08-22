@@ -1,4 +1,4 @@
-package storage
+package compaction
 
 import (
 	"context"
@@ -7,14 +7,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	binlogIO "github.com/milvus-io/milvus/internal/storage/io"
+	binlogIO "github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type SegmentDeserializeReader struct {
 	ctx      context.Context
 	binlogIO binlogIO.BinlogIO
-	reader   *DeserializeReader[*Value]
+	reader   *storage.DeserializeReader[*storage.Value]
 
 	pos           int
 	PKFieldID     int64
@@ -43,11 +44,11 @@ func (r *SegmentDeserializeReader) initDeserializeReader() error {
 		return err
 	}
 
-	blobs := lo.Map(allValues, func(v []byte, i int) *Blob {
-		return &Blob{Key: r.binlogPaths[r.binlogPathPos][i], Value: v}
+	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
+		return &storage.Blob{Key: r.binlogPaths[r.binlogPathPos][i], Value: v}
 	})
 
-	r.reader, err = NewBinlogDeserializeReader(blobs, r.PKFieldID)
+	r.reader, err = storage.NewBinlogDeserializeReader(blobs, r.PKFieldID)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return err
@@ -79,6 +80,6 @@ func (r *SegmentDeserializeReader) Close() {
 	r.reader.Close()
 }
 
-func (r *SegmentDeserializeReader) Value() *Value {
+func (r *SegmentDeserializeReader) Value() *storage.Value {
 	return r.reader.Value()
 }

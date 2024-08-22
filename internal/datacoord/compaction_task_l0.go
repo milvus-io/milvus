@@ -311,6 +311,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			Level:         segInfo.GetLevel(),
 			InsertChannel: segInfo.GetInsertChannel(),
 			Deltalogs:     segInfo.GetDeltalogs(),
+			IsSorted:      segInfo.GetIsSorted(),
 		})
 	}
 
@@ -347,6 +348,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			Level:               info.GetLevel(),
 			CollectionID:        info.GetCollectionID(),
 			PartitionID:         info.GetPartitionID(),
+			IsSorted:            info.GetIsSorted(),
 		}
 	})
 

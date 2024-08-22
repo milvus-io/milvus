@@ -582,6 +582,7 @@ message CompactionSegmentBinlogs {
   SegmentLevel level = 6;
   int64 collectionID = 7;
   int64 partitionID = 8;
+  bool is_sorted = 9;
 }
 
 message CompactionPlan {
