@@ -123,7 +123,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		unflushedRowCount++
 		remainingRowCount++
 
-		if (unflushedRowCount+1)%100 == 0 && writer.IsFull() {
+		if (unflushedRowCount+1)%100 == 0 && writer.FlushAndIsFull() {
 			serWriteStart := time.Now()
 			kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
 			if err != nil {
@@ -155,7 +155,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 	}
 
-	if !writer.IsEmpty() {
+	if !writer.FlushAndIsEmpty() {
 		serWriteStart := time.Now()
 		kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
 		if err != nil {

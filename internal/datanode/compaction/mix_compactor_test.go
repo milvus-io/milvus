@@ -210,6 +210,42 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	s.Empty(segment.Deltalogs)
 }
 
+func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
+	segments := []int64{1001, 1002, 1003}
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	for _, segID := range segments {
+		s.initMultiRowsSegBuffer(segID, 2000, 3)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+
+		s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			IsSorted:     true,
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
+	s.Equal(1, len(result.GetSegments()))
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(19530, segment.GetSegmentID())
+	s.EqualValues(300, segment.GetNumOfRows())
+	s.NotEmpty(segment.InsertLogs)
+	s.NotEmpty(segment.Field2StatslogPaths)
+	s.Empty(segment.Deltalogs)
+}
+
 func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.initSegBuffer(3)
 	collTTL := 864000 // 10 days
@@ -261,17 +297,10 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 				})
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
-<<<<<<< HEAD
 			s.task.collectionID = CollectionID
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
 			res, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions)
-=======
-			segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 100, 19530, PartitionID, CollectionID)
-			s.Require().NoError(err)
-
-			compactionSegment, err := s.task.merge(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions, segWriter)
->>>>>>> 4b715d6ed (Remove sement writer to storage package)
 			s.NoError(err)
 			s.EqualValues(test.expectedRes, len(res))
 			if test.expectedRes > 0 {
@@ -502,6 +531,25 @@ func getRow(magic int64) map[int64]interface{} {
 		},
 		JSONField: []byte(`{"batch":ok}`),
 	}
+}
+
+func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int64) {
+	segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 65535, magic, PartitionID, CollectionID)
+	s.Require().NoError(err)
+
+	for i := int64(0); i < numRows; i++ {
+		v := storage.Value{
+			PK:        storage.NewInt64PrimaryKey(magic + i*step),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Value:     getRow(magic + i*step),
+		}
+		err = segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+
+	segWriter.FlushAndIsFull()
+
+	s.segWriter = segWriter
 }
 
 func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
