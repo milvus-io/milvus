@@ -63,10 +63,7 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
-
-    virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_after(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const = 0;
 
     virtual void
     clear() = 0;
@@ -113,20 +110,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
-        std::shared_lock<std::shared_mutex> lck(mtx_);
-
-        if (limit == Unlimited || limit == NoLimit) {
-            limit = map_.size();
-        }
-
-        // TODO: we can't retrieve pk by offset very conveniently.
-        //      Selectivity should be done outside.
-        return find_first_by_index(limit, 0, bitset);
-    }
-
-    std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_after(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
+    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -240,20 +224,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
-        check_search();
-
-        if (limit == Unlimited || limit == NoLimit) {
-            limit = array_.size();
-        }
-
-        // TODO: we can't retrieve pk by offset very conveniently.
-        //      Selectivity should be done outside.
-        return find_first_by_index(limit, 0, bitset);
-    }
-
-    std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_after(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
+    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {

@@ -168,6 +168,7 @@ message ScanCtx {
   int64 scan_ctx_id = 1;
   int64 segment_idx = 2;
   int64 offset = 3;
+  uint64 mvcc_ts = 4;
 }
 
 message RetrieveRequest {

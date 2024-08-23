@@ -142,13 +142,8 @@ class SegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
-        return insert_record_.pk2offset_->find_first(limit, bitset);
-    }
-
-    std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_after(int64_t limit, int64_t offset, const BitsetType& bitset) const override {
-        return insert_record_.pk2offset_->find_first_after(limit, offset, bitset);
+    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, offset_bound, bitset);
     }
 
     // Calculate: output[i] = Vec[seg_offset[i]]

@@ -594,6 +594,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 			Node:       nodeID,
 			SegmentIdx: result.GetScanCtx().GetSegmentIdx(),
 			Offset:     result.GetScanCtx().GetOffset(),
+			MvccTs:     result.GetScanCtx().GetMvccTs(),
 		}
 	}
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
@@ -723,6 +724,7 @@ func (t *queryTask) SetID(uid UniqueID) {
 }
 
 func (t *queryTask) SetOnEnqueueTime() {
+	// if the request is the init request for query scan, we set up ScanCtxId with the queryTask ID
 	if t.request.GetScanReqCtx() != nil && t.request.GetScanReqCtx().GetScanCtxId() == 0 {
 		t.request.GetScanReqCtx().ScanCtxId = t.ID()
 		t.isScanQuery = true
