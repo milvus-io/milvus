@@ -221,6 +221,7 @@ func (suite *ClusterTestSuite) TestLoadSegments() {
 		Base:  &commonpb.MsgBase{},
 		Infos: []*querypb.SegmentLoadInfo{{}},
 	})
+
 	suite.NoError(err)
 	merr.Ok(status)
 

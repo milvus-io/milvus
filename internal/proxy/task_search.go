@@ -7,10 +7,10 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -62,7 +62,8 @@ type searchTask struct {
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 
-	userOutputFields []string
+	userOutputFields  []string
+	userDynamicFields []string
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
@@ -153,7 +154,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err))
 		return err
@@ -386,8 +387,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		if t.requery {
 			plan.OutputFieldIds = nil
+			plan.DynamicFields = nil
 		} else {
 			plan.OutputFieldIds = t.SearchRequest.OutputFieldsId
+			plan.DynamicFields = t.userDynamicFields
 		}
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
@@ -446,6 +449,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		plan.OutputFieldIds = nil
 	} else {
 		plan.OutputFieldIds = t.SearchRequest.OutputFieldsId
+		plan.DynamicFields = t.userDynamicFields
 	}
 
 	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
@@ -776,7 +780,83 @@ func (t *searchTask) Requery() error {
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    t.SearchRequest.GuaranteeTimestamp,
 	}
-	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, t.GetPartitionIDs())
+	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	ids := t.result.GetResults().GetIds()
+	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+	channelsMvcc := make(map[string]Timestamp)
+	for k, v := range t.queryChannelsTs {
+		channelsMvcc[k] = v
+	}
+	qt := &queryTask{
+		ctx:       t.ctx,
+		Condition: NewTaskCondition(t.ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID:        paramtable.GetNodeID(),
+			PartitionIDs: t.GetPartitionIDs(), // use search partitionIDs
+		},
+		request:      queryReq,
+		plan:         plan,
+		qc:           t.node.(*Proxy).queryCoord,
+		lb:           t.node.(*Proxy).lbPolicy,
+		channelsMvcc: channelsMvcc,
+		fastSkip:     true,
+		reQuery:      true,
+	}
+	queryResult, err := t.node.(*Proxy).query(t.ctx, qt)
+	if err != nil {
+		return err
+	}
+	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return merr.Error(queryResult.GetStatus())
+	}
+	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
+	// We should reorganize query results to keep the order of original queried ids. For example:
+	// ===========================================
+	//  3  2  5  4  1  (query ids)
+	//       ||
+	//       || (query)
+	//       \/
+	//  4  3  5  1  2  (result ids)
+	// v4 v3 v5 v1 v2  (result vectors)
+	//       ||
+	//       || (reorganize)
+	//       \/
+	//  3  2  5  4  1  (result ids)
+	// v3 v2 v5 v4 v1  (result vectors)
+	// ===========================================
+	_, sp := otel.Tracer(typeutil.ProxyRole).Start(t.ctx, "reorganizeRequeryResults")
+	defer sp.End()
+	pkFieldData, err := typeutil.GetPrimaryFieldData(queryResult.GetFieldsData(), pkField)
+	if err != nil {
+		return err
+	}
+	offsets := make(map[any]int)
+	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
+		pk := typeutil.GetData(pkFieldData, i)
+		offsets[pk] = i
+	}
+
+	t.result.Results.FieldsData = make([]*schemapb.FieldData, len(queryResult.GetFieldsData()))
+	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
+		id := typeutil.GetPK(ids, int64(i))
+		if _, ok := offsets[id]; !ok {
+			return merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
+				id, typeutil.GetSizeOfIDs(ids), len(offsets), t.GetCollectionID()))
+		}
+		typeutil.AppendFieldData(t.result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
+	}
+
+	t.result.Results.FieldsData = lo.Filter(t.result.Results.FieldsData, func(fieldData *schemapb.FieldData, i int) bool {
+		return lo.Contains(t.request.GetOutputFields(), fieldData.GetFieldName())
+	})
+	return nil
 }
 
 func (t *searchTask) fillInFieldInfo() {
@@ -810,97 +890,6 @@ func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.Se
 		})
 		return toReduceResults, nil
 	}
-}
-
-func doRequery(ctx context.Context,
-	collectionID int64,
-	node types.ProxyComponent,
-	schema *schemapb.CollectionSchema,
-	request *milvuspb.QueryRequest,
-	result *milvuspb.SearchResults,
-	queryChannelsTs map[string]Timestamp,
-	partitionIDs []int64,
-) error {
-	outputFields := request.GetOutputFields()
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return err
-	}
-	ids := result.GetResults().GetIds()
-	plan := planparserv2.CreateRequeryPlan(pkField, ids)
-	channelsMvcc := make(map[string]Timestamp)
-	for k, v := range queryChannelsTs {
-		channelsMvcc[k] = v
-	}
-	qt := &queryTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:        paramtable.GetNodeID(),
-			PartitionIDs: partitionIDs, // use search partitionIDs
-		},
-		request:      request,
-		plan:         plan,
-		qc:           node.(*Proxy).queryCoord,
-		lb:           node.(*Proxy).lbPolicy,
-		channelsMvcc: channelsMvcc,
-		fastSkip:     true,
-		reQuery:      true,
-	}
-	queryResult, err := node.(*Proxy).query(ctx, qt)
-	if err != nil {
-		return err
-	}
-	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(queryResult.GetStatus())
-	}
-	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
-	// We should reorganize query results to keep the order of original queried ids. For example:
-	// ===========================================
-	//  3  2  5  4  1  (query ids)
-	//       ||
-	//       || (query)
-	//       \/
-	//  4  3  5  1  2  (result ids)
-	// v4 v3 v5 v1 v2  (result vectors)
-	//       ||
-	//       || (reorganize)
-	//       \/
-	//  3  2  5  4  1  (result ids)
-	// v3 v2 v5 v4 v1  (result vectors)
-	// ===========================================
-	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reorganizeRequeryResults")
-	defer sp.End()
-	pkFieldData, err := typeutil.GetPrimaryFieldData(queryResult.GetFieldsData(), pkField)
-	if err != nil {
-		return err
-	}
-	offsets := make(map[any]int)
-	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
-		pk := typeutil.GetData(pkFieldData, i)
-		offsets[pk] = i
-	}
-
-	result.Results.FieldsData = make([]*schemapb.FieldData, len(queryResult.GetFieldsData()))
-	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
-		id := typeutil.GetPK(ids, int64(i))
-		if _, ok := offsets[id]; !ok {
-			return merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
-				id, typeutil.GetSizeOfIDs(ids), len(offsets), collectionID))
-		}
-		typeutil.AppendFieldData(result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
-	}
-
-	// filter id field out if it is not specified as output
-	result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(fieldData *schemapb.FieldData, i int) bool {
-		return lo.Contains(outputFields, fieldData.GetFieldName())
-	})
-
-	return nil
 }
 
 func decodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {

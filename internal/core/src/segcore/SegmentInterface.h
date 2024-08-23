@@ -384,6 +384,13 @@ class SegmentInternalInterface : public SegmentInterface {
                    const int64_t* seg_offsets,
                    int64_t count) const = 0;
 
+    virtual std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_ids,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const = 0;
+
     virtual void
     check_search(const query::Plan* plan) const = 0;
 

@@ -22,9 +22,9 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/x448/float16"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"

@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -360,7 +361,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		// validate dense vector field type parameters
-		if typeutil.IsVectorType(field.DataType) {
+		isVectorType := typeutil.IsVectorType(field.DataType)
+		if isVectorType {
 			err = validateDimension(field)
 			if err != nil {
 				return err
@@ -381,6 +383,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			if err = validateMaxCapacityPerRow(t.schema.Name, field); err != nil {
 				return err
 			}
+		}
+		// TODO should remove the index params in the field schema
+		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
+		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
 		}
 	}
 

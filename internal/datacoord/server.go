@@ -779,7 +779,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 					checker.Check()
 				}
 
-				if err := s.handleDataNodeTtMsg(ctx, &ttMsg.DataNodeTtMsg); err != nil {
+				if err := s.handleDataNodeTtMsg(ctx, ttMsg.DataNodeTtMsg); err != nil {
 					log.Warn("failed to handle timetick message", zap.Error(err))
 					continue
 				}

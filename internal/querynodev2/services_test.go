@@ -27,12 +27,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -95,7 +95,6 @@ func (suite *ServiceSuite) SetupSuite() {
 	// init param
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GCEnabled.Key, "false")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CacheEnabled.Key, "false")
 
 	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
@@ -1709,7 +1708,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Normal() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		Pattern: "Cache.enabled",
+		Pattern: "mmap.growingMmapEnabled",
 	}
 
 	resp, err := suite.node.ShowConfigurations(ctx, req)
@@ -1725,7 +1724,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		Pattern: "Cache.enabled",
+		Pattern: "mmap.growingMmapEnabled",
 	}
 
 	// node not healthy

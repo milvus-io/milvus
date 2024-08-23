@@ -986,14 +986,16 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 	userOutputFieldsMap := make(map[string]bool)
 	userOutputFields := make([]string, 0)
-
+	userDynamicFieldsMap := make(map[string]bool)
+	userDynamicFields := make([]string, 0)
+	useAllDyncamicFields := false
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
@@ -1008,6 +1010,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 				resultFieldNameMap[fieldName] = true
 				userOutputFieldsMap[fieldName] = true
 			}
+			useAllDyncamicFields = true
 		} else {
 			if _, ok := allFieldNameMap[outputFieldName]; ok {
 				resultFieldNameMap[outputFieldName] = true
@@ -1023,12 +1026,13 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 					})
 					if err != nil {
 						log.Info("parse output field name failed", zap.String("field name", outputFieldName))
-						return nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+						return nil, nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
 					resultFieldNameMap[common.MetaFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
+					userDynamicFieldsMap[outputFieldName] = true
 				} else {
-					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 		}
@@ -1045,7 +1049,13 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 	for fieldName := range userOutputFieldsMap {
 		userOutputFields = append(userOutputFields, fieldName)
 	}
-	return resultFieldNames, userOutputFields, nil
+	if !useAllDyncamicFields {
+		for fieldName := range userDynamicFieldsMap {
+			userDynamicFields = append(userDynamicFields, fieldName)
+		}
+	}
+
+	return resultFieldNames, userOutputFields, userDynamicFields, nil
 }
 
 func validateIndexName(indexName string) error {
@@ -1569,52 +1579,52 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 	case *milvuspb.CreateDatabaseRequest:
 		tsMsg = &msgstream.CreateDatabaseMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			CreateDatabaseRequest: *r,
+			CreateDatabaseRequest: r,
 		}
 	case *milvuspb.DropDatabaseRequest:
 		tsMsg = &msgstream.DropDatabaseMsg{
 			BaseMsg:             getBaseMsg(ctx, ts),
-			DropDatabaseRequest: *r,
+			DropDatabaseRequest: r,
 		}
 	case *milvuspb.FlushRequest:
 		tsMsg = &msgstream.FlushMsg{
 			BaseMsg:      getBaseMsg(ctx, ts),
-			FlushRequest: *r,
+			FlushRequest: r,
 		}
 	case *milvuspb.LoadCollectionRequest:
 		tsMsg = &msgstream.LoadCollectionMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadCollectionRequest: *r,
+			LoadCollectionRequest: r,
 		}
 	case *milvuspb.ReleaseCollectionRequest:
 		tsMsg = &msgstream.ReleaseCollectionMsg{
 			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleaseCollectionRequest: *r,
+			ReleaseCollectionRequest: r,
 		}
 	case *milvuspb.CreateIndexRequest:
 		tsMsg = &msgstream.CreateIndexMsg{
 			BaseMsg:            getBaseMsg(ctx, ts),
-			CreateIndexRequest: *r,
+			CreateIndexRequest: r,
 		}
 	case *milvuspb.DropIndexRequest:
 		tsMsg = &msgstream.DropIndexMsg{
 			BaseMsg:          getBaseMsg(ctx, ts),
-			DropIndexRequest: *r,
+			DropIndexRequest: r,
 		}
 	case *milvuspb.LoadPartitionsRequest:
 		tsMsg = &msgstream.LoadPartitionsMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
-			LoadPartitionsRequest: *r,
+			LoadPartitionsRequest: r,
 		}
 	case *milvuspb.ReleasePartitionsRequest:
 		tsMsg = &msgstream.ReleasePartitionsMsg{
 			BaseMsg:                  getBaseMsg(ctx, ts),
-			ReleasePartitionsRequest: *r,
+			ReleasePartitionsRequest: r,
 		}
 	case *milvuspb.AlterIndexRequest:
 		tsMsg = &msgstream.AlterIndexMsg{
 			BaseMsg:           getBaseMsg(ctx, ts),
-			AlterIndexRequest: *r,
+			AlterIndexRequest: r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))
