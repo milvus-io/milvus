@@ -245,7 +245,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		quotaCenter := NewQuotaCenter(pcm2, qc, dc2, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("get collection by id fail, datanode", func(t *testing.T) {
@@ -289,7 +289,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		quotaCenter := NewQuotaCenter(pcm2, qc, dc2, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test force deny reading collection", func(t *testing.T) {

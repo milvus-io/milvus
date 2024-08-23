@@ -406,7 +406,7 @@ func (q *QuotaCenter) collectMetrics() error {
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
-				rangeErr = getErr
+				// skip limit check if the collection meta has been removed from rootcoord meta
 				return false
 			}
 			collIDToPartIDs, ok := q.readableCollections[coll.DBID]
@@ -458,11 +458,11 @@ func (q *QuotaCenter) collectMetrics() error {
 		if cm != nil {
 			collectionMetrics = cm.Collections
 		}
-		var rangeErr error
+
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
-				rangeErr = getErr
+				// skip limit check if the collection meta has been removed from rootcoord meta
 				return false
 			}
 
@@ -494,9 +494,7 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			return true
 		})
-		if rangeErr != nil {
-			return rangeErr
-		}
+
 		for _, collectionID := range datacoordQuotaCollections {
 			_, ok := q.collectionIDToDBID.Get(collectionID)
 			if ok {
@@ -504,7 +502,8 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
-				return getErr
+				// skip limit check if the collection meta has been removed from rootcoord meta
+				continue
 			}
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
