@@ -51,7 +51,7 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 		case <-ticker.C:
 			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 				segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting && !seg.GetIsImporting()
+					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting
 				}))
 				for _, segment := range segments {
 					if err := s.createStatsSegmentTask(segment); err != nil {
@@ -67,6 +67,15 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
 				continue
 			}
+			// TODO @xiaocai2333: remove code after allow create stats task for importing segment
+			if segment.GetIsImporting() {
+				log.Info("segment is importing, skip stats task", zap.Int64("segmentID", segID))
+				select {
+				case s.buildIndexCh <- segID:
+				default:
+				}
+				continue
+			}
 			if err := s.createStatsSegmentTask(segment); err != nil {
 				log.Warn("create stats task for segment failed, wait for retry", zap.Int64("segmentID", segment.ID))
 				continue
@@ -76,7 +85,8 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 }
 
 func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
-	if segment.GetIsSorted() {
+	if segment.GetIsSorted() || segment.GetIsImporting() {
+		// TODO @xiaocai2333: allow importing segment stats
 		log.Info("segment is sorted by segmentID", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -353,7 +363,7 @@ func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNod
 
 func (st *statsTask) SetJobInfo(meta *meta) error {
 	// first update segment
-	metricMutation, err := meta.saveStatsResultSegment(st.segmentID, st.taskInfo)
+	metricMutation, err := meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
 	if err != nil {
 		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID), zap.Error(err))

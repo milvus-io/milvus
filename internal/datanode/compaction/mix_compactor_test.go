@@ -216,7 +216,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segID := range segments {
-		s.initMultiRowsSegBuffer(segID, 2000, 3)
+		s.initMultiRowsSegBuffer(segID, 100, 3)
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {

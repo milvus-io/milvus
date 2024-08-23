@@ -1936,7 +1936,10 @@ func (m *meta) CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
 	return nil
 }
 
-func (m *meta) saveStatsResultSegment(oldSegmentID int64, result *workerpb.StatsResult) (*segMetricMutation, error) {
+func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.StatsResult) (*segMetricMutation, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	log := log.With(zap.Int64("collectionID", result.GetCollectionID()),
 		zap.Int64("partitionID", result.GetPartitionID()),
 		zap.Int64("old segmentID", oldSegmentID),
