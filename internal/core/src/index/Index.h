@@ -25,9 +25,6 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 
-const std::string kMmapFilepath = "mmap_filepath";
-const std::string kEnableMmap = "enable_mmap";
-
 namespace milvus::index {
 
 class IndexBase {

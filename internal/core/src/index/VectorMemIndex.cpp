@@ -32,6 +32,7 @@
 
 #include "index/Index.h"
 #include "index/IndexInfo.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
 #include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
@@ -142,7 +143,7 @@ template <typename T>
 void
 VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                         const Config& config) {
-    if (config.contains(kMmapFilepath)) {
+    if (config.contains(MMAP_FILE_PATH)) {
         return LoadFromFile(config);
     }
 
@@ -483,7 +484,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 
 template <typename T>
 void VectorMemIndex<T>::LoadFromFile(const Config& config) {
-    auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
+    auto filepath = GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 
     std::filesystem::create_directories(
@@ -598,8 +599,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
-    conf.erase(kMmapFilepath);
-    conf[kEnableMmap] = true;
+    conf.erase(MMAP_FILE_PATH);
+    conf[ENABLE_MMAP] = true;
     auto start_deserialize = std::chrono::system_clock::now();
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     auto deserialize_duration =

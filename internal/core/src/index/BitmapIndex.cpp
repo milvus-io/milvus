@@ -255,7 +255,7 @@ BitmapIndex<T>::Serialize(const Config& config) {
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
 
     LOG_INFO("build bitmap index with cardinality = {}, num_rows = {}",
-             Cardinality(),
+             data_.size(),
              total_num_rows_);
 
     Disassemble(ret_set);
@@ -345,6 +345,31 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
     }
 }
 
+template <typename T>
+void
+BitmapIndex<T>::BuildOffsetCache() {
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        data_offsets_cache_.resize(total_num_rows_);
+        for (auto it = data_.begin(); it != data_.end(); it++) {
+            for (const auto& v : it->second) {
+                data_offsets_cache_[v] = it;
+            }
+        }
+    } else {
+        for (auto it = bitsets_.begin(); it != bitsets_.end(); it++) {
+            bitsets_offsets_cache_.resize(total_num_rows_);
+            const auto& bits = it->second;
+            for (int i = 0; i < bits.size(); i++) {
+                if (bits[i]) {
+                    bitsets_offsets_cache_[i] = it;
+                }
+            }
+        }
+    }
+    use_offset_cache_ = true;
+    LOG_INFO("build offset cache for bitmap index");
+}
+
 template <>
 void
 BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
@@ -377,6 +402,9 @@ template <typename T>
 void
 BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                     const Config& config) {
+    auto enable_offset_cache =
+        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
+
     auto index_meta_buffer = binary_set.GetByName(BITMAP_INDEX_META);
     auto index_meta = DeserializeIndexMeta(index_meta_buffer->data.get(),
                                            index_meta_buffer->size);
@@ -386,6 +414,10 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
 
     auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
     DeserializeIndexData(index_data_buffer->data.get(), index_length);
+
+    if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
+        BuildOffsetCache();
+    }
 
     LOG_INFO("load bitmap index with cardinality = {}, num_rows = {}",
              Cardinality(),
@@ -575,7 +607,6 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
     }
     auto lb = data_.begin();
     auto ub = data_.end();
-
     switch (op) {
         case OpType::LessThan: {
             ub = std::lower_bound(data_.begin(),
@@ -760,9 +791,23 @@ BitmapIndex<T>::RangeForRoaring(const T lower_value,
 
 template <typename T>
 T
+BitmapIndex<T>::Reverse_Lookup_InCache(size_t idx) const {
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        return data_offsets_cache_[idx]->first;
+    } else {
+        return bitsets_offsets_cache_[idx]->first;
+    }
+}
+
+template <typename T>
+T
 BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(is_built_, "index has not been built");
     AssertInfo(idx < total_num_rows_, "out of range of total coun");
+
+    if (use_offset_cache_) {
+        return Reverse_Lookup_InCache(idx);
+    }
 
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (auto it = data_.begin(); it != data_.end(); it++) {

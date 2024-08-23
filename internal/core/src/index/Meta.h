@@ -58,6 +58,12 @@ constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
 constexpr const char* BITMAP_INDEX_CARDINALITY_LIMIT =
     "bitmap_cardinality_limit";
 
+// index config key
+constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
+constexpr const char* ENABLE_MMAP = "enable_mmap";
+constexpr const char* INDEX_FILES = "index_files";
+constexpr const char* ENABLE_OFFSET_CACHE = "indexoffsetcache.enabled";
+
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
