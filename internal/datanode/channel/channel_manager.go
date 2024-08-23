@@ -71,7 +71,15 @@ func NewChannelManager(pipelineParams *util.PipelineParams, fgManager pipeline.F
 		opRunners:     typeutil.NewConcurrentMap[string, *opRunner](),
 		abnormals:     typeutil.NewConcurrentMap[int64, string](),
 
-		releaseFunc: fgManager.RemoveFlowgraph,
+		releaseFunc: func(channelName string) {
+			if pipelineParams.CompactionExecutor != nil {
+				pipelineParams.CompactionExecutor.DiscardPlan(channelName)
+			}
+			if pipelineParams.WriteBufferManager != nil {
+				pipelineParams.WriteBufferManager.RemoveChannel(channelName)
+			}
+			fgManager.RemoveFlowgraph(channelName)
+		},
 
 		closeCh: lifetime.NewSafeChan(),
 	}
