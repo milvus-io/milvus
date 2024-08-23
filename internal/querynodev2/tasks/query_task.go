@@ -40,6 +40,7 @@ func NewQueryTask(ctx context.Context,
 		notifier:       make(chan error, 1),
 		tr:             timerecord.NewTimeRecorderWithTrace(ctx, "queryTask"),
 		scheduleSpan:   span,
+		isScanQuery:    req.Req.ScanCtx != nil,
 	}
 }
 
@@ -52,6 +53,7 @@ type QueryTask struct {
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
 	scheduleSpan   trace.Span
+	isScanQuery    bool
 }
 
 // Return the username which task is belong to.

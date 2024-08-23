@@ -106,6 +106,23 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string) (*planpb.
 	return planNode, nil
 }
 
+func CreateRetrievePlanWithOffsetBound(schema *typeutil.SchemaHelper, exprStr string, offsetBound int64) (*planpb.PlanNode, error) {
+	expr, err := ParseExpr(schema, exprStr)
+	if err != nil {
+		return nil, err
+	}
+
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates:  expr,
+				OffsetBound: offsetBound,
+			},
+		},
+	}
+	return planNode, nil
+}
+
 func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {

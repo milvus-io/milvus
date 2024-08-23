@@ -459,7 +459,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	return nil
 }
 
-func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []SegmentEntry, segmentIdx int64) ([]SnapshotItem, []SegmentEntry, error) {
+func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []SegmentEntry, segmentIdx int64, segOffset int64) ([]SnapshotItem, []SegmentEntry, error) {
 	idx := 0
 	targetSealed := make([]SnapshotItem, 0)
 	targetGrowing := make([]SegmentEntry, 0)
@@ -468,6 +468,7 @@ func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []
 		if int64(nextIdx) >= segmentIdx {
 			targetIdx := int(segmentIdx - int64(idx)) // hc--need handle int vs int64 here
 			targetSegment := sealedItem.Segments[targetIdx]
+			targetSegment.Offset = segOffset
 			targetSealed = append(targetSealed, SnapshotItem{
 				NodeID:   sealedItem.NodeID,
 				Segments: []SegmentEntry{targetSegment},
@@ -480,7 +481,9 @@ func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []
 	if targetIdx >= len(growing) {
 		return nil, nil, merr.ErrParameterInvalid
 	}
-	targetGrowing = append(targetGrowing, growing[targetIdx])
+	targetSegment := growing[targetIdx]
+	targetSegment.Offset = segOffset
+	targetGrowing = append(targetGrowing, targetSegment)
 	return targetSealed, targetGrowing, nil
 }
 
@@ -538,7 +541,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 			if err != nil {
 				return nil, err
 			}
-			sealed, growing, err = sd.modifyRequestForScan(sealed, growing, scanSegmentIdx)
+			sealed, growing, err = sd.modifyRequestForScan(sealed, growing, scanSegmentIdx, scanOffset)
 			if err != nil {
 				return nil, err
 			}
@@ -575,7 +578,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
+
+	var tasks []subTask[*querypb.QueryRequest]
+
+	if req.GetReq().GetScanCtx() != nil {
+		tasks, err = organizeScanQuerySubTask(ctx, req, sealed, growing, sd)
+	} else {
+		tasks, err = organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
+	}
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return nil, err
@@ -651,6 +661,63 @@ type subTask[T any] struct {
 	req      T
 	targetID int64
 	worker   cluster.Worker
+}
+
+func organizeScanQuerySubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, growing []SegmentEntry, sd *shardDelegator) ([]subTask[T], error) {
+	result := make([]subTask[T], 0, len(sealed)+1)
+
+	packSubTask := func(segments []SegmentEntry, workerID int64, scope querypb.DataScope) error {
+		segmentIDs := lo.Map(segments, func(item SegmentEntry, _ int) int64 {
+			return item.SegmentID
+		})
+		offsets := lo.Map(segments, func(item SegmentEntry, _ int) int64 {
+			return item.Offset
+		})
+		if len(segmentIDs) == 0 {
+			return nil
+		}
+		if len(segments) != len(offsets) {
+			return fmt.Errorf("failed to organize scan query tasks, len of segments is not equal to len of offsets %d, %d", len(segments), len(offsets))
+		}
+
+		// update request
+		queryRequest, ok := any(req).(*querypb.QueryRequest)
+		if !ok {
+			return fmt.Errorf("req is not of type *querypb.QueryRequest")
+		}
+		nodeReq := proto.Clone(queryRequest).(*querypb.QueryRequest)
+		nodeReq.Scope = scope
+		nodeReq.Req.Base.TargetID = workerID
+		nodeReq.SegmentIDs = segmentIDs
+		nodeReq.Offsets = offsets
+		nodeReq.DmlChannels = []string{sd.vchannelName}
+
+		worker, err := sd.workerManager.GetWorker(ctx, workerID)
+		if err != nil {
+			log.Warn("failed to get worker",
+				zap.Int64("nodeID", workerID),
+				zap.Error(err),
+			)
+			return fmt.Errorf("failed to get worker %d, %w", workerID, err)
+		}
+
+		result = append(result, subTask[T]{
+			req:      any(nodeReq).(T),
+			targetID: workerID,
+			worker:   worker,
+		})
+		return nil
+	}
+	for _, entry := range sealed {
+		err := packSubTask(entry.Segments, entry.NodeID, querypb.DataScope_Historical)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	packSubTask(growing, paramtable.GetNodeID(), querypb.DataScope_Streaming)
+
+	return result, nil
 }
 
 func organizeSubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, growing []SegmentEntry, sd *shardDelegator, modify func(T, querypb.DataScope, []int64, int64) T) ([]subTask[T], error) {

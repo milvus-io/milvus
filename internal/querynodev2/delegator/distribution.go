@@ -78,7 +78,6 @@ type distribution struct {
 	mut sync.RWMutex
 }
 
-// SegmentEntry stores the segment meta information.
 type SegmentEntry struct {
 	NodeID        int64
 	SegmentID     UniqueID
@@ -86,6 +85,8 @@ type SegmentEntry struct {
 	Version       int64
 	TargetVersion int64
 	Level         datapb.SegmentLevel
+	//only used for scan query
+	Offset int64
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.

@@ -202,6 +202,7 @@ message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
   int64 limit = 3;
+  int64 offset_bound = 4;
 };
 
 message PlanNode {
