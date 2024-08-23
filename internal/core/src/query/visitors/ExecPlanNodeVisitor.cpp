@@ -304,9 +304,15 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     retrieve_result.total_data_cnt_ = bitset_holder.size();
-    auto results_pair = segment->find_first(node.limit_, bitset_holder);
-    retrieve_result.result_offsets_ = std::move(results_pair.first);
-    retrieve_result.has_more_result = results_pair.second;
+
+    if(node.offset_bound_==0) {
+        auto results_pair = segment->find_first(node.limit_, bitset_holder);
+        retrieve_result.result_offsets_ = std::move(results_pair.first);
+        retrieve_result.has_more_result = results_pair.second;
+    } else {
+
+    }
+
     retrieve_result_opt_ = std::move(retrieve_result);
 }
 

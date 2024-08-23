@@ -552,14 +552,26 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	future := cgo.Async(
 		ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncRetrieve(
-				traceCtx.ctx,
-				s.ptr,
-				plan.cRetrievePlan,
-				C.uint64_t(plan.Timestamp),
-				C.int64_t(maxLimitSize),
-				C.bool(plan.ignoreNonPk),
-			))
+			if plan.offsetBound <= 0 {
+				return (cgo.CFuturePtr)(C.AsyncRetrieve(
+					traceCtx.ctx,
+					s.ptr,
+					plan.cRetrievePlan,
+					C.uint64_t(plan.Timestamp),
+					C.int64_t(maxLimitSize),
+					C.bool(plan.ignoreNonPk),
+				))
+			} else {
+				return (cgo.CFuturePtr)(C.AsyncRetrieveAfterOffset(
+					traceCtx.ctx,
+					s.ptr,
+					plan.cRetrievePlan,
+					C.int64_t(plan.offsetBound),
+					C.uint64_t(plan.Timestamp),
+					C.int64_t(maxLimitSize),
+					C.bool(plan.ignoreNonPk),
+				))
+			}
 		},
 		cgo.WithName("retrieve"),
 	)

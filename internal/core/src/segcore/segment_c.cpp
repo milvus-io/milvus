@@ -212,23 +212,24 @@ CFuture*
 AsyncRetrieveAfterOffset(CTraceContext c_trace,
                          CSegmentInterface c_segment,
                          CRetrievePlan c_plan,
-                         int64_t offset,
-                         int64_t len) {
+                         int64_t offset_bound,
+                         uint64_t timestamp,
+                         int64_t limit_size,
+                         bool ignore_non_pk) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
-
+    plan->plan_node_->offset_bound_ = offset_bound;
     auto future = milvus::futures::Future<CRetrieveResult>::async(
             milvus::futures::getGlobalCPUExecutor(),
             milvus::futures::ExecutePriority::HIGH,
-            [c_trace, segment, plan, offset, len](
+            [c_trace, segment, plan, timestamp, limit_size, ignore_non_pk](
                     milvus::futures::CancellationToken cancel_token) {
                 auto trace_ctx = milvus::tracer::TraceContext{
                         c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-                milvus::tracer::AutoSpan span(
-                        "SegCoreRetrieveByOffsets", &trace_ctx, true);
+                milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-                auto retrieve_result =
-                        segment->Retrieve(&trace_ctx, plan, offset, len);
+                auto retrieve_result = segment->Retrieve(
+                        &trace_ctx, plan, timestamp, limit_size, ignore_non_pk);
 
                 return CreateLeakedCRetrieveResultFromProto(
                         std::move(retrieve_result));

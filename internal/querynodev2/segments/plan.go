@@ -28,6 +28,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -173,9 +174,10 @@ type RetrievePlan struct {
 	Timestamp     Timestamp
 	msgID         UniqueID // only used to debug.
 	ignoreNonPk   bool
+	offsetBound   int64
 }
 
-func NewRetrievePlan(ctx context.Context, col *Collection, exprPlan []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
+func NewRetrievePlan(ctx context.Context, col *Collection, exprPlan []byte, timestamp Timestamp, msgID UniqueID, scanCtx *internalpb.ScanCtx) (*RetrievePlan, error) {
 	col.mu.RLock()
 	defer col.mu.RUnlock()
 
@@ -195,6 +197,9 @@ func NewRetrievePlan(ctx context.Context, col *Collection, exprPlan []byte, time
 		cRetrievePlan: cPlan,
 		Timestamp:     timestamp,
 		msgID:         msgID,
+	}
+	if scanCtx != nil {
+		newPlan.offsetBound = scanCtx.GetOffset()
 	}
 	return newPlan, nil
 }

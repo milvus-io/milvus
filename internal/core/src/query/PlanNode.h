@@ -82,6 +82,7 @@ struct RetrievePlanNode : PlanNode {
     std::optional<std::shared_ptr<milvus::plan::PlanNode>> filter_plannode_;
     bool is_count_;
     int64_t limit_;
+    int64_t offset_bound_;
 };
 
 }  // namespace milvus::query

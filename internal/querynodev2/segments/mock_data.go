@@ -1173,7 +1173,7 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 		return nil, err
 	}
 
-	plan, err2 := NewRetrievePlan(context.Background(), collection, planBytes, timestamp, 100)
+	plan, err2 := NewRetrievePlan(context.Background(), collection, planBytes, timestamp, 100, nil)
 	return plan, err2
 }
 

@@ -61,6 +61,7 @@ func (t *QueryStreamTask) Execute() error {
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),
 		t.req.Req.Base.GetMsgID(),
+		nil,
 	)
 	if err != nil {
 		return err
