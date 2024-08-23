@@ -1166,7 +1166,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	}
 
 	// 4.
-	s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), isIndexMmapEnable(indexInfo))
+	s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), isIndexMmapEnable(fieldSchema, indexInfo))
 	warmupChunkCacheSpan := tr.RecordSpan()
 	log.Info("Finish loading index",
 		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),

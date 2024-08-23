@@ -834,10 +834,10 @@ std::tuple<std::string, std::shared_ptr<ColumnBase>> static ReadFromChunkCache(
     const storage::ChunkCachePtr& cc,
     const std::string& data_path,
     const storage::MmapChunkDescriptorPtr& descriptor) {
-    // TODO: add Load() interface for chunk cache, make Read() raise error if cache miss
-    // for mmap mode, field_meta is unused, so just construct a fake field meta
+    // For mmap mode, field_meta is unused, so just construct a fake field meta.
     auto fm =
         FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE, false);
+    // TODO: add Load() interface for chunk cache when support retrieve_enable, make Read() raise error if cache miss
     auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
     return {data_path, column};
