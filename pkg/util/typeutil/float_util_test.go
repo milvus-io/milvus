@@ -17,6 +17,7 @@
 package typeutil
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -48,6 +49,16 @@ func Test_VerifyFloats32(t *testing.T) {
 
 	data = []float32{2.5, 32.2, 53.254, float32(math.Inf(1))}
 	err = VerifyFloats32(data)
+	assert.Error(t, err)
+
+	rawValue := uint32(0xffc00000)
+	floatValue := math.Float32frombits(rawValue)
+	err = VerifyFloats32([]float32{floatValue})
+	assert.Error(t, err)
+
+	floatValue = -math.Float32frombits(rawValue)
+	err = VerifyFloats32([]float32{floatValue})
+	fmt.Println("-nan", floatValue, err)
 	assert.Error(t, err)
 }
 
