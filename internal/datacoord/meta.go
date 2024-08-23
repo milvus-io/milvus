@@ -72,6 +72,7 @@ type CompactionMeta interface {
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
 	GetCompactionTaskMeta() *compactionTaskMeta
+	GetStatsTaskMeta() *statsTaskMeta
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -106,6 +107,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetStatsTaskMeta() *statsTaskMeta {
+	return m.statsTaskMeta
 }
 
 type channelCPs struct {

@@ -255,3 +255,15 @@ func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64) indexpb.
 	}
 	return t.GetState()
 }
+
+func (stm *statsTaskMeta) GetTargetSegmentID(from int64) int64 {
+	stm.RLock()
+	defer stm.RUnlock()
+
+	t, ok := stm.segmentStatsTaskIndex[from]
+	if !ok {
+		return 0
+	}
+
+	return t.GetTargetSegmentID()
+}

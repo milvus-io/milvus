@@ -933,6 +933,7 @@ enum CompactionTaskState {
   indexing = 7;
   cleaned = 8;
   meta_saved = 9;
+  statistic = 10;
 }
 
 message CompactionTask{
