@@ -215,7 +215,10 @@ func (t *ImportTask) sync(task *ImportTask, hashedData HashedData) ([]*conc.Futu
 				continue
 			}
 			partitionID := task.GetPartitionIDs()[partitionIdx]
-			segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
+			segmentID, err := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
+			if err != nil {
+				return nil, nil, err
+			}
 			syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
 				segmentID, partitionID, task.GetCollectionID(), channel, data, nil)
 			if err != nil {
