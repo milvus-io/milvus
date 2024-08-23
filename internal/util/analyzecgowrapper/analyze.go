@@ -17,7 +17,7 @@
 package analyzecgowrapper
 
 /*
-#cgo pkg-config: milvus_clustering
+#cgo pkg-config: milvus_core
 
 #include <stdlib.h>	// free
 #include "clustering/analyze_c.h"

@@ -21,7 +21,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "monitor/prometheus_client.h"
-#include "storage/AzureChunkManager.h"
+#include "storage/azure/AzureChunkManager.h"
 
 namespace milvus {
 namespace storage {

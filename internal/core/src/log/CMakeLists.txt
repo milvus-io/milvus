@@ -10,12 +10,6 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
-                ${MILVUS_ENGINE_SRC}/log/Log.h
-                #${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-                #${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.h
-                )
 
-add_library(milvus_log STATIC ${LOG_FILES})
-set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_COMPILE "")
-set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_LINK "")
+add_source_at_current_directory_recursively()
+add_library(milvus_log OBJECT ${SOURCE_FILES})

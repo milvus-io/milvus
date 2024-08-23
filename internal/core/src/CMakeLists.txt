@@ -20,8 +20,19 @@ else()
     project(core CXX C)
 endif()
 
+option( EMBEDDED_MILVUS "Enable embedded Milvus" OFF )
+if ( EMBEDDED_MILVUS )
+    add_compile_definitions( EMBEDDED_MILVUS )
+endif()
+
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
+include_directories(
+    ${KNOWHERE_INCLUDE_DIR}
+    ${SIMDJSON_INCLUDE_DIR}
+    ${TANTIVY_INCLUDE_DIR}
+    ${CONAN_INCLUDE_DIRS}
+)
 
 add_subdirectory( pb )
 add_subdirectory( log )
@@ -37,3 +48,42 @@ add_subdirectory( clustering )
 add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
+
+milvus_add_pkg_config("milvus_core")
+
+add_library(milvus_core SHARED
+    $<TARGET_OBJECTS:milvus_pb>
+    $<TARGET_OBJECTS:milvus_log>
+    $<TARGET_OBJECTS:milvus_config>
+    $<TARGET_OBJECTS:milvus_common>
+    $<TARGET_OBJECTS:milvus_monitor>
+    $<TARGET_OBJECTS:milvus_storage>
+    $<TARGET_OBJECTS:milvus_index>
+    $<TARGET_OBJECTS:milvus_query>
+    $<TARGET_OBJECTS:milvus_segcore>
+    $<TARGET_OBJECTS:milvus_indexbuilder>
+    $<TARGET_OBJECTS:milvus_clustering>
+    $<TARGET_OBJECTS:milvus_exec>
+    $<TARGET_OBJECTS:milvus_bitset>
+    $<TARGET_OBJECTS:milvus_futures>
+)
+
+set(LINK_TARGETS 
+    boost_bitset_ext
+    simdjson
+    tantivy_binding
+    knowhere
+    ${OpenMP_CXX_FLAGS}
+    ${CONAN_LIBS})
+
+if(USE_OPENDAL)
+    set(LINK_TARGETS ${LINK_TARGETS} opendal)
+endif()
+
+if(DEFINED AZURE_BUILD_DIR)
+    set(LINK_TARGETS ${LINK_TARGETS} azure_blob_chunk_manager)
+endif()
+
+target_link_libraries(milvus_core ${LINK_TARGETS})
+
+install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
