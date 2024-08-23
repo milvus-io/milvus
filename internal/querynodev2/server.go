@@ -379,6 +379,11 @@ func (node *QueryNode) Start() error {
 		paramtable.SetUpdateTime(time.Now())
 		mmapEnabled := paramtable.Get().QueryNodeCfg.MmapEnabled.GetAsBool()
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
+		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
+		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
+		mmapScarlarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
+		mmapScarlarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
@@ -387,6 +392,10 @@ func (node *QueryNode) Start() error {
 			zap.String("Address", node.address),
 			zap.Bool("mmapEnabled", mmapEnabled),
 			zap.Bool("growingmmapEnable", growingmmapEnable),
+			zap.Bool("mmapVectorIndex", mmapVectorIndex),
+			zap.Bool("mmapVectorField", mmapVectorField),
+			zap.Bool("mmapScarlarIndex", mmapScarlarIndex),
+			zap.Bool("mmapScarlarField", mmapScarlarField),
 		)
 	})
 

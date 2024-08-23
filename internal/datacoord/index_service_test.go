@@ -639,7 +639,9 @@ func TestServer_AlterIndex(t *testing.T) {
 			Timestamp:    createTS,
 		})
 		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
-		assert.True(t, common.IsMmapEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...), "indexInfo: %+v", describeResp.IndexInfos[0])
+		enableMmap, ok := common.IsMmapDataEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.True(t, enableMmap, "indexInfo: %+v", describeResp.IndexInfos[0])
+		assert.True(t, ok)
 	})
 }
 
@@ -2395,5 +2397,60 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 
 		segments := s.getUnIndexTaskSegments()
 		assert.Equal(t, 0, len(segments))
+	})
+}
+
+func TestValidateIndexParams(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid index param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "h",
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid index user param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "h",
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
 	})
 }
