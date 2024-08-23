@@ -1121,6 +1121,7 @@ type MinioConfig struct {
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
+	GcpCredentialJSON  ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1319,4 +1320,14 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+
+	p.GcpCredentialJSON = ParamItem{
+		Key:          "minio.gcpCredentialJSON",
+		Version:      "2.4.1",
+		DefaultValue: "",
+		Doc: `"The JSON content contains the gcs service account credentials.
+Used only for the 'gcpnative' cloud provider"`,
+		Export: true,
+	}
+	p.GcpCredentialJSON.Init(base.mgr)
 }

@@ -89,6 +89,12 @@ TEST_F(RemoteChunkManagerTest, BasicFunctions) {
     EXPECT_TRUE(the_chunk_manager_->GetName() == "AzureChunkManager");
 #endif
 
+#ifdef ENABLE_GCP_NATIVE
+    configs_.cloud_provider = "gcpnative";
+    the_chunk_manager_ = CreateChunkManager(configs_);
+    EXPECT_TRUE(the_chunk_manager_->GetName() == "GcpNativeChunkManager");
+#endif
+
     configs_.cloud_provider = "";
 }
 

@@ -67,6 +67,13 @@ services:
       - "16686:16686" # frontent
       - "14268:14268" # jaeger.thirft
 
+  gcpnative:
+    image: fsouza/fake-gcs-server
+    container_name: fake-gcs-server
+    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
+    ports:
+      - "4443:4443"
+
 networks:
   default:
     name: milvus_dev

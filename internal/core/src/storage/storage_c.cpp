@@ -76,6 +76,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;
         storage_config.region = c_storage_config.region;
         storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
+        storage_config.gcp_credential_json =
+            std::string(c_storage_config.gcp_credential_json);
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 

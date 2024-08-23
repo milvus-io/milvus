@@ -29,6 +29,9 @@
 #ifdef AZURE_BUILD_DIR
 #include "storage/azure/AzureChunkManager.h"
 #endif
+#ifdef ENABLE_GCP_NATIVE
+#include "storage/GcpNativeChunkManager.h"
+#endif
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
@@ -59,6 +62,7 @@ enum class CloudProviderType : int8_t {
     ALIYUN = 3,
     AZURE = 4,
     TENCENTCLOUD = 5,
+    GCPNATIVE = 6,
 };
 
 std::map<std::string, CloudProviderType> CloudProviderType_Map = {
@@ -66,7 +70,8 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"gcp", CloudProviderType::GCP},
     {"aliyun", CloudProviderType::ALIYUN},
     {"azure", CloudProviderType::AZURE},
-    {"tencent", CloudProviderType::TENCENTCLOUD}};
+    {"tencent", CloudProviderType::TENCENTCLOUD},
+    {"gcpnative", CloudProviderType::GCPNATIVE}};
 
 std::map<std::string, int> ReadAheadPolicy_Map = {
     {"normal", MADV_NORMAL},
@@ -712,6 +717,12 @@ CreateChunkManager(const StorageConfig& storage_config) {
 #ifdef AZURE_BUILD_DIR
                 case CloudProviderType::AZURE: {
                     return std::make_shared<AzureChunkManager>(storage_config);
+                }
+#endif
+#ifdef ENABLE_GCP_NATIVE
+                case CloudProviderType::GCPNATIVE: {
+                    return std::make_shared<GcpNativeChunkManager>(
+                        storage_config);
                 }
 #endif
                 default: {

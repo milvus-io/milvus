@@ -117,6 +117,14 @@ if (DEFINED AZURE_BUILD_DIR)
     include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
 endif()
 
+if (ENABLE_GCP_NATIVE)
+    add_definitions(-DENABLE_GCP_NATIVE)
+    set(MILVUS_TEST_FILES
+                ${MILVUS_TEST_FILES}
+                test_gcp_native_chunk_manager.cpp
+                )
+endif()
+
 if (LINUX)
     message( STATUS "Building Milvus Unit Test on Linux")
     option(USE_ASAN "Whether to use AddressSanitizer" OFF)

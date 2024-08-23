@@ -204,6 +204,8 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.IAMEndpoint.GetValue(), "")
 
+		assert.Equal(t, Params.GcpCredentialJSON.GetValue(), "")
+
 		t.Logf("Minio BucketName = %s", Params.BucketName.GetValue())
 
 		t.Logf("Minio rootpath = %s", Params.RootPath.GetValue())
