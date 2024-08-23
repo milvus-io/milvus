@@ -62,7 +62,7 @@ ChunkCache::Read(const std::string& filepath,
     std::string err_msg = "";
     try {
         field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-        auto column = Mmap(
+        column = Mmap(
             field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
         allocate_success = true;
     } catch (const SegcoreError& e) {
