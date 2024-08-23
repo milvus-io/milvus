@@ -70,7 +70,7 @@ func NewChannelManager(dn *DataNode) *ChannelManagerImpl {
 		opRunners:     typeutil.NewConcurrentMap[string, *opRunner](),
 		abnormals:     typeutil.NewConcurrentMap[int64, string](),
 
-		releaseFunc: dn.flowgraphManager.RemoveFlowgraph,
+		releaseFunc: dn.tryToReleaseFlowgraph,
 
 		closeCh: lifetime.NewSafeChan(),
 	}
