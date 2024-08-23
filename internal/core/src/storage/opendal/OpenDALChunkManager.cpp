@@ -22,7 +22,7 @@
 #include "opendal.h"
 #include "common/EasyAssert.h"
 #include "storage/Util.h"
-#include "storage/OpenDALChunkManager.h"
+#include "storage/opendal/OpenDALChunkManager.h"
 
 namespace milvus::storage {
 

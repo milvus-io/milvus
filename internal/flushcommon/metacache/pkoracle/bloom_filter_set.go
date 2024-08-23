@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metacache
+package pkoracle
 
 import (
 	"sync"
@@ -25,6 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+var _ PkStat = (*BloomFilterSet)(nil)
 
 // BloomFilterSet is a struct with multiple `storage.PkStatstics`.
 // it maintains bloom filter generated from segment primary keys.

@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -31,7 +32,7 @@ type SegmentSuite struct {
 }
 
 func (s *SegmentSuite) TestBasic() {
-	bfs := NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	segment := NewSegmentInfo(s.info, bfs)
 	s.Equal(s.info.GetID(), segment.SegmentID())
 	s.Equal(s.info.GetPartitionID(), segment.PartitionID())
@@ -43,7 +44,7 @@ func (s *SegmentSuite) TestBasic() {
 }
 
 func (s *SegmentSuite) TestClone() {
-	bfs := NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	segment := NewSegmentInfo(s.info, bfs)
 	cloned := segment.Clone()
 	s.Equal(segment.SegmentID(), cloned.SegmentID())

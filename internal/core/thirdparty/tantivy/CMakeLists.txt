@@ -77,3 +77,5 @@ target_link_libraries(ffi_demo
         tantivy_binding
         dl
         )
+
+set( TANTIVY_INCLUDE_DIR ${LIB_HEADER_FOLDER};${CMAKE_CURRENT_SOURCE_DIR} CACHE INTERNAL "Path to tantivy include directory" )

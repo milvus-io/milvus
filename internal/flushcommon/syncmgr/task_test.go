@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -168,7 +169,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
-	bfs := metacache.NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
 		Name:         "ID",
@@ -271,7 +272,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
-	bfs := metacache.NewBloomFilterSet()
+	bfs := pkoracle.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -313,7 +314,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 
 	s.metacache.ExpectedCalls = nil
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, metacache.NewBloomFilterSet())
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})

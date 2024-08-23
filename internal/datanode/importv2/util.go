@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -59,8 +60,8 @@ func NewSyncTask(ctx context.Context,
 			CollectionID:  collectionID,
 			PartitionID:   partitionID,
 			InsertChannel: vchannel,
-		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			bfs := metacache.NewBloomFilterSet()
+		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
+			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
 		})
 	}
@@ -240,8 +241,8 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 			},
 			Schema: schema,
 		}
-		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		metaCaches[channel] = metaCache
 	}

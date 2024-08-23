@@ -362,6 +362,18 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeSearchHitSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_hit_segment_num",
+			Help:      "the number of segments actually involved in search task",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -819,6 +831,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSegmentPruneBias)
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
+	registry.MustRegister(QueryNodeSearchHitSegmentNum)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 }
