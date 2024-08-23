@@ -1731,6 +1731,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel)
 	log.Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
