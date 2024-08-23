@@ -9,16 +9,5 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-milvus_add_pkg_config("milvus_futures")
-
-set(FUTURES_SRC
-        Executor.cpp
-        future_c.cpp
-        future_test_case_c.cpp
-        )
-
-add_library(milvus_futures SHARED ${FUTURES_SRC})
-
-target_link_libraries(milvus_futures milvus_common)
-
-install(TARGETS milvus_futures DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+add_source_at_current_directory_recursively()
+add_library(milvus_futures OBJECT ${SOURCE_FILES})
