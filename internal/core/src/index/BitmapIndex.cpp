@@ -285,7 +285,7 @@ BitmapIndex<T>::Serialize(const Config& config) {
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
 
     LOG_INFO("build bitmap index with cardinality = {}, num_rows = {}",
-             Cardinality(),
+             data_.size(),
              total_num_rows_);
 
     Disassemble(ret_set);
@@ -426,7 +426,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
     DeserializeIndexData(index_data_buffer->data.get(), index_length);
 
     LOG_INFO("load bitmap index with cardinality = {}, num_rows = {}",
-             data_.size(),
+             Cardinality(),
              total_num_rows_);
 
     is_built_ = true;
