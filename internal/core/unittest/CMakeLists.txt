@@ -11,6 +11,12 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(
+    ${KNOWHERE_INCLUDE_DIR}
+    ${SIMDJSON_INCLUDE_DIR}
+    ${TANTIVY_INCLUDE_DIR}
+    ${CONAN_INCLUDE_DIRS}
+)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
@@ -130,13 +136,8 @@ if (LINUX)
 
     target_link_libraries(index_builder_test
             gtest
-            gtest_main
-            milvus_monitor
-            milvus_segcore
-            milvus_storage
-            milvus_indexbuilder
-            milvus_clustering
-            milvus_common
+            milvus_core
+            knowhere
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -147,13 +148,8 @@ add_executable(all_tests
 
 target_link_libraries(all_tests
         gtest
-        milvus_segcore
-        milvus_storage
-        milvus_indexbuilder
-        milvus_clustering
-        pthread
-        milvus_common
-        milvus_exec
+        milvus_core
+        knowhere
         )
 
 install(TARGETS all_tests DESTINATION unittest)
