@@ -81,14 +81,12 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(ctx context.Context,
-	factory msgstream.Factory,
-	isMain bool,
-	pchannel string,
-	position *Pos,
-	subName string,
-	subPos SubPos,
+	factory msgstream.Factory, isMain bool,
+	pchannel string, position *Pos,
+	subName string, subPos SubPos,
 	lagNotifyChan chan struct{},
 	lagTargets *typeutil.ConcurrentMap[string, *target],
+	includeCurrentMsg bool,
 ) (*Dispatcher, error) {
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
@@ -106,7 +104,7 @@ func NewDispatcher(ctx context.Context,
 			return nil, err
 		}
 
-		err = stream.Seek(ctx, []*Pos{position}, false)
+		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
 			stream.Close()
 			log.Error("seek failed", zap.Error(err))
