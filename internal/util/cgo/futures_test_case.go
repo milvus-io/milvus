@@ -4,7 +4,7 @@
 package cgo
 
 /*
-#cgo pkg-config: milvus_futures
+#cgo pkg-config: milvus_core
 
 #include "futures/future_c.h"
 #include <stdlib.h>

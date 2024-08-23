@@ -1,10 +1,9 @@
-
 libdir=@CMAKE_INSTALL_FULL_LIBDIR@
 includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
-Name: Milvus Storage
-Description: Storage wrapper for Milvus
+Name: Milvus Core
+Description: Core modules for Milvus
 Version: @MILVUS_VERSION@
 
-Libs: -L${libdir} -lmilvus_storage
+Libs: -L${libdir} -lmilvus_core
 Cflags: -I${includedir}

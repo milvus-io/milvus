@@ -13,6 +13,8 @@ set(BITSET_SRCS
     detail/platform/dynamic.cpp
 )
 
+
+
 if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     list(APPEND BITSET_SRCS
         detail/platform/x86/avx2-inst.cpp
@@ -38,4 +40,4 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     #set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
 endif()
 
-add_library(milvus_bitset ${BITSET_SRCS})
+add_library(milvus_bitset OBJECT ${BITSET_SRCS})

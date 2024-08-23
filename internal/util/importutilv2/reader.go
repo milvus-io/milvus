@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
@@ -70,6 +71,12 @@ func NewReader(ctx context.Context,
 		return numpy.NewReader(ctx, cm, schema, importFile.GetPaths(), bufferSize)
 	case Parquet:
 		return parquet.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
+	case CSV:
+		sep, err := GetCSVSep(options)
+		if err != nil {
+			return nil, err
+		}
+		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

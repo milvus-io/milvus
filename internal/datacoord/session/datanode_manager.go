@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package session
 
 import (
 	"context"
@@ -48,8 +48,8 @@ const (
 	querySlotTimeout  = 10 * time.Second
 )
 
-//go:generate mockery --name=SessionManager --structname=MockSessionManager --output=./  --filename=mock_session_manager.go --with-expecter --inpackage
-type SessionManager interface {
+// DataNodeManager is the interface for datanode session manager.
+type DataNodeManager interface {
 	AddSession(node *NodeInfo)
 	DeleteSession(node *NodeInfo)
 	GetSessionIDs() []int64
@@ -75,33 +75,33 @@ type SessionManager interface {
 	Close()
 }
 
-var _ SessionManager = (*SessionManagerImpl)(nil)
+var _ DataNodeManager = (*DataNodeManagerImpl)(nil)
 
-// SessionManagerImpl provides the grpc interfaces of cluster
-type SessionManagerImpl struct {
+// DataNodeManagerImpl provides the grpc interfaces of cluster
+type DataNodeManagerImpl struct {
 	sessions struct {
 		lock.RWMutex
 		data map[int64]*Session
 	}
-	sessionCreator dataNodeCreatorFunc
+	sessionCreator DataNodeCreatorFunc
 }
 
 // SessionOpt provides a way to set params in SessionManagerImpl
-type SessionOpt func(c *SessionManagerImpl)
+type SessionOpt func(c *DataNodeManagerImpl)
 
-func withSessionCreator(creator dataNodeCreatorFunc) SessionOpt {
-	return func(c *SessionManagerImpl) { c.sessionCreator = creator }
+func WithDataNodeCreator(creator DataNodeCreatorFunc) SessionOpt {
+	return func(c *DataNodeManagerImpl) { c.sessionCreator = creator }
 }
 
-func defaultSessionCreator() dataNodeCreatorFunc {
+func defaultSessionCreator() DataNodeCreatorFunc {
 	return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return grpcdatanodeclient.NewClient(ctx, addr, nodeID)
 	}
 }
 
-// NewSessionManagerImpl creates a new SessionManagerImpl
-func NewSessionManagerImpl(options ...SessionOpt) *SessionManagerImpl {
-	m := &SessionManagerImpl{
+// NewDataNodeManagerImpl creates a new NewDataNodeManagerImpl
+func NewDataNodeManagerImpl(options ...SessionOpt) *DataNodeManagerImpl {
+	m := &DataNodeManagerImpl{
 		sessions: struct {
 			lock.RWMutex
 			data map[int64]*Session
@@ -115,7 +115,7 @@ func NewSessionManagerImpl(options ...SessionOpt) *SessionManagerImpl {
 }
 
 // AddSession creates a new session
-func (c *SessionManagerImpl) AddSession(node *NodeInfo) {
+func (c *DataNodeManagerImpl) AddSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 
@@ -125,7 +125,7 @@ func (c *SessionManagerImpl) AddSession(node *NodeInfo) {
 }
 
 // GetSession return a Session related to nodeID
-func (c *SessionManagerImpl) GetSession(nodeID int64) (*Session, bool) {
+func (c *DataNodeManagerImpl) GetSession(nodeID int64) (*Session, bool) {
 	c.sessions.RLock()
 	defer c.sessions.RUnlock()
 	s, ok := c.sessions.data[nodeID]
@@ -133,7 +133,7 @@ func (c *SessionManagerImpl) GetSession(nodeID int64) (*Session, bool) {
 }
 
 // DeleteSession removes the node session
-func (c *SessionManagerImpl) DeleteSession(node *NodeInfo) {
+func (c *DataNodeManagerImpl) DeleteSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 
@@ -145,7 +145,7 @@ func (c *SessionManagerImpl) DeleteSession(node *NodeInfo) {
 }
 
 // GetSessionIDs returns IDs of all live DataNodes.
-func (c *SessionManagerImpl) GetSessionIDs() []int64 {
+func (c *DataNodeManagerImpl) GetSessionIDs() []int64 {
 	c.sessions.RLock()
 	defer c.sessions.RUnlock()
 
@@ -157,7 +157,7 @@ func (c *SessionManagerImpl) GetSessionIDs() []int64 {
 }
 
 // GetSessions gets all node sessions
-func (c *SessionManagerImpl) GetSessions() []*Session {
+func (c *DataNodeManagerImpl) GetSessions() []*Session {
 	c.sessions.RLock()
 	defer c.sessions.RUnlock()
 
@@ -168,7 +168,7 @@ func (c *SessionManagerImpl) GetSessions() []*Session {
 	return ret
 }
 
-func (c *SessionManagerImpl) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
+func (c *DataNodeManagerImpl) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
 	c.sessions.RLock()
 	session, ok := c.sessions.data[nodeID]
 	c.sessions.RUnlock()
@@ -181,11 +181,11 @@ func (c *SessionManagerImpl) getClient(ctx context.Context, nodeID int64) (types
 }
 
 // Flush is a grpc interface. It will send req to nodeID asynchronously
-func (c *SessionManagerImpl) Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
+func (c *DataNodeManagerImpl) Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	go c.execFlush(ctx, nodeID, req)
 }
 
-func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
+func (c *DataNodeManagerImpl) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID), zap.String("channel", req.GetChannelName()))
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -196,7 +196,7 @@ func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *d
 	defer cancel()
 
 	resp, err := cli.FlushSegments(ctx, req)
-	if err := VerifyResponse(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("flush call (perhaps partially) failed", zap.Error(err))
 	} else {
 		log.Info("flush call succeeded")
@@ -204,8 +204,8 @@ func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *d
 }
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
-	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+func (c *DataNodeManagerImpl) Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -214,7 +214,7 @@ func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan 
 	}
 
 	resp, err := cli.CompactionV2(ctx, plan)
-	if err := VerifyResponse(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("failed to execute compaction", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
 		return err
 	}
@@ -224,12 +224,12 @@ func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan 
 }
 
 // SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+func (c *DataNodeManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	cli, err := c.getClient(ctx, nodeID)
 	cancel()
 	if err != nil {
@@ -240,7 +240,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	err = retry.Do(context.Background(), func() error {
 		// doesn't set timeout
 		resp, err := cli.SyncSegments(context.Background(), req)
-		if err := VerifyResponse(resp, err); err != nil {
+		if err := merr.CheckRPCCall(resp, err); err != nil {
 			log.Warn("failed to sync segments", zap.Error(err))
 			return err
 		}
@@ -256,7 +256,7 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 }
 
 // GetCompactionPlansResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
-func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
+func (c *DataNodeManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ctx := context.Background()
 	errorGroup, ctx := errgroup.WithContext(ctx)
 
@@ -270,7 +270,7 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pa
 				log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
 				return err
 			}
-			ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+			ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 			defer cancel()
 			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
 				Base: commonpbutil.NewMsgBase(
@@ -308,7 +308,7 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pa
 	return rst, nil
 }
 
-func (c *SessionManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error) {
+func (c *DataNodeManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64) (*datapb.CompactionPlanResult, error) {
 	ctx := context.Background()
 	c.sessions.RLock()
 	s, ok := c.sessions.data[nodeID]
@@ -322,7 +322,7 @@ func (c *SessionManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64)
 		log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err2 := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -352,7 +352,7 @@ func (c *SessionManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64)
 	return result, nil
 }
 
-func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
+func (c *DataNodeManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID),
 		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs())),
 		zap.Strings("channels", req.GetChannels()))
@@ -364,7 +364,7 @@ func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, re
 
 	log.Info("SessionManagerImpl.FlushChannels start")
 	resp, err := cli.FlushChannels(ctx, req)
-	err = VerifyResponse(resp, err)
+	err = merr.CheckRPCCall(resp, err)
 	if err != nil {
 		log.Warn("SessionManagerImpl.FlushChannels failed", zap.Error(err))
 		return err
@@ -373,14 +373,14 @@ func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, re
 	return nil
 }
 
-func (c *SessionManagerImpl) NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error {
+func (c *DataNodeManagerImpl) NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID))
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Info("failed to get dataNode client", zap.Error(err))
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := cli.NotifyChannelOperation(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -390,7 +390,7 @@ func (c *SessionManagerImpl) NotifyChannelOperation(ctx context.Context, nodeID 
 	return nil
 }
 
-func (c *SessionManagerImpl) CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+func (c *DataNodeManagerImpl) CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.String("channel", info.GetVchan().GetChannelName()),
@@ -402,7 +402,7 @@ func (c *SessionManagerImpl) CheckChannelOperationProgress(ctx context.Context, 
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := cli.CheckChannelOperationProgress(ctx, info)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -413,7 +413,7 @@ func (c *SessionManagerImpl) CheckChannelOperationProgress(ctx context.Context, 
 	return resp, nil
 }
 
-func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
+func (c *DataNodeManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("jobID", in.GetJobID()),
@@ -429,10 +429,10 @@ func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest
 		return err
 	}
 	status, err := cli.PreImport(ctx, in)
-	return VerifyResponse(status, err)
+	return merr.CheckRPCCall(status, err)
 }
 
-func (c *SessionManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
+func (c *DataNodeManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("jobID", in.GetJobID()),
@@ -447,10 +447,10 @@ func (c *SessionManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) er
 		return err
 	}
 	status, err := cli.ImportV2(ctx, in)
-	return VerifyResponse(status, err)
+	return merr.CheckRPCCall(status, err)
 }
 
-func (c *SessionManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+func (c *DataNodeManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("jobID", in.GetJobID()),
@@ -464,13 +464,13 @@ func (c *SessionManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImp
 		return nil, err
 	}
 	resp, err := cli.QueryPreImport(ctx, in)
-	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+	if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *SessionManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+func (c *DataNodeManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("jobID", in.GetJobID()),
@@ -484,13 +484,13 @@ func (c *SessionManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportReq
 		return nil, err
 	}
 	resp, err := cli.QueryImport(ctx, in)
-	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+	if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *SessionManagerImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
+func (c *DataNodeManagerImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("jobID", in.GetJobID()),
@@ -504,10 +504,10 @@ func (c *SessionManagerImpl) DropImport(nodeID int64, in *datapb.DropImportReque
 		return err
 	}
 	status, err := cli.DropImport(ctx, in)
-	return VerifyResponse(status, err)
+	return merr.CheckRPCCall(status, err)
 }
 
-func (c *SessionManagerImpl) CheckHealth(ctx context.Context) error {
+func (c *DataNodeManagerImpl) CheckHealth(ctx context.Context) error {
 	group, ctx := errgroup.WithContext(ctx)
 
 	ids := c.GetSessionIDs()
@@ -531,7 +531,7 @@ func (c *SessionManagerImpl) CheckHealth(ctx context.Context) error {
 	return group.Wait()
 }
 
-func (c *SessionManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error) {
+func (c *DataNodeManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error) {
 	log := log.With(zap.Int64("nodeID", nodeID))
 	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
 	defer cancel()
@@ -541,18 +541,18 @@ func (c *SessionManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse,
 		return nil, err
 	}
 	resp, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
-	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+	if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
+func (c *DataNodeManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -565,11 +565,11 @@ func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCo
 	}
 
 	err = retry.Do(context.Background(), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 		defer cancel()
 
 		resp, err := cli.DropCompactionPlan(ctx, req)
-		if err := VerifyResponse(resp, err); err != nil {
+		if err := merr.CheckRPCCall(resp, err); err != nil {
 			log.Warn("failed to drop compaction plan", zap.Error(err))
 			return err
 		}
@@ -585,7 +585,7 @@ func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCo
 }
 
 // Close release sessions
-func (c *SessionManagerImpl) Close() {
+func (c *DataNodeManagerImpl) Close() {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 

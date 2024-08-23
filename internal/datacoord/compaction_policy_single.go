@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -33,11 +34,11 @@ import (
 // todo: move l1 single compaction here
 type singleCompactionPolicy struct {
 	meta      *meta
-	allocator allocator
+	allocator allocator.Allocator
 	handler   Handler
 }
 
-func newSingleCompactionPolicy(meta *meta, allocator allocator, handler Handler) *singleCompactionPolicy {
+func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
@@ -81,7 +82,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		return nil, 0, nil
 	}
 
-	newTriggerID, err := policy.allocator.allocID(ctx)
+	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn("fail to allocate triggerID", zap.Error(err))
 		return nil, 0, err

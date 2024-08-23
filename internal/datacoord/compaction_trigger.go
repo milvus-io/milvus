@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -70,7 +71,7 @@ var _ trigger = (*compactionTrigger)(nil)
 type compactionTrigger struct {
 	handler           Handler
 	meta              *meta
-	allocator         allocator
+	allocator         allocator.Allocator
 	signals           chan *compactionSignal
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
@@ -90,7 +91,7 @@ type compactionTrigger struct {
 func newCompactionTrigger(
 	meta *meta,
 	compactionHandler compactionPlanContext,
-	allocator allocator,
+	allocator allocator.Allocator,
 	handler Handler,
 	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
@@ -281,7 +282,7 @@ func (t *compactionTrigger) triggerManualCompaction(collectionID int64) (UniqueI
 func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return t.allocator.allocID(ctx)
+	return t.allocator.AllocID(ctx)
 }
 
 func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
@@ -355,7 +356,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		plans := t.generatePlans(group.segments, signal, ct)
-		currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
+		currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
 		if err != nil {
 			return err
 		}
@@ -457,7 +458,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 
 	plans := t.generatePlans(segments, signal, ct)
-	currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
+	currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
 	if err != nil {
 		log.Warn("fail to allocate id", zap.Error(err))
 		return

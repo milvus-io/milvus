@@ -17,3 +17,5 @@ FetchContent_Declare(
     URL_HASH MD5=1b0d75ad32179c77f84f4a09d4214057
 )
 FetchContent_MakeAvailable(simdjson)
+
+set( SIMDJSON_INCLUDE_DIR ${simdjson_SOURCE_DIR}/include CACHE INTERNAL "Path to simdjson include directory" )
