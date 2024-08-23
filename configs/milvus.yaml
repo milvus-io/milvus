@@ -141,8 +141,9 @@ minio:
   # for authentication.
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
-  # The JSON content contains the gcs service account credentials. Used only for the "gcpnative" cloud provider.
-  gcpCredentialJSON: ""
+  # The JSON content contains the gcs service account credentials.
+  # Used only for the "gcpnative" cloud provider.
+  gcpCredentialJSON: 
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: 

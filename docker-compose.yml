@@ -43,6 +43,7 @@ services:
       - minio
       - pulsar
       - azurite
+      - gcpnative
     # Command
     command: &builder-command >
       /bin/bash -c "
@@ -83,6 +84,7 @@ services:
       - minio
       - pulsar
       - azurite
+      - gcpnative
     # Command
     command: &builder-command-gpu >
       /bin/bash -c "
@@ -133,6 +135,12 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:latest
+
+  gcpnative:
+    image: fsouza/fake-gcs-server
+    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
+    ports:
+      - "4443:4443"
 
 networks:
   default:

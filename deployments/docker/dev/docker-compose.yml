@@ -104,7 +104,6 @@ services:
 
   gcpnative:
     image: fsouza/fake-gcs-server
-    container_name: fake-gcs-server
     command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443
     ports:
       - "4443:4443"

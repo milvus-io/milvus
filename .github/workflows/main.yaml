@@ -141,7 +141,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker compose up -d azurite
+          docker compose up -d azurite gcpnative
       - name: UT
         run: |
           chmod +x build/builder.sh
@@ -193,7 +193,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker compose up -d pulsar etcd minio azurite
+          docker compose up -d pulsar etcd minio azurite gcpnative
       - name: UT
         run: |
           chmod +x build/builder.sh

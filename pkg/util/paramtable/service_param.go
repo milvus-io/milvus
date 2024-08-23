@@ -1115,13 +1115,13 @@ type MinioConfig struct {
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
 	CloudProvider      ParamItem `refreshable:"false"`
+	GcpCredentialJSON  ParamItem `refreshable:"false"`
 	IAMEndpoint        ParamItem `refreshable:"false"`
 	LogLevel           ParamItem `refreshable:"false"`
 	Region             ParamItem `refreshable:"false"`
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
-	GcpCredentialJSON  ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1256,15 +1256,28 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 	p.CloudProvider = ParamItem{
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
-		Version:      "2.2.0",
+		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
 You can use "gcp" for other cloud provider supports S3 API with signature v2
 You can use "aliyun" for other cloud provider uses virtual host style bucket
+You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
+for authentication.
 When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		Export: true,
 	}
 	p.CloudProvider.Init(base.mgr)
+
+	p.GcpCredentialJSON = ParamItem{
+		Key:          "minio.gcpCredentialJSON",
+		Version:      "2.4.1",
+		DefaultValue: "",
+		Doc: `The JSON content contains the gcs service account credentials.
+Used only for the "gcpnative" cloud provider.`,
+		Export: true,
+	}
+	p.GcpCredentialJSON.Init(base.mgr)
 
 	p.IAMEndpoint = ParamItem{
 		Key:          "minio.iamEndpoint",
@@ -1320,14 +1333,4 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
-
-	p.GcpCredentialJSON = ParamItem{
-		Key:          "minio.gcpCredentialJSON",
-		Version:      "2.4.1",
-		DefaultValue: "",
-		Doc: `"The JSON content contains the gcs service account credentials.
-Used only for the 'gcpnative' cloud provider"`,
-		Export: true,
-	}
-	p.GcpCredentialJSON.Init(base.mgr)
 }
