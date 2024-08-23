@@ -427,6 +427,40 @@ func TestInsertSparseDataMaxDim(t *testing.T) {
 	common.CheckInsertResult(t, pkColumn, inRes)
 }
 
+// empty spare vector can't be searched, but can be queried
+func TestInsertReadSparseEmptyVector(t *testing.T) {
+	// invalid sparse vector: positions >= uint32
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// insert data column
+	columnOpt := hp.TNewDataOption()
+	data := []column.Column{
+		hp.GenColumnData(1, entity.FieldTypeInt64, *columnOpt),
+		hp.GenColumnData(1, entity.FieldTypeVarChar, *columnOpt),
+	}
+
+	//  sparse vector: empty position and values
+	sparseVec, err := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
+	common.CheckErr(t, err, true)
+	data2 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
+	insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data2...))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 1, insertRes.InsertCount)
+
+	// query and check vector is empty
+	resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithLimit(10).WithOutputFields([]string{common.DefaultSparseVecFieldName}).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, resQuery.ResultCount)
+	log.Info("sparseVec", zap.Any("data", resQuery.GetColumn(common.DefaultSparseVecFieldName).(*column.ColumnSparseFloatVector).Data()))
+	common.EqualColumn(t, resQuery.GetColumn(common.DefaultSparseVecFieldName), column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
+}
+
 func TestInsertSparseInvalidVector(t *testing.T) {
 	// invalid sparse vector: len(positions) != len(values)
 	positions := []uint32{1, 10}
@@ -455,15 +489,6 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 	data1 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
 	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data1...))
 	common.CheckErr(t, err, false, "invalid index in sparse float vector: must be less than 2^32-1")
-
-	// invalid sparse vector: empty position and values
-	positions = []uint32{}
-	values = []float32{}
-	sparseVec, err = entity.NewSliceSparseEmbedding(positions, values)
-	common.CheckErr(t, err, true)
-	data2 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data2...))
-	common.CheckErr(t, err, false, "empty sparse float vector row")
 }
 
 func TestInsertSparseVectorSamePosition(t *testing.T) {

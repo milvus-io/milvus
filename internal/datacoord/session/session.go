@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package session
 
 import (
 	"context"
@@ -40,16 +40,34 @@ type Session struct {
 	lock.Mutex
 	info          *NodeInfo
 	client        types.DataNodeClient
-	clientCreator dataNodeCreatorFunc
+	clientCreator DataNodeCreatorFunc
 	isDisposed    bool
 }
 
 // NewSession creates a new session
-func NewSession(info *NodeInfo, creator dataNodeCreatorFunc) *Session {
+func NewSession(info *NodeInfo, creator DataNodeCreatorFunc) *Session {
 	return &Session{
 		info:          info,
 		clientCreator: creator,
 	}
+}
+
+// NodeID returns node id for session.
+// If internal info is nil, return -1 instead.
+func (n *Session) NodeID() int64 {
+	if n.info == nil {
+		return -1
+	}
+	return n.info.NodeID
+}
+
+// Address returns address of session internal node info.
+// If internal info is nil, return empty string instead.
+func (n *Session) Address() string {
+	if n.info == nil {
+		return ""
+	}
+	return n.info.Address
 }
 
 // GetOrCreateClient gets or creates a new client for session

@@ -1,0 +1,7 @@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+
+Name: Knowhere
+Description: an independent project that act as Milvus's internal core.
+Version: @MILVUS_VERSION@
+
+Libs: -L${libdir} -lknowhere

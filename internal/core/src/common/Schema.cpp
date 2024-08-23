@@ -88,6 +88,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                        "repetitive primary key");
             schema->set_primary_field_id(field_id);
         }
+
+        if (child.is_dynamic()) {
+            Assert(schema_proto.enable_dynamic_field());
+            AssertInfo(!schema->get_dynamic_field_id().has_value(),
+                       "repetitive dynamic field");
+            schema->set_dynamic_field_id(field_id);
+        }
     }
 
     AssertInfo(schema->get_primary_field_id().has_value(),

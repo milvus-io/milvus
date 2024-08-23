@@ -481,18 +481,18 @@ generate-mockery-querynode: getdeps build-cpp
 generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=compactionPlanContext --dir=internal/datacoord --filename=mock_compaction_plan_context.go --output=internal/datacoord  --structname=MockCompactionPlanContext --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Handler --dir=internal/datacoord --filename=mock_handler.go --output=internal/datacoord  --structname=NMockHandler --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=allocator --dir=internal/datacoord --filename=mock_allocator_test.go --output=internal/datacoord  --structname=NMockAllocator --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=Allocator --dir=internal/datacoord/allocator --filename=mock_allocator.go --output=internal/datacoord/allocator  --structname=MockAllocator --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=DataNodeManager --dir=internal/datacoord/session --filename=mock_datanode_manager.go --output=internal/datacoord/session  --structname=MockDataNodeManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=RWChannelStore --dir=internal/datacoord --filename=mock_channel_store.go --output=internal/datacoord  --structname=MockRWChannelStore --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=IndexEngineVersionManager --dir=internal/datacoord --filename=mock_index_engine_version_manager.go --output=internal/datacoord  --structname=MockVersionManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=TriggerManager --dir=internal/datacoord --filename=mock_trigger_manager.go --output=internal/datacoord  --structname=MockTriggerManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Cluster --dir=internal/datacoord --filename=mock_cluster.go --output=internal/datacoord  --structname=MockCluster --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=SessionManager --dir=internal/datacoord --filename=mock_session_manager.go --output=internal/datacoord  --structname=MockSessionManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=compactionPlanContext --dir=internal/datacoord --filename=mock_compaction_plan_context.go --output=internal/datacoord  --structname=MockCompactionPlanContext --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=CompactionMeta --dir=internal/datacoord --filename=mock_compaction_meta.go --output=internal/datacoord  --structname=MockCompactionMeta --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=internal/datacoord --filename=mock_channelmanager.go --output=internal/datacoord  --structname=MockChannelManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=SubCluster --dir=internal/datacoord --filename=mock_subcluster.go --output=internal/datacoord  --structname=MockSubCluster --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Broker --dir=internal/datacoord/broker --filename=mock_coordinator_broker.go --output=internal/datacoord/broker  --structname=MockBroker --with-expecter --inpackage
-	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord --filename=mock_worker_manager.go --output=internal/datacoord  --structname=MockWorkerManager --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=WorkerManager --dir=internal/datacoord/session --filename=mock_worker_manager.go --output=internal/datacoord/session  --structname=MockWorkerManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Manager --dir=internal/datacoord --filename=mock_segment_manager.go --output=internal/datacoord  --structname=MockManager --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps

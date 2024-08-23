@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package session
 
 import (
 	"context"
@@ -29,9 +29,12 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestIndexNodeManager_AddNode(t *testing.T) {
+	paramtable.Init()
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 
 	t.Run("success", func(t *testing.T) {
@@ -46,6 +49,7 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 }
 
 func TestIndexNodeManager_PickClient(t *testing.T) {
+	paramtable.Init()
 	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
@@ -57,7 +61,7 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 	t.Run("multiple unavailable IndexNode", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx: context.TODO(),
-			nodeClients: map[UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
@@ -92,11 +96,12 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 
 		selectNodeID, client := nm.PickClient()
 		assert.NotNil(t, client)
-		assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
+		assert.Contains(t, []typeutil.UniqueID{8, 9}, selectNodeID)
 	})
 }
 
 func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
+	paramtable.Init()
 	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
@@ -109,7 +114,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
@@ -127,7 +132,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
@@ -145,7 +150,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:         context.Background(),
 			lock:        lock.RWMutex{},
-			nodeClients: map[UniqueID]types.IndexNodeClient{},
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{},
 		}
 
 		support := nm.ClientSupportDisk()
@@ -156,7 +161,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(nil, err),
 			},
 		}
@@ -169,7 +174,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&indexpb.GetJobStatsResponse{
 					Status:     merr.Status(err),
 					TaskSlots:  0,
@@ -185,6 +190,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 }
 
 func TestNodeManager_StoppingNode(t *testing.T) {
+	paramtable.Init()
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 	err := nm.AddNode(1, "indexnode-1")
 	assert.NoError(t, err)

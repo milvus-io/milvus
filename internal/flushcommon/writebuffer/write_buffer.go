@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -535,8 +536,8 @@ func (wb *writeBufferBase) bufferInsert(inData *inData, startPos, endPos *msgpb.
 			InsertChannel: wb.channelName,
 			StartPosition: startPos,
 			State:         commonpb.SegmentState_Growing,
-		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
+		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.SetStartPosRecorded(false))
 		log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.String("channel", wb.channelName))
 	}

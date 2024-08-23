@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -150,8 +151,8 @@ func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
 	return pack
 }
 
-func (s *StorageV1SerializerSuite) getBfs() *metacache.BloomFilterSet {
-	bfs := metacache.NewBloomFilterSet()
+func (s *StorageV1SerializerSuite) getBfs() *pkoracle.BloomFilterSet {
+	bfs := pkoracle.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
 		Name:         "ID",

@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -46,7 +48,7 @@ type ImportScheduler interface {
 type importScheduler struct {
 	meta    *meta
 	cluster Cluster
-	alloc   allocator
+	alloc   allocator.Allocator
 	imeta   ImportMeta
 
 	buildIndexCh chan UniqueID
@@ -57,7 +59,7 @@ type importScheduler struct {
 
 func NewImportScheduler(meta *meta,
 	cluster Cluster,
-	alloc allocator,
+	alloc allocator.Allocator,
 	imeta ImportMeta,
 	buildIndexCh chan UniqueID,
 ) ImportScheduler {
@@ -144,8 +146,8 @@ func (s *importScheduler) process() {
 }
 
 func (s *importScheduler) peekSlots() map[int64]int64 {
-	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
-		return s.info.NodeID
+	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *session.Session, _ int) int64 {
+		return s.NodeID()
 	})
 	nodeSlots := make(map[int64]int64)
 	mu := &lock.Mutex{}

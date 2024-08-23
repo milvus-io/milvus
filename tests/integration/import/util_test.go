@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -200,6 +201,26 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 
 	err = os.WriteFile(filePath, jsonBytes, 0o644) // nolint
 	assert.NoError(t, err)
+}
+
+func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) rune {
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData)
+	assert.NoError(t, err)
+
+	sep := ','
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+
+	writer := csv.NewWriter(wf)
+	writer.Comma = sep
+	writer.WriteAll(csvData)
+	writer.Flush()
+	assert.NoError(t, err)
+
+	return sep
 }
 
 func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, jobID string) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -211,7 +212,7 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			StartPosition: startPos,
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
+		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
 		log.Info("Add a new level zero segment",
 			zap.Int64("segmentID", segmentID),
 			zap.String("level", datapb.SegmentLevel_L0.String()),

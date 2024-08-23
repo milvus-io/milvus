@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -374,9 +375,8 @@ func TestMeta_Basic(t *testing.T) {
 	const partID0 = UniqueID(100)
 	const partID1 = UniqueID(101)
 	const channelName = "c1"
-	ctx := context.Background()
 
-	mockAllocator := newMockAllocator()
+	// mockAllocator := newMockAllocator(t)
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
 
@@ -395,17 +395,19 @@ func TestMeta_Basic(t *testing.T) {
 		Partitions: []UniqueID{},
 	}
 
+	count := atomic.Int64{}
+	AllocID := func() int64 {
+		return count.Add(1)
+	}
+
 	t.Run("Test Segment", func(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
-		segID0_0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0_0 := AllocID()
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
-		segID1_0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1_0 := AllocID()
 		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
-		segID1_1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1_1 := AllocID()
 		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
 		// check AddSegment
@@ -507,16 +509,14 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
-		segID0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg2 with 300 rows
-		segID1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(context.TODO(), segInfo1)
@@ -573,16 +573,14 @@ func TestMeta_Basic(t *testing.T) {
 		const size1 = 2048
 
 		// add seg0 with size0
-		segID0, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID0 := AllocID()
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.size.Store(size0)
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
 
 		// add seg1 with size1
-		segID1, err := mockAllocator.allocID(ctx)
-		assert.NoError(t, err)
+		segID1 := AllocID()
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.size.Store(size1)
 		err = meta.AddSegment(context.TODO(), segInfo1)
