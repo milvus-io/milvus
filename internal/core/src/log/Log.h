@@ -14,6 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// !!! Bad project layout here, the implementation is on
+// 'milvus-storage/milvus-storage-src/cpp/src/common/log.cpp' The original
+// implementation is on 'internal/core/src/log/Log.cpp', but odr-violation here,
+// So the file is removed
+
 #pragma once
 
 #include <string>
