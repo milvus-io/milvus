@@ -235,7 +235,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	defer t.cleanUp(ctx)
 
 	// 1, download delta logs to build deltaMap
-	deltaBlobs, _, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	deltaBlobs, _, err := composePaths(t.plan.GetSegmentBinlogs())
 	if err != nil {
 		return nil, err
 	}

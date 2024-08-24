@@ -355,8 +355,9 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		plans := t.generatePlans(group.segments, signal, ct)
-		currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
+		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
+		currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
 		if err != nil {
 			return err
 		}
@@ -388,6 +389,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
 				TotalRows:        totalRows,
 				Schema:           coll.Schema,
+				MaxSize:          getExpandedSize(expectedSize),
 			}
 			err := t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
@@ -457,8 +459,9 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal, ct)
-	currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
+	expectedSize := getExpectedSegmentSize(t.meta, coll)
+	plans := t.generatePlans(segments, signal, ct, expectedSize)
+	currentID, _, err := t.allocator.allocN(int64(len(plans) * 2))
 	if err != nil {
 		log.Warn("fail to allocate id", zap.Error(err))
 		return
@@ -491,6 +494,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
 			TotalRows:        totalRows,
 			Schema:           coll.Schema,
+			MaxSize:          getExpandedSize(expectedSize),
 		}); err != nil {
 			log.Warn("failed to execute compaction task",
 				zap.Int64("collection", collectionID),
@@ -509,7 +513,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime) []*typeutil.Pair[int64, []int64] {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*typeutil.Pair[int64, []int64] {
 	if len(segments) == 0 {
 		log.Warn("the number of candidate segments is 0, skip to generate compaction plan")
 		return []*typeutil.Pair[int64, []int64]{}
@@ -520,8 +524,6 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
-
-	expectedSize := t.getExpectedSegmentSize(segments[0].CollectionID)
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
@@ -852,4 +854,8 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	}
 
 	return small
+}
+
+func getExpandedSize(size int64) int64 {
+	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }
