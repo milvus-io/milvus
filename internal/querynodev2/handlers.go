@@ -242,6 +242,9 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	if err != nil {
 		return nil, err
 	}
+	if resp.GetScanCtx() != nil {
+		resp.GetScanCtx().MvccTs = req.GetReq().GetMvccTimestamp()
+	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,

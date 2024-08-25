@@ -22,6 +22,9 @@ func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.Collectio
 	if req.GetReq().GetIsCount() {
 		return &cntReducer{}
 	}
+	if req.GetReq().GetScanCtx() != nil {
+		return &ScanReducer{}
+	}
 	return newDefaultLimitReducer(req, schema)
 }
 
@@ -32,6 +35,9 @@ type segCoreReducer interface {
 func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
 	if req.GetReq().GetIsCount() {
 		return &cntReducerSegCore{}
+	}
+	if req.GetReq().GetScanCtx() != nil {
+		return &ScanReducerSegCore{}
 	}
 	return newDefaultLimitReducerSegcore(req, schema, manager)
 }

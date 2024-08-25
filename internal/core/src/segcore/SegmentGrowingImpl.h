@@ -297,9 +297,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return true;
     }
 
-    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    RetrieveResInfo
     find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
-        return insert_record_.pk2offset_->find_first(limit, offset_bound, bitset);
+        return std::move(insert_record_.pk2offset_->find_first(limit, offset_bound, bitset));
     }
 
     bool

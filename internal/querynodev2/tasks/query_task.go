@@ -165,7 +165,21 @@ func (t *QueryTask) Execute() error {
 		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
 		HasMoreResult:    reducedResult.HasMoreResult,
 	}
+	t.handleScan(reducedResult)
 	return nil
+}
+
+func (t *QueryTask) handleScan(reducedResult *segcorepb.RetrieveResults) {
+	if t.req.GetReq().GetScanCtx() != nil {
+		scanReqCtx := t.req.GetReq().GetScanCtx()
+		scanResCtx := &internalpb.ScanCtx{
+			ScanCtxId:  scanReqCtx.GetScanCtxId(),
+			SegmentIdx: scanReqCtx.GetSegmentIdx(),
+			Offset:     reducedResult.GetLastPkOffset(),
+			MvccTs:     scanReqCtx.GetMvccTs(),
+		}
+		t.result.ScanCtx = scanResCtx
+	}
 }
 
 func (t *QueryTask) Done(err error) {

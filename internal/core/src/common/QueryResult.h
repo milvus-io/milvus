@@ -232,6 +232,7 @@ struct RetrieveResult {
     std::vector<int64_t> result_offsets_;
     std::vector<DataArray> field_data_;
     bool has_more_result = true;
+    int64_t last_pk_offset_ = -1;
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
