@@ -634,7 +634,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 					},
 				}
 			}
-			if fieldData.GetValidData() != nil {
+			if len(fieldData.GetValidData()) != 0 {
 				dst[i].ValidData = append(dst[i].ValidData, fieldData.ValidData[idx])
 			}
 			dstScalar := dst[i].GetScalars()
