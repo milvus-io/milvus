@@ -1660,7 +1660,7 @@ TEST(Sealed, WarmupChunkCache) {
     auto has = segment->HasRawData(vec_info.field_id);
     EXPECT_FALSE(has);
 
-    segment_sealed->WarmupChunkCache(FieldId(vec_info.field_id));
+    segment_sealed->WarmupChunkCache(FieldId(vec_info.field_id), true);
 
     auto ids_ds = GenRandomIds(N);
     auto result =
