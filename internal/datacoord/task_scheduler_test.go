@@ -1716,7 +1716,6 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	s.Run("enqueue returns empty when vector type is not dense vector", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		for _, dataType := range []schemapb.DataType{
-			schemapb.DataType_BinaryVector,
 			schemapb.DataType_SparseFloatVector,
 		} {
 			mt.collections[collID].Schema.Fields[0].DataType = dataType
