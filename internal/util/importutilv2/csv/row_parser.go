@@ -193,13 +193,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
-		return float32(num), nil
+		return float32(num), typeutil.VerifyFloats32([]float32{float32(num)})
 	case schemapb.DataType_Double:
 		num, err := strconv.ParseFloat(obj, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
 		}
-		return num, nil
+		return num, typeutil.VerifyFloats64([]float64{num})
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return obj, nil
 	case schemapb.DataType_BinaryVector:
@@ -228,7 +228,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if len(vec) != r.name2Dim[field.GetName()] {
 			return nil, r.wrapDimError(len(vec), field)
 		}
-		return vec, nil
+		return vec, typeutil.VerifyFloats32(vec)
 	case schemapb.DataType_Float16Vector:
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
@@ -242,7 +242,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		for i := 0; i < len(vec); i++ {
 			copy(vec2[i*2:], typeutil.Float32ToFloat16Bytes(vec[i]))
 		}
-		return vec2, nil
+		return vec2, typeutil.VerifyFloats16(vec2)
 	case schemapb.DataType_BFloat16Vector:
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
@@ -256,7 +256,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		for i := 0; i < len(vec); i++ {
 			copy(vec2[i*2:], typeutil.Float32ToBFloat16Bytes(vec[i]))
 		}
-		return vec2, nil
+		return vec2, typeutil.VerifyBFloats16(vec2)
 	case schemapb.DataType_SparseFloatVector:
 		// use dec.UseNumber() to avoid float64 precision loss
 		var vec map[string]interface{}
@@ -293,13 +293,13 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataType) (*schemapb.ScalarField, error) {
 	switch eleType {
 	case schemapb.DataType_Bool:
-		values := make([]bool, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(bool)
+		values := make([]bool, len(arr))
+		for i, v := range arr {
+			value, ok := v.(bool)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
-			values = append(values, value)
+			values[i] = value
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_BoolData{
@@ -309,17 +309,17 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		values := make([]int32, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(json.Number)
+		values := make([]int32, len(arr))
+		for i, v := range arr {
+			value, ok := v.(json.Number)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 32)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to parse int32: %w", err)
 			}
-			values = append(values, int32(num))
+			values[i] = int32(num)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
@@ -328,18 +328,19 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 				},
 			},
 		}, nil
+
 	case schemapb.DataType_Int64:
-		values := make([]int64, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(json.Number)
+		values := make([]int64, len(arr))
+		for i, v := range arr {
+			value, ok := v.(json.Number)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 64)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to parse int64: %w", err)
 			}
-			values = append(values, num)
+			values[i] = num
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_LongData{
@@ -349,17 +350,20 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	case schemapb.DataType_Float:
-		values := make([]float32, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(json.Number)
+		values := make([]float32, len(arr))
+		for i, v := range arr {
+			value, ok := v.(json.Number)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
 			num, err := strconv.ParseFloat(value.String(), 32)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to parse float32: %w", err)
 			}
-			values = append(values, float32(num))
+			values[i] = float32(num)
+		}
+		if err := typeutil.VerifyFloats32(values); err != nil {
+			return nil, fmt.Errorf("float32 verification failed: %w", err)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -369,17 +373,20 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	case schemapb.DataType_Double:
-		values := make([]float64, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(json.Number)
+		values := make([]float64, len(arr))
+		for i, v := range arr {
+			value, ok := v.(json.Number)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
 			num, err := strconv.ParseFloat(value.String(), 64)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to parse float64: %w", err)
 			}
-			values = append(values, num)
+			values[i] = num
+		}
+		if err := typeutil.VerifyFloats64(values); err != nil {
+			return nil, fmt.Errorf("float64 verification failed: %w", err)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
@@ -389,13 +396,13 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		values := make([]string, 0)
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(string)
+		values := make([]string, len(arr))
+		for i, v := range arr {
+			value, ok := v.(string)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
-			values = append(values, value)
+			values[i] = value
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{
@@ -405,7 +412,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse csv failed, unsupport data type: %s", eleType.String()))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse csv failed, unsupported data type: %s", eleType.String()))
 	}
 }
 
