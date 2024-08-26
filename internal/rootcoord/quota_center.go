@@ -1284,7 +1284,8 @@ func (q *QuotaCenter) calculateRates() error {
 }
 
 func (q *QuotaCenter) resetAllCurrentRates() error {
-	q.rateLimiter = rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps))
+	clusterLimiter := newParamLimiterFunc(internalpb.RateScope_Cluster, allOps)()
+	q.rateLimiter = rlinternal.NewRateLimiterTree(clusterLimiter)
 	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
 		for dbID, collections := range sourceCollections {
 			for collectionID, partitionIDs := range collections {
