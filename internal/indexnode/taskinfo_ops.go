@@ -322,7 +322,7 @@ type statsTaskInfo struct {
 	numRows        int64
 	insertLogs     []*datapb.FieldBinlog
 	statsLogs      []*datapb.FieldBinlog
-	fieldStatsLogs []*datapb.FieldStatsLog
+	fieldStatsLogs map[int64]*datapb.FieldStatsLog
 }
 
 func (i *IndexNode) loadOrStoreStatsTask(clusterID string, taskID UniqueID, info *statsTaskInfo) *statsTaskInfo {
@@ -370,7 +370,7 @@ func (i *IndexNode) storeStatsResult(
 	numRows int64,
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
-	fieldStatsLogs []*datapb.FieldStatsLog,
+	fieldStatsLogs map[int64]*datapb.FieldStatsLog,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
 	i.stateLock.Lock()

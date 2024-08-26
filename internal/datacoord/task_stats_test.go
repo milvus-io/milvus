@@ -526,10 +526,14 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 					Binlogs: []*datapb.Binlog{{LogID: 1004}},
 				},
 			},
-			FieldStatsLogs: []*datapb.FieldStatsLog{
-				{
-					FieldID: 101,
-					Files:   []string{"file1", "file2"},
+			FieldStatsLogs: map[int64]*datapb.FieldStatsLog{
+				101: {
+					TextIndexStats: &datapb.TextIndexStats{
+						Version:    1,
+						Files:      []string{"file1", "file2"},
+						LogSize:    100,
+						MemorySize: 100,
+					},
 				},
 			},
 			NumRows: 65500,

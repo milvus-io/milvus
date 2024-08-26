@@ -283,7 +283,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	fieldStatsLog, err := st.createTextIndex(ctx,
+	textIndexStatsLogs, err := st.createTextIndex(ctx,
 		st.req.GetStorageConfig(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
@@ -295,13 +295,21 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	fieldStatsLogs := make(map[int64]*datapb.FieldStatsLog)
+	for fieldID, textIndexLog := range textIndexStatsLogs {
+		fieldStatsLogs[fieldID] = &datapb.FieldStatsLog{
+			FieldID:        fieldID,
+			TextIndexStats: textIndexLog,
+		}
+	}
+
 	st.node.storeStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs, fieldStatsLog)
+		int64(len(values)), insertLogs, statsLogs, fieldStatsLogs)
 
 	return nil
 }
@@ -552,7 +560,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	segmentID int64,
 	version int64,
 	insertBinlogs []*datapb.FieldBinlog,
-) ([]*datapb.FieldStatsLog, error) {
+) (map[int64]*datapb.TextIndexStats, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -561,18 +569,17 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	fieldStatsLogs := make([]*datapb.FieldStatsLog, 0)
+	fieldStatsLogs := make(map[int64]*datapb.TextIndexStats)
 	for _, field := range st.req.GetSchema().GetFields() {
 		if field.GetDataType() == schemapb.DataType_VarChar {
 			for _, binlog := range insertBinlogs {
 				if binlog.GetFieldID() == field.GetFieldID() {
 					// do text index
 					_ = buildTextLogPrefix(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, field.GetFieldID(), version)
-					fieldStatsLogs = append(fieldStatsLogs, &datapb.FieldStatsLog{
-						FieldID: field.GetFieldID(),
+					fieldStatsLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 						Version: version,
 						Files:   nil,
-					})
+					}
 					log.Info("TODO: call CGO CreateTextIndex", zap.Int64("fieldID", field.GetFieldID()))
 					break
 				}

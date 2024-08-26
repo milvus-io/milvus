@@ -196,7 +196,7 @@ message StatsResult {
   repeated data.FieldBinlog insert_logs = 8;
   repeated data.FieldBinlog stats_logs = 9;
   repeated data.FieldBinlog delta_logs = 10;
-  repeated data.FieldStatsLog field_stats_logs = 11;
+  map<int64, data.FieldStatsLog> field_stats_logs = 11;
   int64 num_rows = 12;
 }
 

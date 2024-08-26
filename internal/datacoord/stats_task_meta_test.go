@@ -216,8 +216,15 @@ func (s *statsTaskMetaSuite) Test_Method() {
 				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 9}}},
 			},
 			DeltaLogs: nil,
-			FieldStatsLogs: []*datapb.FieldStatsLog{
-				{FieldID: 100, Files: []string{"file1", "file2", "file3"}},
+			FieldStatsLogs: map[int64]*datapb.FieldStatsLog{
+				100: {
+					TextIndexStats: &datapb.TextIndexStats{
+						Version:    1,
+						Files:      []string{"file1", "file2", "file3"},
+						LogSize:    100,
+						MemorySize: 100,
+					},
+				},
 			},
 			NumRows: 2048,
 		}

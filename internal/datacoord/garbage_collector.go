@@ -570,7 +570,7 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetFieldStatslogs() {
-		for _, file := range flog.GetFiles() {
+		for _, file := range flog.GetTextIndexStats().GetFiles() {
 			textLogs[file] = struct{}{}
 		}
 	}
@@ -854,7 +854,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 		for _, fieldStats := range seg.GetFieldStatslogs() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
-			for i := int64(1); i < fieldStats.GetVersion(); i++ {
+			for i := int64(1); i < fieldStats.GetTextIndexStats().GetVersion(); i++ {
 				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.TextIndexPath,
 					seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fieldStats.GetFieldID(), i)
 				futures := make([]*conc.Future[struct{}], 0)
