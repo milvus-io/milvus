@@ -70,7 +70,7 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	}
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
-	t.ResultSegments = []int64{100}
+	t.ResultSegments = []int64{100, 200}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
@@ -486,7 +486,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Channel:              "ch1",
 					TotalRows:            200,
 					Schema:               schema,
-					PreAllocatedSegments: &datapb.IDRange{Begin: 100},
+					PreAllocatedSegments: &datapb.IDRange{Begin: 100, End: 200},
 					SlotUsage:            8,
 					MaxSize:              1342177280,
 				},
