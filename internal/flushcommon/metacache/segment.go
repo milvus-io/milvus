@@ -19,6 +19,7 @@ package metacache
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -33,7 +34,7 @@ type SegmentInfo struct {
 	flushedRows      int64
 	bufferRows       int64
 	syncingRows      int64
-	bfs              *BloomFilterSet
+	bfs              pkoracle.PkStat
 	level            datapb.SegmentLevel
 	syncingTasks     int32
 }
@@ -73,7 +74,7 @@ func (s *SegmentInfo) GetHistory() []*storage.PkStatistics {
 	return s.bfs.GetHistory()
 }
 
-func (s *SegmentInfo) GetBloomFilterSet() *BloomFilterSet {
+func (s *SegmentInfo) GetBloomFilterSet() pkoracle.PkStat {
 	return s.bfs
 }
 
@@ -98,7 +99,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 	}
 }
 
-func NewSegmentInfo(info *datapb.SegmentInfo, bfs *BloomFilterSet) *SegmentInfo {
+func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat) *SegmentInfo {
 	level := info.GetLevel()
 	if level == datapb.SegmentLevel_Legacy {
 		level = datapb.SegmentLevel_L1

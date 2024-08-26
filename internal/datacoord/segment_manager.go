@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
@@ -115,7 +116,7 @@ var _ Manager = (*SegmentManager)(nil)
 type SegmentManager struct {
 	meta                *meta
 	mu                  lock.RWMutex
-	allocator           allocator
+	allocator           allocator.Allocator
 	helper              allocHelper
 	segments            []UniqueID
 	estimatePolicy      calUpperLimitPolicy
@@ -213,7 +214,7 @@ func defaultFlushPolicy() flushPolicy {
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) (*SegmentManager, error) {
+func newSegmentManager(meta *meta, allocator allocator.Allocator, opts ...allocOption) (*SegmentManager, error) {
 	manager := &SegmentManager{
 		meta:                meta,
 		allocator:           allocator,
@@ -358,7 +359,7 @@ func isGrowing(segment *SegmentInfo) bool {
 }
 
 func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
-	ts, err := s.allocator.allocTimestamp(ctx)
+	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -374,12 +375,12 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()
-	id, err := s.allocator.allocID(ctx)
+	id, err := s.allocator.AllocID(ctx)
 	if err != nil {
-		log.Error("failed to open new segment while allocID", zap.Error(err))
+		log.Error("failed to open new segment while AllocID", zap.Error(err))
 		return nil, err
 	}
-	ts, err := s.allocator.allocTimestamp(ctx)
+	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -430,9 +431,9 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()
-	id, err := s.allocator.allocID(ctx)
+	id, err := s.allocator.AllocID(ctx)
 	if err != nil {
-		log.Error("failed to open new segment while allocID", zap.Error(err))
+		log.Error("failed to open new segment while AllocID", zap.Error(err))
 		return nil, err
 	}
 	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, id, channelName)

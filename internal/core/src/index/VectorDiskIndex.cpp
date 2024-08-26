@@ -406,9 +406,9 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         }
     }
 
-    if (config.contains(kMmapFilepath)) {
-        load_config.erase(kMmapFilepath);
-        load_config[kEnableMmap] = true;
+    if (config.contains(MMAP_FILE_PATH)) {
+        load_config.erase(MMAP_FILE_PATH);
+        load_config[ENABLE_MMAP] = true;
     }
 
     return load_config;

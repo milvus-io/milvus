@@ -627,6 +627,34 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		err = task.prepareSchema()
 		assert.Error(t, err)
 	})
+
+	t.Run("vector type not support null", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: 101,
+					Nullable: true,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+		}
+		err = task.prepareSchema()
+		assert.Error(t, err)
+	})
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {

@@ -1,7 +1,7 @@
 package cgo
 
 /*
-#cgo pkg-config: milvus_common
+#cgo pkg-config: milvus_core
 
 #include "common/type_c.h"
 #include <stdlib.h>

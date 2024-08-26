@@ -143,8 +143,12 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(db2CollIDs map[int64][]i
 	return check(maxColNumPerDB)
 }
 
-func checkDefaultValue(schema *schemapb.CollectionSchema) error {
+func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetDefaultValue() != nil {
 			switch fieldSchema.GetDefaultValue().Data.(type) {
 			case *schemapb.ValueField_BoolData:
@@ -228,9 +232,7 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
 
-	err := checkDefaultValue(schema)
-	if err != nil {
-		log.Error("has invalid default value")
+	if err := checkFieldSchema(schema); err != nil {
 		return err
 	}
 

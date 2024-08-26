@@ -510,9 +510,12 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 			continue
 		}
 
-		if err := gc.meta.DropChannelCheckpoint(vChannel); err != nil {
+		err := gc.meta.DropChannelCheckpoint(vChannel)
+		if err != nil {
 			// Try to GC in the next gc cycle if drop channel cp meta fail.
-			log.Warn("failed to drop channel check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
+			log.Warn("failed to drop channelcp check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
+		} else {
+			log.Info("GC channel cp", zap.String("vchannel", vChannel))
 		}
 	}
 

@@ -2250,7 +2250,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	})
 	if len(grantEntities) != 0 {
 		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Any("grants", grantEntities), zap.Error(err))
 		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
 	redoTask := newBaseRedoTask(c.stepExecutor)
@@ -2740,15 +2740,36 @@ func (c *Core) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequ
 	method := "RestoreRBAC"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole))
 	ctxLog.Debug(method)
 
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, in.RBACMeta); err != nil {
-		return merr.Status(err), nil
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("restore rbac meta data", func(ctx context.Context) ([]nestedStep, error) {
+		if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, in.RBACMeta); err != nil {
+			log.Warn("fail to restore rbac meta data", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
+		if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheRefresh),
+		}); err != nil {
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when restore rbac meta data"
+		log.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 
 	ctxLog.Debug(method + " success")

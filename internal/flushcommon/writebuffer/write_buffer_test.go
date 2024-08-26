@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -52,8 +53,8 @@ func (s *WriteBufferSuite) SetupTest() {
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
 	var err error
 	s.wb, err = newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		},
 	})
 	s.Require().NoError(err)
@@ -263,8 +264,8 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 
 func (s *WriteBufferSuite) TestSyncSegmentsError() {
 	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		},
 	})
 	s.Require().NoError(err)
@@ -296,8 +297,8 @@ func (s *WriteBufferSuite) TestSyncSegmentsError() {
 
 func (s *WriteBufferSuite) TestEvictBuffer() {
 	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		},
 	})
 	s.Require().NoError(err)
@@ -365,8 +366,8 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 func (s *WriteBufferSuite) TestDropPartitions() {
 	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		},
 	})
 	s.Require().NoError(err)

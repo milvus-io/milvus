@@ -246,11 +246,8 @@ class TestIndexOperation(TestcaseBase):
         """
         schema = cf.gen_array_collection_schema()
         collection_w = self.init_collection_wrap(schema=schema)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "create index on json field is not supported: expected=supported field, "
-                             "actual=create index on Array field: invalid parameter"}
-        collection_w.create_index(ct.default_string_array_field_name, {},
-                                  check_task=CheckTasks.err_res, check_items=error)
+        collection_w.create_index(ct.default_string_array_field_name, {})
+        assert collection_w.index()[0].params == {}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
@@ -1399,8 +1396,8 @@ class TestIndexInvalid(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
-        scalar_index = ["Trie", "STL_SORT", "INVERTED"]
-        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name, ct.default_int32_field_name]
+        scalar_index = ["Trie", "STL_SORT"]
+        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name]
         for i in range(len(scalar_fields)):
             index_name = f"scalar_index_name_{i}"
             scalar_index_params = {"index_type": f"{scalar_index[i]}"}

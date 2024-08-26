@@ -71,22 +71,22 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 ```bash
 {
     "go.toolsEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.testEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.buildFlags": [
-        "-ldflags=-r /Users/zilliz/workspace/milvus/internal/core/output/lib"
+        "-ldflags=-r=/Users/zilliz/workspace/milvus/internal/core/output/lib"
     ],
     "terminal.integrated.env.linux": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.useLanguageServer": true,
     "gopls": {
@@ -94,7 +94,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
     },
     "go.formatTool": "gofumpt",
     "go.lintTool": "golangci-lint",
-    "go.testTags": "dynamic",
+    "go.testTags": "test,dynamic",
     "go.testTimeout": "10m"
 }
 ```

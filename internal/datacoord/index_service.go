@@ -53,7 +53,7 @@ func (s *Server) startIndexService(ctx context.Context) {
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
 	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
-	buildID, err := s.allocator.allocID(context.Background())
+	buildID, err := s.allocator.AllocID(context.Background())
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 
 	if indexID == 0 {
-		indexID, err = s.allocator.allocID(ctx)
+		indexID, err = s.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn("failed to alloc indexID", zap.Error(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
@@ -272,12 +272,18 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 func ValidateIndexParams(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
+	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap index params", err.Error())
 	}
-	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+	}
+	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, indexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
+	}
+	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
 	}
 	return nil
 }

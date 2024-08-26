@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -333,7 +333,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 				log.Info("segment loading PKs", zap.Int64("segmentID", segID))
 				newSegments = append(newSegments, newSeg)
 				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-					var val *metacache.BloomFilterSet
+					var val *pkoracle.BloomFilterSet
 					var err error
 					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 					if err != nil {
@@ -345,7 +345,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 						log.Warn("failed to load segment stats log", zap.Error(err))
 						return val, err
 					}
-					val = metacache.NewBloomFilterSet(pks...)
+					val = pkoracle.NewBloomFilterSet(pks...)
 					return val, nil
 				})
 				futures = append(futures, future)
@@ -358,8 +358,8 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *metacache.BloomFilterSet {
-		return future.Value().(*metacache.BloomFilterSet)
+	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *pkoracle.BloomFilterSet {
+		return future.Value().(*pkoracle.BloomFilterSet)
 	})
 
 	ds.GetMetaCache().UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)

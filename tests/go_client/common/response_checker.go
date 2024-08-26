@@ -151,12 +151,12 @@ func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.
 
 // CheckSearchResult check search result, check nq, topk, ids, score
 func CheckSearchResult(t *testing.T, actualSearchResults []client.ResultSet, expNq int, expTopK int) {
-	require.Equal(t, len(actualSearchResults), expNq)
+	require.Equalf(t, len(actualSearchResults), expNq, fmt.Sprintf("Expected nq=%d, actual SearchResultsLen=%d", expNq, len(actualSearchResults)))
 	require.Len(t, actualSearchResults, expNq)
 	for _, actualSearchResult := range actualSearchResults {
-		require.Equal(t, actualSearchResult.ResultCount, expTopK)
-		require.Equal(t, actualSearchResult.IDs.Len(), expTopK)
-		require.Equal(t, len(actualSearchResult.Scores), expTopK)
+		require.Equalf(t, actualSearchResult.ResultCount, expTopK, fmt.Sprintf("Expected topK=%d, actual ResultCount=%d", expTopK, actualSearchResult.ResultCount))
+		require.Equalf(t, actualSearchResult.IDs.Len(), expTopK, fmt.Sprintf("Expected topK=%d, actual IDsLen=%d", expTopK, actualSearchResult.IDs.Len()))
+		require.Equalf(t, len(actualSearchResult.Scores), expTopK, fmt.Sprintf("Expected topK=%d, actual ScoresLen=%d", expTopK, len(actualSearchResult.Scores)))
 	}
 }
 

@@ -153,6 +153,13 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const override;
+
     bool
     is_mmap_field(FieldId id) const override;
 
@@ -289,7 +296,7 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     void
-    WarmupChunkCache(const FieldId field_id) override;
+    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool
     generate_interim_index(const FieldId field_id);

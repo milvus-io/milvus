@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,9 +50,9 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 
 func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 	job ImportJob,
-	alloc allocator,
+	alloc allocator.Allocator,
 ) ([]ImportTask, error) {
-	idStart, _, err := alloc.allocN(int64(len(fileGroups)))
+	idStart, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
 	}
@@ -79,9 +80,9 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	job ImportJob,
 	manager Manager,
-	alloc allocator,
+	alloc allocator.Allocator,
 ) ([]ImportTask, error) {
-	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
+	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +177,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 	}
 }
 
-func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
+func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(segmentID)
@@ -191,7 +192,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ts, err := alloc.allocTimestamp(ctx)
+	ts, err := alloc.AllocTimestamp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +204,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	// Allocated IDs are used for rowID and the BEGINNING of the logID.
 	allocNum := totalRows + 1
 
-	idBegin, idEnd, err := alloc.allocN(allocNum)
+	idBegin, idEnd, err := alloc.AllocN(allocNum)
 	if err != nil {
 		return nil, err
 	}

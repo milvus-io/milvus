@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -35,7 +36,7 @@ func TestSingleCompactionPolicySuite(t *testing.T) {
 type SingleCompactionPolicySuite struct {
 	suite.Suite
 
-	mockAlloc          *NMockAllocator
+	mockAlloc          *allocator.MockAllocator
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
 	handler            *NMockHandler
@@ -56,10 +57,11 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	mockAllocator := newMockAllocator()
+
+	s.mockAlloc = newMockAllocator(s.T())
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
-	s.singlePolicy = newSingleCompactionPolicy(meta, mockAllocator, mockHandler)
+	s.singlePolicy = newSingleCompactionPolicy(meta, s.mockAlloc, mockHandler)
 }
 
 func (s *SingleCompactionPolicySuite) TestTrigger() {
