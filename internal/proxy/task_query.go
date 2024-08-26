@@ -34,11 +34,6 @@ import (
 )
 
 const (
-	WithCache    = true
-	WithoutCache = false
-)
-
-const (
 	RetrieveTaskName = "RetrieveTask"
 	QueryTaskName    = "QueryTask"
 )
