@@ -434,8 +434,10 @@ message FieldBinlog{
 
 message FieldStatsLog {
   int64 FieldID = 1;
-  int64 version = 2;
-  repeated string files = 3;
+  int64 text_index_version = 2;
+  repeated string text_index_files = 3;
+  int64 text_index_log_size = 4;
+  int64 text_index_memory_size = 5;
 }
 
 message Binlog {

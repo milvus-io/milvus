@@ -103,7 +103,7 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	defer stm.Unlock()
 
 	if _, ok := stm.segmentStatsTaskIndex[t.GetSegmentID()]; ok {
-		log.Debug("stats task already exist in meta", zap.Int64("taskID", t.GetTaskID()),
+		log.Warn("stats task already exist in meta", zap.Int64("taskID", t.GetTaskID()),
 			zap.Int64("segmentID", t.GetSegmentID()))
 		return fmt.Errorf("stats task already exist in meta of segment %d", t.GetSegmentID())
 	}

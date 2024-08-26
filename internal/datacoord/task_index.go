@@ -146,6 +146,8 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	if isFlatIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 		log.Ctx(ctx).Info("segment does not need index really", zap.Int64("taskID", it.taskID),
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("num rows", segIndex.NumRows))
+		it.SetStartTime(time.Now())
+		it.SetEndTime(time.Now())
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
 		return false
 	}

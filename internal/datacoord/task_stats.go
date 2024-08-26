@@ -55,7 +55,8 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 				}))
 				for _, segment := range segments {
 					if err := s.createStatsSegmentTask(segment); err != nil {
-						log.Warn("create stats task for segment failed, wait for retry", zap.Int64("segmentID", segment.GetID()))
+						log.Warn("create stats task for segment failed, wait for retry",
+							zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 						continue
 					}
 				}
@@ -77,7 +78,8 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 				continue
 			}
 			if err := s.createStatsSegmentTask(segment); err != nil {
-				log.Warn("create stats task for segment failed, wait for retry", zap.Int64("segmentID", segment.ID))
+				log.Warn("create stats task for segment failed, wait for retry",
+					zap.Int64("segmentID", segment.ID), zap.Error(err))
 				continue
 			}
 		}

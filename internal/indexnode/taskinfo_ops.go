@@ -220,7 +220,15 @@ func (i *IndexNode) getAnalyzeTaskInfo(clusterID string, taskID UniqueID) *analy
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 
-	return i.analyzeTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]
+	if info, ok := i.analyzeTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
+		return &analyzeTaskInfo{
+			cancel:        info.cancel,
+			state:         info.state,
+			failReason:    info.failReason,
+			centroidsFile: info.centroidsFile,
+		}
+	}
+	return nil
 }
 
 func (i *IndexNode) deleteAnalyzeTaskInfos(ctx context.Context, keys []taskKey) []*analyzeTaskInfo {
@@ -384,7 +392,22 @@ func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTa
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 
-	return i.statsTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]
+	if info, ok := i.statsTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
+		return &statsTaskInfo{
+			cancel:         info.cancel,
+			state:          info.state,
+			failReason:     info.failReason,
+			collID:         info.collID,
+			partID:         info.partID,
+			segID:          info.segID,
+			insertChannel:  info.insertChannel,
+			numRows:        info.numRows,
+			insertLogs:     info.insertLogs,
+			statsLogs:      info.statsLogs,
+			fieldStatsLogs: info.fieldStatsLogs,
+		}
+	}
+	return nil
 }
 
 func (i *IndexNode) deleteStatsTaskInfos(ctx context.Context, keys []taskKey) []*statsTaskInfo {

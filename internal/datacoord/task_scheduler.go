@@ -239,7 +239,7 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 	}
 	state := task.GetState()
 	log.Ctx(s.ctx).Info("task is processing", zap.Int64("taskID", taskID),
-		zap.String("state", state.String()))
+		zap.String("task type", task.GetTaskType()), zap.String("state", state.String()))
 
 	switch state {
 	case indexpb.JobState_JobStateNone:
