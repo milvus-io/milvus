@@ -370,7 +370,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result ready", func() {
@@ -403,7 +403,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result timeout", func() {
@@ -499,6 +499,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			CollectionID: 1,
 			IndexID:      3,
 		}
+
+		task.targetSegments = []int64{10, 11}
 		err := s.meta.indexMeta.CreateIndex(index)
 		s.NoError(err)
 
