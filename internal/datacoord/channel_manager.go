@@ -701,8 +701,9 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 		}
 
 		schema := ch.GetSchema()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if ch.GetSchema() == nil {
+		if schema == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			collInfo, err := m.h.GetCollection(ctx, ch.GetCollectionID())
 			if err != nil {
 				return err
