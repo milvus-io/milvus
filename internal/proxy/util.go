@@ -1023,7 +1023,6 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 				if schema.IsFieldLoaded(fieldID) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
-					userDynamicFieldsMap[outputFieldName] = true
 				} else {
 					return nil, nil, nil, fmt.Errorf("field %s is not loaded", outputFieldName)
 				}
