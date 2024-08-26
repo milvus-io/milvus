@@ -141,9 +141,9 @@ class SegmentSealedImpl : public SegmentSealed {
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
-    RetrieveResInfo
-    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
-        return std::move(insert_record_.pk2offset_->find_first(limit, offset_bound, bitset));
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
+        return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 
     // Calculate: output[i] = Vec[seg_offset[i]]

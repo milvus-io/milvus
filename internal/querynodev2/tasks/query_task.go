@@ -172,11 +172,16 @@ func (t *QueryTask) Execute() error {
 func (t *QueryTask) handleScan(reducedResult *segcorepb.RetrieveResults) {
 	if t.req.GetReq().GetScanCtx() != nil {
 		scanReqCtx := t.req.GetReq().GetScanCtx()
+		var lastOffset int64 = -1
+		offsetCount := len(reducedResult.GetOffset())
+		if offsetCount > 0 {
+			lastOffset = reducedResult.GetOffset()[offsetCount-1]
+		}
 		scanResCtx := &internalpb.ScanCtx{
 			ScanCtxId:  scanReqCtx.GetScanCtxId(),
 			SegmentIdx: scanReqCtx.GetSegmentIdx(),
-			Offset:     reducedResult.GetLastPkOffset(),
 			MvccTs:     scanReqCtx.GetMvccTs(),
+			Offset:     lastOffset,
 		}
 		t.result.ScanCtx = scanResCtx
 	}

@@ -32,7 +32,6 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
 #include "storage/MmapManager.h"
-#include "Types.h"
 
 namespace milvus::segcore {
 
@@ -63,8 +62,8 @@ class OffsetMap {
 
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
-    virtual RetrieveResInfo
-    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const = 0;
+    virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
 
     virtual void
     clear() = 0;
@@ -110,8 +109,8 @@ class OffsetOrderedMap : public OffsetMap {
         return map_.empty();
     }
 
-    RetrieveResInfo
-    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -120,7 +119,7 @@ class OffsetOrderedMap : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, offset_bound, bitset);
+        return find_first_by_index(limit, bitset);
     }
 
     void
@@ -130,20 +129,15 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
  private:
-    RetrieveResInfo
-    find_first_by_index(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const {
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
-        // if offset_bound exceed the size of array, return empty result
-        if (offset_bound >= map_.size()) {
-            return {seg_offsets, false, -1};
-        }
         auto it = map_.begin();
-        std::advance(it, offset_bound);
         for (; hit_num < limit && it != map_.end(); it++) {
             // Offsets in the growing segment are ordered by timestamp,
             // so traverse from back to front to obtain the latest offset.
@@ -162,7 +156,7 @@ class OffsetOrderedMap : public OffsetMap {
                 }
             }
         }
-        return {seg_offsets, it != map_.end(), std::distance(map_.begin(), it)};
+        return {seg_offsets, it != map_.end()};
     }
 
  private:
@@ -228,8 +222,8 @@ class OffsetOrderedArray : public OffsetMap {
         return array_.empty();
     }
 
-    RetrieveResInfo
-    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const override {
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first(int64_t limit, const BitsetType& bitset) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -238,7 +232,7 @@ class OffsetOrderedArray : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, offset_bound, bitset);
+        return find_first_by_index(limit, bitset);
     }
 
     void
@@ -248,8 +242,8 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
  private:
-    RetrieveResInfo
-    find_first_by_index(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const {
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
@@ -257,13 +251,7 @@ class OffsetOrderedArray : public OffsetMap {
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
-
-        //if offset_bound exceed the size of array, return empty result
-        if(offset_bound >= array_.size()){
-            return {seg_offsets, false, -1};
-        }
-
-        auto it = array_.begin() + offset_bound;
+        auto it = array_.begin();
         for (; hit_num < limit && it != array_.end(); it++) {
             auto seg_offset = it->second;
             if (seg_offset >= size) {
@@ -276,7 +264,7 @@ class OffsetOrderedArray : public OffsetMap {
                 hit_num++;
             }
         }
-        return {seg_offsets, more_hit_than_limit && it != array_.end(), std::distance(array_.begin(), it)};
+        return {seg_offsets, more_hit_than_limit && it != array_.end()};
     }
 
     void

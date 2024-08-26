@@ -121,7 +121,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                     retrieve_results.result_offsets_.size(),
                     ignore_non_pk,
                     true);
-    results->set_last_pk_offset(retrieve_results.last_pk_offset_);
     return results;
 }
 

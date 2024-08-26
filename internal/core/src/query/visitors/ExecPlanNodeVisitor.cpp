@@ -304,10 +304,16 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     retrieve_result.total_data_cnt_ = bitset_holder.size();
-    auto retrieve_info = std::move(segment->find_first(node.limit_, node.offset_bound_, bitset_holder));
-    retrieve_result.result_offsets_ = std::move(retrieve_info.result_seg_offsets_);
-    retrieve_result.has_more_result = retrieve_info.has_more_result_;
-    retrieve_result.last_pk_offset_ = retrieve_info.last_pk_offset_;
+    if (node.offset_bound_ == -1) {
+        auto results_pair = std::move(segment->find_first(node.limit_, bitset_holder));
+        retrieve_result.result_offsets_ = std::move(results_pair.first);
+        retrieve_result.has_more_result = results_pair.second;
+    } else {
+        auto results_pair = std::move(segment->find_after(node.limit_, node.offset_bound_, bitset_holder));
+        retrieve_result.result_offsets_ = std::move(results_pair.first);
+        retrieve_result.has_more_result = results_pair.second;
+    }
+
     retrieve_result_opt_ = std::move(retrieve_result);
 }
 

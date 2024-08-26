@@ -49,10 +49,4 @@ struct LoadIndexInfo {
     proto::schema::FieldSchema schema;
 };
 
-struct RetrieveResInfo {
-    std::vector<int64_t> result_seg_offsets_;
-    bool has_more_result_;
-    int64_t last_pk_offset_;
-};
-
 }  // namespace milvus::segcore

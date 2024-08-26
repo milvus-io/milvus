@@ -337,8 +337,23 @@ class SegmentInternalInterface : public SegmentInterface {
      * @param false_filtered_out
      * @return All candidates offsets.
      */
-    virtual RetrieveResInfo
-    find_first(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const = 0;
+    virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_after(int64_t limit, int64_t offset_bound, const BitsetType& bitset) const {
+        AssertInfo(offset_bound < bitset.size(), "Input offset_bound for find_after is larger than bitset size, wrong state!");
+        int64_t size = std::min<int64_t>(bitset.size() - offset_bound, limit);
+        std::vector<OffsetMap::OffsetType> seg_offsets(size);
+        int64_t res_idx = 0;
+        int64_t i = offset_bound;
+        for (; i < bitset.size() && res_idx < size; i++){
+            if (bitset[i]){
+                seg_offsets[res_idx++] = i;
+            }
+        }
+        return {seg_offsets, i < bitset.size()};
+    }
 
     void
     FillTargetEntry(
