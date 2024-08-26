@@ -3325,7 +3325,6 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-
     std::vector<
         std::tuple<std::string, std::function<bool(const milvus::Json& json)>>>
         testcases = {
