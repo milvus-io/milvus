@@ -700,11 +700,21 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 			return err
 		}
 
+		schema := ch.GetSchema()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if ch.GetSchema() == nil {
+			collInfo, err := m.h.GetCollection(ctx, ch.GetCollectionID())
+			if err != nil {
+				return err
+			}
+			schema = collInfo.Schema
+		}
+
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   reduceVChanSize(vcInfo),
 			StartTs: startTs,
 			State:   inferStateByOpType(op.Type),
-			Schema:  ch.GetSchema(),
+			Schema:  schema,
 			OpID:    opID,
 		}
 		ch.UpdateWatchInfo(info)
