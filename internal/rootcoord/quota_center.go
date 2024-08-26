@@ -552,6 +552,7 @@ func (q *QuotaCenter) collectMetrics() error {
 
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
 func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster bool, dbIDs, collectionIDs []int64, col2partitionIDs map[int64][]int64) error {
+	log := log.Ctx(context.TODO()).WithRateGroup("quotaCenter.forceDenyWriting", 1.0, 60.0)
 	if cluster {
 		clusterLimiters := q.rateLimiter.GetRootLimiters()
 		updateLimiter(clusterLimiters, GetEarliestLimiter(), internalpb.RateScope_Cluster, dml)
@@ -1358,6 +1359,7 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 
 // checkDiskQuota checks if disk quota exceeded.
 func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	q.diskMu.Lock()
 	defer q.diskMu.Unlock()
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
@@ -1371,6 +1373,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
+		log.RatedWarn(10, "cluster disk quota exceeded", zap.Int64("disk usage", total), zap.Float64("disk quota", totalDiskQuota))
 		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil)
 		if err != nil {
 			log.Warn("fail to force deny writing", zap.Error(err))
@@ -1432,6 +1435,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 }
 
 func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	dbIDs := make([]int64, 0)
 	checkDiskQuota := func(dbID, binlogSize int64, quota float64) {
 		if float64(binlogSize) >= quota {
