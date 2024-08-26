@@ -101,7 +101,8 @@ struct ArithOpElementFunc {
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         /*
         // This is the original code, kept here for the documentation purposes
         for (int i = 0; i < size; ++i) {
@@ -287,6 +288,7 @@ struct ArithOpElementFunc {
                     }
                     continue;
                 }
+                valid_res[right] = false;
                 execute_sub_batch(
                     src + left, right - left, val, right_operand, res + left);
                 left = right;

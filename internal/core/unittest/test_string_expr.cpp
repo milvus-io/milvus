@@ -166,7 +166,8 @@ GenAlwaysFalseExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 }
 
 auto
-GenAlwaysTrueExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
+GenAlwaysTrueExprIfValid(const FieldMeta& fvec_meta,
+                         const FieldMeta& str_meta) {
     auto always_false_expr = GenAlwaysFalseExpr(fvec_meta, str_meta);
     auto not_expr = GenNotExpr();
     not_expr->set_allocated_child(always_false_expr);
@@ -196,7 +197,7 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 
 auto
 GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
-    auto always_true_expr = GenAlwaysTrueExpr(fvec_meta, str_meta);
+    auto always_true_expr = GenAlwaysTrueExprIfValid(fvec_meta, str_meta);
     proto::plan::VectorType vector_type;
     if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
         vector_type = proto::plan::VectorType::FloatVector;
@@ -1293,7 +1294,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto expr_proto = GenAlwaysTrueExpr(fvec_meta, str_meta);
+    auto expr_proto = GenAlwaysTrueExprIfValid(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
     plan_proto->mutable_query()->set_allocated_predicates(expr_proto);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
@@ -1336,7 +1337,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto expr_proto = GenAlwaysTrueExpr(fvec_meta, str_meta);
+    auto expr_proto = GenAlwaysTrueExprIfValid(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
     plan_proto->mutable_query()->set_allocated_predicates(expr_proto);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
@@ -1346,9 +1347,9 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
 
     auto retrieved = segment->Retrieve(
         nullptr, plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE, false);
-    ASSERT_EQ(retrieved->offset().size(), N);
+    ASSERT_EQ(retrieved->offset().size(), N / 2);
     ASSERT_EQ(retrieved->fields_data().size(), 1);
     ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
-              N);
-    ASSERT_EQ(retrieved->fields_data(0).valid_data().size(), N);
+              N / 2);
+    ASSERT_EQ(retrieved->fields_data(0).valid_data().size(), N / 2);
 }

@@ -2091,7 +2091,11 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                        "converted to string index");
             auto n = impl->Size();
             for (size_t i = 0; i < n; i++) {
-                index->AddText(impl->Reverse_Lookup(i), i);
+                auto value = impl->Reverse_Lookup(i);
+                if (!value.has_value()) {
+                    continue;
+                }
+                index->AddText(impl->Reverse_Lookup(i).value(), i);
             }
         }
     }

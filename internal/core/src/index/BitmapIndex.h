@@ -267,7 +267,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 
     // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
-    TargetBitmap valid_bitset;
+    TargetBitmap valid_bitset_;
 };
 
 }  // namespace index

@@ -40,7 +40,8 @@ struct BinaryRangeElementFunc {
                const T* src,
                const bool* valid_data,
                size_t n,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         auto execute_sub_batch = [](T val1,
                                     T val2,
                                     const T* src,
@@ -79,6 +80,7 @@ struct BinaryRangeElementFunc {
                     }
                     continue;
                 }
+                valid_res[right] = false;
                 execute_sub_batch(
                     val1, val2, src + left, right - left, res + left);
                 left = right;
@@ -91,8 +93,8 @@ struct BinaryRangeElementFunc {
 #define BinaryRangeJSONCompare(cmp)                           \
     do {                                                      \
         if (valid_data && !valid_data[i]) {                   \
-            res[i] = false;                                   \
-            continue;                                         \
+            res[i] = valid_res[i] = false;                    \
+            break;                                            \
         }                                                     \
         auto x = src[i].template at<GetType>(pointer);        \
         if (x.error()) {                                      \
@@ -123,7 +125,8 @@ struct BinaryRangeElementFuncForJson {
                const milvus::Json* src,
                const bool* valid_data,
                size_t n,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (size_t i = 0; i < n; ++i) {
             if constexpr (lower_inclusive && upper_inclusive) {
                 BinaryRangeJSONCompare(val1 <= value && value <= val2);
@@ -150,10 +153,11 @@ struct BinaryRangeElementFuncForArray {
                const milvus::ArrayView* src,
                const bool* valid_data,
                size_t n,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (size_t i = 0; i < n; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             if constexpr (lower_inclusive && upper_inclusive) {

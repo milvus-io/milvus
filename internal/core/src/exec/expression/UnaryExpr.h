@@ -63,7 +63,8 @@ struct UnaryElementFunc {
                const bool* valid_data,
                size_t size,
                IndexInnerType val,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T> func;
             func(src, size, val, res);
@@ -153,6 +154,7 @@ struct UnaryElementFunc {
                     }
                     continue;
                 }
+                valid_res[right] = false;
                 execute_sub_batch(src + left, right - left, val, res + left);
                 left = right;
                 break;
@@ -186,10 +188,11 @@ struct UnaryElementFuncForArray {
                size_t size,
                ValueType val,
                int index,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
         for (int i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             if constexpr (op == proto::plan::OpType::Equal) {

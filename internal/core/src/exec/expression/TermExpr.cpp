@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "TermExpr.h"
+#include <memory>
+#include <utility>
 #include "query/Utils.h"
 namespace milvus {
 namespace exec {
@@ -199,9 +201,12 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    // pk valid_bitmap is always all true
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     for (size_t i = 0; i < real_batch_size; ++i) {
         res[i] = cached_bits_[current_data_chunk_pos_++];
@@ -241,9 +246,11 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -253,6 +260,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
                                 const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 const ValueType& target_val) {
         auto executor = [&](size_t i) {
             for (int i = 0; i < data[i].length(); i++) {
@@ -265,7 +273,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
         };
         for (int i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             executor(i);
@@ -273,7 +281,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     };
 
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
-        execute_sub_batch, std::nullptr_t{}, res, target_val);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, target_val);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -294,9 +302,11 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -317,14 +327,15 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
                                 const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
         for (int i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
-            if (index >= data[i].length()) {
+            if (term_set.empty() || index >= data[i].length()) {
                 res[i] = false;
                 continue;
             }
@@ -334,7 +345,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     };
 
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
-        execute_sub_batch, std::nullptr_t{}, res, index, term_set);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, index, term_set);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -354,9 +365,11 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -367,6 +380,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
                                 const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 const std::string pointer,
                                 const ValueType& target_val) {
         auto executor = [&](size_t i) {
@@ -387,14 +401,14 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
         };
         for (size_t i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             res[i] = executor(i);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
-        execute_sub_batch, std::nullptr_t{}, res, pointer, val);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer, val);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -414,9 +428,11 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<ValueType> term_set;
@@ -434,6 +450,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
                                 const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 const std::string pointer,
                                 const std::unordered_set<ValueType>& terms) {
         auto executor = [&](size_t i) {
@@ -456,6 +473,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
         };
         for (size_t i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (terms.empty()) {
                 res[i] = false;
                 continue;
             }
@@ -463,7 +484,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
-        execute_sub_batch, std::nullptr_t{}, res, pointer, term_set);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer, term_set);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -509,12 +530,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         return func(index_ptr, vals.size(), vals.data());
     };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, vals);
-    AssertInfo(res.size() == real_batch_size,
+    AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
-               res.size(),
+               res->size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return res;
 }
 
 template <>
@@ -536,7 +557,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
     };
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, vals);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return res;
 }
 
 template <typename T>
@@ -547,9 +568,11 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    valid_res.set();
 
     std::vector<T> vals;
     for (auto& val : expr_->vals_) {
@@ -565,18 +588,19 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
                                 const bool* valid_data,
                                 const int size,
                                 TargetBitmapView res,
+                                TargetBitmapView valid_res,
                                 const std::unordered_set<T>& vals) {
         TermElementFuncSet<T> func;
         for (size_t i = 0; i < size; ++i) {
             if (valid_data && !valid_data[i]) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             res[i] = func(vals, data[i]);
         }
     };
     int64_t processed_size = ProcessDataChunks<T>(
-        execute_sub_batch, std::nullptr_t{}, res, vals_set);
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, vals_set);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
