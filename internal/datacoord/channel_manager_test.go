@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	kvmock "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -724,7 +725,7 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 	}
 	s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(keys, values, nil).Once()
 	s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-	m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 	err = m.Startup(context.TODO(), nil, []int64{1, 3})
 	s.Require().NoError(err)
