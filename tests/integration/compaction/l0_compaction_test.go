@@ -126,7 +126,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	// stats task happened
-	s.Contains(2, len(segments))
+	s.Equal(2, len(segments))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load

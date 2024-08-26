@@ -963,6 +963,7 @@ message CompactionTask{
   int64 analyzeVersion = 24;
   int64 lastStateStartTime = 25;
   int64 max_size = 26;
+  repeated int64 targetSegments = 27;
 }
 
 message PartitionStatsInfo {

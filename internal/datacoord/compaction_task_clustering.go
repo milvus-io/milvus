@@ -47,8 +47,6 @@ type clusteringCompactionTask struct {
 	plan   *datapb.CompactionPlan
 	result *datapb.CompactionPlanResult
 
-	targetSegments []int64
-
 	span             trace.Span
 	allocator        allocator.Allocator
 	meta             CompactionMeta
@@ -297,8 +295,8 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 
 func (t *clusteringCompactionTask) processStats() error {
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
-	targetSegments := make([]int64, 0, len(t.ResultSegments))
-	for _, segmentID := range t.ResultSegments {
+	targetSegments := make([]int64, 0, len(t.GetResultSegments()))
+	for _, segmentID := range t.GetResultSegments() {
 		if t.meta.GetStatsTaskMeta().GetStatsTaskStateBySegmentID(segmentID) != indexpb.JobState_JobStateFinished {
 			return nil
 		}
@@ -307,10 +305,12 @@ func (t *clusteringCompactionTask) processStats() error {
 		}
 	}
 
-	t.targetSegments = targetSegments
+	t.TargetSegments = targetSegments
 
-	setState(datapb.CompactionTaskState_indexing)(t.CompactionTask)
-	return nil
+	log.Info("clustering compaction stats task finished", zap.Int64s("result segments", t.ResultSegments),
+		zap.Int64s("target segments", t.TargetSegments))
+
+	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
 }
 
 func (t *clusteringCompactionTask) processIndexing() error {
@@ -322,7 +322,7 @@ func (t *clusteringCompactionTask) processIndexing() error {
 	}
 	indexed := func() bool {
 		for _, collectionIndex := range collectionIndexes {
-			for _, segmentID := range t.targetSegments {
+			for _, segmentID := range t.GetTargetSegments() {
 				segmentIndexState := t.meta.GetIndexMeta().GetSegmentIndexState(t.GetCollectionID(), segmentID, collectionIndex.IndexID)
 				log.Debug("segment index state", zap.String("segment", segmentIndexState.String()))
 				if segmentIndexState.GetState() != commonpb.IndexState_Finished {
@@ -347,7 +347,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 		PartitionID:  t.GetPartitionID(),
 		VChannel:     t.GetChannel(),
 		Version:      t.GetPlanID(),
-		SegmentIDs:   t.targetSegments,
+		SegmentIDs:   t.GetTargetSegments(),
 		CommitTime:   time.Now().Unix(),
 	})
 	if err != nil {
@@ -355,7 +355,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 	}
 
 	var operators []UpdateOperator
-	for _, segID := range t.targetSegments {
+	for _, segID := range t.GetTargetSegments() {
 		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetPlanID()))
 	}
 	err = t.meta.UpdateSegmentsInfo(operators...)

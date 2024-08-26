@@ -112,7 +112,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	log.Info("start create index for segment loop...")
 	defer s.serverLoopWg.Done()
 
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {

@@ -41,7 +41,7 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 	log.Info("start check stats task for segment loop...")
 	defer s.serverLoopWg.Done()
 
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
