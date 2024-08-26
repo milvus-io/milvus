@@ -29,7 +29,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -40,14 +39,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 )
 
 type mixCompactionTask struct {
 	binlogIO  io.BinlogIO
-	allocator allocator.Interface
 	currentTs typeutil.Timestamp
 
 	plan *datapb.CompactionPlan
@@ -73,12 +68,10 @@ func NewMixCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
-	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	return &mixCompactionTask{
 		ctx:       ctx1,
 		cancel:    cancel,
 		binlogIO:  binlogIO,
-		allocator: alloc,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("mergeSplit compaction"),
 		currentTs: tsoutil.GetCurrentTime(),
@@ -142,7 +135,10 @@ func (t *mixCompactionTask) mergeSplit(
 
 	log := log.With(zap.Int64("planID", t.GetPlanID()))
 
-	mWriter := NewMultiSegmentWriter(t.binlogIO, t.Allocator, t.plan, t.maxRows, t.partitionID, t.collectionID)
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID)
 
 	isValueDeleted := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]

@@ -12,7 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -26,7 +27,7 @@ import (
 // Not concurrent safe.
 type MultiSegmentWriter struct {
 	binlogIO  io.BinlogIO
-	allocator allocator.Allocator
+	allocator *compactionAlloactor
 
 	writers []*SegmentWriter
 	current int
@@ -48,7 +49,27 @@ type MultiSegmentWriter struct {
 	res []*datapb.CompactionSegment
 }
 
-func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator allocator.Allocator, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64) *MultiSegmentWriter {
+type compactionAlloactor struct {
+	segmentAlloc allocator.Interface
+	logIDAlloc   allocator.Interface
+}
+
+func NewCompactionAllocator(segmentAlloc, logIDAlloc allocator.Interface) *compactionAlloactor {
+	return &compactionAlloactor{
+		segmentAlloc: segmentAlloc,
+		logIDAlloc:   logIDAlloc,
+	}
+}
+
+func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
+	return alloc.segmentAlloc.AllocOne()
+}
+
+func (alloc *compactionAlloactor) getLogIDAllocator() allocator.Interface {
+	return alloc.logIDAlloc
+}
+
+func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64) *MultiSegmentWriter {
 	return &MultiSegmentWriter{
 		binlogIO:  binlogIO,
 		allocator: allocator,
@@ -77,7 +98,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 	}
 
 	if !writer.FlushAndIsEmpty() {
-		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator, writer)
+		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			return err
 		}
@@ -89,7 +110,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		mergeFieldBinlogs(allBinlogs, partialBinlogs)
 	}
 
-	sPath, err := statSerializeWrite(context.TODO(), w.binlogIO, w.allocator, writer)
+	sPath, err := statSerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
 	if err != nil {
 		return err
 	}
@@ -113,7 +134,7 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 }
 
 func (w *MultiSegmentWriter) addNewWriter() error {
-	newSegmentID, err := w.allocator.AllocOne()
+	newSegmentID, err := w.allocator.allocSegmentID()
 	if err != nil {
 		return err
 	}
@@ -159,7 +180,7 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 			w.cachedMeta[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 		}
 
-		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator, writer)
+		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			return err
 		}

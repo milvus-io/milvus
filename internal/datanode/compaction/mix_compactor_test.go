@@ -83,7 +83,7 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 		Type:                 datapb.CompactionType_MixCompaction,
 		Schema:               s.meta.GetSchema(),
 		BeginLogID:           19530,
-		PreAllocatedSegments: &datapb.IDRange{Begin: 19530},
+		PreAllocatedSegments: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		MaxSize:              64 * 1024 * 1024,
 	}
 
@@ -156,7 +156,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 	s.Equal(1, len(result.GetSegments()))
 
 	segment := result.GetSegments()[0]
-	s.EqualValues(19530, segment.GetSegmentID())
+	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
 	s.NotEmpty(segment.Field2StatslogPaths)
@@ -203,7 +203,7 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	s.Equal(1, len(result.GetSegments()))
 
 	segment := result.GetSegments()[0]
-	s.EqualValues(19530, segment.GetSegmentID())
+	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
 	s.NotEmpty(segment.Field2StatslogPaths)
