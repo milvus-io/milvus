@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -1486,22 +1487,28 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 
 	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
+		"cluster-id-rootcoord-dm_1_123v0": nil,
 		"cluster-id-rootcoord-dm_0_124v0": nil,
 	}
 
-	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{})
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
+
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
 
 	t.Run("list channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
 		gc.recycleChannelCPMeta(context.TODO())
-		assert.Equal(t, 2, len(m.channelCPs.checkpoints))
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Unset()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0":                   nil,
+		"cluster-id-rootcoord-dm_1_123v0":                   nil,
 		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
 		"cluster-id-rootcoord-dm_0_124v0":                   nil,
-	}, nil).Twice()
+	}, nil).Times(3)
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
@@ -1509,16 +1516,22 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 				return true
 			}
 			return false
-		})
+		}).Maybe()
 
-	t.Run("drop channel cp fail", func(t *testing.T) {
-		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
 		gc.recycleChannelCPMeta(context.TODO())
-		assert.Equal(t, 2, len(m.channelCPs.checkpoints))
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
-	t.Run("gc ok", func(t *testing.T) {
-		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Once()
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
+	t.Run("drop channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+	})
+
+	t.Run("channel cp gc ok", func(t *testing.T) {
+		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
 		gc.recycleChannelCPMeta(context.TODO())
 		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
 	})

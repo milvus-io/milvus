@@ -531,6 +531,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
 		cli:              cli,
+		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
 		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
