@@ -85,6 +85,7 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 		TimeoutInSeconds: 10,
 		Type:             datapb.CompactionType_MixCompaction,
 		Schema:           s.meta.GetSchema(),
+		MaxSize:          64 * 1024 * 1024,
 	}
 	s.task.plan = s.plan
 }
@@ -134,26 +135,12 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 		err = s.segWriter.writer.Flush()
 		s.Require().NoError(err)
 
-		//statistic := &storage.PkStatistics{
-		//	PkFilter: s.segWriter.pkstats.BF,
-		//	MinPK:    s.segWriter.pkstats.MinPk,
-		//	MaxPK:    s.segWriter.pkstats.MaxPk,
-		//}
-		//bfs := metacache.NewBloomFilterSet(statistic)
-
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
 			return len(left) == 0 && len(right) == 0
 		})).Return(lo.Values(kvs), nil).Once()
-
-		//seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-		//	CollectionID: CollectionID,
-		//	PartitionID:  PartitionID,
-		//	ID:           segID,
-		//	NumOfRows:    1,
-		//}, bfs)
 
 		s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:    segID,
@@ -187,25 +174,12 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
 	for _, segID := range segments {
 		s.initSegBuffer(segID)
-		//statistic := &storage.PkStatistics{
-		//	PkFilter: s.segWriter.pkstats.BF,
-		//	MinPK:    s.segWriter.pkstats.MinPk,
-		//	MaxPK:    s.segWriter.pkstats.MaxPk,
-		//}
-		//bfs := metacache.NewBloomFilterSet(statistic)
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
 			return len(left) == 0 && len(right) == 0
 		})).Return(lo.Values(kvs), nil).Once()
-
-		//seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-		//	CollectionID: CollectionID,
-		//	PartitionID:  PartitionID,
-		//	ID:           segID,
-		//	NumOfRows:    1,
-		//}, bfs)
 
 		s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:    segID,
@@ -240,43 +214,8 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	s.Empty(segment.Deltalogs)
 }
 
-func (s *MixCompactionTaskSuite) TestMergeBufferFull() {
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
-
-	s.initSegBuffer(5)
-	v := storage.Value{
-		PK:        storage.NewInt64PrimaryKey(100),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
-		Value:     getRow(100),
-	}
-	err := s.segWriter.Write(&v)
-	s.Require().NoError(err)
-
-	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil).Times(2)
-	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
-	s.Require().NoError(err)
-
-	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, paths []string) ([][]byte, error) {
-			s.Require().Equal(len(paths), len(kvs))
-			return lo.Values(kvs), nil
-		})
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
-
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, 19530, PartitionID, CollectionID)
-	s.Require().NoError(err)
-
-	compactionSegment, err := s.task.merge(s.task.ctx, [][]string{lo.Keys(kvs)}, nil, segWriter)
-	s.NoError(err)
-	s.NotNil(compactionSegment)
-	s.EqualValues(2, compactionSegment.GetNumOfRows())
-}
-
-func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
+func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.initSegBuffer(3)
-	// entityTs == tsoutil.ComposeTSByTime(milvusBirthday, 0)
 	collTTL := 864000 // 10 days
 	currTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second*(time.Duration(collTTL)+1)), 0)
 	s.task.currentTs = currTs
@@ -285,7 +224,6 @@ func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
 
 	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 	s.Require().NoError(err)
-	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, paths []string) ([][]byte, error) {
 			s.Require().Equal(len(paths), len(kvs))
@@ -293,22 +231,22 @@ func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
 		})
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
-	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, 19530, PartitionID, CollectionID)
-	s.Require().NoError(err)
+	s.task.collectionID = CollectionID
+	s.task.partitionID = PartitionID
+	s.task.maxRows = 1000
 
-	compactionSegment, err := s.task.merge(s.task.ctx, [][]string{lo.Keys(kvs)}, nil, segWriter)
+	compactionSegments, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, nil)
 	s.NoError(err)
-	s.NotNil(compactionSegment)
-	s.EqualValues(0, compactionSegment.GetNumOfRows())
+	s.Equal(0, len(compactionSegments))
 }
 
 func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 	s.initSegBuffer(4)
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	tests := []struct {
-		description      string
-		deletions        map[interface{}]uint64
-		expectedRowCount int
+		description string
+		deletions   map[interface{}]uint64
+		expectedRes int
 	}{
 		{"no deletion", nil, 1},
 		{"mismatch deletion", map[interface{}]uint64{int64(1): deleteTs}, 1},
@@ -320,10 +258,10 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 	s.Require().NoError(err)
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			if test.expectedRowCount > 0 {
+			if test.expectedRes > 0 {
 				s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(77777, 99999, nil).Once()
 			}
-			s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
+			s.mockAlloc.EXPECT().AllocOne().Return(888888, nil).Maybe()
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
 					s.Require().Equal(len(paths), len(kvs))
@@ -331,13 +269,15 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 				})
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
-			segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, 19530, PartitionID, CollectionID)
-			s.Require().NoError(err)
-
-			compactionSegment, err := s.task.merge(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions, segWriter)
+			s.task.collectionID = CollectionID
+			s.task.partitionID = PartitionID
+			s.task.maxRows = 1000
+			res, err := s.task.mergeSplit(s.task.ctx, [][]string{lo.Keys(kvs)}, test.deletions)
 			s.NoError(err)
-			s.NotNil(compactionSegment)
-			s.EqualValues(test.expectedRowCount, compactionSegment.GetNumOfRows())
+			s.EqualValues(test.expectedRes, len(res))
+			if test.expectedRes > 0 {
+				s.EqualValues(1, res[0].GetNumOfRows())
+			}
 		})
 	}
 }
@@ -492,8 +432,8 @@ func (s *MixCompactionTaskSuite) TestCompactFail() {
 		s.Error(err)
 	})
 
-	s.Run("Test compact AllocOnce failed", func() {
-		s.mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc one error")).Once()
+	s.Run("Test compact failed maxSize zero", func() {
+		s.plan.MaxSize = 0
 		_, err := s.task.Compact()
 		s.Error(err)
 	})

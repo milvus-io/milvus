@@ -25,12 +25,14 @@ import (
 
 	"golang.org/x/exp/slices"
 
+	"github.com/milvus-io/milvus/cmd/asan"
 	"github.com/milvus-io/milvus/cmd/milvus"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func main() {
+	defer asan.LsanDoLeakCheck()
 	idx := slices.Index(os.Args, "--run-with-subprocess")
 
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
