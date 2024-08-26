@@ -740,3 +740,23 @@ func TestInsertAutoIDInvalidRow(t *testing.T) {
 		common.CheckErr(t, err, false, "missing pk data")
 	}
 }
+
+func TestFlushRate(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+	// create collection
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
+
+	// insert
+	columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *columnOpt)
+	insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn)
+	_, err := mc.Insert(ctx, insertOpt)
+	common.CheckErr(t, err, true)
+
+	_, err = mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
+	common.CheckErr(t, err, true)
+	_, err = mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
+	common.CheckErr(t, err, false, "request is rejected by grpc RateLimiter middleware, please retry later: rate limit exceeded[rate=0.1]")
+}

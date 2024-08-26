@@ -390,7 +390,8 @@ class TestInsertParams(TestcaseBase):
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
         error = {ct.err_code: 999,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {%s} field should be a int64, "
+                             "but got a {<class 'int'>} instead." % ct.default_int64_field_name}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -2091,7 +2092,7 @@ class TestUpsertInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail("insert and upsert have removed the [] error check")
+    @pytest.mark.skip("insert and upsert have removed the [] error check")
     def test_upsert_multi_partitions(self):
         """
         target: test upsert two partitions
@@ -2106,7 +2107,7 @@ class TestUpsertInvalid(TestcaseBase):
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=1000)
         error = {ct.err_code: 999, ct.err_msg: "['partition_1', 'partition_2'] has type <class 'list'>, "
-                                             "but expected one of: (<class 'bytes'>, <class 'str'>)"}
+                                               "but expected one of: (<class 'bytes'>, <class 'str'>)"}
         collection_w.upsert(data=data, partition_name=["partition_1", "partition_2"],
                             check_task=CheckTasks.err_res, check_items=error)
 

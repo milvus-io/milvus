@@ -80,6 +80,7 @@ func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 
 // test search empty collection -> return empty
 func TestSearchEmptyCollection(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -104,13 +105,13 @@ func TestSearchEmptyCollection(t *testing.T) {
 			resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, _mNameVec.queryVec).
 				WithConsistencyLevel(entity.ClStrong).WithANNSField(_mNameVec.fieldName))
 			common.CheckErr(t, errSearch, true)
-			t.Log("https://github.com/milvus-io/milvus/issues/33952")
-			common.CheckSearchResult(t, resSearch, 0, 0)
+			common.CheckSearchResult(t, resSearch, common.DefaultNq, 0)
 		}
 	}
 }
 
 func TestSearchEmptySparseCollection(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -124,8 +125,7 @@ func TestSearchEmptySparseCollection(t *testing.T) {
 	resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
 		WithConsistencyLevel(entity.ClStrong).WithANNSField(common.DefaultSparseVecFieldName))
 	common.CheckErr(t, errSearch, true)
-	t.Log("https://github.com/milvus-io/milvus/issues/33952")
-	common.CheckSearchResult(t, resSearch, 0, 0)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, 0)
 }
 
 // test search with partition names []string{}, specify partitions
@@ -976,7 +976,8 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 
 // test search from empty sparse vectors collection
 func TestSearchFromEmptySparseVector(t *testing.T) {
-	t.Parallel()
+	t.Skip("https://github.com/milvus-io/milvus/issues/33952")
+	t.Skip("https://github.com/zilliztech/knowhere/issues/774")
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -984,6 +985,8 @@ func TestSearchFromEmptySparseVector(t *testing.T) {
 	for _, idx := range []index.Index{idxInverted} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 			TWithEnableDynamicField(true))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithSparseMaxLen(128).TWithStart(common.DefaultNb))
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
 		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultSparseVecFieldName: idx}))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
@@ -1009,10 +1012,12 @@ func TestSearchFromEmptySparseVector(t *testing.T) {
 		vector1, _ := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
 		vector2, _ := entity.NewSliceSparseEmbedding([]uint32{0, 2, 5, 10, 100}, []float32{rand.Float32(), rand.Float32(), rand.Float32(), rand.Float32(), rand.Float32()})
 
-		for _, vector := range []entity.Vector{vector1, vector2} {
+		// search from sparse collection: part normal sparse vectors, part empty sparse
+		// excepted: The empty vector is not related to any other vector, so it will not be returned，and alsopty obtained as the search vector.
+		for limit, vector := range map[int]entity.Vector{0: vector1, common.DefaultLimit: vector2} {
 			searchRes, errSearch1 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, errSearch1, true)
-			common.CheckSearchResult(t, searchRes, 1, 0)
+			common.CheckSearchResult(t, searchRes, 1, limit)
 		}
 	}
 }

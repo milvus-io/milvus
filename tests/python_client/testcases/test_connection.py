@@ -849,7 +849,8 @@ class TestConnect(TestcaseBase):
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
-                                                  ct.err_msg: "Open local milvus failed, dir: ftp: not exists"})
+                                                  ct.err_msg: "needs start with [unix, http, https, tcp] "
+                                                              "or a local file endswith [.db]"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
