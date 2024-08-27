@@ -75,6 +75,11 @@ func (s *SegmentInfo) Clone(opts ...SegmentOperator) *SegmentInfo {
 	for _, opt := range opts {
 		opt.UpdateSegment(cloned)
 	}
+
+	// invalidate cache since segment info maybe updated
+	cloned.size.Store(-1)
+	cloned.deltaRowcount.Store(-1)
+
 	return cloned
 }
 

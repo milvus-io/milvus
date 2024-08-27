@@ -90,6 +90,7 @@ func (m *channelManager) DropChannelCheckpoint(ctx context.Context, vChannel str
 		return err
 	}
 	delete(m.checkpoints, vChannel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel)
 	log.Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }

@@ -31,9 +31,8 @@ import (
 
 type compactionTaskMeta struct {
 	sync.RWMutex
-	ctx     context.Context
-	catalog metastore.DataCoordCatalog
-	// currently only clustering compaction task is stored in persist meta
+	ctx             context.Context
+	catalog         metastore.DataCoordCatalog
 	compactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
 }
 
