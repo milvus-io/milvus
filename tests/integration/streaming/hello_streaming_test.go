@@ -43,8 +43,8 @@ type HelloStreamingSuite struct {
 }
 
 func (s *HelloStreamingSuite) SetupSuite() {
-	s.MiniClusterSuite.SetupSuite()
 	streamingutil.SetStreamingServiceEnabled()
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *HelloStreamingSuite) TeardownSuite() {
