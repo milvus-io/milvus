@@ -92,15 +92,3 @@ else
     bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
-
-echo "BUILD_OPENDAL: ${BUILD_OPENDAL}"
-if [ "${BUILD_OPENDAL}" = "ON" ]; then
-    git clone --depth=1 --branch v0.43.0-rc.2 https://github.com/apache/opendal.git opendal
-    cd opendal
-    pushd bindings/c
-    cargo +1.73 build --release --verbose || { echo 'opendal_c build failed'; exit 1; }
-    popd
-    cp target/release/libopendal_c.a ${ROOT_DIR}/internal/core/output/lib/libopendal_c.a
-    cp bindings/c/include/opendal.h ${ROOT_DIR}/internal/core/output/include/opendal.h
-fi
-popd

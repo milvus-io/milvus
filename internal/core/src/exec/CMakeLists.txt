@@ -9,25 +9,5 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-set(MILVUS_EXEC_SRCS
-        expression/Expr.cpp
-        expression/UnaryExpr.cpp
-        expression/ConjunctExpr.cpp
-        expression/LogicalUnaryExpr.cpp
-        expression/LogicalBinaryExpr.cpp
-        expression/TermExpr.cpp
-        expression/BinaryArithOpEvalRangeExpr.cpp
-        expression/BinaryRangeExpr.cpp
-        expression/AlwaysTrueExpr.cpp
-        expression/CompareExpr.cpp
-        expression/JsonContainsExpr.cpp
-        expression/ExistsExpr.cpp
-        operator/FilterBits.cpp
-        operator/Operator.cpp
-        Driver.cpp
-        Task.cpp
-        )
-
-add_library(milvus_exec STATIC ${MILVUS_EXEC_SRCS})
-
-target_link_libraries(milvus_exec milvus_common milvus-storage ${CONAN_LIBS})
+add_source_at_current_directory_recursively()
+add_library(milvus_exec OBJECT ${SOURCE_FILES})

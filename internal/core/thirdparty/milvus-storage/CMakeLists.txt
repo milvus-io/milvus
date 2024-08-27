@@ -46,3 +46,6 @@ FetchContent_MakeAvailable(milvus-storage)
 # get_property( var DIRECTORY "${milvus-storage_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
 message( STATUS "milvus-storage src compile options: ${var}" )
 # unset(CMAKE_CXX_STANDARD)
+
+set( MILVUS_STORAGE_INCLUDE_DIRS ${milvus-storage_SOURCE_DIR}/cpp/include/milvus-storage CACHE INTERNAL "Path to milvus storage include directory" )
+set( MILVUS_STORAGE_SRC_DIRS ${milvus-storage_SOURCE_DIR}/cpp/src CACHE INTERNAL "Path to milvus storage src include directory" )

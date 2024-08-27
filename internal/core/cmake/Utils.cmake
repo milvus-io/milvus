@@ -100,3 +100,13 @@ macro(create_library)
     target_link_libraries(${L_TARGET} PRIVATE ${L_LIBS})
     target_compile_definitions(${L_TARGET} PRIVATE ${L_DEFS})
 endmacro()
+
+macro(add_source_at_current_directory_recursively)
+    file(GLOB_RECURSE SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cc" "*.cpp" "*.c" "*.cxx")
+    message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}  add new source files at current directory recursively: ${SOURCE_FILES}")
+endmacro()
+
+macro(add_source_at_current_directory)
+    file(GLOB SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cc" "*.cpp" "*.c" "*.cxx")
+    message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}  add new source files at current directory: ${SOURCE_FILES}")
+endmacro()
