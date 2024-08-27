@@ -79,7 +79,15 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.node.storeStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
-			[]*datapb.FieldStatsLog{{FieldID: 100, Files: []string{"file1"}}},
+			map[int64]*datapb.FieldStatsLog{100: {
+				FieldID: 100,
+				TextIndexStats: &datapb.TextIndexStats{
+					Version:    1,
+					Files:      []string{"file1"},
+					LogSize:    1024,
+					MemorySize: 1024,
+				},
+			}},
 		)
 	})
 

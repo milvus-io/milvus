@@ -49,9 +49,10 @@ type taskScheduler struct {
 	collectMetricsDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
-	tasks      map[int64]Task
-	notifyChan chan struct{}
-	taskLock   *lock.KeyLock[int64]
+	tasks        map[int64]Task
+	notifyChan   chan struct{}
+	taskLock     *lock.KeyLock[int64]
+	failTaskChan chan UniqueID
 
 	meta *meta
 
@@ -168,6 +169,10 @@ func (s *taskScheduler) enqueue(task Task) {
 	}
 }
 
+func (s *taskScheduler) FailTask(taskID int64) {
+	s.failTaskChan <- taskID
+}
+
 func (s *taskScheduler) schedule() {
 	// receive notifyChan
 	// time ticker
@@ -199,6 +204,14 @@ func (s *taskScheduler) getTask(taskID UniqueID) Task {
 }
 
 func (s *taskScheduler) run() {
+	// must be serial with task scheduling
+	select {
+	case taskID := <-s.failTaskChan:
+		task := s.getTask(taskID)
+		task.SetState(indexpb.JobState_JobStateFailed, "canceled")
+	default:
+	}
+
 	// schedule policy
 	s.RLock()
 	taskIDs := make([]UniqueID, 0, len(s.tasks))
@@ -333,7 +346,7 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 			task.QueryResult(s.ctx, client)
 			return true
 		}
-		task.SetState(indexpb.JobState_JobStateRetry, "")
+		task.SetState(indexpb.JobState_JobStateRetry, "node does not exist")
 	}
 	return true
 }
