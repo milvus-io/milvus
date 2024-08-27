@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -86,6 +87,8 @@ type ServiceSuite struct {
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
 
+	proxyManager *proxyutil.MockProxyClientManager
+
 	// Test object
 	server *Server
 }
@@ -124,6 +127,9 @@ func (suite *ServiceSuite) SetupSuite() {
 		1, 2, 3, 4, 5,
 		101, 102, 103, 104, 105,
 	}
+
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *ServiceSuite) SetupTest() {
@@ -185,6 +191,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.targetMgr,
 		suite.targetObserver,
 		&checkers.CheckerController{},
+		suite.proxyManager,
 	)
 	suite.collectionObserver.Start()
 

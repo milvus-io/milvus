@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -66,6 +67,7 @@ type OpsServiceSuite struct {
 	jobScheduler   *job.Scheduler
 	taskScheduler  *task.MockScheduler
 	balancer       balance.Balance
+	proxyManager   *proxyutil.MockProxyClientManager
 
 	distMgr           *meta.DistributionManager
 	distController    *dist.MockController
@@ -77,6 +79,8 @@ type OpsServiceSuite struct {
 
 func (suite *OpsServiceSuite) SetupSuite() {
 	paramtable.Init()
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *OpsServiceSuite) SetupTest() {
@@ -151,6 +155,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.server.targetMgr,
 		suite.targetObserver,
 		&checkers.CheckerController{},
+		suite.proxyManager,
 	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

@@ -993,6 +993,7 @@ func TestHasCollectionTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -1139,6 +1140,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -1201,6 +1203,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	rc := NewRootCoordMock()
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1264,6 +1267,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
@@ -1627,6 +1631,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 
@@ -1874,6 +1879,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 
@@ -2747,6 +2753,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
@@ -2787,6 +2794,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
@@ -2827,6 +2835,7 @@ func TestTransferNodeTask(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
@@ -2867,6 +2876,7 @@ func TestTransferNodeTask(t *testing.T) {
 func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	ctx := context.Background()
@@ -2910,6 +2920,7 @@ func TestTransferReplicaTask(t *testing.T) {
 func TestListResourceGroupsTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
 		Status:         merr.Success(),
 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
@@ -2953,6 +2964,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 func TestDescribeResourceGroupTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
 		Status: merr.Success(),
 		ResourceGroup: &querypb.ResourceGroupInfo{
@@ -3008,6 +3020,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 	}, nil)
@@ -3213,8 +3226,11 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 
+		qc := getQueryCoordClient()
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+
 		// check default partitions
-		err = InitMetaCache(ctx, rc, nil, nil)
+		err = InitMetaCache(ctx, rc, qc, nil)
 		assert.NoError(t, err)
 		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
@@ -3293,6 +3309,7 @@ func TestPartitionKey(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 
@@ -3548,6 +3565,7 @@ func TestClusteringKey(t *testing.T) {
 
 	defer rc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 
@@ -3730,6 +3748,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 	dc := NewDataCoordMock()
 	defer dc.Close()
 	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	defer qc.Close()
 	ctx := context.Background()
 	mgr := newShardClientMgr()

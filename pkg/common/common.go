@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -168,6 +170,7 @@ const (
 	MmapEnabledKey           = "mmap.enabled"
 	LazyLoadEnableKey        = "lazyload.enabled"
 	PartitionKeyIsolationKey = "partitionkey.isolation"
+	FieldSkipLoadKey         = "field.skipLoad"
 )
 
 const (
@@ -339,4 +342,36 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 	}
 
 	return nil, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+}
+
+// GetCollectionLoadFields returns the load field ids according to the type params.
+func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField bool) []int64 {
+	return lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+		// skip system field
+		if IsSystemField(field.GetFieldID()) {
+			return field.GetFieldID(), false
+		}
+		// skip dynamic field if specified
+		if field.IsDynamic && skipDynamicField {
+			return field.GetFieldID(), false
+		}
+
+		v, err := ShouldFieldBeLoaded(field.GetTypeParams())
+		if err != nil {
+			log.Warn("type param parse skip load failed", zap.Error(err))
+			// if configuration cannot be parsed, ignore it and load field
+			return field.GetFieldID(), true
+		}
+		return field.GetFieldID(), v
+	})
+}
+
+func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.GetKey() == FieldSkipLoadKey {
+			val, err := strconv.ParseBool(kv.GetValue())
+			return !val, err
+		}
+	}
+	return true, nil
 }

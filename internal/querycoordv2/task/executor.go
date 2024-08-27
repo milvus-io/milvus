@@ -343,6 +343,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
@@ -358,6 +359,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 
@@ -649,6 +651,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		log.Warn("failed to get collection info", zap.Error(err))
 		return nil, nil, nil, err
 	}
+	loadFields := ex.meta.GetLoadFields(task.CollectionID())
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
@@ -660,6 +663,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		task.CollectionID(),
 		collectionInfo.GetDbName(),
 		task.ResourceGroup(),
+		loadFields,
 		partitions...,
 	)
 

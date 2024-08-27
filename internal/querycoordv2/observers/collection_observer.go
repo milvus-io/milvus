@@ -26,14 +26,18 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -50,6 +54,8 @@ type CollectionObserver struct {
 
 	loadTasks *typeutil.ConcurrentMap[string, LoadTask]
 
+	proxyManager proxyutil.ProxyClientManagerInterface
+
 	stopOnce sync.Once
 }
 
@@ -65,6 +71,7 @@ func NewCollectionObserver(
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *CollectionObserver {
 	ob := &CollectionObserver{
 		dist:                 dist,
@@ -74,6 +81,7 @@ func NewCollectionObserver(
 		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 		loadTasks:            typeutil.NewConcurrentMap[string, LoadTask](),
+		proxyManager:         proxyManager,
 	}
 
 	// Add load task for collection recovery
@@ -347,5 +355,20 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int32("partitionLoadPercentage", loadPercentage),
 		zap.Int32("collectionLoadPercentage", collectionPercentage),
 	)
+	if collectionPercentage == 100 {
+		ob.invalidateCache(ctx, partition.GetCollectionID())
+	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", partition.CollectionID, loadPercentage)))
+}
+
+func (ob *CollectionObserver) invalidateCache(ctx context.Context, collectionID int64) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	err := ob.proxyManager.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+		CollectionID: collectionID,
+	}, proxyutil.SetMsgType(commonpb.MsgType_LoadCollection))
+	if err != nil {
+		log.Warn("failed to invalidate proxy's shard leader cache", zap.Error(err))
+		return
+	}
 }
