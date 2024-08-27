@@ -337,30 +337,69 @@ func (s *segmentManager) DropSegment(ctx context.Context, segmentID typeutil.Uni
 }
 
 func (s *segmentManager) getCandidates(criterion *segmentCriterion) map[typeutil.UniqueID]*SegmentInfo {
+	// segment ids specified
+	if criterion.segmentIDs != nil {
+		return s.getCandidatesByIDs(criterion)
+	}
+
+	// use collection index
 	if criterion.collectionID > 0 {
-		collSegments, ok := s.secondaryIndexes.coll2Segments[criterion.collectionID]
-		if !ok {
-			return nil
-		}
-
-		// both collection id and channel are filters of criterion
-		if criterion.channel != "" {
-			return lo.OmitBy(collSegments, func(k typeutil.UniqueID, v *SegmentInfo) bool {
-				return v.InsertChannel != criterion.channel
-			})
-		}
-		return collSegments
+		return s.getCandidatesByCollection(criterion)
 	}
 
+	// use channel secondary index
 	if criterion.channel != "" {
-		channelSegments, ok := s.secondaryIndexes.channel2Segments[criterion.channel]
-		if !ok {
-			return nil
-		}
-		return channelSegments
+		return s.getCandidatesByChannel(criterion)
 	}
 
+	// scan all segments
 	return s.segments
+}
+
+func (s *segmentManager) getCandidatesByIDs(criterion *segmentCriterion) map[typeutil.UniqueID]*SegmentInfo {
+	segments := lo.FilterMap(criterion.segmentIDs.Collect(), func(segID int64, _ int) (*SegmentInfo, bool) {
+		seg, ok := s.segments[segID]
+		return seg, ok
+	})
+
+	// add collection id filter to filters
+	if criterion.collectionID > 0 {
+		criterion.others = append(criterion.others, WithSegmentFilterFunc(func(si *SegmentInfo) bool {
+			return si.GetCollectionID() == criterion.collectionID
+		}))
+	}
+
+	// add channel filter to filters
+	if criterion.channel != "" {
+		criterion.others = append(criterion.others, WithSegmentFilterFunc(func(si *SegmentInfo) bool {
+			return si.GetInsertChannel() == criterion.channel
+		}))
+	}
+
+	return lo.SliceToMap(segments, func(segment *SegmentInfo) (int64, *SegmentInfo) { return segment.GetID(), segment })
+}
+
+func (s *segmentManager) getCandidatesByCollection(criterion *segmentCriterion) map[typeutil.UniqueID]*SegmentInfo {
+	collSegments, ok := s.secondaryIndexes.coll2Segments[criterion.collectionID]
+	if !ok {
+		return nil
+	}
+
+	// both collection id and channel are filters of criterion
+	if criterion.channel != "" {
+		return lo.OmitBy(collSegments, func(k typeutil.UniqueID, v *SegmentInfo) bool {
+			return v.InsertChannel != criterion.channel
+		})
+	}
+	return collSegments
+}
+
+func (s *segmentManager) getCandidatesByChannel(criterion *segmentCriterion) map[typeutil.UniqueID]*SegmentInfo {
+	channelSegments, ok := s.secondaryIndexes.channel2Segments[criterion.channel]
+	if !ok {
+		return nil
+	}
+	return channelSegments
 }
 
 func (s *segmentManager) addSecondaryIndex(segment *SegmentInfo) {
