@@ -1706,6 +1706,7 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			}
 			queryInfo := &planpb.QueryInfo{
 				GroupByFieldId: 1,
+				GroupSize:      1,
 			}
 			reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, topK, metric.L2,
 				schemapb.DataType_Int64, 0, queryInfo))
@@ -1765,6 +1766,7 @@ func TestTaskSearch_reduceGroupBySearchResultDataWithOffset(t *testing.T) {
 
 	queryInfo := &planpb.QueryInfo{
 		GroupByFieldId: 1,
+		GroupSize:      1,
 	}
 	reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, limit+offset, metric.L2,
 		schemapb.DataType_Int64, offset, queryInfo))
@@ -1775,6 +1777,82 @@ func TestTaskSearch_reduceGroupBySearchResultDataWithOffset(t *testing.T) {
 	assert.EqualValues(t, expectedScores, resultScores)
 	assert.EqualValues(t, expectedGroupByValues, resultGroupByValues)
 	assert.NoError(t, err)
+}
+
+func TestTaskSearch_reduceGroupBySearchWithGroupSizeMoreThanOne(t *testing.T) {
+	var (
+		nq   int64 = 2
+		topK int64 = 5
+	)
+	ids := [][]int64{
+		{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
+		{2, 4, 6, 8, 10, 2, 4, 6, 8, 10},
+	}
+	scores := [][]float32{
+		{10, 8, 6, 4, 2, 10, 8, 6, 4, 2},
+		{9, 7, 5, 3, 1, 9, 7, 5, 3, 1},
+	}
+
+	groupByValuesArr := [][][]int64{
+		{
+			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
+			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
+		},
+		{
+			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
+			{6, 8, 3, 4, 5, 6, 8, 3, 4, 5},
+		},
+	}
+	expectedIDs := [][]int64{
+		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		{1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6},
+	}
+	expectedScores := [][]float32{
+		{-10, -9, -8, -7, -6, -5, -4, -3, -2, -1, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1},
+		{-10, -9, -8, -7, -6, -5, -10, -9, -8, -7, -6, -5},
+	}
+	expectedGroupByValues := [][]int64{
+		{1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5},
+		{1, 6, 2, 8, 3, 3, 1, 6, 2, 8, 3, 3},
+	}
+
+	for i, groupByValues := range groupByValuesArr {
+		t.Run("Group By correctness", func(t *testing.T) {
+			var results []*schemapb.SearchResultData
+			for j := range ids {
+				result := getSearchResultData(nq, topK)
+				result.Ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids[j]}}
+				result.Scores = scores[j]
+				result.Topks = []int64{topK, topK}
+				result.GroupByFieldValue = &schemapb.FieldData{
+					Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{
+									Data: groupByValues[j],
+								},
+							},
+						},
+					},
+				}
+				results = append(results, result)
+			}
+			queryInfo := &planpb.QueryInfo{
+				GroupByFieldId: 1,
+				GroupSize:      2,
+			}
+			reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, topK, metric.L2,
+				schemapb.DataType_Int64, 0, queryInfo))
+			resultIDs := reduced.GetResults().GetIds().GetIntId().Data
+			resultScores := reduced.GetResults().GetScores()
+			resultGroupByValues := reduced.GetResults().GetGroupByFieldValue().GetScalars().GetLongData().GetData()
+			assert.EqualValues(t, expectedIDs[i], resultIDs)
+			assert.EqualValues(t, expectedScores[i], resultScores)
+			assert.EqualValues(t, expectedGroupByValues[i], resultGroupByValues)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestSearchTask_ErrExecute(t *testing.T) {
