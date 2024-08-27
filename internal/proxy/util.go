@@ -633,6 +633,21 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
+	schemaInfo := newSchemaInfo(schema)
+	// calculate schema default
+	loadList := common.GetCollectionLoadFields(schema, false)
+	var loadNames []string
+	var loadFields []*schemapb.FieldSchema
+	for _, fieldID := range loadList {
+		field, _ := schemaInfo.schemaHelper.GetFieldFromID(fieldID)
+		loadNames = append(loadNames, field.GetName())
+		loadFields = append(loadFields, field)
+	}
+
+	return schemaInfo.validateLoadFields(loadNames, loadFields)
+}
+
 // parsePrimaryFieldData2IDs get IDs to fill grpc result, for example insert request, delete request etc.
 func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, error) {
 	primaryData := &schemapb.IDs{}
