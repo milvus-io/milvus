@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from datetime import datetime
 import requests
-from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility
+from pymilvus import connections, Collection, DataType, FieldSchema, CollectionSchema, utility, list_collections
 from loguru import logger
 import matplotlib.pyplot as plt
 import plotly.io as pio
@@ -525,5 +525,14 @@ if __name__ == "__main__":
 
     connections.connect("source", uri=args.source_uri, token=args.source_token)
     connections.connect("target", uri=args.target_uri, token=args.target_token)
+    #release all collectiions
+    source_collections = list_collections(using="source")
+    for collection in source_collections:
+        c = Collection(collection, using="source")
+        c.release()
+    source_collections = list_collections(using="target")
+    for collection in source_collections:
+        c = Collection(collection, using="target")
+        c.release()
     cdc_test = MilvusCDCPerformance("source", "target", args.cdc_host)
     cdc_test.run_all_tests(duration=args.test_duration, batch_size=1000, max_concurrency=10)
