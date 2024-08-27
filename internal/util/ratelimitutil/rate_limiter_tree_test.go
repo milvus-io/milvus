@@ -130,7 +130,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DMLInsert)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
-		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+		assert.True(t, strings.Contains(err.Error(), "disabled"))
 	})
 
 	t.Run("read", func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DQLSearch)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
-		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+		assert.True(t, strings.Contains(err.Error(), "disabled"))
 	})
 
 	t.Run("unknown", func(t *testing.T) {
