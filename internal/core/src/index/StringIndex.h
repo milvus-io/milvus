@@ -29,6 +29,10 @@ namespace milvus::index {
 
 class StringIndex : public ScalarIndex<std::string> {
  public:
+    StringIndex(const std::string& index_type)
+        : ScalarIndex<std::string>(index_type) {
+    }
+
     const TargetBitmap
     Query(const DatasetPtr& dataset) override {
         auto op = dataset->Get<OpType>(OPERATOR_TYPE);

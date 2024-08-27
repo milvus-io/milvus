@@ -36,7 +36,7 @@ namespace milvus::index {
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
-    : is_built_(false), data_() {
+    : ScalarIndex<T>(ASCENDING_SORT), is_built_(false), data_() {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);

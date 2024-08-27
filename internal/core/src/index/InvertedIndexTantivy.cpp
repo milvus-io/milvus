@@ -71,7 +71,8 @@ get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx)
-    : schema_(ctx.fieldDataMeta.field_schema) {
+    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
+      schema_(ctx.fieldDataMeta.field_schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     auto field =
