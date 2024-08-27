@@ -1,4 +1,4 @@
-shared:
+misc:
   - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
