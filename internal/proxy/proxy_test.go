@@ -3896,7 +3896,7 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		resp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		entity.Name = "unit_test"
+		entity.Name = "unit_test1000"
 		resp, _ = proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
