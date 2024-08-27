@@ -123,6 +123,7 @@ class ColumnBase {
 
     // mmap mode ctor
     // User must call Seal to build the view for variable length column.
+    // !!! The incoming file must be write padings at the end of the file.
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
         : mapping_type_(MappingType::MAP_WITH_FILE) {
         auto data_type = field_meta.get_data_type();
@@ -131,47 +132,55 @@ class ColumnBase {
             type_size_ = field_meta.get_sizeof();
             num_rows_ = size / type_size_;
         }
+        AssertInfo(size >= padding_,
+                   "file size {} is less than padding size {}",
+                   size,
+                   padding_);
 
         size_ = size;
-        cap_size_ = size;
+        cap_size_ = size - padding_;
         // use exactly same size of file, padding shall be written in file already
         // see also https://github.com/milvus-io/milvus/issues/34442
-        size_t mapped_size = cap_size_;
-        data_ = static_cast<char*>(mmap(
-            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
+        data_ = static_cast<char*>(
+            mmap(nullptr, size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
-        madvise(data_, mapped_size, MADV_WILLNEED);
+        madvise(data_, size, MADV_WILLNEED);
 
-        UpdateMetricWhenMmap(mapped_size);
+        UpdateMetricWhenMmap(size);
     }
 
     // mmap mode ctor
     // User must call Seal to build the view for variable length column.
+    // !!! The incoming file must be write padings at the end of the file.
     ColumnBase(const File& file,
                size_t size,
                int dim,
                const DataType& data_type)
-        : size_(size),
-          cap_size_(size),
-          mapping_type_(MappingType::MAP_WITH_FILE) {
+        : size_(size), mapping_type_(MappingType::MAP_WITH_FILE) {
         SetPaddingSize(data_type);
 
         // use exact same size of file, padding shall be written in file already
         // see also https://github.com/milvus-io/milvus/issues/34442
-        size_t mapped_size = cap_size_;
         if (!IsVariableDataType(data_type)) {
             type_size_ = GetDataTypeSize(data_type, dim);
             num_rows_ = size / type_size_;
         }
-        data_ = static_cast<char*>(mmap(
-            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
+        AssertInfo(size >= padding_,
+                   "file size {} is less than padding size {}",
+                   size,
+                   padding_);
+
+        cap_size_ = size - padding_;
+
+        data_ = static_cast<char*>(
+            mmap(nullptr, size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
 
-        UpdateMetricWhenMmap(mapped_size);
+        UpdateMetricWhenMmap(size);
     }
 
     virtual ~ColumnBase() {
@@ -276,22 +285,7 @@ class ColumnBase {
 
     void
     SetPaddingSize(const DataType& type) {
-        switch (type) {
-            case DataType::JSON:
-                // simdjson requires a padding following the json data
-                padding_ = simdjson::SIMDJSON_PADDING;
-                break;
-            case DataType::VARCHAR:
-            case DataType::STRING:
-                padding_ = STRING_PADDING;
-                break;
-            case DataType::ARRAY:
-                padding_ = ARRAY_PADDING;
-                break;
-            default:
-                padding_ = 0;
-                break;
-        }
+        padding_ = PaddingSize(type);
     }
 
  protected:
