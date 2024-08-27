@@ -23,7 +23,7 @@ func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.Collectio
 		return &cntReducer{}
 	}
 	if req.GetReq().GetScanCtx() != nil {
-		return &ScanReducer{}
+		return &ScanReducer{req: req}
 	}
 	return newDefaultLimitReducer(req, schema)
 }

@@ -169,6 +169,7 @@ message ScanCtx {
   int64 segment_idx = 2;
   int64 offset = 3;
   uint64 mvcc_ts = 4;
+  bool is_init_scan = 5;
 }
 
 message RetrieveRequest {

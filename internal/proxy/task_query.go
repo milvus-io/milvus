@@ -38,6 +38,14 @@ const (
 	QueryTaskName    = "QueryTask"
 )
 
+type ScanOperator int
+
+const (
+	ScanNone  = 0
+	ScanInit  = 1
+	ScanQuery = 2
+)
+
 type queryTask struct {
 	baseTask
 	Condition
@@ -67,7 +75,7 @@ type queryTask struct {
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
-	isScanQuery          bool
+	scanOperator         ScanOperator
 }
 
 type queryParams struct {
@@ -454,9 +462,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		zap.String("requestType", "query"))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	if t.isScanQuery {
-		t.dstChannelNodeMap = make(map[string]*milvuspb.ScanItem, 0)
-	}
+	t.setupScanMap()
 
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
 		db:             t.request.GetDbName(),
@@ -518,12 +524,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	}
 	t.result.OutputFields = t.userOutputFields
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
-	if t.isScanQuery {
-		t.result.ScanRespCtx = &milvuspb.ScanCtx{
-			ScanCtxId: t.request.GetScanReqCtx().GetScanCtxId(),
-			ScanMap:   t.dstChannelNodeMap,
-		}
-	}
+	t.setScanMapForRes()
 	log.Debug("Query PostExecute done")
 	return nil
 }
@@ -544,16 +545,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	if needOverrideMvcc && mvccTs > 0 {
 		retrieveReq.MvccTimestamp = mvccTs
 	}
-	if t.request.GetScanReqCtx() != nil {
-		scanItem := t.request.GetScanReqCtx().GetScanMap()[channel]
-		if scanItem != nil {
-			retrieveReq.ScanCtx = &internalpb.ScanCtx{
-				ScanCtxId:  t.request.GetScanReqCtx().GetScanCtxId(),
-				SegmentIdx: scanItem.SegmentIdx,
-				Offset:     scanItem.Offset,
-			}
-		}
-	}
+	t.setShardReqScanCtx(channel, retrieveReq)
 
 	req := &querypb.QueryRequest{
 		Req:         retrieveReq,
@@ -584,14 +576,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 
 	log.Debug("get query result")
 	t.resultBuf.Insert(result)
-	if t.isScanQuery {
-		t.dstChannelNodeMap[channel] = &milvuspb.ScanItem{
-			Node:       nodeID,
-			SegmentIdx: result.GetScanCtx().GetSegmentIdx(),
-			Offset:     result.GetScanCtx().GetOffset(),
-			MvccTs:     result.GetScanCtx().GetMvccTs(),
-		}
-	}
+	t.fillScanMap(channel, nodeID, result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil
 }
@@ -720,9 +705,16 @@ func (t *queryTask) SetID(uid UniqueID) {
 
 func (t *queryTask) SetOnEnqueueTime() {
 	// if the request is the init request for query scan, we set up ScanCtxId with the queryTask ID
-	if t.request.GetScanReqCtx() != nil && t.request.GetScanReqCtx().GetScanCtxId() == 0 {
-		t.request.GetScanReqCtx().ScanCtxId = t.ID()
-		t.isScanQuery = true
+	if t.request.GetScanReqCtx() != nil {
+		if t.request.GetScanReqCtx().GetScanCtxId() == 0 {
+			t.request.GetScanReqCtx().ScanCtxId = t.ID()
+			t.request.GetScanReqCtx().IsInitScan = true
+			t.scanOperator = ScanInit
+		} else {
+			t.scanOperator = ScanQuery
+		}
+	} else {
+		t.scanOperator = ScanNone
 	}
 }
 
@@ -755,5 +747,61 @@ func (t *queryTask) OnEnqueue() error {
 	}
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *queryTask) setupScanMap() {
+	if t.scanOperator == ScanInit || t.scanOperator == ScanQuery {
+		t.dstChannelNodeMap = make(map[string]*milvuspb.ScanItem, 0)
+	}
+}
+
+func (t *queryTask) fillScanMap(channel string, nodeID int64, result *internalpb.RetrieveResults) {
+	if t.scanOperator == ScanInit || t.scanOperator == ScanQuery {
+		scanItem := &milvuspb.ScanItem{
+			Node:   nodeID,
+			MvccTs: result.GetScanCtx().GetMvccTs(),
+		}
+		t.dstChannelNodeMap[channel] = scanItem
+		if t.scanOperator == ScanQuery {
+			scanItem.SegmentIdx = result.GetScanCtx().GetSegmentIdx()
+			scanItem.Offset = result.GetScanCtx().GetOffset()
+		}
+	}
+}
+
+func (t *queryTask) setScanMapForRes() {
+	if t.scanOperator != ScanNone {
+		t.result.ScanRespCtx = &milvuspb.ScanCtx{
+			ScanCtxId: t.request.GetScanReqCtx().GetScanCtxId(),
+			ScanMap:   t.dstChannelNodeMap,
+		}
+	}
+}
+
+func (t *queryTask) setShardReqScanCtx(channel string, retrieveReq *internalpb.RetrieveRequest) error {
+	if t.scanOperator == ScanInit {
+		if t.request.GetScanReqCtx() == nil {
+			return merr.ErrParameterInvalid
+		}
+		retrieveReq.ScanCtx = &internalpb.ScanCtx{
+			ScanCtxId:  t.request.GetScanReqCtx().GetScanCtxId(),
+			IsInitScan: true,
+		}
+		return nil
+	}
+	if t.scanOperator == ScanQuery {
+		scanItem := t.request.GetScanReqCtx().GetScanMap()[channel]
+		if scanItem != nil {
+			retrieveReq.ScanCtx = &internalpb.ScanCtx{
+				ScanCtxId:  t.request.GetScanReqCtx().GetScanCtxId(),
+				SegmentIdx: scanItem.SegmentIdx,
+				Offset:     scanItem.Offset,
+				MvccTs:     scanItem.GetMvccTs(),
+			}
+		} else {
+			return merr.ErrParameterInvalid
+		}
+	}
 	return nil
 }

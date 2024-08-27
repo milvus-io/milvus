@@ -459,11 +459,11 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	return nil
 }
 
-func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []SegmentEntry, segmentIdx int64, segOffset int64) ([]SnapshotItem, []SegmentEntry, error) {
+func (sd *shardDelegator) modifyRequestForScan(sealed *[]SnapshotItem, growing *[]SegmentEntry, segmentIdx int64, segOffset int64) ([]SnapshotItem, []SegmentEntry, error) {
 	idx := 0
 	targetSealed := make([]SnapshotItem, 0)
 	targetGrowing := make([]SegmentEntry, 0)
-	for _, sealedItem := range sealed {
+	for _, sealedItem := range *sealed {
 		nextIdx := idx + len(sealedItem.Segments)
 		if int64(nextIdx) >= segmentIdx {
 			targetIdx := int(segmentIdx - int64(idx)) // hc--need handle int vs int64 here
@@ -478,10 +478,10 @@ func (sd *shardDelegator) modifyRequestForScan(sealed []SnapshotItem, growing []
 		idx = nextIdx
 	}
 	targetIdx := int(segmentIdx - int64(idx))
-	if targetIdx >= len(growing) {
+	if targetIdx >= len(*growing) {
 		return nil, nil, merr.ErrParameterInvalid
 	}
-	targetSegment := growing[targetIdx]
+	targetSegment := (*growing)[targetIdx]
 	targetSegment.Offset = segOffset
 	targetGrowing = append(targetGrowing, targetSegment)
 	return targetSealed, targetGrowing, nil
@@ -525,29 +525,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	var growing []SegmentEntry
 	var version int64
 	//handle scan request
-	if req.GetReq().GetScanCtx() != nil {
-		scanCtx := req.GetReq().GetScanCtx()
-		scanCtxId := scanCtx.GetScanCtxId()
-		scanSegmentIdx := scanCtx.GetSegmentIdx()
-		scanOffset := scanCtx.GetOffset()
-		{
-			sd.readCtxLock.RLock()
-			scanCtx := sd.readCtxMap[scanCtxId]
-			if scanCtx == nil {
-				return nil, merr.ErrParameterInvalid
-				//refine error handle here
-			}
-			sealed, growing, err = sd.distribution.PeekSegmentsBySnapshot(scanCtx.snapshotID, true, req.GetReq().GetPartitionIDs()...)
-			if err != nil {
-				return nil, err
-			}
-			sealed, growing, err = sd.modifyRequestForScan(sealed, growing, scanSegmentIdx, scanOffset)
-			if err != nil {
-				return nil, err
-			}
-			sd.readCtxLock.RUnlock()
-		}
-	} else {
+	if isScan, err := sd.handleScanQuery(req, &sealed, &growing); !isScan {
 		sealed, growing, version, err = sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 		if err != nil {
 			log.Warn("delegator failed to query, current distribution is not serviceable")
@@ -1007,6 +985,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:     chunkManager,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
+		readCtxMap:       make(map[int64]*ReadContext, 0),
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
@@ -1015,4 +994,49 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+func (sd *shardDelegator) handleScanQuery(req *querypb.QueryRequest, sealed *[]SnapshotItem, growing *[]SegmentEntry) (bool, error) {
+	if req.GetReq().GetScanCtx() != nil {
+		scanCtx := req.GetReq().GetScanCtx()
+		scanCtxId := scanCtx.GetScanCtxId()
+		var err error
+		if scanCtx.GetIsInitScan() {
+			if nil != sd.readCtxMap[scanCtxId] {
+				return true, merr.ErrParameterInvalid
+			}
+			var version int64
+			_, _, version, err = sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+			// don't do actual query for init scan reqeust
+			*sealed = make([]SnapshotItem, 0)
+			*growing = make([]SegmentEntry, 0)
+			sd.readCtxLock.Lock()
+			sd.readCtxMap[scanCtxId] = &ReadContext{
+				snapshotID: version,
+			}
+			sd.readCtxLock.Unlock()
+		} else {
+			scanSegmentIdx := scanCtx.GetSegmentIdx()
+			scanOffset := scanCtx.GetOffset()
+			sd.readCtxLock.RLock()
+			if nil == sd.readCtxMap[scanCtxId] {
+				return true, merr.ErrParameterInvalid
+			}
+			scanCtx := sd.readCtxMap[scanCtxId]
+			if scanCtx == nil {
+				return false, merr.ErrParameterInvalid
+			}
+			*sealed, *growing, err = sd.distribution.PeekSegmentsBySnapshot(scanCtx.snapshotID, true, req.GetReq().GetPartitionIDs()...)
+			if err != nil {
+				return false, err
+			}
+			*sealed, *growing, err = sd.modifyRequestForScan(sealed, growing, scanSegmentIdx, scanOffset)
+			if err != nil {
+				return false, err
+			}
+			sd.readCtxLock.RUnlock()
+		}
+		return true, nil
+	}
+	return false, nil
 }

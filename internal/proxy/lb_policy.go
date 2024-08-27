@@ -200,15 +200,25 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 func (lb *LBPolicyImpl) targetDml2Leaders(ctx context.Context, workload *CollectionWorkLoad) (map[string][]nodeInfo, error) {
 	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collectionName, workload.collectionID)
+	if err != nil {
+		return dml2leaders, err
+	}
 	if workload.milvusReq.GetScanReqCtx() != nil {
 		scanCtx := workload.milvusReq.GetScanReqCtx()
+		// for init scan request, we broadcast request to all dml channels
+		if scanCtx.GetIsInitScan() {
+			return dml2leaders, nil
+		}
+		// for further scan query request, broadcast request only to client-specified delegators
+		targetDml2leaders := make(map[string][]nodeInfo, 0)
 		for ch, item := range scanCtx.GetScanMap() {
-			dml2leaders[ch] = lo.Filter(dml2leaders[ch], func(info nodeInfo, _ int) bool {
+			targetDml2leaders[ch] = lo.Filter(dml2leaders[ch], func(info nodeInfo, _ int) bool {
 				return info.nodeID == item.GetNode()
 			})
 		}
+		return targetDml2leaders, nil
 	}
-	return dml2leaders, err
+	return dml2leaders, nil
 }
 
 // Execute will execute collection workload in parallel
