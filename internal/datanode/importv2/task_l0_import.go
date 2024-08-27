@@ -216,7 +216,10 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			continue
 		}
 		partitionID := t.GetPartitionIDs()[0]
-		segmentID := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+		segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+		if err != nil {
+			return nil, nil, err
+		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data)
 		if err != nil {
