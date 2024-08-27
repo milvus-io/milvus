@@ -61,8 +61,11 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
   mkdir -p ${CI_LOG_PATH}
 fi
 
-echo "prepare e2e test"  
-install_pytest_requirements  
+# skip pip install when DISABLE_PIP_INSTALL is set
+if [ "${DISABLE_PIP_INSTALL:-}" = "" ]; then
+    echo "prepare e2e test"  
+    install_pytest_requirements  
+fi
 
 
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
