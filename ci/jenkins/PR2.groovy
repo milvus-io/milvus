@@ -1,7 +1,7 @@
-@Library('jenkins-shared-library@v0.27.0') _
+@Library('jenkins-shared-library@v0.29.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
-def milvus_helm_chart_version = '4.2.8'
+def milvus_helm_chart_version = '4.1.27'
 
 pipeline {
     options {
