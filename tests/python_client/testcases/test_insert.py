@@ -2091,7 +2091,7 @@ class TestUpsertInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail("insert and upsert have removed the [] error check")
+    @pytest.mark.skip("insert and upsert have removed the [] error check")
     def test_upsert_multi_partitions(self):
         """
         target: test upsert two partitions
