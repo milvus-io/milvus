@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
@@ -38,7 +39,8 @@ func generateWatchInfo(name string, state datapb.ChannelWatchState) *datapb.Chan
 		Vchan: &datapb.VchannelInfo{
 			ChannelName: name,
 		},
-		State: state,
+		Schema: &schemapb.CollectionSchema{},
+		State:  state,
 	}
 }
 

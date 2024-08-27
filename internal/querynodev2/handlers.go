@@ -388,7 +388,11 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	if req.GetReq().GetIsAdvanced() {
 		resp, err = segments.ReduceAdvancedSearchResults(ctx, results, req.Req.GetNq())
 	} else {
-		resp, err = segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+		resp, err = segments.ReduceSearchResults(ctx, results, segments.NewReduceInfo(req.Req.GetNq(),
+			req.Req.GetTopk(),
+			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
+			req.Req.GetExtraSearchParam().GetGroupSize(),
+			req.Req.GetMetricType()))
 	}
 	if err != nil {
 		return nil, err

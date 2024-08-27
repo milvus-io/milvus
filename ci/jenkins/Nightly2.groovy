@@ -1,20 +1,30 @@
-@Library('jenkins-shared-library@v0.28.0') _
+@Library('jenkins-shared-library@v0.27.0') _
 
-def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
+def pod = libraryResource 'io/milvus/pod/tekton-ci.yaml'
+
+String cron_timezone = 'TZ=Asia/Shanghai'
+String cron_string = BRANCH_NAME == 'master' ? '50 1 * * * ' : ''
+
+// Make timeout 4 hours so that we can run two nightly during the ci
+int total_timeout_minutes = 7 * 60
 
 def milvus_helm_chart_version = '4.2.8'
 
 pipeline {
+    triggers {
+        cron """${cron_timezone}
+            ${cron_string}"""
+    }
     options {
         skipDefaultCheckout true
-        parallelsAlwaysFailFast()
+        timeout(time: total_timeout_minutes, unit: 'MINUTES')
+        // parallelsAlwaysFailFast()
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
     }
     agent {
         kubernetes {
-            cloud '4am'
             yaml pod
         }
     }
@@ -32,10 +42,11 @@ pipeline {
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
-                                              suppress_suffix_of_image_tag: true
+                                              suppress_suffix_of_image_tag: true,
+                                              test_client_type: '["pytest"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
-                        milvus_sdk_go_image =  tekton.query_result job_name, 'gotestsum-image-fqdn'
+                        pytest_image =  tekton.query_result job_name, 'pytest-image-fqdn'
                     }
                 }
             }
@@ -43,7 +54,7 @@ pipeline {
                 always {
                     container('tkn') {
                         script {
-                            tekton.sure_stop()
+                                tekton.sure_stop()
                         }
                     }
                 }
@@ -53,14 +64,13 @@ pipeline {
             matrix {
                 agent {
                     kubernetes {
-                        cloud '4am'
                         yaml pod
                     }
                 }
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed'
+                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication', 'standalone-one-pod', 'distributed-streaming-service'
                     }
                 }
                 stages {
@@ -69,16 +79,16 @@ pipeline {
                             container('tkn') {
                                 script {
                                     def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             ciMode: 'e2e',
-                                                                             client: 'gotestsum',
+                                                                             ciMode: 'nightly',
+                                                                             client: 'py',
                                                                              changeId: "${env.CHANGE_ID}",
                                                                              buildId:"${env.BUILD_ID}"
 
-                                    job_name = tekton.gotestsum helm_release_name: helm_release_name,
+                                    tekton.pytest helm_release_name: helm_release_name,
                                               milvus_helm_version: milvus_helm_chart_version,
-                                              ciMode: 'e2e',
+                                              ciMode: 'nightly',
                                               milvus_image_tag: milvus_image_tag,
-                                              milvus_sdk_go_image: milvus_sdk_go_image,
+                                              pytest_image: pytest_image,
                                               milvus_deployment_option: milvus_deployment_option
                                 }
                             }
@@ -95,10 +105,10 @@ pipeline {
                                 container('archive') {
                                     script {
                                         def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             ciMode: 'e2e',
-                                                                             client: 'gotestsum',
-                                                                             changeId: "${env.CHANGE_ID}",
-                                                                             buildId:"${env.BUILD_ID}"
+                                                                                 ciMode: 'nightly',
+                                                                                 client: 'py',
+                                                                                 changeId: "${env.CHANGE_ID}",
+                                                                                 buildId:"${env.BUILD_ID}"
 
                                         tekton.archive  milvus_deployment_option: milvus_deployment_option,
                                                                     release_name: helm_release_name ,
