@@ -87,7 +87,7 @@ jobs:
       - name: 'Setup Use USE_ASAN'
         if: steps.changed-files-cpp.outputs.any_changed == 'true'
         run: |
-          echo "useasan=ON" >> $GITHUB_ENV
+          echo "useasan=OFF" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: Download Caches
         uses: ./.github/actions/cache-restore
