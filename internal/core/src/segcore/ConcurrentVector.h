@@ -234,9 +234,11 @@ class ConcurrentVectorImpl : public VectorBase {
         if (element_count == 0) {
             return;
         }
+        auto size =
+            size_per_chunk_ == MAX_ROW_COUNT ? element_count : size_per_chunk_;
         chunks_ptr_->emplace_to_at_least(
-            upper_div(element_offset + element_count, size_per_chunk_),
-            elements_per_row_ * size_per_chunk_);
+            upper_div(element_offset + element_count, size),
+            elements_per_row_ * size);
         set_data(
             element_offset, static_cast<const Type*>(source), element_count);
     }

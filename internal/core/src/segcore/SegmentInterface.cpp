@@ -392,14 +392,6 @@ SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
         field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
-void
-SegmentInternalInterface::LoadStringSkipIndex(
-    milvus::FieldId field_id,
-    int64_t chunk_id,
-    const milvus::VariableColumn<std::string>& var_column) {
-    skip_index_.LoadString(field_id, chunk_id, var_column);
-}
-
 index::TextMatchIndex*
 SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     std::shared_lock lock(mutex_);
