@@ -62,11 +62,17 @@ EmptyTraceID(const TraceContext* ctx);
 bool
 EmptySpanID(const TraceContext* ctx);
 
-std::vector<uint8_t>
-GetTraceIDAsVector(const TraceContext* ctx);
+std::string
+BytesToHexStr(const uint8_t* data, const size_t len);
 
-std::vector<uint8_t>
-GetSpanIDAsVector(const TraceContext* ctx);
+std::string
+GetIDFromHexStr(const std::string& hexStr);
+
+std::string
+GetTraceIDAsHexStr(const TraceContext* ctx);
+
+std::string
+GetSpanIDAsHexStr(const TraceContext* ctx);
 
 struct AutoSpan {
     explicit AutoSpan(const std::string& name,
