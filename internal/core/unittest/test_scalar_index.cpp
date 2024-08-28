@@ -27,6 +27,7 @@
 #include <boost/filesystem.hpp>
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/TmpPath.h"
+#include "storage/Util.h"
 
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;
@@ -55,7 +56,11 @@ TYPED_TEST_P(TypedScalarIndexTest, Dummy) {
 
 auto
 GetTempFileManagerCtx(CDataType data_type) {
-    auto ctx = milvus::storage::FileManagerContext();
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = "/tmp/local/";
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto ctx = milvus::storage::FileManagerContext(chunk_manager);
     ctx.fieldDataMeta.field_schema.set_data_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
     return ctx;

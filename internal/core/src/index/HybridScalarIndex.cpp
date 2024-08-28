@@ -30,7 +30,8 @@ namespace index {
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
     const storage::FileManagerContext& file_manager_context)
-    : is_built_(false),
+    : ScalarIndex<T>(HYBRID_INDEX_TYPE),
+      is_built_(false),
       bitmap_index_cardinality_limit_(DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND),
       file_manager_context_(file_manager_context) {
     if (file_manager_context.Valid()) {

@@ -35,7 +35,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManager = storage::DiskFileManagerImpl;
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
-    InvertedIndexTantivy() = default;
+    InvertedIndexTantivy() : ScalarIndex<T>(INVERTED_INDEX_TYPE) {
+    }
+
     explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx);
 
     ~InvertedIndexTantivy();

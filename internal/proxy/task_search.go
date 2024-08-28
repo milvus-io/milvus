@@ -456,12 +456,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
+	t.SearchRequest.ExtraSearchParam = &internalpb.ExtraSearchParam{GroupByFieldId: queryInfo.GroupByFieldId, GroupSize: queryInfo.GroupSize}
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		zap.Stringer("plan", plan)) // may be very large if large term passed.

@@ -790,7 +790,11 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if req.GetReq().GetIsAdvanced() {
 		result, err2 = segments.ReduceAdvancedSearchResults(ctx, toReduceResults, req.Req.GetNq())
 	} else {
-		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, segments.NewReduceInfo(req.Req.GetNq(),
+			req.Req.GetTopk(),
+			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
+			req.Req.GetExtraSearchParam().GetGroupSize(),
+			req.Req.GetMetricType()))
 	}
 
 	if err2 != nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -36,7 +37,10 @@ func getChannel(name string, collID int64) *StateChannel {
 	return &StateChannel{
 		Name:         name,
 		CollectionID: collID,
-		Info:         &datapb.ChannelWatchInfo{Vchan: &datapb.VchannelInfo{}},
+		Info: &datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{ChannelName: name, CollectionID: collID},
+		},
+		Schema: &schemapb.CollectionSchema{Name: "coll1"},
 	}
 }
 

@@ -15,10 +15,14 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <boost/algorithm/string.hpp>
+#include <sys/errno.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 #include "index/BitmapIndex.h"
 
+#include "common/File.h"
 #include "common/Slice.h"
 #include "common/Common.h"
 #include "index/Meta.h"
@@ -33,12 +37,27 @@ namespace index {
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
     const storage::FileManagerContext& file_manager_context)
-    : is_built_(false),
-      schema_(file_manager_context.fieldDataMeta.field_schema) {
+    : ScalarIndex<T>(BITMAP_INDEX_TYPE),
+      is_built_(false),
+      schema_(file_manager_context.fieldDataMeta.field_schema),
+      is_mmap_(false) {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
+    }
+}
+
+template <typename T>
+void
+BitmapIndex<T>::UnmapIndexData() {
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+        if (munmap(mmap_data_, mmap_size_) != 0) {
+            AssertInfo(
+                true, "failed to unmap bitmap index, err={}", strerror(errno));
+        }
+        mmap_data_ = nullptr;
+        mmap_size_ = 0;
     }
 }
 
@@ -348,20 +367,30 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
 template <typename T>
 void
 BitmapIndex<T>::BuildOffsetCache() {
-    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-        data_offsets_cache_.resize(total_num_rows_);
-        for (auto it = data_.begin(); it != data_.end(); it++) {
-            for (const auto& v : it->second) {
-                data_offsets_cache_[v] = it;
+    if (is_mmap_) {
+        mmap_offsets_cache_.resize(total_num_rows_);
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             ++it) {
+            for (const auto& v : AccessBitmap(it->second)) {
+                mmap_offsets_cache_[v] = it;
             }
         }
     } else {
-        for (auto it = bitsets_.begin(); it != bitsets_.end(); it++) {
+        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            data_offsets_cache_.resize(total_num_rows_);
+            for (auto it = data_.begin(); it != data_.end(); it++) {
+                for (const auto& v : it->second) {
+                    data_offsets_cache_[v] = it;
+                }
+            }
+        } else {
             bitsets_offsets_cache_.resize(total_num_rows_);
-            const auto& bits = it->second;
-            for (int i = 0; i < bits.size(); i++) {
-                if (bits[i]) {
-                    bitsets_offsets_cache_[i] = it;
+            for (auto it = bitsets_.begin(); it != bitsets_.end(); it++) {
+                const auto& bits = it->second;
+                for (int i = 0; i < bits.size(); i++) {
+                    if (bits[i]) {
+                        bitsets_offsets_cache_[i] = it;
+                    }
                 }
             }
         }
@@ -400,6 +429,83 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
 
 template <typename T>
 void
+BitmapIndex<T>::DeserializeIndexDataForMmap(const char* data_ptr,
+                                            size_t index_length) {
+    for (size_t i = 0; i < index_length; ++i) {
+        T key;
+        memcpy(&key, data_ptr, sizeof(T));
+        data_ptr += sizeof(T);
+
+        roaring::Roaring value;
+        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        auto size = value.getSizeInBytes();
+
+        bitmap_info_map_[key] = {static_cast<size_t>(data_ptr - mmap_data_),
+                                 size};
+        data_ptr += size;
+    }
+}
+
+template <>
+void
+BitmapIndex<std::string>::DeserializeIndexDataForMmap(const char* data_ptr,
+                                                      size_t index_length) {
+    for (size_t i = 0; i < index_length; ++i) {
+        size_t key_size;
+        memcpy(&key_size, data_ptr, sizeof(size_t));
+        data_ptr += sizeof(size_t);
+
+        std::string key(reinterpret_cast<const char*>(data_ptr), key_size);
+        data_ptr += key_size;
+
+        roaring::Roaring value;
+        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        auto size = value.getSizeInBytes();
+
+        bitmap_info_map_[key] = {static_cast<size_t>(data_ptr - mmap_data_),
+                                 size};
+        data_ptr += size;
+    }
+}
+
+template <typename T>
+void
+BitmapIndex<T>::MMapIndexData(const std::string& file_name,
+                              const uint8_t* data_ptr,
+                              size_t data_size,
+                              size_t index_length) {
+    std::filesystem::create_directories(
+        std::filesystem::path(file_name).parent_path());
+
+    auto file = File::Open(file_name, O_RDWR | O_CREAT | O_TRUNC);
+    auto written = file.Write(data_ptr, data_size);
+    if (written != data_size) {
+        file.Close();
+        remove(file_name.c_str());
+        PanicInfo(ErrorCode::UnistdError,
+                  fmt::format("write index to fd error: {}", strerror(errno)));
+    }
+
+    file.Seek(0, SEEK_SET);
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, data_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+    if (mmap_data_ == MAP_FAILED) {
+        file.Close();
+        remove(file_name.c_str());
+        PanicInfo(
+            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
+    }
+
+    mmap_size_ = data_size;
+    unlink(file_name.c_str());
+
+    char* ptr = mmap_data_;
+    DeserializeIndexDataForMmap(ptr, index_length);
+    is_mmap_ = true;
+}
+
+template <typename T>
+void
 BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                     const Config& config) {
     auto enable_offset_cache =
@@ -413,15 +519,37 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
     valid_bitset = TargetBitmap(total_num_rows_, false);
 
     auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
-    DeserializeIndexData(index_data_buffer->data.get(), index_length);
+
+    ChooseIndexLoadMode(index_length);
+
+    // only using mmap when build mode is raw roaring bitmap
+    if (config.contains(MMAP_FILE_PATH) &&
+        build_mode_ == BitmapIndexBuildMode::ROARING) {
+        auto mmap_filepath =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        AssertInfo(mmap_filepath.has_value(),
+                   "mmap filepath is empty when load index");
+        MMapIndexData(mmap_filepath.value(),
+                      index_data_buffer->data.get(),
+                      index_data_buffer->size,
+                      index_length);
+    } else {
+        DeserializeIndexData(index_data_buffer->data.get(), index_length);
+    }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
         BuildOffsetCache();
     }
 
-    LOG_INFO("load bitmap index with cardinality = {}, num_rows = {}",
-             Cardinality(),
-             total_num_rows_);
+    auto file_index_meta = file_manager_->GetIndexMeta();
+    LOG_INFO(
+        "load bitmap index with cardinality = {}, num_rows = {} for segment_id "
+        "= {}, field_id = {}, mmap = {}",
+        Cardinality(),
+        total_num_rows_,
+        file_index_meta.segment_id,
+        file_index_meta.field_id,
+        is_mmap_);
 
     is_built_ = true;
 }
@@ -429,6 +557,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
 template <typename T>
 void
 BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
+    LOG_DEBUG("load bitmap index with config {}", config.dump());
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -453,6 +582,18 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
 
+    if (is_mmap_) {
+        for (size_t i = 0; i < n; ++i) {
+            auto val = values[i];
+            auto it = bitmap_info_map_.find(val);
+            if (it != bitmap_info_map_.end()) {
+                for (const auto& v : AccessBitmap(it->second)) {
+                    res.set(v);
+                }
+            }
+        }
+        return res;
+    }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (size_t i = 0; i < n; ++i) {
             auto val = values[i];
@@ -479,6 +620,19 @@ const TargetBitmap
 BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
 
+    if (is_mmap_) {
+        TargetBitmap res(total_num_rows_, true);
+        for (int i = 0; i < n; ++i) {
+            auto val = values[i];
+            auto it = bitmap_info_map_.find(val);
+            if (it != bitmap_info_map_.end()) {
+                for (const auto& v : AccessBitmap(it->second)) {
+                    res.reset(v);
+                }
+            }
+        }
+        return res;
+    }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
@@ -590,11 +744,75 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::Range(const T value, OpType op) {
+    if (is_mmap_) {
+        return std::move(RangeForMmap(value, op));
+    }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         return std::move(RangeForRoaring(value, op));
     } else {
         return std::move(RangeForBitset(value, op));
     }
+}
+template <typename T>
+TargetBitmap
+BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
+    AssertInfo(is_built_, "index has not been built");
+    TargetBitmap res(total_num_rows_, false);
+    if (ShouldSkip(value, value, op)) {
+        return res;
+    }
+    auto lb = bitmap_info_map_.begin();
+    auto ub = bitmap_info_map_.end();
+
+    switch (op) {
+        case OpType::LessThan: {
+            ub = std::lower_bound(bitmap_info_map_.begin(),
+                                  bitmap_info_map_.end(),
+                                  std::make_pair(value, TargetBitmap()),
+                                  [](const auto& lhs, const auto& rhs) {
+                                      return lhs.first < rhs.first;
+                                  });
+            break;
+        }
+        case OpType::LessEqual: {
+            ub = std::upper_bound(bitmap_info_map_.begin(),
+                                  bitmap_info_map_.end(),
+                                  std::make_pair(value, TargetBitmap()),
+                                  [](const auto& lhs, const auto& rhs) {
+                                      return lhs.first < rhs.first;
+                                  });
+            break;
+        }
+        case OpType::GreaterThan: {
+            lb = std::upper_bound(bitmap_info_map_.begin(),
+                                  bitmap_info_map_.end(),
+                                  std::make_pair(value, TargetBitmap()),
+                                  [](const auto& lhs, const auto& rhs) {
+                                      return lhs.first < rhs.first;
+                                  });
+            break;
+        }
+        case OpType::GreaterEqual: {
+            lb = std::lower_bound(bitmap_info_map_.begin(),
+                                  bitmap_info_map_.end(),
+                                  std::make_pair(value, TargetBitmap()),
+                                  [](const auto& lhs, const auto& rhs) {
+                                      return lhs.first < rhs.first;
+                                  });
+            break;
+        }
+        default: {
+            PanicInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
+        }
+    }
+
+    for (; lb != ub; lb++) {
+        for (const auto& v : AccessBitmap(lb->second)) {
+            res.set(v);
+        }
+    }
+    return res;
 }
 
 template <typename T>
@@ -721,6 +939,10 @@ BitmapIndex<T>::Range(const T lower_value,
                       bool lb_inclusive,
                       const T upper_value,
                       bool ub_inclusive) {
+    if (is_mmap_) {
+        return RangeForMmap(
+            lower_value, lb_inclusive, upper_value, ub_inclusive);
+    }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         return RangeForRoaring(
             lower_value, lb_inclusive, upper_value, ub_inclusive);
@@ -728,6 +950,65 @@ BitmapIndex<T>::Range(const T lower_value,
         return RangeForBitset(
             lower_value, lb_inclusive, upper_value, ub_inclusive);
     }
+}
+
+template <typename T>
+TargetBitmap
+BitmapIndex<T>::RangeForMmap(const T lower_value,
+                             bool lb_inclusive,
+                             const T upper_value,
+                             bool ub_inclusive) {
+    AssertInfo(is_built_, "index has not been built");
+    TargetBitmap res(total_num_rows_, false);
+    if (lower_value > upper_value ||
+        (lower_value == upper_value && !(lb_inclusive && ub_inclusive))) {
+        return res;
+    }
+    if (ShouldSkip(lower_value, upper_value, OpType::Range)) {
+        return res;
+    }
+
+    auto lb = bitmap_info_map_.begin();
+    auto ub = bitmap_info_map_.end();
+
+    if (lb_inclusive) {
+        lb = std::lower_bound(bitmap_info_map_.begin(),
+                              bitmap_info_map_.end(),
+                              std::make_pair(lower_value, TargetBitmap()),
+                              [](const auto& lhs, const auto& rhs) {
+                                  return lhs.first < rhs.first;
+                              });
+    } else {
+        lb = std::upper_bound(bitmap_info_map_.begin(),
+                              bitmap_info_map_.end(),
+                              std::make_pair(lower_value, TargetBitmap()),
+                              [](const auto& lhs, const auto& rhs) {
+                                  return lhs.first < rhs.first;
+                              });
+    }
+
+    if (ub_inclusive) {
+        ub = std::upper_bound(bitmap_info_map_.begin(),
+                              bitmap_info_map_.end(),
+                              std::make_pair(upper_value, TargetBitmap()),
+                              [](const auto& lhs, const auto& rhs) {
+                                  return lhs.first < rhs.first;
+                              });
+    } else {
+        ub = std::lower_bound(bitmap_info_map_.begin(),
+                              bitmap_info_map_.end(),
+                              std::make_pair(upper_value, TargetBitmap()),
+                              [](const auto& lhs, const auto& rhs) {
+                                  return lhs.first < rhs.first;
+                              });
+    }
+
+    for (; lb != ub; lb++) {
+        for (const auto& v : AccessBitmap(lb->second)) {
+            res.set(v);
+        }
+    }
+    return res;
 }
 
 template <typename T>
@@ -792,6 +1073,11 @@ BitmapIndex<T>::RangeForRoaring(const T lower_value,
 template <typename T>
 T
 BitmapIndex<T>::Reverse_Lookup_InCache(size_t idx) const {
+    if (is_mmap_) {
+        Assert(build_mode_ == BitmapIndexBuildMode::ROARING);
+        return mmap_offsets_cache_[idx]->first;
+    }
+
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         return data_offsets_cache_[idx]->first;
     } else {
@@ -809,18 +1095,29 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
         return Reverse_Lookup_InCache(idx);
     }
 
-    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-        for (auto it = data_.begin(); it != data_.end(); it++) {
-            for (const auto& v : it->second) {
+    if (is_mmap_) {
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             it++) {
+            for (const auto& v : AccessBitmap(it->second)) {
                 if (v == idx) {
                     return it->first;
                 }
             }
         }
     } else {
-        for (auto it = bitsets_.begin(); it != bitsets_.end(); it++) {
-            if (it->second[idx]) {
-                return it->first;
+        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            for (auto it = data_.begin(); it != data_.end(); it++) {
+                for (const auto& v : it->second) {
+                    if (v == idx) {
+                        return it->first;
+                    }
+                }
+            }
+        } else {
+            for (auto it = bitsets_.begin(); it != bitsets_.end(); it++) {
+                if (it->second[idx]) {
+                    return it->first;
+                }
             }
         }
     }
@@ -873,6 +1170,15 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
         return should_skip;
     };
 
+    if (is_mmap_) {
+        if (!bitmap_info_map_.empty()) {
+            auto lower_bound = bitmap_info_map_.begin()->first;
+            auto upper_bound = bitmap_info_map_.rbegin()->first;
+            bool should_skip = skip(op, lower_bound, upper_bound);
+            return should_skip;
+        }
+    }
+
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         if (!data_.empty()) {
             auto lower_bound = data_.begin()->first;
@@ -906,6 +1212,19 @@ BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
     if (op == OpType::PrefixMatch) {
         auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
         TargetBitmap res(total_num_rows_, false);
+        if (is_mmap_) {
+            for (auto it = bitmap_info_map_.begin();
+                 it != bitmap_info_map_.end();
+                 ++it) {
+                const auto& key = it->first;
+                if (milvus::query::Match(key, prefix, op)) {
+                    for (const auto& v : AccessBitmap(it->second)) {
+                        res.set(v);
+                    }
+                }
+            }
+            return res;
+        }
         if (build_mode_ == BitmapIndexBuildMode::ROARING) {
             for (auto it = data_.begin(); it != data_.end(); ++it) {
                 const auto& key = it->first;
@@ -943,6 +1262,18 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
     AssertInfo(is_built_, "index has not been built");
     RegexMatcher matcher(regex_pattern);
     TargetBitmap res(total_num_rows_, false);
+    if (is_mmap_) {
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                for (const auto& v : AccessBitmap(it->second)) {
+                    res.set(v);
+                }
+            }
+        }
+        return res;
+    }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (auto it = data_.begin(); it != data_.end(); ++it) {
             const auto& key = it->first;

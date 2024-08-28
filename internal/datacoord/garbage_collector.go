@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -53,6 +54,7 @@ type GcOption struct {
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
+	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
 }
 
@@ -489,7 +491,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 	collectionID2GcStatus := make(map[int64]bool)
 	skippedCnt := 0
 
-	log.Info("start to GC channel cp", zap.Int("vchannelCnt", len(channelCPs)))
+	log.Info("start to GC channel cp", zap.Int("vchannelCPCnt", len(channelCPs)))
 	for vChannel := range channelCPs {
 		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
 
@@ -500,8 +502,20 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 			continue
 		}
 
-		if _, ok := collectionID2GcStatus[collectionID]; !ok {
-			collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+		_, ok := collectionID2GcStatus[collectionID]
+		if !ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			has, err := gc.option.broker.HasCollection(ctx, collectionID)
+			if err == nil && !has {
+				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+			} else {
+				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
+				log.Debug("skip channel cp GC, the collection state is available",
+					zap.Int64("collectionID", collectionID),
+					zap.Bool("dropped", has), zap.Error(err))
+				collectionID2GcStatus[collectionID] = false
+			}
 		}
 
 		// Skip to GC if all segments meta of the corresponding collection are not removed

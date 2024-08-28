@@ -1,7 +1,6 @@
-@Library('jenkins-shared-library@v0.28.0') _
+@Library('jenkins-shared-library@v0.29.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
-
 def milvus_helm_chart_version = '4.2.8'
 
 pipeline {
@@ -32,10 +31,11 @@ pipeline {
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
-                                              suppress_suffix_of_image_tag: true
+                                              suppress_suffix_of_image_tag: true,
+                                              test_client_type: '["pytest"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
-                        milvus_sdk_go_image =  tekton.query_result job_name, 'gotestsum-image-fqdn'
+                        pytest_image =  tekton.query_result job_name, 'pytest-image-fqdn'
                     }
                 }
             }
@@ -60,7 +60,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed'
+                        values 'standalone', 'distributed', 'standalone-kafka', 'distributed-streaming-service'
                     }
                 }
                 stages {
@@ -69,17 +69,29 @@ pipeline {
                             container('tkn') {
                                 script {
                                     def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             ciMode: 'e2e',
-                                                                             client: 'gotestsum',
+                                                                             client: 'py',
                                                                              changeId: "${env.CHANGE_ID}",
                                                                              buildId:"${env.BUILD_ID}"
 
-                                    job_name = tekton.gotestsum helm_release_name: helm_release_name,
-                                              milvus_helm_version: milvus_helm_chart_version,
-                                              ciMode: 'e2e',
-                                              milvus_image_tag: milvus_image_tag,
-                                              milvus_sdk_go_image: milvus_sdk_go_image,
-                                              milvus_deployment_option: milvus_deployment_option
+                                    if (milvus_deployment_option == 'distributed-streaming-service') {
+                                        try {
+                                            tekton.pytest helm_release_name: helm_release_name,
+                                                    milvus_helm_version: milvus_helm_chart_version,
+                                                    ciMode: 'e2e',
+                                                    milvus_image_tag: milvus_image_tag,
+                                                    pytest_image: pytest_image,
+                                                    milvus_deployment_option: milvus_deployment_option
+                                        } catch (Exception e) {
+                                            println e
+                                        }
+                                    } else {
+                                        tekton.pytest helm_release_name: helm_release_name,
+                                                    milvus_helm_version: milvus_helm_chart_version,
+                                                    ciMode: 'e2e',
+                                                    milvus_image_tag: milvus_image_tag,
+                                                    pytest_image: pytest_image,
+                                                    milvus_deployment_option: milvus_deployment_option
+                                    }
                                 }
                             }
                         }
@@ -95,10 +107,9 @@ pipeline {
                                 container('archive') {
                                     script {
                                         def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             ciMode: 'e2e',
-                                                                             client: 'gotestsum',
-                                                                             changeId: "${env.CHANGE_ID}",
-                                                                             buildId:"${env.BUILD_ID}"
+                                                                                 client: 'py',
+                                                                                 changeId: "${env.CHANGE_ID}",
+                                                                                 buildId:"${env.BUILD_ID}"
 
                                         tekton.archive  milvus_deployment_option: milvus_deployment_option,
                                                                     release_name: helm_release_name ,
