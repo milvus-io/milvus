@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.29.0') _
+@Library('jenkins-shared-library@v0.32.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.1.27'
@@ -18,15 +18,26 @@ pipeline {
         }
     }
     stages {
-        stage('build') {
+        stage('meta') {
             steps {
-                container('tkn') {
+                container('jnlp') {
                     script {
                         isPr = env.CHANGE_ID != null
                         gitMode = isPr ? 'merge' : 'fetch'
                         gitBaseRef = isPr ? "$env.CHANGE_TARGET" : "$env.BRANCH_NAME"
 
-                        job_name = tekton.run arch: 'amd64',
+                        get_helm_release_name =  tekton.helm_release_name client: 'py',
+                                                             changeId: "${env.CHANGE_ID}",
+                                                             buildId:"${env.BUILD_ID}"
+                    }
+                }
+            }
+        }
+        stage('build') {
+            steps {
+                container('tkn') {
+                    script {
+                        def job_name = tekton.run arch: 'amd64',
                                               isPr: isPr,
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
@@ -68,10 +79,7 @@ pipeline {
                         steps {
                             container('tkn') {
                                 script {
-                                    def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             client: 'py',
-                                                                             changeId: "${env.CHANGE_ID}",
-                                                                             buildId:"${env.BUILD_ID}"
+                                    def helm_release_name =  get_helm_release_name milvus_deployment_option
 
                                     if (milvus_deployment_option == 'distributed-streaming-service') {
                                         try {
@@ -106,10 +114,7 @@ pipeline {
 
                                 container('archive') {
                                     script {
-                                        def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                                 client: 'py',
-                                                                                 changeId: "${env.CHANGE_ID}",
-                                                                                 buildId:"${env.BUILD_ID}"
+                                        def helm_release_name =  get_helm_release_name milvus_deployment_option
 
                                         tekton.archive  milvus_deployment_option: milvus_deployment_option,
                                                                     release_name: helm_release_name ,
