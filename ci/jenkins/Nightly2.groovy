@@ -1,6 +1,6 @@
-@Library('jenkins-shared-library@v0.29.0') _
+@Library('jenkins-shared-library@v0.32.0') _
 
-def pod = libraryResource 'io/milvus/pod/tekton-ci.yaml'
+def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
 String cron_timezone = 'TZ=Asia/Shanghai'
 String cron_string = BRANCH_NAME == 'master' ? '50 1 * * * ' : ''
@@ -25,19 +25,33 @@ pipeline {
     }
     agent {
         kubernetes {
+            cloud '4am'
             yaml pod
         }
     }
     stages {
-        stage('build') {
+        stage('meta') {
             steps {
-                container('tkn') {
+                container('jnlp') {
                     script {
                         isPr = env.CHANGE_ID != null
                         gitMode = isPr ? 'merge' : 'fetch'
                         gitBaseRef = isPr ? "$env.CHANGE_TARGET" : "$env.BRANCH_NAME"
 
-                        job_name = tekton.run arch: 'amd64',
+                        get_helm_release_name =  tekton.helm_release_name client: 'py',
+                                                             ciMode: 'nightly',
+                                                             changeId: "${isPr ? env.CHANGE_ID : env.BRANCH_NAME }",
+                                                             buildId:"${env.BUILD_ID}"
+                    }
+                }
+            }
+        }
+        stage('build') {
+            steps {
+                container('tkn') {
+                    script {
+
+                        def job_name = tekton.run arch: 'amd64',
                                               isPr: isPr,
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
@@ -64,6 +78,7 @@ pipeline {
             matrix {
                 agent {
                     kubernetes {
+                        cloud '4am'
                         yaml pod
                     }
                 }
@@ -78,11 +93,7 @@ pipeline {
                         steps {
                             container('tkn') {
                                 script {
-                                    def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                             ciMode: 'nightly',
-                                                                             client: 'py',
-                                                                             changeId: "${env.CHANGE_ID}",
-                                                                             buildId:"${env.BUILD_ID}"
+                                    def helm_release_name =  get_helm_release_name milvus_deployment_option
 
                                     tekton.pytest helm_release_name: helm_release_name,
                                               milvus_helm_version: milvus_helm_chart_version,
@@ -104,11 +115,7 @@ pipeline {
 
                                 container('archive') {
                                     script {
-                                        def helm_release_name =  tekton.release_name milvus_deployment_option: milvus_deployment_option,
-                                                                                 ciMode: 'nightly',
-                                                                                 client: 'py',
-                                                                                 changeId: "${env.CHANGE_ID}",
-                                                                                 buildId:"${env.BUILD_ID}"
+                                        def helm_release_name =  get_helm_release_name milvus_deployment_option
 
                                         tekton.archive  milvus_deployment_option: milvus_deployment_option,
                                                                     release_name: helm_release_name ,

@@ -23,6 +23,8 @@ extern "C" {
 
 void free_rust_array(RustArray array);
 
+void print_vector_of_strings(const char *const *ptr, uintptr_t len);
+
 void *tantivy_load_index(const char *path);
 
 void tantivy_free_index_reader(void *ptr);
@@ -75,46 +77,51 @@ RustArray tantivy_prefix_query_keyword(void *ptr, const char *prefix);
 
 RustArray tantivy_regex_query(void *ptr, const char *pattern);
 
-void *tantivy_create_index(const char *field_name, TantivyDataType data_type, const char *path);
+void *tantivy_create_index(const char *field_name,
+                           TantivyDataType data_type,
+                           const char *path,
+                           uintptr_t num_threads,
+                           uintptr_t overall_memory_budget_in_bytes);
 
 void tantivy_free_index_writer(void *ptr);
 
 void tantivy_finish_index(void *ptr);
 
-void tantivy_index_add_int8s(void *ptr, const int8_t *array, uintptr_t len);
+void tantivy_index_add_int8s(void *ptr, const int8_t *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_int16s(void *ptr, const int16_t *array, uintptr_t len);
+void tantivy_index_add_int16s(void *ptr, const int16_t *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_int32s(void *ptr, const int32_t *array, uintptr_t len);
+void tantivy_index_add_int32s(void *ptr, const int32_t *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_int64s(void *ptr, const int64_t *array, uintptr_t len);
+void tantivy_index_add_int64s(void *ptr, const int64_t *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_f32s(void *ptr, const float *array, uintptr_t len);
+void tantivy_index_add_f32s(void *ptr, const float *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_f64s(void *ptr, const double *array, uintptr_t len);
+void tantivy_index_add_f64s(void *ptr, const double *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_bools(void *ptr, const bool *array, uintptr_t len);
+void tantivy_index_add_bools(void *ptr, const bool *array, uintptr_t len, int64_t offset_begin);
 
-void tantivy_index_add_keyword(void *ptr, const char *s);
+void tantivy_index_add_string(void *ptr, const char *s, int64_t offset);
 
-void tantivy_index_add_multi_int8s(void *ptr, const int8_t *array, uintptr_t len);
+void tantivy_index_add_multi_int8s(void *ptr, const int8_t *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_int16s(void *ptr, const int16_t *array, uintptr_t len);
+void tantivy_index_add_multi_int16s(void *ptr, const int16_t *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_int32s(void *ptr, const int32_t *array, uintptr_t len);
+void tantivy_index_add_multi_int32s(void *ptr, const int32_t *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_int64s(void *ptr, const int64_t *array, uintptr_t len);
+void tantivy_index_add_multi_int64s(void *ptr, const int64_t *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_f32s(void *ptr, const float *array, uintptr_t len);
+void tantivy_index_add_multi_f32s(void *ptr, const float *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_f64s(void *ptr, const double *array, uintptr_t len);
+void tantivy_index_add_multi_f64s(void *ptr, const double *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_bools(void *ptr, const bool *array, uintptr_t len);
+void tantivy_index_add_multi_bools(void *ptr, const bool *array, uintptr_t len, int64_t offset);
 
-void tantivy_index_add_multi_keywords(void *ptr, const char *const *array, uintptr_t len);
+void tantivy_index_add_multi_keywords(void *ptr,
+                                      const char *const *array,
+                                      uintptr_t len,
+                                      int64_t offset);
 
 bool tantivy_index_exist(const char *path);
-
-void print_vector_of_strings(const char *const *ptr, uintptr_t len);
 
 } // extern "C"

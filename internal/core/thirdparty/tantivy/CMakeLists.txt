@@ -34,7 +34,7 @@ add_custom_target(tantivy_binding_target DEPENDS compile_tantivy ls_cargo_target
 
 set(INSTALL_COMMAND
         cp ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/ &&
-        cp ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/ &&
+        cp ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${TANTIVY_INCLUDE_DIR}/ &&
         cp ${LIB_FILE} ${TANTIVY_LIB_DIR}/)
 add_custom_command(OUTPUT install_tantivy
         COMMENT "Install tantivy target ${LIB_FILE} to ${TANTIVY_LIB_DIR}"
