@@ -151,6 +151,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
             return cached_overflow_res_;
         }
         auto res = std::make_shared<ColumnVector>(TargetBitmap(batch_size));
+        cached_overflow_res_ = res;
         return res;
     };
 
