@@ -139,51 +139,10 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		IsAdvanced: true,
 	}
 
-	for _, result := range results {
-		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
-		for ch, ts := range result.GetChannelsMvcc() {
-			channelsMvcc[ch] = ts
-		}
+	for index, result := range results {
 		if result.GetIsTopkReduce() {
 			isTopkReduce = true
 		}
-		if !result.GetIsAdvanced() {
-			continue
-		}
-		// we just append here, no need to split subResult and reduce
-		// defer this reduce to proxy
-		searchResults.SubResults = append(searchResults.SubResults, result.GetSubResults()...)
-		searchResults.NumQueries = result.GetNumQueries()
-	}
-	searchResults.ChannelsMvcc = channelsMvcc
-	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
-	})
-	searchResults.CostAggregation = mergeRequestCost(requestCosts)
-	if searchResults.CostAggregation == nil {
-		searchResults.CostAggregation = &internalpb.CostAggregation{}
-	}
-	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
-	searchResults.IsTopkReduce = isTopkReduce
-	return searchResults, nil
-}
-
-func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
-	searchResults := &internalpb.SearchResults{
-		IsAdvanced: true,
-	}
-
-	channelsMvcc := make(map[string]uint64)
-	relatedDataSize := int64(0)
-	for index, result := range results {
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
@@ -219,6 +178,7 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 		searchResults.CostAggregation = &internalpb.CostAggregation{}
 	}
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
+	searchResults.IsTopkReduce = isTopkReduce
 	return searchResults, nil
 }
 
