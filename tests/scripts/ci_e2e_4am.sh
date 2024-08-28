@@ -64,7 +64,7 @@ fi
 
 # skip pip install when DISABLE_PIP_INSTALL is set
 DISABLE_PIP_INSTALL=${DISABLE_PIP_INSTALL:-false}
-if [ "${DISABLE_PIP_INSTALL:-}" = "" ]; then
+if [ "${DISABLE_PIP_INSTALL:-}" = "false" ]; then
   echo "prepare e2e test"
   install_pytest_requirements
 fi
