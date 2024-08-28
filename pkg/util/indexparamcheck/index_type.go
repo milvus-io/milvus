@@ -52,6 +52,11 @@ const (
 	AutoIndex IndexType = "AUTOINDEX"
 )
 
+func IsScalarIndexType(indexType IndexType) bool {
+	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+}
+
 func IsGpuIndex(indexType IndexType) bool {
 	return indexType == IndexGpuBF ||
 		indexType == IndexRaftIvfFlat ||
