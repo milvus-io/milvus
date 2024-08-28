@@ -2912,6 +2912,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 				metrics.SearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			// result size still insufficient
 			if resultSizeInsufficient {
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3140,13 +3141,14 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.SearchLabel,
+				metrics.HybridSearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			// result size still insufficient
 			if resultSizeInsufficient {
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
-					metrics.SearchLabel,
+					metrics.HybridSearchLabel,
 					request.GetCollectionName(),
 				).Inc()
 			}
