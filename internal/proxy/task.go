@@ -395,6 +395,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if err := validateLoadFieldsList(t.schema); err != nil {
+		return err
+	}
+
 	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
