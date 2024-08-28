@@ -192,9 +192,14 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		metrics.RestfulReqLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
 		).Observe(float64(latency.Milliseconds()))
-		metrics.RestfulSendBytes.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
-		).Add(float64(c.Writer.Size()))
+
+		// see https://github.com/milvus-io/milvus/issues/35767, counter cannot add negative value
+		// when response is not written(say timeout/network broken), panicking may happen if not check
+		if size := c.Writer.Size(); size > 0 {
+			metrics.RestfulSendBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+			).Add(float64(c.Writer.Size()))
+		}
 	})
 
 	ginHandler.Use(accesslog.AccessLogMiddleware)
