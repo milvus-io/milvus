@@ -44,7 +44,7 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         size += null_bitmap_n;
         row_nums_ += array->length();
     }
-    size += sizeof(uint64_t) * row_nums_ + MMAP_STRING_PADDING;
+    size += sizeof(uint64_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -63,11 +63,19 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     }
 
     // write data
-    offsets_pos_ = target_->tell();
-    target_->skip(sizeof(uint64_t) * row_nums_);
+    int offset_num = row_nums_ + 1;
+    int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
+    std::vector<uint64_t> offsets;
 
     for (auto str : strs) {
-        offsets_.push_back(target_->tell());
+        offsets.push_back(offset_start_pos);
+        offset_start_pos += str.size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
+
+    for (auto str : strs) {
         target_->write(str.data(), str.size());
     }
 }
@@ -78,12 +86,8 @@ StringChunkWriter::finish() {
     // FIXME
     char padding[MMAP_STRING_PADDING];
     target_->write(padding, MMAP_STRING_PADDING);
-
-    // seek back to write offsets
-    target_->seek(offsets_pos_);
-    target_->write(offsets_.data(), offsets_.size() * sizeof(uint64_t));
     auto [data, size] = target_->get();
-    return std::make_shared<StringChunk>(row_nums_, data, size);
+    return std::make_shared<StringChunk>(row_nums_, data, size, nullable_);
 }
 
 void
@@ -101,14 +105,14 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             size += json.data().size();
             jsons.push_back(std::move(json));
         }
-        AssertInfo(data->length() % 8 == 0,
-                   "String length should be multiple of 8");
+        // AssertInfo(data->length() % 8 == 0,
+        //            "String length should be multiple of 8");
         auto null_bitmap_n = (data->length() + 7) / 8;
         null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
         size += null_bitmap_n;
         row_nums_ += array->length();
     }
-    size += sizeof(uint64_t) * row_nums_ + simdjson::SIMDJSON_PADDING;
+    size += sizeof(uint64_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -126,12 +130,20 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
     }
 
-    offsets_pos_ = target_->tell();
-    target_->skip(sizeof(uint64_t) * row_nums_);
+    int offset_num = row_nums_ + 1;
+    int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
+    std::vector<uint64_t> offsets;
+
+    for (auto json : jsons) {
+        offsets.push_back(offset_start_pos);
+        offset_start_pos += json.data().size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
 
     // write data
     for (auto json : jsons) {
-        offsets_.push_back(target_->tell());
         target_->write(json.data().data(), json.data().size());
     }
 }
@@ -141,17 +153,15 @@ JSONChunkWriter::finish() {
     char padding[simdjson::SIMDJSON_PADDING];
     target_->write(padding, simdjson::SIMDJSON_PADDING);
 
-    // write offsets and padding
-    target_->seek(offsets_pos_);
-    target_->write(offsets_.data(), offsets_.size() * sizeof(uint64_t));
     auto [data, size] = target_->get();
-    return std::make_shared<JSONChunk>(row_nums_, data, size);
+    return std::make_shared<JSONChunk>(row_nums_, data, size, nullable_);
 }
 
 void
 ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
 
+    auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
@@ -164,8 +174,10 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             auto arr = Array(scalar_array);
             size += arr.byte_size();
             arrays.push_back(std::move(arr));
-            // element offsets size
-            size += sizeof(uint64_t) * arr.length();
+            if (is_string) {
+                // element offsets size
+                size += sizeof(uint64_t) * arr.length();
+            }
         }
         row_nums_ += array->length();
         auto null_bitmap_n = (data->length() + 7) / 8;
@@ -173,10 +185,8 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         size += null_bitmap_n;
     }
 
-    auto is_string = IsStringDataType(element_type_);
     // offsets + lens
-    size += is_string ? sizeof(uint64_t) * row_nums_ * 2 + MMAP_ARRAY_PADDING
-                      : sizeof(uint64_t) * row_nums_ + MMAP_ARRAY_PADDING;
+    size += sizeof(uint64_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -193,16 +203,35 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
     }
 
-    offsets_pos_ = target_->tell();
-    target_->skip(sizeof(uint64_t) * row_nums_ * 2);
+    int offsets_num = row_nums_ + 1;
+    int len_num = row_nums_;
+    int offset_start_pos =
+        target_->tell() + sizeof(uint64_t) * (offsets_num + len_num);
+    std::vector<uint64_t> offsets;
+    std::vector<uint64_t> lens;
     for (auto& arr : arrays) {
-        // write elements offsets
-        offsets_.push_back(target_->tell());
+        offsets.push_back(offset_start_pos);
+        lens.push_back(arr.length());
+        offset_start_pos +=
+            is_string ? sizeof(uint64_t) * arr.get_offsets().size() : 0;
+        offset_start_pos += arr.byte_size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    for (int i = 0; i < offsets.size(); i++) {
+        if (i == offsets.size() - 1) {
+            target_->write(&offsets[i], sizeof(uint64_t));
+            break;
+        }
+        target_->write(&offsets[i], sizeof(uint64_t));
+        target_->write(&lens[i], sizeof(uint64_t));
+    }
+
+    for (auto& arr : arrays) {
         if (is_string) {
             target_->write(arr.get_offsets().data(),
                            arr.get_offsets().size() * sizeof(uint64_t));
         }
-        lens_.push_back(arr.length());
         target_->write(arr.data(), arr.byte_size());
     }
 }
@@ -212,14 +241,9 @@ ArrayChunkWriter::finish() {
     char padding[MMAP_ARRAY_PADDING];
     target_->write(padding, MMAP_ARRAY_PADDING);
 
-    // write offsets and lens
-    target_->seek(offsets_pos_);
-    for (size_t i = 0; i < offsets_.size(); i++) {
-        target_->write(&offsets_[i], sizeof(uint64_t));
-        target_->write(&lens_[i], sizeof(uint64_t));
-    }
     auto [data, size] = target_->get();
-    return std::make_shared<ArrayChunk>(row_nums_, data, size, element_type_);
+    return std::make_shared<ArrayChunk>(
+        row_nums_, data, size, element_type_, nullable_);
 }
 
 void
@@ -241,7 +265,7 @@ SparseFloatVectorChunkWriter::write(
         size += null_bitmap_n;
         row_nums_ += array->length();
     }
-    size += sizeof(uint64_t) * row_nums_;
+    size += sizeof(uint64_t) * (row_nums_ + 1);
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -260,22 +284,29 @@ SparseFloatVectorChunkWriter::write(
     }
 
     // write data
-    offsets_pos_ = target_->tell();
-    target_->skip(sizeof(uint64_t) * row_nums_);
+
+    int offset_num = row_nums_ + 1;
+    int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
+    std::vector<uint64_t> offsets;
 
     for (auto str : strs) {
-        offsets_.push_back(target_->tell());
+        offsets.push_back(offset_start_pos);
+        offset_start_pos += str.size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
+
+    for (auto str : strs) {
         target_->write(str.data(), str.size());
     }
 }
 
 std::shared_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
-    // seek back to write offsets
-    target_->seek(offsets_pos_);
-    target_->write(offsets_.data(), offsets_.size() * sizeof(uint64_t));
     auto [data, size] = target_->get();
-    return std::make_shared<SparseFloatVectorChunk>(row_nums_, data, size);
+    return std::make_shared<SparseFloatVectorChunk>(
+        row_nums_, data, size, nullable_);
 }
 
 std::shared_ptr<Chunk>
@@ -283,72 +314,180 @@ create_chunk(const FieldMeta& field_meta,
              int dim,
              std::shared_ptr<arrow::RecordBatchReader> r) {
     std::shared_ptr<ChunkWriterBase> w;
+    bool nullable = field_meta.is_nullable();
 
     switch (field_meta.get_data_type()) {
         case milvus::DataType::BOOL: {
-            w = std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::INT8: {
-            w = std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::INT16: {
-            w = std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::INT32: {
-            w = std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::INT64: {
-            w = std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::FLOAT: {
-            w = std::make_shared<ChunkWriter<arrow::FloatArray, float>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::FloatArray, float>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::DOUBLE: {
-            w = std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(dim);
+            w = std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::VECTOR_FLOAT: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, float>>(dim);
+                ChunkWriter<arrow::FixedSizeBinaryArray, float>>(dim, nullable);
             break;
         }
         case milvus::DataType::VECTOR_BINARY: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(dim / 8);
+                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(dim / 8,
+                                                                   nullable);
             break;
         }
         case milvus::DataType::VECTOR_FLOAT16: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(dim);
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::VECTOR_BFLOAT16: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(dim);
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING: {
-            w = std::make_shared<StringChunkWriter>();
+            w = std::make_shared<StringChunkWriter>(nullable);
             break;
         }
         case milvus::DataType::JSON: {
-            w = std::make_shared<JSONChunkWriter>();
+            w = std::make_shared<JSONChunkWriter>(nullable);
             break;
         }
         case milvus::DataType::ARRAY: {
             w = std::make_shared<ArrayChunkWriter>(
-                field_meta.get_element_type());
+                field_meta.get_element_type(), nullable);
             break;
         }
         case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-            w = std::make_shared<SparseFloatVectorChunkWriter>();
+            w = std::make_shared<SparseFloatVectorChunkWriter>(nullable);
+            break;
+        }
+        default:
+            PanicInfo(Unsupported, "Unsupported data type");
+    }
+
+    w->write(r);
+    return w->finish();
+}
+
+std::shared_ptr<Chunk>
+create_chunk(const FieldMeta& field_meta,
+             int dim,
+             File& file,
+             size_t file_offset,
+             std::shared_ptr<arrow::RecordBatchReader> r) {
+    std::shared_ptr<ChunkWriterBase> w;
+    bool nullable = field_meta.is_nullable();
+
+    switch (field_meta.get_data_type()) {
+        case milvus::DataType::BOOL: {
+            w = std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::INT8: {
+            w = std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::INT16: {
+            w = std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::INT32: {
+            w = std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::INT64: {
+            w = std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::FLOAT: {
+            w = std::make_shared<ChunkWriter<arrow::FloatArray, float>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::DOUBLE: {
+            w = std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_FLOAT: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, float>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_BINARY: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(
+                dim / 8, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_FLOAT16: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_BFLOAT16: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::STRING: {
+            w = std::make_shared<StringChunkWriter>(
+                file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::JSON: {
+            w = std::make_shared<JSONChunkWriter>(file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::ARRAY: {
+            w = std::make_shared<ArrayChunkWriter>(
+                field_meta.get_element_type(), file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_SPARSE_FLOAT: {
+            w = std::make_shared<SparseFloatVectorChunkWriter>(
+                file, file_offset, nullable);
             break;
         }
         default:

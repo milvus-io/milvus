@@ -24,6 +24,7 @@
 #include <memory>
 #include <queue>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/Array.h"
@@ -121,13 +122,27 @@ class ColumnBase {
      *
      */
  public:
-    enum class MappingType {
+    virtual size_t
+    DataByteSize() const = 0;
+
+    virtual const char*
+    MmappedData() const = 0;
+
+    virtual void
+    AppendBatch(const FieldDataPtr data) = 0;
+
+    virtual const char*
+    Data(int chunk_id = 0) const = 0;
+};
+class SingleChunkColumnBase : public ColumnBase {
+ public:
+    enum MappingType {
         MAP_WITH_ANONYMOUS = 0,
         MAP_WITH_FILE = 1,
         MAP_WITH_MANAGER = 2,
     };
     // MAP_WITH_ANONYMOUS ctor
-    ColumnBase(size_t reserve_rows, const FieldMeta& field_meta)
+    SingleChunkColumnBase(size_t reserve_rows, const FieldMeta& field_meta)
         : mapping_type_(MappingType::MAP_WITH_ANONYMOUS) {
         auto data_type = field_meta.get_data_type();
         SetPaddingSize(data_type);
@@ -161,11 +176,11 @@ class ColumnBase {
 
     // MAP_WITH_MANAGER ctor
     // reserve is number of bytes to allocate(without padding)
-    ColumnBase(size_t reserve,
-               const DataType& data_type,
-               storage::MmapChunkManagerPtr mcm,
-               storage::MmapChunkDescriptorPtr descriptor,
-               bool nullable)
+    SingleChunkColumnBase(size_t reserve,
+                          const DataType& data_type,
+                          storage::MmapChunkManagerPtr mcm,
+                          storage::MmapChunkDescriptorPtr descriptor,
+                          bool nullable)
         : mcm_(mcm),
           mmap_descriptor_(descriptor),
           num_rows_(0),
@@ -193,7 +208,9 @@ class ColumnBase {
     // !!! The incoming file must have padding written at the end of the file.
     // Subclasses of variable length data type, if they used this constructor,
     // must set num_rows_ by themselves.
-    ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
+    SingleChunkColumnBase(const File& file,
+                          size_t size,
+                          const FieldMeta& field_meta)
         : nullable_(field_meta.is_nullable()),
           mapping_type_(MappingType::MAP_WITH_FILE) {
         auto data_type = field_meta.get_data_type();
@@ -229,7 +246,7 @@ class ColumnBase {
         UpdateMetricWhenMmap(size);
     }
 
-    virtual ~ColumnBase() {
+    virtual ~SingleChunkColumnBase() {
         if (data_ != nullptr) {
             size_t mapped_size = data_cap_size_ + padding_;
             if (mapping_type_ != MappingType::MAP_WITH_MANAGER) {
@@ -246,17 +263,17 @@ class ColumnBase {
         }
     }
 
-    ColumnBase(ColumnBase&&) = delete;
+    SingleChunkColumnBase(ColumnBase&&) = delete;
 
     // Data() points at an addr that contains the elements
     virtual const char*
-    Data() const {
+    Data(int chunk_id = 0) const override {
         return data_;
     }
 
     // MmappedData() returns the mmaped address
     const char*
-    MmappedData() const {
+    MmappedData() const override {
         return data_;
     }
 
@@ -481,28 +498,30 @@ class ColumnBase {
     storage::MmapChunkManagerPtr mcm_ = nullptr;
 };
 
-class Column : public ColumnBase {
+class SingleChunkColumn : public SingleChunkColumnBase {
  public:
     // MAP_WITH_ANONYMOUS ctor
-    Column(size_t cap, const FieldMeta& field_meta)
-        : ColumnBase(cap, field_meta) {
+    SingleChunkColumn(size_t cap, const FieldMeta& field_meta)
+        : SingleChunkColumnBase(cap, field_meta) {
     }
 
     // MAP_WITH_FILE ctor
-    Column(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta) {
+    SingleChunkColumn(const File& file,
+                      size_t size,
+                      const FieldMeta& field_meta)
+        : SingleChunkColumnBase(file, size, field_meta) {
     }
 
     // MAP_WITH_MANAGER ctor
-    Column(size_t reserve,
-           const DataType& data_type,
-           storage::MmapChunkManagerPtr mcm,
-           storage::MmapChunkDescriptorPtr descriptor,
-           bool nullable)
-        : ColumnBase(reserve, data_type, mcm, descriptor, nullable) {
+    SingleChunkColumn(size_t reserve,
+                      const DataType& data_type,
+                      storage::MmapChunkManagerPtr mcm,
+                      storage::MmapChunkDescriptorPtr descriptor,
+                      bool nullable)
+        : SingleChunkColumnBase(reserve, data_type, mcm, descriptor, nullable) {
     }
 
-    ~Column() override = default;
+    ~SingleChunkColumn() override = default;
 
     SpanBase
     Span() const override {
@@ -511,19 +530,18 @@ class Column : public ColumnBase {
     }
 };
 
-class SparseFloatColumn : public ColumnBase {
+class SingleChunkSparseFloatColumn : public SingleChunkColumnBase {
  public:
     // MAP_WITH_ANONYMOUS ctor
-    SparseFloatColumn(const FieldMeta& field_meta)
-        : ColumnBase(/*reserve_rows= */ 0, field_meta) {
+    SingleChunkSparseFloatColumn(const FieldMeta& field_meta)
+        : SingleChunkColumnBase(0, field_meta) {
     }
-
     // MAP_WITH_FILE ctor
-    SparseFloatColumn(const File& file,
-                      size_t size,
-                      const FieldMeta& field_meta,
-                      std::vector<uint64_t>&& indices = {})
-        : ColumnBase(file, size, field_meta) {
+    SingleChunkSparseFloatColumn(const File& file,
+                                 size_t size,
+                                 const FieldMeta& field_meta,
+                                 std::vector<uint64_t>&& indices = {})
+        : SingleChunkColumnBase(file, size, field_meta) {
         AssertInfo(!indices.empty(),
                    "SparseFloatColumn indices should not be empty.");
         num_rows_ = indices.size();
@@ -545,22 +563,18 @@ class SparseFloatColumn : public ColumnBase {
             dim_ = std::max(dim_, vec_.back().dim());
         }
     }
-
     // MAP_WITH_MANAGER ctor
-    SparseFloatColumn(storage::MmapChunkManagerPtr mcm,
-                      storage::MmapChunkDescriptorPtr descriptor)
-        : ColumnBase(/*reserve= */ 0,
-                     DataType::VECTOR_SPARSE_FLOAT,
-                     mcm,
-                     descriptor,
-                     false) {
+    SingleChunkSparseFloatColumn(storage::MmapChunkManagerPtr mcm,
+                                 storage::MmapChunkDescriptorPtr descriptor)
+        : SingleChunkColumnBase(
+              0, DataType::VECTOR_SPARSE_FLOAT, mcm, descriptor, false) {
     }
 
-    ~SparseFloatColumn() override = default;
+    ~SingleChunkSparseFloatColumn() override = default;
 
     // returned pointer points at a list of knowhere::sparse::SparseRow<float>
     const char*
-    Data() const override {
+    Data(int chunk_id = 0) const override {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
     }
 
@@ -635,27 +649,29 @@ class SparseFloatColumn : public ColumnBase {
 };
 
 template <typename T>
-class VariableColumn : public ColumnBase {
+class SingleChunkVariableColumn : public SingleChunkColumnBase {
  public:
     using ViewType =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
     // MAP_WITH_ANONYMOUS ctor
-    VariableColumn(size_t reserve_rows,
-                   const FieldMeta& field_meta,
-                   size_t block_size)
-        : ColumnBase(reserve_rows, field_meta), block_size_(block_size) {
+    SingleChunkVariableColumn(size_t reserve_rows,
+                              const FieldMeta& field_meta,
+                              size_t block_size)
+        : SingleChunkColumnBase(reserve_rows, field_meta),
+          block_size_(block_size) {
     }
 
     // MAP_WITH_FILE ctor
-    VariableColumn(const File& file,
-                   size_t size,
-                   const FieldMeta& field_meta,
-                   size_t block_size)
-        : ColumnBase(file, size, field_meta), block_size_(block_size) {
+    SingleChunkVariableColumn(const File& file,
+                              size_t size,
+                              const FieldMeta& field_meta,
+                              size_t block_size)
+        : SingleChunkColumnBase(file, size, field_meta),
+          block_size_(block_size) {
     }
 
-    ~VariableColumn() override = default;
+    ~SingleChunkVariableColumn() override = default;
 
     SpanBase
     Span() const override {
@@ -705,7 +721,9 @@ class VariableColumn : public ColumnBase {
             pos += sizeof(uint32_t) + size;
         }
 
-        return BufferView{pos, data_size_ - (pos - data_)};
+        BufferView res;
+        res.data_ = std::pair<char*, size_t>{pos, 0};
+        return res;
     }
 
     ViewType
@@ -809,21 +827,23 @@ class VariableColumn : public ColumnBase {
     std::vector<uint64_t> indices_{};
 };
 
-class ArrayColumn : public ColumnBase {
+class SingleChunkArrayColumn : public SingleChunkColumnBase {
  public:
     // MAP_WITH_ANONYMOUS ctor
-    ArrayColumn(size_t reserve_rows, const FieldMeta& field_meta)
-        : ColumnBase(reserve_rows, field_meta),
+    SingleChunkArrayColumn(size_t reserve_rows, const FieldMeta& field_meta)
+        : SingleChunkColumnBase(reserve_rows, field_meta),
           element_type_(field_meta.get_element_type()) {
     }
 
     // MAP_WITH_FILE ctor
-    ArrayColumn(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta),
+    SingleChunkArrayColumn(const File& file,
+                           size_t size,
+                           const FieldMeta& field_meta)
+        : SingleChunkColumnBase(file, size, field_meta),
           element_type_(field_meta.get_element_type()) {
     }
 
-    ~ArrayColumn() override = default;
+    ~SingleChunkArrayColumn() override = default;
 
     SpanBase
     Span() const override {
@@ -853,12 +873,13 @@ class ArrayColumn : public ColumnBase {
         indices_.emplace_back(data_size_);
         element_indices_.emplace_back(array.get_offsets());
         if (nullable_) {
-            return ColumnBase::Append(static_cast<const char*>(array.data()),
-                                      valid_data,
-                                      array.byte_size());
+            return SingleChunkColumnBase::Append(
+                static_cast<const char*>(array.data()),
+                valid_data,
+                array.byte_size());
         }
-        ColumnBase::Append(static_cast<const char*>(array.data()),
-                           array.byte_size());
+        SingleChunkColumnBase::Append(static_cast<const char*>(array.data()),
+                                      array.byte_size());
     }
 
     void

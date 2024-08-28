@@ -395,21 +395,6 @@ class FieldDataImpl : public FieldDataBase {
         return &data_[offset];
     }
 
-    // std::optional<const void*>
-    // Value(ssize_t offset) {
-    //     if (!is_type_entire_row) {
-    //         return RawValue(offset);
-    //     }
-    //     AssertInfo(offset < get_num_rows(),
-    //                "field data subscript out of range");
-    //     AssertInfo(offset < length(),
-    //                "subscript position don't has valid value");
-    //     if (nullable_ && !valid_data_[offset]) {
-    //         return std::nullopt;
-    //     }
-    //     return &field_data_[offset];
-    // }
-
     int64_t
     Size() const override {
         return DataSize() + ValidDataSize();

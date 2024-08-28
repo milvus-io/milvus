@@ -122,12 +122,43 @@ class SegmentExpr : public Expr {
         }
         // if index not include raw data, also need load data
         if (segment_->HasFieldData(field_id_)) {
-            num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
+            if (segment_->is_chunked()) {
+                num_data_chunk_ = segment_->num_chunk_data(field_id_);
+            } else {
+                num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
+            }
         }
     }
 
     void
-    MoveCursorForData() {
+    MoveCursorForDataMultipleChunk() {
+        int64_t processed_size = 0;
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+            int64_t size = 0;
+            if (segment_->type() == SegmentType::Growing) {
+                size = (i == (num_data_chunk_ - 1) &&
+                        active_count_ % size_per_chunk_ != 0)
+                           ? active_count_ % size_per_chunk_ - data_pos
+                           : size_per_chunk_ - data_pos;
+            } else {
+                size = segment_->chunk_size(field_id_, i) - data_pos;
+            }
+
+            size = std::min(size, batch_size_ - processed_size);
+
+            processed_size += size;
+            if (processed_size >= batch_size_) {
+                current_data_chunk_ = i;
+                current_data_chunk_pos_ = data_pos + size;
+                break;
+            }
+            // }
+        }
+    }
+    void
+    MoveCursorForDataSingleChunk() {
         if (segment_->type() == SegmentType::Sealed) {
             auto size =
                 std::min(active_count_ - current_data_chunk_pos_, batch_size_);
@@ -151,6 +182,15 @@ class SegmentExpr : public Expr {
                     break;
                 }
             }
+        }
+    }
+
+    void
+    MoveCursorForData() {
+        if (segment_->is_chunked()) {
+            MoveCursorForDataMultipleChunk();
+        } else {
+            MoveCursorForDataSingleChunk();
         }
     }
 
@@ -183,7 +223,17 @@ class SegmentExpr : public Expr {
         auto current_chunk_pos = is_index_mode_ && use_index_
                                      ? current_index_chunk_pos_
                                      : current_data_chunk_pos_;
-        auto current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
+        auto current_rows = 0;
+        if (segment_->is_chunked()) {
+            current_rows =
+                is_index_mode_ && use_index_ &&
+                        segment_->type() == SegmentType::Sealed
+                    ? current_chunk_pos
+                    : segment_->num_rows_until_chunk(field_id_, current_chunk) +
+                          current_chunk_pos;
+        } else {
+            current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
+        }
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
                    : batch_size_;
@@ -220,7 +270,7 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataChunks(
+    ProcessDataChunksForSingleChunk(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
@@ -265,6 +315,90 @@ class SegmentExpr : public Expr {
         }
 
         return processed_size;
+    }
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataChunksForMultipleChunk(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        ValTypes... values) {
+        int64_t processed_size = 0;
+
+        // if constexpr (std::is_same_v<T, std::string_view> ||
+        //               std::is_same_v<T, Json>) {
+        //     if (segment_->type() == SegmentType::Sealed) {
+        //         return ProcessChunkForSealedSeg<T>(
+        //             func, skip_func, res, values...);
+        //     }
+        // }
+
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+
+            int64_t size = 0;
+            if (segment_->type() == SegmentType::Growing) {
+                size = (i == (num_data_chunk_ - 1))
+                           ? (active_count_ % size_per_chunk_ == 0
+                                  ? size_per_chunk_ - data_pos
+                                  : active_count_ % size_per_chunk_ - data_pos)
+                           : size_per_chunk_ - data_pos;
+            } else {
+                size = segment_->chunk_size(field_id_, i) - data_pos;
+            }
+
+            size = std::min(size, batch_size_ - processed_size);
+
+            auto& skip_index = segment_->GetSkipIndex();
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
+                bool is_seal = false;
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json>) {
+                    if (segment_->type() == SegmentType::Sealed) {
+                        auto data_vec = segment_
+                                            ->get_batch_views<T>(
+                                                field_id_, i, data_pos, size)
+                                            .first;
+                        func(data_vec.data(),
+                             size,
+                             res + processed_size,
+                             values...);
+                        is_seal = true;
+                    }
+                }
+                if (!is_seal) {
+                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    const T* data = chunk.data() + data_pos;
+                    func(data, size, res + processed_size, values...);
+                }
+            }
+
+            processed_size += size;
+            if (processed_size >= batch_size_) {
+                current_data_chunk_ = i;
+                current_data_chunk_pos_ = data_pos + size;
+                break;
+            }
+        }
+
+        return processed_size;
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataChunks(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        ValTypes... values) {
+        if (segment_->is_chunked()) {
+            return ProcessDataChunksForMultipleChunk<T>(
+                func, skip_func, res, values...);
+        } else {
+            return ProcessDataChunksForSingleChunk<T>(
+                func, skip_func, res, values...);
+        }
     }
 
     int

@@ -508,7 +508,7 @@ TEST(Sealed, LoadFieldData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -671,7 +671,7 @@ TEST(Sealed, ClearData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -775,7 +775,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);

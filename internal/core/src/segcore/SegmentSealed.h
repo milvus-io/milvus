@@ -19,7 +19,6 @@
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
-#include "mmap/Column.h"
 
 namespace milvus::segcore {
 
@@ -42,6 +41,12 @@ class SegmentSealed : public SegmentInternalInterface {
     AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
     virtual void
     WarmupChunkCache(const FieldId field_id, bool mmap_enabled) = 0;
+    virtual void
+    RemoveFieldFile(const FieldId field_id) = 0;
+    virtual void
+    ClearData() = 0;
+    virtual std::unique_ptr<DataArray>
+    get_vector(FieldId field_id, const int64_t* ids, int64_t count) const = 0;
 
     virtual void
     LoadTextIndex(FieldId field_id,

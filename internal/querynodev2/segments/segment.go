@@ -281,11 +281,16 @@ func NewSegment(ctx context.Context,
 		return nil, err
 	}
 
+	multipleChunkEnable := paramtable.Get().QueryNodeCfg.MultipleChunkedEnable.GetAsBool()
 	var cSegType C.SegmentType
 	var locker *state.LoadStateLock
 	switch segmentType {
 	case SegmentTypeSealed:
-		cSegType = C.Sealed
+		if multipleChunkEnable {
+			cSegType = C.ChunkedSealed
+		} else {
+			cSegType = C.Sealed
+		}
 		locker = state.NewLoadStateLock(state.LoadStateOnlyMeta)
 	case SegmentTypeGrowing:
 		locker = state.NewLoadStateLock(state.LoadStateDataLoaded)

@@ -25,10 +25,11 @@ namespace milvus {
 
 class ChunkWriterBase {
  public:
-    ChunkWriterBase() = default;
+    explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
+    }
 
-    ChunkWriterBase(File& file, size_t offset)
-        : file_(&file), file_offset_(offset) {
+    ChunkWriterBase(File& file, size_t offset, bool nullable)
+        : file_(&file), file_offset_(offset), nullable_(nullable) {
     }
 
     virtual void
@@ -46,17 +47,18 @@ class ChunkWriterBase {
     int row_nums_ = 0;
     File* file_ = nullptr;
     size_t file_offset_ = 0;
+    bool nullable_ = false;
     std::shared_ptr<ChunkTarget> target_;
 };
 
 template <typename ArrowType, typename T>
 class ChunkWriter : public ChunkWriterBase {
  public:
-    ChunkWriter(int dim) : dim_(dim) {
+    ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
     }
 
-    ChunkWriter(int dim, File& file, size_t offset)
-        : ChunkWriterBase(file, offset), dim_(dim){};
+    ChunkWriter(int dim, File& file, size_t offset, bool nullable)
+        : ChunkWriterBase(file, offset, nullable), dim_(dim){};
 
     void
     write(std::shared_ptr<arrow::RecordBatchReader> data) override {
@@ -104,8 +106,8 @@ class ChunkWriter : public ChunkWriterBase {
     std::shared_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_shared<FixedWidthChunk<T>>(
-            row_nums_, dim_, data, size);
+        return std::make_shared<FixedWidthChunk>(
+            row_nums_, dim_, data, size, sizeof(T), nullable_);
     }
 
  private:
@@ -165,10 +167,6 @@ class StringChunkWriter : public ChunkWriterBase {
 
     std::shared_ptr<Chunk>
     finish() override;
-
- protected:
-    std::vector<int64_t> offsets_;
-    size_t offsets_pos_ = 0;
 };
 
 class JSONChunkWriter : public ChunkWriterBase {
@@ -180,21 +178,18 @@ class JSONChunkWriter : public ChunkWriterBase {
 
     std::shared_ptr<Chunk>
     finish() override;
-
- private:
-    std::vector<int64_t> offsets_;
-    size_t offsets_pos_ = 0;
 };
 
 class ArrayChunkWriter : public ChunkWriterBase {
  public:
-    ArrayChunkWriter(const milvus::DataType element_type)
-        : element_type_(element_type) {
+    ArrayChunkWriter(const milvus::DataType element_type, bool nullable)
+        : ChunkWriterBase(nullable), element_type_(element_type) {
     }
     ArrayChunkWriter(const milvus::DataType element_type,
                      File& file,
-                     size_t offset)
-        : ChunkWriterBase(file, offset), element_type_(element_type) {
+                     size_t offset,
+                     bool nullable)
+        : ChunkWriterBase(file, offset, nullable), element_type_(element_type) {
     }
 
     void
@@ -205,9 +200,6 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
  private:
     const milvus::DataType element_type_;
-    std::vector<uint64_t> offsets_;
-    std::vector<uint64_t> lens_;
-    size_t offsets_pos_;
 };
 
 class SparseFloatVectorChunkWriter : public ChunkWriterBase {
@@ -219,10 +211,6 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
 
     std::shared_ptr<Chunk>
     finish() override;
-
- private:
-    uint64_t offsets_pos_ = 0;
-    std::vector<uint64_t> offsets_;
 };
 
 std::shared_ptr<Chunk>

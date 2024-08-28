@@ -399,7 +399,7 @@ SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
 }
 
 int64_t
-SegmentGrowingImpl::num_chunk() const {
+SegmentGrowingImpl::num_chunk(FieldId field_id) const {
     auto size = get_insert_record().ack_responder_.GetAck();
     return upper_div(size, segcore_config_.get_chunk_rows());
 }

@@ -135,6 +135,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return segcore_config_.get_chunk_rows();
     }
 
+    virtual int64_t
+    chunk_size(FieldId field_id, int64_t chunk_id) const final {
+        return segcore_config_.get_chunk_rows();
+    }
+
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+        auto size_per_chunk = segcore_config_.get_chunk_rows();
+        return {offset / size_per_chunk, offset % size_per_chunk};
+    }
+
+    int64_t
+    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+        return chunk_id * segcore_config_.get_chunk_rows();
+    }
+
     void
     try_remove_chunks(FieldId fieldId);
 
@@ -320,7 +336,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  protected:
     int64_t
-    num_chunk() const override;
+    num_chunk(FieldId field_id) const override;
 
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
