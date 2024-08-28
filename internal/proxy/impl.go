@@ -2899,18 +2899,26 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 
 	optimizedSearch := true
-	resultSizeNotMeetLimit := false
+	resultSizeInsufficient := false
+	isTopkReduce := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeNotMeetLimit, err = node.search(ctx, request, optimizedSearch)
-		if merr.Ok(rsp.GetStatus()) && resultSizeNotMeetLimit && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
+		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeNotMeetLimit, err = node.search(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			if resultSizeInsufficient {
+				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					metrics.SearchLabel,
+					request.GetCollectionName(),
+				).Inc()
+			}
 		}
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
@@ -2923,11 +2931,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	return rsp, err
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, error) {
-	metrics.GetStats(ctx).
-		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(metrics.SearchLabel).
-		SetCollectionName(request.GetCollectionName())
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.SearchLabel,
+		request.GetCollectionName(),
+	).Add(float64(receiveSize))
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2938,7 +2948,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 
 	method := "Search"
@@ -2959,7 +2969,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		if err != nil {
 			return &milvuspb.SearchResults{
 				Status: merr.Status(err),
-			}, false, nil
+			}, false, false, nil
 		}
 
 		request.PlaceholderGroup = placeholderGroupBytes
@@ -3028,7 +3038,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
 
@@ -3054,7 +3064,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 
 	span := tr.CtxRecord(ctx, "wait search result")
@@ -3111,7 +3121,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeNotMeetLimit, nil
+	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -3120,18 +3130,26 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		Status: merr.Success(),
 	}
 	optimizedSearch := true
-	resultSizeNotMeetLimit := false
+	resultSizeInsufficient := false
+	isTopkReduce := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeNotMeetLimit, err = node.hybridSearch(ctx, request, optimizedSearch)
-		if merr.Ok(rsp.GetStatus()) && resultSizeNotMeetLimit && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
+		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeNotMeetLimit, err = node.hybridSearch(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.HybridSearchLabel,
+				metrics.SearchLabel,
 				request.GetCollectionName(),
 			).Inc()
+			if resultSizeInsufficient {
+				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					metrics.SearchLabel,
+					request.GetCollectionName(),
+				).Inc()
+			}
 		}
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
@@ -3144,16 +3162,18 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	return rsp, err
 }
 
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, error) {
-	metrics.GetStats(ctx).
-		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(metrics.HybridSearchLabel).
-		SetCollectionName(request.GetCollectionName())
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.HybridSearchLabel,
+		request.GetCollectionName(),
+	).Add(float64(receiveSize))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 
 	method := "HybridSearch"
@@ -3227,7 +3247,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 	tr.CtxRecord(ctx, "hybrid search request enqueue")
 
@@ -3252,7 +3272,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, nil
+		}, false, false, nil
 	}
 
 	span := tr.CtxRecord(ctx, "wait hybrid search result")
@@ -3309,7 +3329,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeNotMeetLimit, nil
+	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
 func (node *Proxy) getVectorPlaceholderGroupForSearchByPks(ctx context.Context, request *milvuspb.SearchRequest) ([]byte, error) {
