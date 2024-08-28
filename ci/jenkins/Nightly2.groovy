@@ -1,6 +1,6 @@
 @Library('jenkins-shared-library@v0.32.0') _
 
-def pod = libraryResource 'io/milvus/pod/tekton-ci.yaml'
+def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
 String cron_timezone = 'TZ=Asia/Shanghai'
 String cron_string = '50 4 * * *'
@@ -25,6 +25,7 @@ pipeline {
     }
     agent {
         kubernetes {
+            cloud '4am'
             yaml pod
         }
     }
@@ -77,6 +78,7 @@ pipeline {
             matrix {
                 agent {
                     kubernetes {
+                        cloud '4am'
                         yaml pod
                     }
                 }
