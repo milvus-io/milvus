@@ -27,7 +27,7 @@ pipeline {
                         gitBaseRef = isPr ? "$env.CHANGE_TARGET" : "$env.BRANCH_NAME"
 
                         get_helm_release_name =  tekton.helm_release_name client: 'py',
-                                                             branch: "${env.CHANGE_ID}",
+                                                             changeId: "${env.CHANGE_ID}",
                                                              buildId:"${env.BUILD_ID}"
                     }
                 }

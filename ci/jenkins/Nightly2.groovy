@@ -1,6 +1,6 @@
 @Library('jenkins-shared-library@v0.32.0') _
 
-def pod = libraryResource 'io/milvus/pod/tekton-ci.yaml'
+def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
 String cron_timezone = 'TZ=Asia/Shanghai'
 String cron_string = BRANCH_NAME == 'master' ? '50 1 * * * ' : ''
@@ -25,6 +25,7 @@ pipeline {
     }
     agent {
         kubernetes {
+            cloud '4am'
             yaml pod
         }
     }
@@ -39,7 +40,7 @@ pipeline {
 
                         get_helm_release_name =  tekton.helm_release_name client: 'py',
                                                              ciMode: 'nightly',
-                                                             branch: "${env.BRANCH_NAME}",
+                                                             changeId: "${isPr ? env.CHANGE_ID : env.BRANCH_NAME }",
                                                              buildId:"${env.BUILD_ID}"
                     }
                 }
@@ -77,6 +78,7 @@ pipeline {
             matrix {
                 agent {
                     kubernetes {
+                        cloud '4am'
                         yaml pod
                     }
                 }
