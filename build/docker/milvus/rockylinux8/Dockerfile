@@ -21,6 +21,10 @@ RUN dnf -y install dnf-plugins-core && \
     dnf config-manager --set-enabled powertools && \
     dnf -y install openblas-devel
 
+# Add Tini
+RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
+    chmod +x /tini
+
 COPY ./bin/ /milvus/bin/
 
 COPY ./configs/ /milvus/configs/
@@ -32,9 +36,6 @@ ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
-# Add Tini
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH /tini
-RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus
