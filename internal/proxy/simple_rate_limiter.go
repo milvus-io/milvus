@@ -217,14 +217,20 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 }
 
 func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[internalpb.RateType]*paramtable.ParamItem) {
-	log := log.Ctx(context.TODO()).WithRateGroup("proxy.rateLimiter", 1.0, 60.0)
 	for rt, p := range rateLimiterConfigs {
-		limit := ratelimitutil.Limit(p.GetAsFloat())
+		newLimit := ratelimitutil.Limit(p.GetAsFloat())
 		burst := p.GetAsFloat() // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
-		rln.GetLimiters().Insert(rt, ratelimitutil.NewLimiter(limit, burst))
-		log.RatedDebug(30, "RateLimiter register for rateType",
+		old, ok := rln.GetLimiters().Get(rt)
+		if ok {
+			if old.Limit() != newLimit {
+				old.SetLimit(newLimit)
+			}
+		} else {
+			rln.GetLimiters().Insert(rt, ratelimitutil.NewLimiter(newLimit, burst))
+		}
+		log.Debug("RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[(int32(rt))]),
-			zap.String("rateLimit", ratelimitutil.Limit(p.GetAsFloat()).String()),
+			zap.String("rateLimit", newLimit.String()),
 			zap.String("burst", fmt.Sprintf("%v", burst)))
 	}
 }
