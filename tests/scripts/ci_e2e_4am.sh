@@ -62,12 +62,8 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
   mkdir -p ${CI_LOG_PATH}
 fi
 
-# skip pip install when DISABLE_PIP_INSTALL is set
-DISABLE_PIP_INSTALL=${DISABLE_PIP_INSTALL:-false}
-if [ "${DISABLE_PIP_INSTALL:-}" = "" ]; then
-  echo "prepare e2e test"
-  install_pytest_requirements
-fi
+echo "prepare e2e test"
+install_pytest_requirements
 
 
 # Run restful test v2
