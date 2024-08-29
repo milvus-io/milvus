@@ -56,7 +56,8 @@ type CollectionObserver struct {
 
 	proxyManager proxyutil.ProxyClientManagerInterface
 
-	stopOnce sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 type LoadTask struct {
@@ -94,27 +95,29 @@ func NewCollectionObserver(
 }
 
 func (ob *CollectionObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	observePeriod := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
-	ob.wg.Add(1)
-	go func() {
-		defer ob.wg.Done()
+		observePeriod := Params.QueryCoordCfg.CollectionObserverInterval.GetAsDuration(time.Millisecond)
+		ob.wg.Add(1)
+		go func() {
+			defer ob.wg.Done()
 
-		ticker := time.NewTicker(observePeriod)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("CollectionObserver stopped")
-				return
+			ticker := time.NewTicker(observePeriod)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("CollectionObserver stopped")
+					return
 
-			case <-ticker.C:
-				ob.Observe(ctx)
+				case <-ticker.C:
+					ob.Observe(ctx)
+				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 func (ob *CollectionObserver) Stop() {

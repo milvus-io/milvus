@@ -71,7 +71,8 @@ type TargetObserver struct {
 	dispatcher *taskDispatcher[int64]
 	keylocks   *lock.KeyLock[int64]
 
-	stopOnce sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewTargetObserver(
@@ -101,19 +102,21 @@ func NewTargetObserver(
 }
 
 func (ob *TargetObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	ob.dispatcher.Start()
+		ob.dispatcher.Start()
 
-	ob.wg.Add(1)
-	go func() {
-		defer ob.wg.Done()
-		ob.schedule(ctx)
-	}()
+		ob.wg.Add(1)
+		go func() {
+			defer ob.wg.Done()
+			ob.schedule(ctx)
+		}()
 
-	// after target observer start, update target for all collection
-	ob.initChan <- initRequest{}
+		// after target observer start, update target for all collection
+		ob.initChan <- initRequest{}
+	})
 }
 
 func (ob *TargetObserver) Stop() {

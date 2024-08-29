@@ -1084,8 +1084,6 @@ func (suite *ServiceSuite) TestReleasePartition() {
 func (suite *ServiceSuite) TestRefreshCollection() {
 	server := suite.server
 
-	server.collectionObserver.Start()
-
 	// Test refresh all collections.
 	for _, collection := range suite.collections {
 		err := server.refreshCollection(collection)

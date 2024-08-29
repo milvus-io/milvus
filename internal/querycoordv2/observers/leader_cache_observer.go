@@ -36,6 +36,7 @@ type CollectionShardLeaderCache = map[string]*querypb.ShardLeadersList
 type LeaderCacheObserver struct {
 	wg           sync.WaitGroup
 	proxyManager proxyutil.ProxyClientManagerInterface
+	startOnce    sync.Once
 	stopOnce     sync.Once
 	closeCh      chan struct{}
 
@@ -44,8 +45,10 @@ type LeaderCacheObserver struct {
 }
 
 func (o *LeaderCacheObserver) Start(ctx context.Context) {
-	o.wg.Add(1)
-	go o.schedule(ctx)
+	o.startOnce.Do(func() {
+		o.wg.Add(1)
+		go o.schedule(ctx)
+	})
 }
 
 func (o *LeaderCacheObserver) Stop() {
