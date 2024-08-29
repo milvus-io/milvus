@@ -1540,7 +1540,7 @@ please adjust in embedded Milvus: false`,
 	p.ReplicaSelectionPolicy = ParamItem{
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
-		DefaultValue: "look_aside",
+		DefaultValue: "round_robin",
 		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
@@ -1752,6 +1752,7 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+	EnableAssignReplicaToProxy         ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2306,6 +2307,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.EnableAssignReplicaToProxy = ParamItem{
+		Key:          "queryCoord.enableAssignReplicaToProxy",
+		Version:      "2.4.10",
+		DefaultValue: "false",
+		Doc:          "whether assign replicas to proxy",
+		Export:       false,
+	}
+	p.EnableAssignReplicaToProxy.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
