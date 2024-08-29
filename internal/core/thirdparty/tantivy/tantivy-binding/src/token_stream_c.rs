@@ -3,11 +3,11 @@ use std::ffi::{c_char, CStr};
 use libc::c_void;
 use tantivy::tokenizer::{BoxTokenStream, TextAnalyzer};
 
+use crate::string_c::c_str_to_str;
 use crate::{
     string_c::create_string,
     util::{create_binding, free_binding},
 };
-use crate::string_c::c_str_to_str;
 
 // Note: the tokenizer and text must be released after the token_stream.
 #[no_mangle]
