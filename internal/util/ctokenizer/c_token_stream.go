@@ -1,7 +1,7 @@
 package ctokenizer
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_core
 #include <stdlib.h>	// free
 #include "segcore/token_stream_c.h"
 */
