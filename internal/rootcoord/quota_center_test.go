@@ -563,17 +563,27 @@ func TestQuotaCenter(t *testing.T) {
 				ID:   0,
 				Name: "default",
 			},
+			{
+				ID:   1,
+				Name: "db1",
+			},
 		}, nil).Maybe()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		quotaCenter.clearMetrics()
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
-			0: collectionIDToPartitionIDs,
+			0: {1: {}, 2: {}, 3: {}},
+			1: {4: {}},
 		}
 		quotaCenter.dbs.Insert("default", 0)
+		quotaCenter.dbs.Insert("db1", 1)
 		quotaCenter.collections.Insert("0.col1", 1)
 		quotaCenter.collections.Insert("0.col2", 2)
 		quotaCenter.collections.Insert("0.col3", 3)
+		quotaCenter.collections.Insert("1.col4", 4)
+
 		colSubLabel := ratelimitutil.GetCollectionSubLabel("default", "col1")
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
 			1: {Rms: []metricsinfo.RateMetric{
@@ -652,6 +662,41 @@ func TestQuotaCenter(t *testing.T) {
 		err = quotaCenter.calculateReadRates()
 		assert.NoError(t, err)
 		checkLimiter()
+
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Unset()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, i int64, u uint64) (*model.Database, error) {
+				if i == 1 {
+					return &model.Database{
+						ID:   1,
+						Name: "db1",
+						Properties: []*commonpb.KeyValuePair{
+							{
+								Key:   common.DatabaseForceDenyReadingKey,
+								Value: "true",
+							},
+						},
+					}, nil
+				}
+				return nil, errors.New("mock error")
+			}).Maybe()
+		quotaCenter.resetAllCurrentRates()
+		err = quotaCenter.calculateReadRates()
+		assert.NoError(t, err)
+		assert.NoError(t, err)
+		rln := quotaCenter.rateLimiter.GetDatabaseLimiters(0)
+		limiters := rln.GetLimiters()
+		a, _ := limiters.Get(internalpb.RateType_DQLSearch)
+		assert.NotEqual(t, Limit(0), a.Limit())
+		b, _ := limiters.Get(internalpb.RateType_DQLQuery)
+		assert.NotEqual(t, Limit(0), b.Limit())
+
+		rln = quotaCenter.rateLimiter.GetDatabaseLimiters(1)
+		limiters = rln.GetLimiters()
+		a, _ = limiters.Get(internalpb.RateType_DQLSearch)
+		assert.Equal(t, Limit(0), a.Limit())
+		b, _ = limiters.Get(internalpb.RateType_DQLQuery)
+		assert.Equal(t, Limit(0), b.Limit())
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {
@@ -1544,6 +1589,8 @@ func TestCalculateReadRates(t *testing.T) {
 	t.Run("cool off db", func(t *testing.T) {
 		qc := mocks.NewMockQueryCoordClient(t)
 		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+
 		pcm := proxyutil.NewMockProxyClientManager(t)
 		dc := mocks.NewMockDataCoordClient(t)
 		core, _ := NewCore(ctx, nil)
