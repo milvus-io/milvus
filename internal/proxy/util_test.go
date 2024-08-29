@@ -2472,3 +2472,140 @@ func TestGetCostValue(t *testing.T) {
 		assert.Equal(t, 100, cost)
 	})
 }
+
+func TestValidateLoadFieldsList(t *testing.T) {
+	type testCase struct {
+		tag       string
+		schema    *schemapb.CollectionSchema
+		expectErr bool
+	}
+
+	rowIDField := &schemapb.FieldSchema{
+		FieldID:  common.RowIDField,
+		Name:     common.RowIDFieldName,
+		DataType: schemapb.DataType_Int64,
+	}
+	timestampField := &schemapb.FieldSchema{
+		FieldID:  common.TimeStampField,
+		Name:     common.TimeStampFieldName,
+		DataType: schemapb.DataType_Int64,
+	}
+	pkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	scalarField := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 1,
+		Name:     "text",
+		DataType: schemapb.DataType_VarChar,
+	}
+	partitionKeyField := &schemapb.FieldSchema{
+		FieldID:        common.StartOfUserFieldID + 2,
+		Name:           "part_key",
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+	vectorField := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 3,
+		Name:     "vector",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "768"},
+		},
+	}
+	dynamicField := &schemapb.FieldSchema{
+		FieldID:   common.StartOfUserFieldID + 4,
+		Name:      common.MetaFieldName,
+		DataType:  schemapb.DataType_JSON,
+		IsDynamic: true,
+	}
+
+	addSkipLoadAttr := func(f *schemapb.FieldSchema, flag bool) *schemapb.FieldSchema {
+		result := typeutil.Clone(f)
+		result.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{
+			Key:   common.FieldSkipLoadKey,
+			Value: strconv.FormatBool(flag),
+		})
+		return result
+	}
+
+	testCases := []testCase{
+		{
+			tag: "default",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+			},
+			expectErr: false,
+		},
+		{
+			tag: "pk_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					addSkipLoadAttr(pkField, true),
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+			},
+			expectErr: true,
+		},
+		{
+			tag: "part_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					addSkipLoadAttr(pkField, true),
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+				},
+			},
+			expectErr: true,
+		},
+		{
+			tag: "vector_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					addSkipLoadAttr(vectorField, true),
+					dynamicField,
+				},
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.tag, func(t *testing.T) {
+			err := validateLoadFieldsList(tc.schema)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

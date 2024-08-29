@@ -633,6 +633,40 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
+	// ignore error if not found
+	// partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
+
+	var vectorCnt int
+	for _, field := range schema.Fields {
+		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
+		if err != nil {
+			return err
+		}
+		// shoud load field, skip other check
+		if shouldLoad {
+			if typeutil.IsVectorType(field.GetDataType()) {
+				vectorCnt++
+			}
+			continue
+		}
+
+		if field.IsPrimaryKey {
+			return merr.WrapErrParameterInvalidMsg("Primary key field %s cannot skip loading", field.GetName())
+		}
+
+		if field.IsPartitionKey {
+			return merr.WrapErrParameterInvalidMsg("Partition Key field %s cannot skip loading", field.GetName())
+		}
+	}
+
+	if vectorCnt == 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot config all vector field(s) skip loading")
+	}
+
+	return nil
+}
+
 // parsePrimaryFieldData2IDs get IDs to fill grpc result, for example insert request, delete request etc.
 func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, error) {
 	primaryData := &schemapb.IDs{}
