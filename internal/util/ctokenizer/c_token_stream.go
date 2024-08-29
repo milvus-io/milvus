@@ -6,6 +6,7 @@ package ctokenizer
 #include "segcore/token_stream_c.h"
 */
 import "C"
+
 import (
 	"unsafe"
 

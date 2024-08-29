@@ -7,6 +7,7 @@ package ctokenizer
 #include "segcore/token_stream_c.h"
 */
 import "C"
+
 import (
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 )
