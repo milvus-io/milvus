@@ -130,6 +130,11 @@ type Server struct {
 	proxyCreator       proxyutil.ProxyCreator
 	proxyWatcher       proxyutil.ProxyWatcherInterface
 	proxyClientManager proxyutil.ProxyClientManagerInterface
+
+	// assign replica to proxy
+	proxyAssignLock sync.RWMutex
+	// proxy ID -> replica IDs
+	proxyAssignedReplicas map[int64][]int64
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {

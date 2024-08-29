@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -898,7 +899,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
-	log.RatedInfo(10, "get shard leaders request received")
+	log.Info("get shard leaders request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get shard leaders"
 		log.Warn(msg, zap.Error(err))
@@ -908,6 +909,118 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	}
 
 	leaders, err := utils.GetShardLeaders(s.meta, s.targetMgr, s.dist, s.nodeMgr, req.GetCollectionID())
+
+	if paramtable.Get().QueryCoordCfg.EnableAssignReplicaToProxy.GetAsBool() {
+		shardOnNodes := lo.FlatMap(leaders, func(leader *querypb.ShardLeadersList, _ int) []*querypb.ShardLeadersList {
+			ret := make([]*querypb.ShardLeadersList, 0, len(leader.NodeIds))
+			for i := range leader.NodeIds {
+				ret = append(ret, &querypb.ShardLeadersList{
+					ChannelName: leader.ChannelName,
+					NodeIds:     []int64{leader.NodeIds[i]},
+					NodeAddrs:   []string{leader.NodeAddrs[i]},
+				})
+			}
+			return ret
+		})
+		replicaShards := lo.GroupBy(shardOnNodes, func(shard *querypb.ShardLeadersList) int64 {
+			replica := s.meta.ReplicaManager.GetByCollectionAndNode(req.GetCollectionID(), shard.NodeIds[0])
+			if replica == nil {
+				return -1
+			}
+			return replica.GetID()
+		})
+
+		channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID(), meta.CurrentTargetFirst)
+		allReplicaReady := func() bool {
+			coll := s.meta.CollectionManager.GetCollection(req.GetCollectionID())
+			if coll == nil {
+				return false
+			}
+			// check replica num
+			if len(replicaShards) != int(coll.GetReplicaNumber()) {
+				return false
+			}
+			// check each replica's shard num
+			for _, shards := range replicaShards {
+				if len(shards) != len(channels) {
+					return false
+				}
+			}
+			return true
+		}
+
+		assignReplicas := func() {
+			// do assignment
+			proxyIDs := make([]int64, 0)
+			s.proxyClientManager.GetProxyClients().Range(func(key int64, value types.ProxyClient) bool {
+				proxyIDs = append(proxyIDs, key)
+				return true
+			})
+			replicas := lo.Keys(replicaShards)
+			average := len(proxyIDs) / len(replicas)
+			if average == 0 {
+				average = 1
+			}
+
+			s.proxyAssignedReplicas = make(map[int64][]int64)
+			assignCounter := 0
+			for _, proxyID := range proxyIDs {
+				ret := make([]int64, 0, average)
+				for j := 0; j < average; j++ {
+					ret = append(ret, replicas[assignCounter%len(replicas)])
+					assignCounter += 1
+				}
+				s.proxyAssignedReplicas[proxyID] = ret
+			}
+
+			log.Info("replica assignment to proxy", zap.Any("assignment", s.proxyAssignedReplicas))
+		}
+
+		// try to assign replica to proxy, only when all replica is ready, try to
+		proxyCount := s.proxyClientManager.GetProxyCount()
+		permitAssignReplica := func() bool {
+			return proxyCount > 1 && len(replicaShards) > 1 && (len(replicaShards)%proxyCount == 0 || proxyCount%len(replicaShards) == 0)
+		}
+		log.Info("xxx", zap.Bool("allReplicaReady", allReplicaReady()), zap.Bool("permitAssignReplica", permitAssignReplica()), zap.Any("replicaShards", replicaShards), zap.Int("proxyCount", proxyCount))
+		if allReplicaReady() && permitAssignReplica() {
+			s.proxyAssignLock.Lock()
+			defer s.proxyAssignLock.Unlock()
+			proxyID := req.GetBase().GetSourceID()
+			if _, ok := s.proxyAssignedReplicas[proxyID]; !ok {
+				// assign replicas to proxyIDs
+				assignReplicas()
+
+				// after reassignment, we should notify proxy to expire shard leader cache
+				s.leaderCacheObserver.RegisterEvent(req.GetCollectionID())
+			}
+
+			replicas := s.proxyAssignedReplicas[proxyID]
+			shardList := make(map[string]*querypb.ShardLeadersList)
+			for _, replicaID := range replicas {
+				shards := replicaShards[replicaID]
+				for _, shard := range shards {
+					if _, ok := shardList[shard.GetChannelName()]; !ok {
+						shardList[shard.GetChannelName()] = &querypb.ShardLeadersList{
+							ChannelName: shard.GetChannelName(),
+							NodeIds:     shard.GetNodeIds(),
+							NodeAddrs:   shard.GetNodeAddrs(),
+						}
+						continue
+					}
+					shardList[shard.GetChannelName()].NodeIds = append(shardList[shard.GetChannelName()].NodeIds, shard.NodeIds...)
+					shardList[shard.GetChannelName()].NodeAddrs = append(shardList[shard.GetChannelName()].NodeAddrs, shard.NodeAddrs...)
+				}
+			}
+
+			log.Info("proxy got shard list", zap.Int64("proxyID", proxyID), zap.Any("shardList", shardList))
+
+			return &querypb.GetShardLeadersResponse{
+				Status: merr.Status(err),
+				Shards: lo.Values(shardList),
+			}, nil
+		}
+	}
+
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,
