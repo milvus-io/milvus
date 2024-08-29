@@ -229,7 +229,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 				Value: "true",
 			},
 		}
-		updateCollectionProperties(coll, updateProps1)
+		coll.Properties = MergeProperties(coll.Properties, updateProps1)
 
 		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
@@ -247,7 +247,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 				Value: "2",
 			},
 		}
-		updateCollectionProperties(coll, updateProps2)
+		coll.Properties = MergeProperties(coll.Properties, updateProps2)
 
 		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
@@ -265,7 +265,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 				Value: "true",
 			},
 		}
-		updateCollectionProperties(coll, updatePropsIso)
+		coll.Properties = MergeProperties(coll.Properties, updatePropsIso)
 		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
 			Key:   common.PartitionKeyIsolationKey,
 			Value: "true",

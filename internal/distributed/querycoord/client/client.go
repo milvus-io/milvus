@@ -512,3 +512,14 @@ func (c *Client) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 		return client.CheckQueryNodeDistribution(ctx, req)
 	})
 }
+
+func (c *Client) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
+		return client.UpdateLoadConfig(ctx, req)
+	})
+}

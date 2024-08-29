@@ -484,3 +484,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.CheckQueryNodeDistribution(ctx, req)
 }
+
+func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
+	return s.queryCoord.UpdateLoadConfig(ctx, req)
+}
