@@ -729,7 +729,8 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
+	var validDataMap map[string][]bool
+	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -740,7 +741,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -807,7 +808,8 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
+	var validDataMap map[string][]bool
+	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -818,7 +820,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1178,6 +1180,17 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				IsPartitionKey: field.IsPartitionKey,
 				DataType:       dataType,
 				TypeParams:     []*commonpb.KeyValuePair{},
+				Nullable:       field.Nullable,
+			}
+
+			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
+			if err != nil {
+				log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: "convert defaultValue fail, err:" + err.Error(),
+				})
+				return nil, err
 			}
 			if dataType == schemapb.DataType_Array {
 				if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {

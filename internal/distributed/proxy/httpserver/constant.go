@@ -77,6 +77,7 @@ const (
 	HTTPIndexField           = "fieldName"
 	HTTPAliasName            = "aliasName"
 	HTTPRequestData          = "data"
+	HTTPRequestDefaultValue  = "defaultValue"
 	DefaultDbName            = "default"
 	DefaultIndexName         = "vector_idx"
 	DefaultAliasName         = "the_alias"
