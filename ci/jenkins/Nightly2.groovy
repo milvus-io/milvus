@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.32.0') _
+@Library('jenkins-shared-library@v0.34.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
