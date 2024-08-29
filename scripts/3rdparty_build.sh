@@ -16,6 +16,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Skip the installation and compilation of third-party code, 
+# if the developer is certain that it has already been done.
+if [[ ${SKIP_3RDPARTY} -eq 1 ]]; then
+  exit 0
+fi
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
