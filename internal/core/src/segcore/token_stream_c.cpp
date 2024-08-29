@@ -13,9 +13,6 @@
 #include <string.h>
 
 #include "segcore/token_stream_c.h"
-
-#include <folly/Conv.h>
-
 #include "token-stream.h"
 
 void
