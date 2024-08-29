@@ -1162,6 +1162,7 @@ dependencies = [
  "cbindgen",
  "env_logger",
  "futures",
+ "lazy_static",
  "libc",
  "log",
  "scopeguard",

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <memory>
 #include <string>
 
@@ -13,6 +14,7 @@ struct TokenStream {
 
     TokenStream(void* ptr, std::shared_ptr<std::string> text)
         : ptr_(ptr), text_(text) {
+        assert(ptr != nullptr);
     }
 
     ~TokenStream() {
@@ -33,6 +35,12 @@ struct TokenStream {
         std::string s(token);
         free_rust_string(token);
         return s;
+    }
+
+    // Note: the returned token must be freed by calling `free_rust_string`.
+    const char*
+    get_token_no_copy() {
+        return tantivy_token_stream_get_token(ptr_);
     }
 
  public:

@@ -7,8 +7,9 @@ package ctokenizer
 */
 import "C"
 import (
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 )
 
 var _ tokenizerapi.TokenStream = (*CTokenStream)(nil)
@@ -29,7 +30,7 @@ func (impl *CTokenStream) Advance() bool {
 
 func (impl *CTokenStream) Token() string {
 	token := C.token_stream_get_token(impl.ptr)
-	defer C.free(unsafe.Pointer(token))
+	defer C.free_token(unsafe.Pointer(token))
 	return C.GoString(token)
 }
 

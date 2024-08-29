@@ -25,7 +25,7 @@ create_cmap() {
 
 void
 free_cmap(CMap m) {
-    delete reinterpret_cast<Map*>(m);
+    delete static_cast<Map*>(m);
 }
 
 void
@@ -34,6 +34,6 @@ cmap_set(CMap m,
          uint32_t key_len,
          const char* value,
          uint32_t value_len) {
-    auto mm = reinterpret_cast<Map*>(m);
+    auto mm = static_cast<Map*>(m);
     (*mm)[std::string(key, key_len)] = std::string(value, value_len);
 }

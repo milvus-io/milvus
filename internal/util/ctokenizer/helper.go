@@ -1,7 +1,7 @@
 package ctokenizer
 
 /*
-#cgo pkg-config: milvus_common
+#cgo pkg-config: milvus_core
 #include <stdlib.h>	// free
 #include "common/type_c.h"
 */

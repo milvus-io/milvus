@@ -1,10 +1,14 @@
 use std::collections::HashMap;
-
+use lazy_static::lazy_static;
 use log::info;
 use tantivy::tokenizer::{TextAnalyzer, TokenizerManager};
 
+lazy_static! {
+    static ref DEFAULT_TOKENIZER_MANAGER : TokenizerManager = TokenizerManager::default();
+}
+
 pub(crate) fn default_tokenizer() -> TextAnalyzer {
-    TokenizerManager::default().get("default").unwrap()
+    DEFAULT_TOKENIZER_MANAGER.get("default").unwrap()
 }
 
 fn jieba_tokenizer() -> TextAnalyzer {

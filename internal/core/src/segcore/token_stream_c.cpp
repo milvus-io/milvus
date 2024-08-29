@@ -13,26 +13,29 @@
 #include <string.h>
 
 #include "segcore/token_stream_c.h"
+
+#include <folly/Conv.h>
+
 #include "token-stream.h"
 
 void
 free_token_stream(CTokenStream token_stream) {
-    delete reinterpret_cast<milvus::tantivy::TokenStream*>(token_stream);
+    delete static_cast<milvus::tantivy::TokenStream*>(token_stream);
 }
 
 bool
 token_stream_advance(CTokenStream token_stream) {
-    return reinterpret_cast<milvus::tantivy::TokenStream*>(token_stream)
-        ->advance();
+    return static_cast<milvus::tantivy::TokenStream*>(token_stream)->advance();
 }
 
-// Note: returned string must be freed by the caller.
-char*
+// Note: returned token must be freed by the caller using `free_token`.
+const char*
 token_stream_get_token(CTokenStream token_stream) {
-    auto token = reinterpret_cast<milvus::tantivy::TokenStream*>(token_stream)
-                     ->get_token();
-    char* ret = reinterpret_cast<char*>(malloc(token.length() + 1));
-    memcpy(ret, token.c_str(), token.length());
-    ret[token.length()] = 0;
-    return ret;
+    return static_cast<milvus::tantivy::TokenStream*>(token_stream)
+        ->get_token_no_copy();
+}
+
+void
+free_token(void* token) {
+    free_rust_string(static_cast<const char*>(token));
 }

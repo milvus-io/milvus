@@ -8,8 +8,9 @@ package ctokenizer
 */
 import "C"
 import (
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 )
 
 var _ tokenizerapi.Tokenizer = (*CTokenizer)(nil)

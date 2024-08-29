@@ -27,7 +27,10 @@ void free_token_stream(CTokenStream);
 bool token_stream_advance(CTokenStream);
 
 // Note: returned string must be freed by the caller.
-char* token_stream_get_token(CTokenStream);
+const char* token_stream_get_token(CTokenStream);
+
+void
+free_token(void* token);
 
 #ifdef __cplusplus
 }
