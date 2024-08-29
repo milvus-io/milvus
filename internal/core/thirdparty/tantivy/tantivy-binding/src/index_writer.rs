@@ -10,7 +10,6 @@ use tantivy::{doc, tokenizer, Document, Index, IndexWriter};
 
 use crate::data_type::TantivyDataType;
 
-use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
 
 pub(crate) struct IndexWriterWrapper {
