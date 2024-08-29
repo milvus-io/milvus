@@ -37,7 +37,8 @@ type ReplicaObserver struct {
 	meta    *meta.Meta
 	distMgr *meta.DistributionManager
 
-	stopOnce sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *ReplicaObserver {
@@ -48,11 +49,13 @@ func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *Rep
 }
 
 func (ob *ReplicaObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	ob.wg.Add(1)
-	go ob.schedule(ctx)
+		ob.wg.Add(1)
+		go ob.schedule(ctx)
+	})
 }
 
 func (ob *ReplicaObserver) Stop() {
