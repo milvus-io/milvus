@@ -212,6 +212,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         search_info.group_size_ = query_info_proto.group_size() > 0
                                       ? query_info_proto.group_size()
                                       : 1;
+        search_info.group_strict_size_ = query_info_proto.group_strict_size();
     }
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
