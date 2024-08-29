@@ -61,77 +61,75 @@ type LBPolicy interface {
 	Close()
 }
 
+const (
+	RoundRobin = "round_robin"
+	LookAside  = "look_aside"
+)
+
 type LBPolicyImpl struct {
-	balancer  LBBalancer
-	clientMgr shardClientMgr
+	getBalancer func() LBBalancer
+	clientMgr   shardClientMgr
+	balancerMap map[string]LBBalancer
 }
 
 func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
+	balancerMap := make(map[string]LBBalancer)
+	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
+	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 
-	var balancer LBBalancer
-	switch balancePolicy {
-	case "round_robin":
-		log.Info("use round_robin policy on replica selection")
-		balancer = NewRoundRobinBalancer()
-	default:
-		log.Info("use look_aside policy on replica selection")
-		balancer = NewLookAsideBalancer(clientMgr)
+	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
+		if _, ok := balancerMap[balancePolicy]; !ok {
+			return balancerMap[LookAside]
+		}
+		return balancerMap[balancePolicy]
 	}
 
 	return &LBPolicyImpl{
-		balancer:  balancer,
-		clientMgr: clientMgr,
+		getBalancer: getBalancer,
+		clientMgr:   clientMgr,
+		balancerMap: balancerMap,
 	}
 }
 
 func (lb *LBPolicyImpl) Start(ctx context.Context) {
-	lb.balancer.Start(ctx)
+	for _, lb := range lb.balancerMap {
+		lb.Start(ctx)
+	}
 }
 
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.collectionID),
-		zap.String("collectionName", workload.collectionName),
-		zap.String("channelName", workload.channel),
-	)
-
-	filterAvailableNodes := func(node int64, _ int) bool {
-		return !excludeNodes.Contain(node)
-	}
-
-	getShardLeaders := func() ([]int64, error) {
+	availableNodes := lo.FilterMap(workload.shardLeaders, func(node int64, _ int) (int64, bool) { return node, !excludeNodes.Contain(node) })
+	targetNode, err := lb.getBalancer().SelectNode(ctx, availableNodes, workload.nq)
+	if err != nil {
+		log := log.Ctx(ctx)
+		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 		shardLeaders, err := globalMetaCache.GetShards(ctx, false, workload.db, workload.collectionName, workload.collectionID)
 		if err != nil {
-			return nil, err
-		}
-
-		return lo.Map(shardLeaders[workload.channel], func(node nodeInfo, _ int) int64 { return node.nodeID }), nil
-	}
-
-	availableNodes := lo.Filter(workload.shardLeaders, filterAvailableNodes)
-	targetNode, err := lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
-	if err != nil {
-		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
-		nodes, err := getShardLeaders()
-		if err != nil || len(nodes) == 0 {
 			log.Warn("failed to get shard delegator",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Error(err))
 			return -1, err
 		}
 
-		availableNodes := lo.Filter(nodes, filterAvailableNodes)
+		availableNodes := lo.FilterMap(shardLeaders[workload.channel], func(node nodeInfo, _ int) (int64, bool) { return node.nodeID, !excludeNodes.Contain(node.nodeID) })
 		if len(availableNodes) == 0 {
+			nodes := lo.Map(shardLeaders[workload.channel], func(node nodeInfo, _ int) int64 { return node.nodeID })
 			log.Warn("no available shard delegator found",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Int64s("nodes", nodes),
 				zap.Int64s("excluded", excludeNodes.Collect()))
 			return -1, merr.WrapErrChannelNotAvailable("no available shard delegator found")
 		}
 
-		targetNode, err = lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
+		targetNode, err = lb.getBalancer().SelectNode(ctx, availableNodes, workload.nq)
 		if err != nil {
 			log.Warn("failed to select shard",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Int64s("availableNodes", availableNodes),
 				zap.Error(err))
 			return -1, err
@@ -144,17 +142,14 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
 	excludeNodes := typeutil.NewUniqueSet()
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.collectionID),
-		zap.String("collectionName", workload.collectionName),
-		zap.String("channelName", workload.channel),
-	)
 
 	var lastErr error
 	err := retry.Do(ctx, func() error {
 		targetNode, err := lb.selectNode(ctx, workload, excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err),
 			)
@@ -167,12 +162,14 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
 			log.Warn("search/query channel failed, node not available",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
 
 			// cancel work load which assign to the target node
-			lb.balancer.CancelWorkload(targetNode, workload.nq)
+			lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
@@ -180,16 +177,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		err = workload.exec(ctx, targetNode, client, workload.channel)
 		if err != nil {
 			log.Warn("search/query channel failed",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel),
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
-			lb.balancer.CancelWorkload(targetNode, workload.nq)
-
+			lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
 
-		lb.balancer.CancelWorkload(targetNode, workload.nq)
+		lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 		return nil
 	}, retry.Attempts(workload.retryTimes))
 
@@ -232,9 +230,11 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {
-	lb.balancer.UpdateCostMetrics(node, cost)
+	lb.getBalancer().UpdateCostMetrics(node, cost)
 }
 
 func (lb *LBPolicyImpl) Close() {
-	lb.balancer.Close()
+	for _, lb := range lb.balancerMap {
+		lb.Close()
+	}
 }

@@ -101,7 +101,9 @@ func (s *LBPolicySuite) SetupTest() {
 	s.lbBalancer.EXPECT().Start(context.Background()).Maybe()
 	s.lbPolicy = NewLBPolicyImpl(s.mgr)
 	s.lbPolicy.Start(context.Background())
-	s.lbPolicy.balancer = s.lbBalancer
+	s.lbPolicy.getBalancer = func() LBBalancer {
+		return s.lbBalancer
+	}
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
 	s.NoError(err)
@@ -419,17 +421,17 @@ func (s *LBPolicySuite) TestUpdateCostMetrics() {
 
 func (s *LBPolicySuite) TestNewLBPolicy() {
 	policy := NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.LookAsideBalancer")
 	policy.Close()
 
 	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "round_robin")
 	policy = NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.RoundRobinBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.RoundRobinBalancer")
 	policy.Close()
 
 	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "look_aside")
 	policy = NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.LookAsideBalancer")
 	policy.Close()
 }
 
