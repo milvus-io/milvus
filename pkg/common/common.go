@@ -159,6 +159,7 @@ const (
 	DatabaseDiskQuotaKey        = "database.diskQuota.mb"
 	DatabaseMaxCollectionsKey   = "database.max.collections"
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
+	DatabaseForceDenyReadingKey = "database.force.deny.reading"
 
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
