@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -174,6 +175,32 @@ func (s *NullDataSuite) run() {
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
+
+	desCollResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	compactResp, err := c.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+		CollectionID: desCollResp.GetCollectionID(),
+	})
+
+	s.NoError(err)
+	s.Equal(compactResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	compacted := func() bool {
+		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+			CompactionID: compactResp.GetCompactionID(),
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetState() == commonpb.CompactionState_Completed
+	}
+	for !compacted() {
+		time.Sleep(3 * time.Second)
+	}
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
