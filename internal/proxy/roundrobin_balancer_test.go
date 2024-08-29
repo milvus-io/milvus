@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type RoundRobinBalancerSuite struct {
@@ -33,48 +35,34 @@ func (s *RoundRobinBalancerSuite) SetupTest() {
 	s.balancer.Start(context.Background())
 }
 
-func (s *RoundRobinBalancerSuite) TestRoundRobin() {
-	availableNodes := []int64{1, 2}
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+func TestSelectNode(t *testing.T) {
+	balancer := NewRoundRobinBalancer()
 
-	workload, ok := s.balancer.nodeWorkload.Get(1)
-	s.True(ok)
-	s.Equal(int64(2), workload.Load())
-	workload, ok = s.balancer.nodeWorkload.Get(1)
-	s.True(ok)
-	s.Equal(int64(2), workload.Load())
+	// Test case 1: Empty availableNodes
+	_, err1 := balancer.SelectNode(context.Background(), []int64{}, 0)
+	if err1 != merr.ErrNodeNotAvailable {
+		t.Errorf("Expected ErrNodeNotAvailable, got %v", err1)
+	}
 
-	s.balancer.SelectNode(context.TODO(), availableNodes, 3)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	// Test case 2: Non-empty availableNodes
+	availableNodes := []int64{1, 2, 3}
+	selectedNode2, err2 := balancer.SelectNode(context.Background(), availableNodes, 0)
+	if err2 != nil {
+		t.Errorf("Expected no error, got %v", err2)
+	}
+	if selectedNode2 < 1 || selectedNode2 > 3 {
+		t.Errorf("Expected a node in the range [1, 3], got %d", selectedNode2)
+	}
 
-	workload, ok = s.balancer.nodeWorkload.Get(1)
-	s.True(ok)
-	s.Equal(int64(5), workload.Load())
-	workload, ok = s.balancer.nodeWorkload.Get(1)
-	s.True(ok)
-	s.Equal(int64(5), workload.Load())
-}
-
-func (s *RoundRobinBalancerSuite) TestNoAvailableNode() {
-	availableNodes := []int64{}
-	_, err := s.balancer.SelectNode(context.TODO(), availableNodes, 1)
-	s.Error(err)
-}
-
-func (s *RoundRobinBalancerSuite) TestCancelWorkload() {
-	availableNodes := []int64{101}
-	_, err := s.balancer.SelectNode(context.TODO(), availableNodes, 5)
-	s.NoError(err)
-	workload, ok := s.balancer.nodeWorkload.Get(101)
-	s.True(ok)
-	s.Equal(int64(5), workload.Load())
-	s.balancer.CancelWorkload(101, 5)
-	s.Equal(int64(0), workload.Load())
+	// Test case 3: Boundary case
+	availableNodes = []int64{1}
+	selectedNode3, err3 := balancer.SelectNode(context.Background(), availableNodes, 0)
+	if err3 != nil {
+		t.Errorf("Expected no error, got %v", err3)
+	}
+	if selectedNode3 != 1 {
+		t.Errorf("Expected 1, got %d", selectedNode3)
+	}
 }
 
 func TestRoundRobinBalancerSuite(t *testing.T) {

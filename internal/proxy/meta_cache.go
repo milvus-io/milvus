@@ -922,11 +922,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 
-	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
-	if err != nil {
-		return nil, err
-	}
-
 	cacheShardLeaders, ok := m.getCollectionShardLeader(database, collectionName)
 	if withCache {
 		if ok {
@@ -938,6 +933,12 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord")
 	}
+
+	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
 	req := &querypb.GetShardLeadersRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
