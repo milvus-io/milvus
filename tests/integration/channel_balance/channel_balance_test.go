@@ -14,12 +14,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
 func TestChannelBalanceSuite(t *testing.T) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		t.Skip("skip channel balance test in streaming service mode")
+	}
 	suite.Run(t, new(ChannelBalanceSuite))
 }
 

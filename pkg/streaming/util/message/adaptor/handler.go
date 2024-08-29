@@ -69,7 +69,7 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 			}
 		}
 		m.Pendings = append(m.Pendings, msg)
-	case message.VersionV1:
+	case message.VersionV1, message.VersionV2:
 		if len(m.Pendings) != 0 { // all previous message should be vOld.
 			m.addMsgPackIntoPending(m.Pendings...)
 			m.Pendings = nil

@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
@@ -113,7 +114,7 @@ func (m *PChannelSegmentAllocManager) RemoveCollection(ctx context.Context, coll
 	m.helper.AsyncSeal(waitForSealed...)
 
 	// trigger a seal operation in background rightnow.
-	resource.Resource().SegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
+	inspector.GetSegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
 
 	// wait for all segment has been flushed.
 	return m.helper.WaitUntilNoWaitSeal(ctx)
@@ -132,7 +133,7 @@ func (m *PChannelSegmentAllocManager) RemovePartition(ctx context.Context, colle
 	m.helper.AsyncSeal(waitForSealed...)
 
 	// trigger a seal operation in background rightnow.
-	resource.Resource().SegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
+	inspector.GetSegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
 
 	// wait for all segment has been flushed.
 	return m.helper.WaitUntilNoWaitSeal(ctx)
@@ -186,6 +187,20 @@ func (m *PChannelSegmentAllocManager) TryToSealSegments(ctx context.Context, inf
 			if pm, err := m.managers.Get(info.CollectionID, info.PartitionID); err == nil {
 				m.helper.AsyncSeal(pm.CollectShouldBeSealed()...)
 			}
+		}
+	}
+	m.helper.SealAllWait(ctx)
+}
+
+func (m *PChannelSegmentAllocManager) MustSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
+	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
+		return
+	}
+	defer m.lifetime.Done()
+
+	for _, info := range infos {
+		if pm, err := m.managers.Get(info.CollectionID, info.PartitionID); err == nil {
+			m.helper.AsyncSeal(pm.CollectionMustSealed(info.SegmentID))
 		}
 	}
 	m.helper.SealAllWait(ctx)

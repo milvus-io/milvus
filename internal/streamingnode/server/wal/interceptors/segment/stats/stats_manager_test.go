@@ -10,32 +10,32 @@ import (
 func TestStatsManager(t *testing.T) {
 	m := NewStatsManager()
 
-	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2}, 3, createSegmentStats(100, 100, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 3}, 3, createSegmentStats(100, 100, 300))
 	assert.Len(t, m.segmentStats, 1)
 	assert.Len(t, m.vchannelStats, 1)
 	assert.Len(t, m.pchannelStats, 1)
 	assert.Len(t, m.segmentIndex, 1)
 
-	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 3}, 4, createSegmentStats(100, 100, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 3, SegmentID: 4}, 4, createSegmentStats(100, 100, 300))
 	assert.Len(t, m.segmentStats, 2)
 	assert.Len(t, m.segmentIndex, 2)
 	assert.Len(t, m.vchannelStats, 1)
 	assert.Len(t, m.pchannelStats, 1)
 
-	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel2", CollectionID: 2, PartitionID: 4}, 5, createSegmentStats(100, 100, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel2", CollectionID: 2, PartitionID: 4, SegmentID: 5}, 5, createSegmentStats(100, 100, 300))
 	assert.Len(t, m.segmentStats, 3)
 	assert.Len(t, m.segmentIndex, 3)
 	assert.Len(t, m.vchannelStats, 2)
 	assert.Len(t, m.pchannelStats, 1)
 
-	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel2", VChannel: "vchannel3", CollectionID: 2, PartitionID: 5}, 6, createSegmentStats(100, 100, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel2", VChannel: "vchannel3", CollectionID: 2, PartitionID: 5, SegmentID: 6}, 6, createSegmentStats(100, 100, 300))
 	assert.Len(t, m.segmentStats, 4)
 	assert.Len(t, m.segmentIndex, 4)
 	assert.Len(t, m.vchannelStats, 3)
 	assert.Len(t, m.pchannelStats, 2)
 
 	assert.Panics(t, func() {
-		m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2}, 3, createSegmentStats(100, 100, 300))
+		m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 3}, 3, createSegmentStats(100, 100, 300))
 	})
 
 	shouldBlock(t, m.SealNotifier().WaitChan())

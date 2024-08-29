@@ -5,8 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 )
@@ -93,7 +96,7 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 }
 
 // GracefulClose waits for all transactions to be cleaned up.
-func (m *TxnManager) GracefulClose() {
+func (m *TxnManager) GracefulClose(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed == nil {
 		m.closed = lifetime.NewSafeChan()
@@ -101,7 +104,13 @@ func (m *TxnManager) GracefulClose() {
 			m.closed.Close()
 		}
 	}
+	log.Info("there's still txn session in txn manager, waiting for them to be consumed", zap.Int("session count", len(m.sessions)))
 	m.mu.Unlock()
 
-	<-m.closed.CloseCh()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.closed.CloseCh():
+		return nil
+	}
 }

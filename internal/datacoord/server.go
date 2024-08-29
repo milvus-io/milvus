@@ -724,7 +724,10 @@ func (s *Server) startServerLoop() {
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
-	s.syncSegmentsScheduler.Start()
+
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.syncSegmentsScheduler.Start()
+	}
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {

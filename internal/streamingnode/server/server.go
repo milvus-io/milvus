@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -48,7 +49,8 @@ func (s *Server) Init(ctx context.Context) (err error) {
 
 // Start starts the streamingnode server.
 func (s *Server) Start() {
-	// Just do nothing now.
+	resource.Resource().Flusher().Start()
+	log.Info("flusher started")
 }
 
 // Stop stops the streamingnode server.
@@ -58,6 +60,9 @@ func (s *Server) Stop() {
 	log.Info("close wal manager...")
 	s.walManager.Close()
 	log.Info("streamingnode server stopped")
+	log.Info("stopping flusher...")
+	resource.Resource().Flusher().Stop()
+	log.Info("flusher stopped")
 }
 
 // Health returns the health status of the streamingnode server.

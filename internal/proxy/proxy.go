@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -400,19 +401,21 @@ func (node *Proxy) Start() error {
 	}
 	log.Debug("start id allocator done", zap.String("role", typeutil.ProxyRole))
 
-	if err := node.segAssigner.Start(); err != nil {
-		log.Warn("failed to start segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Error(err))
-		return err
-	}
-	log.Debug("start segment id assigner done", zap.String("role", typeutil.ProxyRole))
+	if !streamingutil.IsStreamingServiceEnabled() {
+		if err := node.segAssigner.Start(); err != nil {
+			log.Warn("failed to start segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+			return err
+		}
+		log.Debug("start segment id assigner done", zap.String("role", typeutil.ProxyRole))
 
-	if err := node.chTicker.start(); err != nil {
-		log.Warn("failed to start channels time ticker", zap.String("role", typeutil.ProxyRole), zap.Error(err))
-		return err
-	}
-	log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
+		if err := node.chTicker.start(); err != nil {
+			log.Warn("failed to start channels time ticker", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+			return err
+		}
+		log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
-	node.sendChannelsTimeTickLoop()
+		node.sendChannelsTimeTickLoop()
+	}
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
@@ -440,22 +443,24 @@ func (node *Proxy) Stop() error {
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
 	}
 
-	if node.segAssigner != nil {
-		node.segAssigner.Close()
-		log.Info("close segment id assigner", zap.String("role", typeutil.ProxyRole))
-	}
-
 	if node.sched != nil {
 		node.sched.Close()
 		log.Info("close scheduler", zap.String("role", typeutil.ProxyRole))
 	}
 
-	if node.chTicker != nil {
-		err := node.chTicker.close()
-		if err != nil {
-			return err
+	if !streamingutil.IsStreamingServiceEnabled() {
+		if node.segAssigner != nil {
+			node.segAssigner.Close()
+			log.Info("close segment id assigner", zap.String("role", typeutil.ProxyRole))
 		}
-		log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
+
+		if node.chTicker != nil {
+			err := node.chTicker.close()
+			if err != nil {
+				return err
+			}
+			log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
+		}
 	}
 
 	for _, cb := range node.closeCallbacks {

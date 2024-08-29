@@ -30,12 +30,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -400,13 +404,6 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts uint64) *ms.MsgPack {
-	collectionID := t.collID
-	partitionIDs := t.partIDs
-	// error won't happen here.
-	marshaledSchema, _ := proto.Marshal(t.schema)
-	pChannels := t.channels.physicalChannels
-	vChannels := t.channels.virtualChannels
-
 	msgPack := ms.MsgPack{}
 	msg := &ms.CreateCollectionMsg{
 		BaseMsg: ms.BaseMsg{
@@ -415,26 +412,76 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		CreateCollectionRequest: &msgpb.CreateCollectionRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
-				commonpbutil.WithTimeStamp(ts),
-			),
-			CollectionID:         collectionID,
-			PartitionIDs:         partitionIDs,
-			Schema:               marshaledSchema,
-			VirtualChannelNames:  vChannels,
-			PhysicalChannelNames: pChannels,
-		},
+		CreateCollectionRequest: t.genCreateCollectionRequest(),
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	return &msgPack
 }
 
+func (t *createCollectionTask) genCreateCollectionRequest() *msgpb.CreateCollectionRequest {
+	collectionID := t.collID
+	partitionIDs := t.partIDs
+	// error won't happen here.
+	marshaledSchema, _ := proto.Marshal(t.schema)
+	pChannels := t.channels.physicalChannels
+	vChannels := t.channels.virtualChannels
+	return &msgpb.CreateCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+			commonpbutil.WithTimeStamp(t.ts),
+		),
+		CollectionID:         collectionID,
+		PartitionIDs:         partitionIDs,
+		Schema:               marshaledSchema,
+		VirtualChannelNames:  vChannels,
+		PhysicalChannelNames: pChannels,
+	}
+}
+
 func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context, ts uint64) (map[string][]byte, error) {
 	t.core.chanTimeTick.addDmlChannels(t.channels.physicalChannels...)
+	if streamingutil.IsStreamingServiceEnabled() {
+		return t.broadcastCreateCollectionMsgIntoStreamingService(ctx, ts)
+	}
 	msg := t.genCreateCollectionMsg(ctx, ts)
 	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
+}
+
+func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {
+	req := t.genCreateCollectionRequest()
+	// dispatch the createCollectionMsg into all vchannel.
+	msgs := make([]message.MutableMessage, 0, len(req.VirtualChannelNames))
+	for _, vchannel := range req.VirtualChannelNames {
+		msg, err := message.NewCreateCollectionMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: req.CollectionID,
+				PartitionIds: req.GetPartitionIDs(),
+			}).
+			WithBody(req).
+			BuildMutable()
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, msg)
+	}
+	// send the createCollectionMsg into streaming service.
+	// ts is used as initial checkpoint at datacoord,
+	// it must be set as barrier time tick.
+	// The timetick of create message in wal must be greater than ts, to avoid data read loss at read side.
+	resps := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
+		BarrierTimeTick: ts,
+	}, msgs...)
+	if err := resps.UnwrapFirstError(); err != nil {
+		return nil, err
+	}
+	// make the old message stream serialized id.
+	startPositions := make(map[string][]byte)
+	for idx, resp := range resps.Responses {
+		// The key is pchannel here
+		startPositions[req.PhysicalChannelNames[idx]] = adaptor.MustGetMQWrapperIDFromMessage(resp.AppendResult.MessageID).Serialize()
+	}
+	return startPositions, nil
 }
 
 func (t *createCollectionTask) getCreateTs() (uint64, error) {

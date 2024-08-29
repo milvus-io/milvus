@@ -35,12 +35,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -375,6 +377,12 @@ func (mr *MilvusRoles) Run() {
 		}
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
+	}
+
+	// Initialize streaming service if enabled.
+	if streamingutil.IsStreamingServiceEnabled() {
+		streaming.Init()
+		defer streaming.Release()
 	}
 
 	expr.Init()

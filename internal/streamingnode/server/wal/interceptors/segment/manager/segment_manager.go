@@ -30,6 +30,7 @@ func newSegmentAllocManagerFromProto(
 		resource.Resource().SegmentAssignStatsManager().RegisterNewGrowingSegment(stats.SegmentBelongs{
 			CollectionID: inner.GetCollectionId(),
 			PartitionID:  inner.GetPartitionId(),
+			SegmentID:    inner.GetSegmentId(),
 			PChannel:     pchannel.Name,
 			VChannel:     inner.GetVchannel(),
 		}, inner.GetSegmentId(), stat)
@@ -253,6 +254,7 @@ func (m *mutableSegmentAssignmentMeta) Commit(ctx context.Context) error {
 		resource.Resource().SegmentAssignStatsManager().RegisterNewGrowingSegment(stats.SegmentBelongs{
 			CollectionID: m.original.GetCollectionID(),
 			PartitionID:  m.original.GetPartitionID(),
+			SegmentID:    m.original.GetSegmentID(),
 			PChannel:     m.original.pchannel.Name,
 			VChannel:     m.original.GetVChannel(),
 		}, m.original.GetSegmentID(), stats.NewSegmentStatFromProto(m.modifiedCopy.Stat))

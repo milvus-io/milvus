@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 )
 
-func TestIDCoversion(t *testing.T) {
+func TestIDConvension(t *testing.T) {
 	id := MustGetMessageIDFromMQWrapperID(MustGetMQWrapperIDFromMessage(rmq.NewRmqID(1)))
 	assert.True(t, id.EQ(rmq.NewRmqID(1)))
 

@@ -7,21 +7,14 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 )
-
-type utility struct {
-	appendExecutionPool   *conc.Pool[struct{}]
-	dispatchExecutionPool *conc.Pool[struct{}]
-	*walAccesserImpl
-}
 
 // AppendMessagesToWAL appends messages to the wal.
 // It it a helper utility function to append messages to the wal.
 // If the messages is belong to one vchannel, it will be sent as a transaction.
 // Otherwise, it will be sent as individual messages.
 // !!! This function do not promise the atomicity and deliver order of the messages appending.
-func (u *utility) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
 	assertNoSystemMessage(msgs...)
 
 	// dispatch the messages into different vchannel.
@@ -58,7 +51,7 @@ func (u *utility) AppendMessages(ctx context.Context, msgs ...message.MutableMes
 }
 
 // AppendMessagesWithOption appends messages to the wal with the given option.
-func (u *utility) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
+func (u *walAccesserImpl) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
 	for _, msg := range msgs {
 		applyOpt(msg, opts)
 	}
@@ -66,7 +59,7 @@ func (u *utility) AppendMessagesWithOption(ctx context.Context, opts AppendOptio
 }
 
 // dispatchMessages dispatches the messages into different vchannel.
-func (u *utility) dispatchMessages(msgs ...message.MutableMessage) (map[string][]message.MutableMessage, map[string][]int) {
+func (u *walAccesserImpl) dispatchMessages(msgs ...message.MutableMessage) (map[string][]message.MutableMessage, map[string][]int) {
 	dispatchedMessages := make(map[string][]message.MutableMessage, 0)
 	indexes := make(map[string][]int, 0)
 	for idx, msg := range msgs {
@@ -82,7 +75,7 @@ func (u *utility) dispatchMessages(msgs ...message.MutableMessage) (map[string][
 }
 
 // appendToVChannel appends the messages to the specified vchannel.
-func (u *utility) appendToVChannel(ctx context.Context, vchannel string, msgs ...message.MutableMessage) AppendResponses {
+func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string, msgs ...message.MutableMessage) AppendResponses {
 	if len(msgs) == 0 {
 		return newAppendResponseN(0)
 	}
@@ -167,6 +160,16 @@ type AppendResponse struct {
 // AppendResponses is the response of append operation.
 type AppendResponses struct {
 	Responses []AppendResponse
+}
+
+func (a AppendResponses) MaxTimeTick() uint64 {
+	var maxTimeTick uint64
+	for _, r := range a.Responses {
+		if r.AppendResult != nil && r.AppendResult.TimeTick > maxTimeTick {
+			maxTimeTick = r.AppendResult.TimeTick
+		}
+	}
+	return maxTimeTick
 }
 
 // UnwrapFirstError returns the first error in the responses.

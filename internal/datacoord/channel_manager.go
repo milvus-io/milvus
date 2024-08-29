@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -160,7 +161,7 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 		m.finishRemoveChannel(info.NodeID, lo.Values(info.Channels)...)
 	}
 
-	if m.balanceCheckLoop != nil {
+	if m.balanceCheckLoop != nil && !streamingutil.IsStreamingServiceEnabled() {
 		log.Info("starting channel balance loop")
 		m.wg.Add(1)
 		go func() {
@@ -329,6 +330,12 @@ func (m *ChannelManagerImpl) Balance() {
 }
 
 func (m *ChannelManagerImpl) Match(nodeID UniqueID, channel string) bool {
+	if streamingutil.IsStreamingServiceEnabled() {
+		// Skip the channel matching check since the
+		// channel manager no longer manages channels in streaming mode.
+		return true
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

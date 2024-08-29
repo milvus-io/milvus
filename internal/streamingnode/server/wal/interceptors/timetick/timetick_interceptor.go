@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -90,7 +91,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 					txnSession.AddNewMessageFail()
 				}
 				// perform keepalive for the transaction session if append success.
-				txnSession.AddNewMessageAndKeepalive(msg.TimeTick())
+				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick())
 			}()
 		}
 	}
@@ -106,8 +107,15 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 
 // GracefulClose implements InterceptorWithGracefulClose.
 func (impl *timeTickAppendInterceptor) GracefulClose() {
-	log.Warn("timeTickAppendInterceptor is closing")
-	impl.txnManager.GracefulClose()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	logger := log.With(zap.Any("pchannel", impl.operator.pchannel))
+	logger.Info("timeTickAppendInterceptor is closing, try to perform a txn manager graceful shutdown")
+	if err := impl.txnManager.GracefulClose(ctx); err != nil {
+		logger.Warn("timeTickAppendInterceptor is closed", zap.Error(err))
+		return
+	}
+	logger.Info("txnManager of timeTickAppendInterceptor is graceful closed")
 }
 
 // Close implements AppendInterceptor.

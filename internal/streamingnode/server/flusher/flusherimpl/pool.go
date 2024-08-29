@@ -14,12 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package flusher
+package flusherimpl
 
-import "github.com/milvus-io/milvus/pkg/streaming/util/message"
+import (
+	"sync"
 
-type FlushMsgHandler interface {
-	HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error
+	"github.com/milvus-io/milvus/pkg/util/conc"
+)
 
-	HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error
+var (
+	execPool         *conc.Pool[any]
+	execPoolInitOnce sync.Once
+)
+
+func initExecPool() {
+	execPool = conc.NewPool[any](
+		128,
+		conc.WithPreAlloc(true),
+	)
+}
+
+func GetExecPool() *conc.Pool[any] {
+	execPoolInitOnce.Do(initExecPool)
+	return execPool
 }

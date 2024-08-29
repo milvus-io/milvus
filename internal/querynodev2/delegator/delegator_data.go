@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -38,11 +39,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -750,14 +755,10 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	return nil
 }
 
-func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
-	log := sd.getLogger(ctx).With(
-		zap.String("channel", position.ChannelName),
-		zap.Int64("segmentID", candidate.ID()),
-	)
+func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
 	stream, err := sd.factory.NewTtMsgStream(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer stream.Close()
 	vchannelName := position.ChannelName
@@ -771,15 +772,57 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
 	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqcommon.SubscriptionPositionUnknown)
 	if err != nil {
-		return nil, err
+		return nil, stream.Close, err
 	}
 
-	ts = time.Now()
 	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position}, false)
+	if err != nil {
+		return nil, stream.Close, err
+	}
+	return stream.Chan(), stream.Close, nil
+}
+
+func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
+	handler := adaptor.NewMsgPackAdaptorHandler()
+	s := streaming.WAL().Read(ctx, streaming.ReadOption{
+		VChannel: position.GetChannelName(),
+		DeliverPolicy: options.DeliverPolicyStartFrom(
+			adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID()),
+		),
+		DeliverFilters: []options.DeliverFilter{
+			// only deliver message which timestamp >= position.Timestamp
+			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
+			// only delete message
+			options.DeliverFilterMessageType(message.MessageTypeDelete),
+		},
+		MessageHandler: handler,
+	})
+	return handler.Chan(), s.Close, nil
+}
+
+func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
+	log := sd.getLogger(ctx).With(
+		zap.String("channel", position.ChannelName),
+		zap.Int64("segmentID", candidate.ID()),
+	)
+	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
+
+	var ch <-chan *msgstream.MsgPack
+	var closer func()
+	var err error
+	if streamingutil.IsStreamingServiceEnabled() {
+		ch, closer, err = sd.createDeleteStreamFromStreamingService(ctx, position)
+	} else {
+		ch, closer, err = sd.createStreamFromMsgStream(ctx, position)
+	}
+	if closer != nil {
+		defer closer()
+	}
 	if err != nil {
 		return nil, err
 	}
 
+	start := time.Now()
 	result := &storage.DeleteData{}
 	hasMore := true
 	for hasMore {
@@ -787,7 +830,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 		case <-ctx.Done():
 			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
 			return nil, ctx.Err()
-		case msgPack, ok := <-stream.Chan():
+		case msgPack, ok := <-ch:
 			if !ok {
 				err = fmt.Errorf("stream channel closed, pChannelName=%v, msgID=%v", pChannelName, position.GetMsgID())
 				log.Warn("fail to read delta msg",
@@ -835,7 +878,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			}
 		}
 	}
-	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(ts)))
+	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(start)))
 	return result, nil
 }
 

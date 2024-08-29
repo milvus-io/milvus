@@ -1034,3 +1034,13 @@ trace:
 gpu:
   initMemSize: 2048 # Gpu Memory Pool init size
   maxMemSize: 4096 # Gpu Memory Pool Max size
+
+# Any configuration related to the streaming node server.
+streamingNode:
+  ip:  # TCP/IP address of streamingNode. If not specified, use the first unicastable address
+  port: 22222 # TCP port of streamingNode
+  grpc:
+    serverMaxSendSize: 268435456 # The maximum size of each RPC request that the streamingNode can send, unit: byte
+    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the streamingNode can receive, unit: byte
+    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
+    clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte

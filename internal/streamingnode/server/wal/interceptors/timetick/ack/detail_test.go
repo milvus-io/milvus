@@ -15,8 +15,7 @@ func TestDetail(t *testing.T) {
 	assert.Panics(t, func() {
 		newAckDetail(0, mock_message.NewMockMessageID(t))
 	})
-	msgID := mock_message.NewMockMessageID(t)
-	msgID.EXPECT().EQ(msgID).Return(true)
+	msgID := walimplstest.NewTestMessageID(1)
 
 	ackDetail := newAckDetail(1, msgID)
 	assert.Equal(t, uint64(1), ackDetail.BeginTimestamp)
