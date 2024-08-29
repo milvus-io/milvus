@@ -1,0 +1,267 @@
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/e2e
+          operator: Exists
+      weight: 1
+cluster:
+  enabled: false
+dataCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.1"
+      memory: 50Mi
+dataNode:
+  resources:
+    limits:
+      cpu: "2"
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+etcd:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: 100Mi
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: PR-35402-20240812-402f716b5
+indexCoordinator:
+  gc:
+    interval: 1
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.1"
+      memory: 50Mi
+indexNode:
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "2"
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+kafka:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: 1Gi
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+  zookeeper:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: 512Mi
+log:
+  level: debug
+indexCoord:
+  scheduler:
+    interval: 100
+metrics:
+  serviceMonitor:
+    enabled: true
+minio:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  mode: standalone
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: 512Mi
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+proxy:
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.3"
+      memory: 256Mi
+pulsar:
+  bookkeeper:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    configData:
+      PULSAR_GC: |
+        -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -XX:+PrintGCDetails
+      PULSAR_MEM: |
+        -Xms4096m -Xmx4096m -XX:MaxDirectMemorySize=8192m
+      nettyMaxFrameSizeBytes: "104867840"
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: 4Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+  broker:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    configData:
+      PULSAR_GC: |
+        -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError
+      PULSAR_MEM: |
+        -Xms4096m -Xmx4096m -XX:MaxDirectMemorySize=8192m
+      backlogQuotaDefaultLimitGB: "8"
+      backlogQuotaDefaultRetentionPolicy: producer_exception
+      defaultRetentionSizeInMB: "8192"
+      defaultRetentionTimeInMinutes: "10080"
+      maxMessageSize: "104857600"
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: 4Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+  components:
+    autorecovery: false
+  enabled: false
+  proxy:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    configData:
+      PULSAR_GC: |
+        -XX:MaxDirectMemorySize=2048m
+      PULSAR_MEM: |
+        -Xms1024m -Xmx1024m
+      httpNumThreads: "50"
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: 1Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+    wsResources:
+      requests:
+        cpu: "0.1"
+        memory: 100Mi
+  zookeeper:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    configData:
+      PULSAR_GC: |
+        -Dcom.sun.management.jmxremote -Djute.maxbuffer=10485760 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Dzookeeper.forceSync=no
+      PULSAR_MEM: |
+        -Xms1024m -Xmx1024m
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: 512Mi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+queryCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.2"
+      memory: 100Mi
+queryNode:
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "2"
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+rootCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+service:
+  type: ClusterIP
+standalone:
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "4"
+    requests:
+      cpu: "1"
+      memory: 3.5Gi
+tolerations:
+- effect: NoSchedule
+  key: node-role.kubernetes.io/e2e
+  operator: Exists
