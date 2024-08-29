@@ -1,0 +1,65 @@
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/e2e
+          operator: Exists
+      weight: 1
+cluster:
+  enabled: false
+etcd:
+  enabled: false
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+  replicaCount: 1
+extraConfigFiles:
+  user.yaml: |
+    etcd:
+      use:
+        embed: true
+      data:
+        dir: /var/lib/milvus/etcd
+    common:
+      storageType: local
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: PR-35432-20240812-71a1562ea
+indexCoordinator:
+  gc:
+    interval: 1
+indexCoord:
+  scheduler:
+    interval: 100
+indexNode:
+  disk:
+    enabled: true
+metrics:
+  serviceMonitor:
+    enabled: true
+minio:
+  enabled: false
+  mode: standalone
+  tls:
+    enabled: false
+pulsar:
+  enabled: false
+queryNode:
+  disk:
+    enabled: true
+service:
+  type: ClusterIP
+standalone:
+  disk:
+    enabled: true
+  extraEnv:
+  - name: ETCD_CONFIG_PATH
+    value: /milvus/configs/advanced/etcd.yaml
+tolerations:
+- effect: NoSchedule
+  key: node-role.kubernetes.io/e2e
+  operator: Exists
