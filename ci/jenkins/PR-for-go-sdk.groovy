@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.34.0') _
+@Library('jenkins-shared-library@v0.40.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -45,10 +45,12 @@ pipeline {
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
-                                              suppress_suffix_of_image_tag: true
+                                              suppress_suffix_of_image_tag: true,
+                                              images: '["milvus","gotestsum","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
                         milvus_sdk_go_image =  tekton.query_result job_name, 'gotestsum-image-fqdn'
+                        helm_image =  tekton.query_result job_name, 'helm-image-fqdn'
                     }
                 }
             }
@@ -88,7 +90,9 @@ pipeline {
                                               ciMode: 'e2e',
                                               milvus_image_tag: milvus_image_tag,
                                               milvus_sdk_go_image: milvus_sdk_go_image,
-                                              milvus_deployment_option: milvus_deployment_option
+                                              helm_image: helm_image,
+                                              milvus_deployment_option: milvus_deployment_option,
+                                              verbose: 'false'
                                 }
                             }
                         }
