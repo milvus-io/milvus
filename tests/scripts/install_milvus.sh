@@ -65,6 +65,10 @@ kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
 echo "[debug]  cluster type is ${MILVUS_SERVICE_TYPE}"
 if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
+
+  echo ">>>>>>>>>>values path>>>>>>>>>>:$2"
+  cat $2
+
   helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                --set image.all.tag="${MILVUS_IMAGE_TAG}" \

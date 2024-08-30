@@ -92,7 +92,7 @@ pipeline {
                                               milvus_sdk_go_image: milvus_sdk_go_image,
                                               helm_image: helm_image,
                                               milvus_deployment_option: milvus_deployment_option,
-                                              verbose: 'false'
+                                              verbose: 'true'
                                 }
                             }
                         }

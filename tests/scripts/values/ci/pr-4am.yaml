@@ -4,6 +4,11 @@ metrics:
 log:
   level: debug
 
+
+indexCoord:
+  scheduler:
+    interval: 100
+
 affinity:
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
