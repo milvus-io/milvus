@@ -36,10 +36,24 @@ if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
 fi
 
 # run unittest
+arg="$1"
+filter_value="${arg#*=}"
+
 for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
   if [ ! -d "${UNITTEST_DIR}" ]; then
     echo "The unittest folder does not exist!"
     exit 1
+  fi
+
+
+  if [[ $filter_value ]]; then
+    if [ $filter_value == "--gtest_list_tests" ]; then
+	  ${UNITTEST_DIR}/all_tests $filter_value
+	  exit 0
+    else
+	  ${UNITTEST_DIR}/all_tests --gtest_filter=$filter_value
+	  exit 0
+    fi
   fi
 
   echo "Running all unittest ..."
@@ -56,6 +70,7 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
         exit 1
       fi
   fi
+
 done
 
 # run cwrapper unittest
