@@ -188,7 +188,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 

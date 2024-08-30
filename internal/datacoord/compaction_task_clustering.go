@@ -172,7 +172,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		AnalyzeResultPath:  path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(t.AnalyzeTaskID, t.AnalyzeVersion)),
 		AnalyzeSegmentIds:  t.GetInputSegments(),
 		BeginLogID:         beginLogID,
-		PreAllocatedSegments: &datapb.IDRange{
+		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: t.GetResultSegments()[0],
 			End:   t.GetResultSegments()[1],
 		},

@@ -79,12 +79,12 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:     10,
-		Type:                 datapb.CompactionType_MixCompaction,
-		Schema:               s.meta.GetSchema(),
-		BeginLogID:           19530,
-		PreAllocatedSegments: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
-		MaxSize:              64 * 1024 * 1024,
+		TimeoutInSeconds:       10,
+		Type:                   datapb.CompactionType_MixCompaction,
+		Schema:                 s.meta.GetSchema(),
+		BeginLogID:             19530,
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		MaxSize:                64 * 1024 * 1024,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, s.plan)
