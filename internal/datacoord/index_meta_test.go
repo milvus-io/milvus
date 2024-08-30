@@ -170,7 +170,8 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 			{
 				Key:   common.IndexTypeKey,
 				Value: "HYBRID",
-			}},
+			},
+		},
 		Timestamp:       0,
 		IsAutoIndex:     true,
 		UserIndexParams: userIndexParams,
@@ -205,7 +206,6 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
 		assert.Equal(t, newIndexParams[0].Value, "INVERTED")
 	})
-
 }
 
 func TestMeta_CanCreateIndex(t *testing.T) {

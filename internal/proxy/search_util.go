@@ -307,13 +307,15 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair) (*rankParams, erro
 }
 
 func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest {
+	searchParams := make([]*commonpb.KeyValuePair, len(req.GetRankParams()))
+	copy(searchParams, req.GetRankParams())
 	ret := &milvuspb.SearchRequest{
 		Base:                  req.GetBase(),
 		DbName:                req.GetDbName(),
 		CollectionName:        req.GetCollectionName(),
 		PartitionNames:        req.GetPartitionNames(),
 		OutputFields:          req.GetOutputFields(),
-		SearchParams:          req.GetRankParams(),
+		SearchParams:          searchParams,
 		TravelTimestamp:       req.GetTravelTimestamp(),
 		GuaranteeTimestamp:    req.GetGuaranteeTimestamp(),
 		Nq:                    0,
