@@ -355,26 +355,26 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		plans := t.generatePlans(group.segments, signal, ct)
-		currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
-		if err != nil {
-			return err
-		}
+		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, plan := range plans {
-			totalRows := plan.A
-			segIDs := plan.B
 			if !signal.isForce && t.compactionHandler.isFull() {
-				log.Warn("compaction plan skipped due to handler full", zap.Int64s("segmentIDs", segIDs))
+				log.Warn("compaction plan skipped due to handler full")
 				break
 			}
+			totalRows, inputSegmentIDs := plan.A, plan.B
+
+			// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
+			// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
+			startID, endID, err := t.allocator.AllocN(11)
+			if err != nil {
+				log.Warn("fail to allocate id", zap.Error(err))
+				return err
+			}
 			start := time.Now()
-			planID := currentID
-			currentID++
-			targetSegmentID := currentID
-			currentID++
 			pts, _ := tsoutil.ParseTS(ct.startTime)
 			task := &datapb.CompactionTask{
-				PlanID:           planID,
+				PlanID:           startID,
 				TriggerID:        signal.id,
 				State:            datapb.CompactionTaskState_pipelining,
 				StartTime:        pts.Unix(),
@@ -384,22 +384,26 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				CollectionID:     group.collectionID,
 				PartitionID:      group.partitionID,
 				Channel:          group.channelName,
-				InputSegments:    segIDs,
-				ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
+				InputSegments:    inputSegmentIDs,
+				ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
 				TotalRows:        totalRows,
 				Schema:           coll.Schema,
+				MaxSize:          getExpandedSize(expectedSize),
 			}
-			err := t.compactionHandler.enqueueCompaction(task)
+			err = t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
 				log.Warn("failed to execute compaction task",
-					zap.Int64s("segmentIDs", segIDs),
+					zap.Int64("collection", group.collectionID),
+					zap.Int64("triggerID", signal.id),
+					zap.Int64("planID", task.GetPlanID()),
+					zap.Int64s("inputSegments", inputSegmentIDs),
 					zap.Error(err))
 				continue
 			}
 
 			log.Info("time cost of generating global compaction",
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
-				zap.Int64s("segmentIDs", segIDs))
+				zap.Int64s("segmentIDs", inputSegmentIDs))
 		}
 	}
 	return nil
@@ -457,27 +461,26 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal, ct)
-	currentID, _, err := t.allocator.AllocN(int64(len(plans) * 2))
-	if err != nil {
-		log.Warn("fail to allocate id", zap.Error(err))
-		return
-	}
+	expectedSize := getExpectedSegmentSize(t.meta, coll)
+	plans := t.generatePlans(segments, signal, ct, expectedSize)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID))
 			break
 		}
-		totalRows := plan.A
-		segmentIDS := plan.B
+
+		// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
+		// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
+		startID, endID, err := t.allocator.AllocN(11)
+		if err != nil {
+			log.Warn("fail to allocate id", zap.Error(err))
+			return
+		}
+		totalRows, inputSegmentIDs := plan.A, plan.B
 		start := time.Now()
-		planID := currentID
-		currentID++
-		targetSegmentID := currentID
-		currentID++
 		pts, _ := tsoutil.ParseTS(ct.startTime)
-		if err := t.compactionHandler.enqueueCompaction(&datapb.CompactionTask{
-			PlanID:           planID,
+		task := &datapb.CompactionTask{
+			PlanID:           startID,
 			TriggerID:        signal.id,
 			State:            datapb.CompactionTaskState_pipelining,
 			StartTime:        pts.Unix(),
@@ -487,29 +490,32 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			CollectionID:     collectionID,
 			PartitionID:      partitionID,
 			Channel:          channel,
-			InputSegments:    segmentIDS,
-			ResultSegments:   []int64{targetSegmentID}, // pre-allocated target segment
+			InputSegments:    inputSegmentIDs,
+			ResultSegments:   []int64{startID + 1, endID}, // pre-allocated target segment
 			TotalRows:        totalRows,
 			Schema:           coll.Schema,
-		}); err != nil {
+			MaxSize:          getExpandedSize(expectedSize),
+		}
+		if err := t.compactionHandler.enqueueCompaction(task); err != nil {
 			log.Warn("failed to execute compaction task",
 				zap.Int64("collection", collectionID),
-				zap.Int64("planID", planID),
-				zap.Int64s("segmentIDs", segmentIDS),
+				zap.Int64("triggerID", signal.id),
+				zap.Int64("planID", task.GetPlanID()),
+				zap.Int64s("inputSegments", inputSegmentIDs),
 				zap.Error(err))
 			continue
 		}
 		log.Info("time cost of generating compaction",
-			zap.Int64("planID", planID),
+			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64("time cost", time.Since(start).Milliseconds()),
 			zap.Int64("collectionID", signal.collectionID),
 			zap.String("channel", channel),
 			zap.Int64("partitionID", partitionID),
-			zap.Int64s("segmentIDs", segmentIDS))
+			zap.Int64s("inputSegmentIDs", inputSegmentIDs))
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime) []*typeutil.Pair[int64, []int64] {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*typeutil.Pair[int64, []int64] {
 	if len(segments) == 0 {
 		log.Warn("the number of candidate segments is 0, skip to generate compaction plan")
 		return []*typeutil.Pair[int64, []int64]{}
@@ -520,8 +526,6 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
-
-	expectedSize := t.getExpectedSegmentSize(segments[0].CollectionID)
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
@@ -852,4 +856,8 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	}
 
 	return small
+}
+
+func getExpandedSize(size int64) int64 {
+	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }

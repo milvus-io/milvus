@@ -592,6 +592,7 @@ message CompactionPlan {
   int64 begin_logID = 17;
   IDRange pre_allocated_segments = 18; // only for clustering compaction
   int64 slot_usage = 19;
+  int64 max_size = 20;
 }
 
 message CompactionSegment {
@@ -946,6 +947,7 @@ message CompactionTask{
   int64 analyzeTaskID = 23;
   int64 analyzeVersion = 24;
   int64 lastStateStartTime = 25;
+  int64 max_size = 26;
 }
 
 message PartitionStatsInfo {

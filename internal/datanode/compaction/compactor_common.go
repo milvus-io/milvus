@@ -104,7 +104,7 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 	return pk2ts, nil
 }
 
-func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {
+func composePaths(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {
 	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, nil, err
@@ -184,7 +184,7 @@ func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *
 func statSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) (*datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
-	sblob, err := writer.Finish(writer.GetRowNum())
+	sblob, err := writer.Finish()
 	if err != nil {
 		return nil, err
 	}
@@ -219,4 +219,13 @@ func uploadStatsBlobs(ctx context.Context, collectionID, partitionID, segmentID,
 	}
 
 	return statFieldLog, nil
+}
+
+func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
+	for fID, fpath := range paths {
+		if _, ok := base[fID]; !ok {
+			base[fID] = &datapb.FieldBinlog{FieldID: fID, Binlogs: make([]*datapb.Binlog, 0)}
+		}
+		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
+	}
 }

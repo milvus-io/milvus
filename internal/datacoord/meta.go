@@ -1505,62 +1505,69 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 	}
 
-	// MixCompaction / MergeCompaction will generates one and only one segment
-	compactToSegment := result.GetSegments()[0]
+	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
-	compactToSegmentInfo := NewSegmentInfo(
-		&datapb.SegmentInfo{
-			ID:            compactToSegment.GetSegmentID(),
-			CollectionID:  compactFromSegInfos[0].CollectionID,
-			PartitionID:   compactFromSegInfos[0].PartitionID,
-			InsertChannel: t.GetChannel(),
-			NumOfRows:     compactToSegment.NumOfRows,
-			State:         commonpb.SegmentState_Flushed,
-			MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
-			Binlogs:       compactToSegment.GetInsertLogs(),
-			Statslogs:     compactToSegment.GetField2StatslogPaths(),
-			Deltalogs:     compactToSegment.GetDeltalogs(),
+	compactToSegments := make([]*SegmentInfo, 0)
+	for _, compactToSegment := range result.GetSegments() {
+		compactToSegmentInfo := NewSegmentInfo(
+			&datapb.SegmentInfo{
+				ID:            compactToSegment.GetSegmentID(),
+				CollectionID:  compactFromSegInfos[0].CollectionID,
+				PartitionID:   compactFromSegInfos[0].PartitionID,
+				InsertChannel: t.GetChannel(),
+				NumOfRows:     compactToSegment.NumOfRows,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
+				Binlogs:       compactToSegment.GetInsertLogs(),
+				Statslogs:     compactToSegment.GetField2StatslogPaths(),
+				Deltalogs:     compactToSegment.GetDeltalogs(),
 
-			CreatedByCompaction: true,
-			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
-			Level:               datapb.SegmentLevel_L1,
+				CreatedByCompaction: true,
+				CompactionFrom:      compactFromSegIDs,
+				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+				Level:               datapb.SegmentLevel_L1,
 
-			StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetStartPosition()
-			})),
-			DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetDmlPosition()
-			})),
-		})
+				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+					return info.GetStartPosition()
+				})),
+				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+					return info.GetDmlPosition()
+				})),
+			})
 
-	// L1 segment with NumRows=0 will be discarded, so no need to change the metric
-	if compactToSegmentInfo.GetNumOfRows() > 0 {
-		// metrics mutation for compactTo segments
-		metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetNumOfRows())
-	} else {
-		compactToSegmentInfo.State = commonpb.SegmentState_Dropped
+		// L1 segment with NumRows=0 will be discarded, so no need to change the metric
+		if compactToSegmentInfo.GetNumOfRows() > 0 {
+			// metrics mutation for compactTo segments
+			metricMutation.addNewSeg(compactToSegmentInfo.GetState(), compactToSegmentInfo.GetLevel(), compactToSegmentInfo.GetNumOfRows())
+		} else {
+			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
+		}
+
+		log.Info("Add a new compactTo segment",
+			zap.Int64("compactTo", compactToSegmentInfo.GetID()),
+			zap.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
+			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
+			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
+			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+		)
+		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
-
-	log = log.With(
-		zap.Int64s("compactFrom", compactFromSegIDs),
-		zap.Int64("compactTo", compactToSegmentInfo.GetID()),
-		zap.Int64("compactTo segment numRows", compactToSegmentInfo.GetNumOfRows()),
-	)
 
 	log.Debug("meta update: prepare for meta mutation - complete")
 	compactFromInfos := lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
 
-	log.Debug("meta update: alter meta store for compaction updates",
-		zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
-		zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
-		zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
-	)
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{compactToSegmentInfo.SegmentInfo},
-		metastore.BinlogsIncrement{Segment: compactToSegmentInfo.SegmentInfo},
-	); err != nil {
+	compactToInfos := lo.Map(compactToSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
+		return info.SegmentInfo
+	})
+
+	binlogs := make([]metastore.BinlogsIncrement, 0)
+	for _, seg := range compactToInfos {
+		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
+	}
+	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
+	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		log.Warn("fail to alter compactTo segments", zap.Error(err))
 		return nil, nil, err
 	}
@@ -1568,14 +1575,15 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 		log.Warn("fail to alter compactFrom segments", zap.Error(err))
 		return nil, nil, err
 	}
-
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
 		m.segments.SetSegment(info.GetID(), info)
 	})
-	m.segments.SetSegment(compactToSegmentInfo.GetID(), compactToSegmentInfo)
+	lo.ForEach(compactToSegments, func(info *SegmentInfo, _ int) {
+		m.segments.SetSegment(info.GetID(), info)
+	})
 
 	log.Info("meta update: alter in memory meta after compaction - complete")
-	return []*SegmentInfo{compactToSegmentInfo}, metricMutation, nil
+	return compactToSegments, metricMutation, nil
 }
 
 func (m *meta) CompleteCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {

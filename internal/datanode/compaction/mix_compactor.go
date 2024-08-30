@@ -41,10 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// for MixCompaction only
 type mixCompactionTask struct {
 	binlogIO  io.BinlogIO
-	allocator allocator.Interface
 	currentTs typeutil.Timestamp
 
 	plan *datapb.CompactionPlan
@@ -52,11 +50,16 @@ type mixCompactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	collectionID int64
+	partitionID  int64
+	targetSize   int64
+	maxRows      int64
+	pkID         int64
+
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 }
 
-// make sure compactionTask implements compactor interface
 var _ Compactor = (*mixCompactionTask)(nil)
 
 func NewMixCompactionTask(
@@ -65,76 +68,77 @@ func NewMixCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
-	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	return &mixCompactionTask{
 		ctx:       ctx1,
 		cancel:    cancel,
 		binlogIO:  binlogIO,
-		allocator: alloc,
 		plan:      plan,
-		tr:        timerecord.NewTimeRecorder("mix compaction"),
+		tr:        timerecord.NewTimeRecorder("mergeSplit compaction"),
 		currentTs: tsoutil.GetCurrentTime(),
 		done:      make(chan struct{}, 1),
 	}
 }
 
-func (t *mixCompactionTask) Complete() {
-	t.done <- struct{}{}
-}
+// preCompact exams whether its a valid compaction plan, and init the collectionID and partitionID
+func (t *mixCompactionTask) preCompact() error {
+	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
+		return t.ctx.Err()
+	}
 
-func (t *mixCompactionTask) Stop() {
-	t.cancel()
-	<-t.done
-}
+	if len(t.plan.GetSegmentBinlogs()) < 1 {
+		return errors.Newf("compaction plan is illegal, there's no segments in compaction plan, planID = %d", t.GetPlanID())
+	}
 
-func (t *mixCompactionTask) GetPlanID() typeutil.UniqueID {
-	return t.plan.GetPlanID()
-}
+	if t.plan.GetMaxSize() == 0 {
+		return errors.Newf("compaction plan is illegal, empty maxSize, planID = %d", t.GetPlanID())
+	}
 
-func (t *mixCompactionTask) GetChannelName() string {
-	return t.plan.GetChannel()
-}
+	t.collectionID = t.plan.GetSegmentBinlogs()[0].GetCollectionID()
+	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
+	t.targetSize = t.plan.GetMaxSize()
 
-func (t *mixCompactionTask) GetCompactionType() datapb.CompactionType {
-	return t.plan.GetType()
-}
+	currSize := int64(0)
+	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
+		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				// numRows just need to add entries num of ONE field.
+				if i == 0 {
+					t.maxRows += binlog.GetEntriesNum()
+				}
 
-// return num rows of all segment compaction from
-func (t *mixCompactionTask) getNumRows() int64 {
-	numRows := int64(0)
-	for _, binlog := range t.plan.SegmentBinlogs {
-		if len(binlog.GetFieldBinlogs()) > 0 {
-			for _, ct := range binlog.GetFieldBinlogs()[0].GetBinlogs() {
-				numRows += ct.GetEntriesNum()
+				// MemorySize might be incorrectly
+				currSize += binlog.GetMemorySize()
 			}
 		}
 	}
-	return numRows
+
+	outputSegmentCount := int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
+	log.Info("preCompaction analyze",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64("currSize", currSize),
+		zap.Int64("targetSize", t.targetSize),
+		zap.Int64("estimatedSegmentCount", outputSegmentCount),
+	)
+
+	return nil
 }
 
-func (t *mixCompactionTask) merge(
+func (t *mixCompactionTask) mergeSplit(
 	ctx context.Context,
 	binlogPaths [][]string,
 	delta map[interface{}]typeutil.Timestamp,
-	writer *SegmentWriter,
-) (*datapb.CompactionSegment, error) {
+) ([]*datapb.CompactionSegment, error) {
 	_ = t.tr.RecordSpan()
 
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "CompactMerge")
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
 	defer span.End()
 
-	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.Int64("compactTo segment", writer.GetSegmentID()))
+	log := log.With(zap.Int64("planID", t.GetPlanID()))
 
-	var (
-		syncBatchCount    int   // binlog batch count
-		remainingRowCount int64 // the number of remaining entities
-		expiredRowCount   int64 // the number of expired entities
-		deletedRowCount   int64 = 0
-		unflushedRowCount int64 = 0
-
-		// All binlog meta of a segment
-		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
-	)
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID)
 
 	isValueDeleted := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
@@ -147,25 +151,27 @@ func (t *mixCompactionTask) merge(
 		return false
 	}
 
-	downloadTimeCost := time.Duration(0)
-	serWriteTimeCost := time.Duration(0)
-	uploadTimeCost := time.Duration(0)
+	deletedRowCount := int64(0)
+	expiredRowCount := int64(0)
 
+	pkField, err := typeutil.GetPrimaryFieldSchema(t.plan.GetSchema())
+	if err != nil {
+		log.Warn("failed to get pk field from schema")
+		return nil, err
+	}
 	for _, paths := range binlogPaths {
 		log := log.With(zap.Strings("paths", paths))
-		downloadStart := time.Now()
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
 			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
 			return nil, err
 		}
-		downloadTimeCost += time.Since(downloadStart)
 
 		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		iter, err := storage.NewBinlogDeserializeReader(blobs, writer.GetPkID())
+		iter, err := storage.NewBinlogDeserializeReader(blobs, pkField.GetFieldID())
 		if err != nil {
 			log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
@@ -193,148 +199,56 @@ func (t *mixCompactionTask) merge(
 				continue
 			}
 
-			err = writer.Write(v)
+			err = mWriter.Write(v)
 			if err != nil {
 				log.Warn("compact wrong, failed to writer row", zap.Error(err))
 				return nil, err
 			}
-			unflushedRowCount++
-			remainingRowCount++
-
-			if (unflushedRowCount+1)%100 == 0 && writer.FlushAndIsFull() {
-				serWriteStart := time.Now()
-				kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, writer)
-				if err != nil {
-					log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-					return nil, err
-				}
-				serWriteTimeCost += time.Since(serWriteStart)
-
-				uploadStart := time.Now()
-				if err := t.binlogIO.Upload(ctx, kvs); err != nil {
-					log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-					return nil, err
-				}
-				uploadTimeCost += time.Since(uploadStart)
-				mergeFieldBinlogs(allBinlogs, partialBinlogs)
-				syncBatchCount++
-				unflushedRowCount = 0
-			}
 		}
 	}
-
-	if !writer.FlushAndIsEmpty() {
-		serWriteStart := time.Now()
-		kvs, partialBinlogs, err := serializeWrite(ctx, t.allocator, writer)
-		if err != nil {
-			log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-			return nil, err
-		}
-		serWriteTimeCost += time.Since(serWriteStart)
-
-		uploadStart := time.Now()
-		if err := t.binlogIO.Upload(ctx, kvs); err != nil {
-			log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-			return nil, err
-		}
-		uploadTimeCost += time.Since(uploadStart)
-
-		mergeFieldBinlogs(allBinlogs, partialBinlogs)
-		syncBatchCount++
-	}
-
-	serWriteStart := time.Now()
-	sPath, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, writer)
+	res, err := mWriter.Finish()
 	if err != nil {
-		log.Warn("compact wrong, failed to serialize write segment stats",
-			zap.Int64("remaining row count", remainingRowCount), zap.Error(err))
+		log.Warn("compact wrong, failed to finish writer", zap.Error(err))
 		return nil, err
-	}
-	serWriteTimeCost += time.Since(serWriteStart)
-
-	pack := &datapb.CompactionSegment{
-		SegmentID:           writer.GetSegmentID(),
-		InsertLogs:          lo.Values(allBinlogs),
-		Field2StatslogPaths: []*datapb.FieldBinlog{sPath},
-		NumOfRows:           remainingRowCount,
-		Channel:             t.plan.GetChannel(),
 	}
 
 	totalElapse := t.tr.RecordSpan()
-
-	log.Info("compact merge end",
-		zap.Int64("remaining row count", remainingRowCount),
+	log.Info("compact mergeSplit end",
+		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
 		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
-		zap.Int("binlog batch count", syncBatchCount),
-		zap.Duration("download binlogs elapse", downloadTimeCost),
-		zap.Duration("upload binlogs elapse", uploadTimeCost),
-		zap.Duration("serWrite elapse", serWriteTimeCost),
-		zap.Duration("deRead elapse", totalElapse-serWriteTimeCost-downloadTimeCost-uploadTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	return pack, nil
-}
-
-func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
-	for fID, fpath := range paths {
-		if _, ok := base[fID]; !ok {
-			base[fID] = &datapb.FieldBinlog{FieldID: fID, Binlogs: make([]*datapb.Binlog, 0)}
-		}
-		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
-	}
+	return res, nil
 }
 
 func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	durInQueue := t.tr.RecordSpan()
-	compactStart := time.Now()
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
 	defer span.End()
+	compactStart := time.Now()
 
-	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		log.Warn("compact wrong, there's no segments in segment binlogs", zap.Int64("planID", t.plan.GetPlanID()))
-		return nil, errors.New("compaction plan is illegal")
+	if err := t.preCompact(); err != nil {
+		log.Warn("compact wrong, failed to preCompact", zap.Error(err))
+		return nil, err
 	}
 
-	collectionID := t.plan.GetSegmentBinlogs()[0].GetCollectionID()
-	partitionID := t.plan.GetSegmentBinlogs()[0].GetPartitionID()
-
-	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.GetPlanID()),
+		zap.Int64("collectionID", t.collectionID),
+		zap.Int64("partitionID", t.partitionID),
 		zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
-
-	if ok := funcutil.CheckCtxValid(ctx); !ok {
-		log.Warn("compact wrong, task context done or timeout")
-		return nil, ctx.Err()
-	}
 
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
 	log.Info("compact start")
-
-	targetSegID := t.plan.GetPreAllocatedSegments().GetBegin()
-	previousRowCount := t.getNumRows()
-
-	writer, err := NewSegmentWriter(t.plan.GetSchema(), previousRowCount, targetSegID, partitionID, collectionID)
+	deltaPaths, allBatchPaths, err := composePaths(t.plan.GetSegmentBinlogs())
 	if err != nil {
-		log.Warn("compact wrong, unable to init segment writer", zap.Error(err))
+		log.Warn("compact wrong, failed to composePaths", zap.Error(err))
 		return nil, err
 	}
-
-	segIDs := lo.Map(t.plan.GetSegmentBinlogs(), func(binlogs *datapb.CompactionSegmentBinlogs, _ int) int64 {
-		return binlogs.GetSegmentID()
-	})
-
-	deltaPaths, allPath, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
-	if err != nil {
-		log.Warn("fail to merge deltalogs", zap.Error(err))
-		return nil, err
-	}
-
 	// Unable to deal with all empty segments cases, so return error
-	if len(allPath) == 0 {
+	if len(allBatchPaths) == 0 {
 		log.Warn("compact wrong, all segments' binlogs are empty")
 		return nil, errors.New("illegal compaction plan")
 	}
@@ -345,20 +259,13 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	compactToSeg, err := t.merge(ctxTimeout, allPath, deltaPk2Ts, writer)
+	res, err := t.mergeSplit(ctxTimeout, allBatchPaths, deltaPk2Ts)
 	if err != nil {
-		log.Warn("compact wrong, fail to merge", zap.Error(err))
+		log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))
 		return nil, err
 	}
 
-	log.Info("compact done",
-		zap.Int64("compact to segment", targetSegID),
-		zap.Int64s("compact from segments", segIDs),
-		zap.Int("num of binlog paths", len(compactToSeg.GetInsertLogs())),
-		zap.Int("num of stats paths", 1),
-		zap.Int("num of delta paths", len(compactToSeg.GetDeltalogs())),
-		zap.Duration("compact elapse", time.Since(compactStart)),
-	)
+	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)))
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
@@ -367,30 +274,35 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),
 		Channel:  t.GetChannelName(),
-		Segments: []*datapb.CompactionSegment{compactToSeg},
+		Segments: res,
 		Type:     t.plan.GetType(),
 	}
-
 	return planResult, nil
 }
 
-func (t *mixCompactionTask) GetCollection() typeutil.UniqueID {
-	// The length of SegmentBinlogs is checked before task enqueueing.
-	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
+func (t *mixCompactionTask) Complete() {
+	t.done <- struct{}{}
 }
 
-func (t *mixCompactionTask) isExpiredEntity(ts typeutil.Timestamp) bool {
-	now := t.currentTs
+func (t *mixCompactionTask) Stop() {
+	t.cancel()
+	<-t.done
+}
 
-	// entity expire is not enabled if duration <= 0
-	if t.plan.GetCollectionTtl() <= 0 {
-		return false
-	}
+func (t *mixCompactionTask) GetPlanID() typeutil.UniqueID {
+	return t.plan.GetPlanID()
+}
 
-	entityT, _ := tsoutil.ParseTS(ts)
-	nowT, _ := tsoutil.ParseTS(now)
+func (t *mixCompactionTask) GetChannelName() string {
+	return t.plan.GetChannel()
+}
 
-	return entityT.Add(time.Duration(t.plan.GetCollectionTtl())).Before(nowT)
+func (t *mixCompactionTask) GetCompactionType() datapb.CompactionType {
+	return t.plan.GetType()
+}
+
+func (t *mixCompactionTask) GetCollection() typeutil.UniqueID {
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
 func (t *mixCompactionTask) GetSlotUsage() int64 {
