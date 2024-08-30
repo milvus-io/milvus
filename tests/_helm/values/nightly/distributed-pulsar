@@ -1,0 +1,74 @@
+cluster:
+  enabled: true
+common:
+  security:
+    authorizationEnabled: false
+dataCoordinator:
+  gc:
+    dropTolerance: 86400
+    missingTolerance: 86400
+  profiling:
+    enabled: true
+dataNode:
+  profiling:
+    enabled: true
+  replicas: 2
+etcd:
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: nightly-20240821-ed4eaff
+indexCoordinator:
+  gc:
+    interval: 1
+  profiling:
+    enabled: true
+indexNode:
+  disk:
+    enabled: true
+  profiling:
+    enabled: true
+  replicas: 2
+kafka:
+  enabled: false
+  metrics:
+    jmx:
+      enabled: true
+    kafka:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+log:
+  level: debug
+metrics:
+  serviceMonitor:
+    enabled: true
+minio:
+  mode: standalone
+proxy:
+  profiling:
+    enabled: true
+  replicas: 2
+pulsar:
+  broker:
+    replicaCount: 2
+  enabled: true
+queryCoordinator:
+  profiling:
+    enabled: true
+queryNode:
+  disk:
+    enabled: true
+  profiling:
+    enabled: true
+  replicas: 2
+service:
+  type: ClusterIP
+standalone:
+  disk:
+    enabled: true
