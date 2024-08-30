@@ -44,11 +44,11 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
-  ? github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector
-  : interfaces:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector: 
+    interfaces:
       SealOperator:
-  ? github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector
-  : interfaces:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector: 
+    interfaces:
       TimeTickSyncOperator:
   google.golang.org/grpc:
     interfaces:
