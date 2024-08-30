@@ -4,7 +4,7 @@ import (
 	"container/heap"
 	"context"
 	sio "io"
-	"time"
+	"math"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -20,12 +20,11 @@ import (
 )
 
 func mergeSortMultipleSegments(ctx context.Context,
-	planID int64,
+	plan *datapb.CompactionPlan,
+	collectionID, partitionID, maxRows int64,
 	binlogIO io.BinlogIO,
-	allocator allocator.Interface,
 	binlogs []*datapb.CompactionSegmentBinlogs,
 	delta map[interface{}]typeutil.Timestamp,
-	writer *storage.SegmentWriter,
 	tr *timerecord.TimeRecorder,
 	currentTs typeutil.Timestamp,
 	collectionTtl int64,
@@ -35,16 +34,16 @@ func mergeSortMultipleSegments(ctx context.Context,
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "mergeSortMultipleSegments")
 	defer span.End()
 
-	log := log.With(zap.Int64("planID", planID), zap.Int64("compactTo segment", writer.GetSegmentID()))
+	log := log.With(zap.Int64("planID", plan.GetPlanID()))
+
+	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegments().GetBegin(), plan.GetPreAllocatedSegments().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID)
 
 	var (
-		syncBatchCount    int   // binlog batch count
-		remainingRowCount int64 // the number of remaining entities
-		expiredRowCount   int64 // the number of expired entities
-		unflushedRowCount int64 = 0
-
-		// All binlog meta of a segment
-		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+		expiredRowCount int64 // the number of expired entities
+		deletedRowCount int64
 	)
 
 	isValueDeleted := func(v *storage.Value) bool {
@@ -58,9 +57,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return false
 	}
 
-	downloadTimeCost := time.Duration(0)
-	serWriteTimeCost := time.Duration(0)
-	uploadTimeCost := time.Duration(0)
+	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	if err != nil {
+		log.Warn("failed to get pk field from schema")
+		return nil, err
+	}
 
 	//SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
 	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
@@ -86,7 +87,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			}
 			binlogPaths[idx] = batchPaths
 		}
-		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, writer.GetPkID())
+		segmentReaders[i] = NewSegmentDeserializeReader(ctx, binlogPaths, binlogIO, pkField.GetFieldID())
 	}
 
 	pq := make(PriorityQueue, 0)
@@ -106,6 +107,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		v := smallest.Value
 
 		if isValueDeleted(v) {
+			deletedRowCount++
 			continue
 		}
 
@@ -115,31 +117,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 			continue
 		}
 
-		err := writer.Write(v)
+		err := mWriter.Write(v)
 		if err != nil {
 			log.Warn("compact wrong, failed to writer row", zap.Error(err))
 			return nil, err
-		}
-		unflushedRowCount++
-		remainingRowCount++
-
-		if (unflushedRowCount+1)%100 == 0 && writer.FlushAndIsFull() {
-			serWriteStart := time.Now()
-			kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
-			if err != nil {
-				log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-				return nil, err
-			}
-			serWriteTimeCost += time.Since(serWriteStart)
-
-			uploadStart := time.Now()
-			if err := binlogIO.Upload(ctx, kvs); err != nil {
-				log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-			}
-			uploadTimeCost += time.Since(uploadStart)
-			mergeFieldBinlogs(allBinlogs, partialBinlogs)
-			syncBatchCount++
-			unflushedRowCount = 0
 		}
 
 		v, err = segmentReaders[smallest.Index].Next()
@@ -155,53 +136,22 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 	}
 
-	if !writer.FlushAndIsEmpty() {
-		serWriteStart := time.Now()
-		kvs, partialBinlogs, err := serializeWrite(ctx, allocator, writer)
-		if err != nil {
-			log.Warn("compact wrong, failed to serialize writer", zap.Error(err))
-			return nil, err
-		}
-		serWriteTimeCost += time.Since(serWriteStart)
-
-		uploadStart := time.Now()
-		if err := binlogIO.Upload(ctx, kvs); err != nil {
-			log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
-		}
-		uploadTimeCost += time.Since(uploadStart)
-
-		mergeFieldBinlogs(allBinlogs, partialBinlogs)
-		syncBatchCount++
-	}
-
-	serWriteStart := time.Now()
-	sPath, err := statSerializeWrite(ctx, binlogIO, allocator, writer)
+	res, err := mWriter.Finish()
 	if err != nil {
-		log.Warn("compact wrong, failed to serialize write segment stats",
-			zap.Int64("remaining row count", remainingRowCount), zap.Error(err))
+		log.Warn("compact wrong, failed to finish writer", zap.Error(err))
 		return nil, err
 	}
-	serWriteTimeCost += time.Since(serWriteStart)
 
-	pack := &datapb.CompactionSegment{
-		SegmentID:           writer.GetSegmentID(),
-		InsertLogs:          lo.Values(allBinlogs),
-		Field2StatslogPaths: []*datapb.FieldBinlog{sPath},
-		NumOfRows:           remainingRowCount,
-		IsSorted:            true,
+	for _, seg := range res {
+		seg.IsSorted = true
 	}
 
 	totalElapse := tr.RecordSpan()
-
-	log.Info("mergeSortMultipleSegments merge end",
-		zap.Int64("remaining row count", remainingRowCount),
+	log.Info("compact mergeSortMultipleSegments end",
+		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
+		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
-		zap.Int("binlog batch count", syncBatchCount),
-		zap.Duration("download binlogs elapse", downloadTimeCost),
-		zap.Duration("upload binlogs elapse", uploadTimeCost),
-		zap.Duration("serWrite elapse", serWriteTimeCost),
-		zap.Duration("deRead elapse", totalElapse-serWriteTimeCost-downloadTimeCost-uploadTimeCost),
 		zap.Duration("total elapse", totalElapse))
 
-	return []*datapb.CompactionSegment{pack}, nil
+	return res, nil
 }

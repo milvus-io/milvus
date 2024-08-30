@@ -54,7 +54,7 @@ type MixCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 
 	meta      *etcdpb.CollectionMeta
-	segWriter *storage.SegmentWriter
+	segWriter *SegmentWriter
 
 	task *mixCompactionTask
 	plan *datapb.CompactionPlan
@@ -237,9 +237,10 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 
 	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
 	s.Equal(1, len(result.GetSegments()))
+	s.True(result.GetSegments()[0].GetIsSorted())
 
 	segment := result.GetSegments()[0]
-	s.EqualValues(19530, segment.GetSegmentID())
+	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(300, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
 	s.NotEmpty(segment.Field2StatslogPaths)
@@ -534,7 +535,7 @@ func getRow(magic int64) map[int64]interface{} {
 }
 
 func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int64) {
-	segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 65535, magic, PartitionID, CollectionID)
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, magic, PartitionID, CollectionID)
 	s.Require().NoError(err)
 
 	for i := int64(0); i < numRows; i++ {
@@ -553,7 +554,7 @@ func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int
 }
 
 func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
-	segWriter, err := storage.NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID)
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID)
 	s.Require().NoError(err)
 
 	v := storage.Value{

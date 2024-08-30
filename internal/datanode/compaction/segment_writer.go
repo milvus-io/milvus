@@ -2,7 +2,7 @@
 // buffer.Serialize will serialize the InsertBuffer and clear it
 // pkstats keeps tracking pkstats of the segment until Finish
 
-package storage
+package compaction
 
 import (
 	"context"
@@ -14,8 +14,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -210,7 +212,7 @@ func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 
 func NewSegmentDeltaWriter(segmentID, partitionID, collectionID int64) *SegmentDeltaWriter {
 	return &SegmentDeltaWriter{
-		deleteData:   &DeleteData{},
+		deleteData:   &storage.DeleteData{},
 		segmentID:    segmentID,
 		partitionID:  partitionID,
 		collectionID: collectionID,
@@ -220,7 +222,7 @@ func NewSegmentDeltaWriter(segmentID, partitionID, collectionID int64) *SegmentD
 }
 
 type SegmentDeltaWriter struct {
-	deleteData   *DeleteData
+	deleteData   *storage.DeleteData
 	segmentID    int64
 	partitionID  int64
 	collectionID int64
@@ -245,8 +247,8 @@ func (w *SegmentDeltaWriter) GetRowNum() int64 {
 	return w.deleteData.RowCount
 }
 
-func (w *SegmentDeltaWriter) GetTimeRange() *TimeRange {
-	return NewTimeRange(w.tsFrom, w.tsTo)
+func (w *SegmentDeltaWriter) GetTimeRange() *writebuffer.TimeRange {
+	return writebuffer.NewTimeRange(w.tsFrom, w.tsTo)
 }
 
 func (w *SegmentDeltaWriter) updateRange(ts typeutil.Timestamp) {
@@ -258,12 +260,12 @@ func (w *SegmentDeltaWriter) updateRange(ts typeutil.Timestamp) {
 	}
 }
 
-func (w *SegmentDeltaWriter) Write(pk PrimaryKey, ts typeutil.Timestamp) {
+func (w *SegmentDeltaWriter) Write(pk storage.PrimaryKey, ts typeutil.Timestamp) {
 	w.deleteData.Append(pk, ts)
 	w.updateRange(ts)
 }
 
-func (w *SegmentDeltaWriter) WriteBatch(pks []PrimaryKey, tss []typeutil.Timestamp) {
+func (w *SegmentDeltaWriter) WriteBatch(pks []storage.PrimaryKey, tss []typeutil.Timestamp) {
 	w.deleteData.AppendBatch(pks, tss)
 
 	for _, ts := range tss {
@@ -271,8 +273,8 @@ func (w *SegmentDeltaWriter) WriteBatch(pks []PrimaryKey, tss []typeutil.Timesta
 	}
 }
 
-func (w *SegmentDeltaWriter) Finish() (*Blob, *TimeRange, error) {
-	blob, err := NewDeleteCodec().Serialize(w.collectionID, w.partitionID, w.segmentID, w.deleteData)
+func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *writebuffer.TimeRange, error) {
+	blob, err := storage.NewDeleteCodec().Serialize(w.collectionID, w.partitionID, w.segmentID, w.deleteData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,17 +282,13 @@ func (w *SegmentDeltaWriter) Finish() (*Blob, *TimeRange, error) {
 	return blob, w.GetTimeRange(), nil
 }
 
-func (w *SegmentDeltaWriter) GetDeltaData() *DeleteData {
-	return w.deleteData
-}
-
 type SegmentWriter struct {
-	writer  *SerializeWriter[*Value]
-	closers []func() (*Blob, error)
+	writer  *storage.SerializeWriter[*storage.Value]
+	closers []func() (*storage.Blob, error)
 	tsFrom  typeutil.Timestamp
 	tsTo    typeutil.Timestamp
 
-	pkstats      *PrimaryKeyStats
+	pkstats      *storage.PrimaryKeyStats
 	segmentID    int64
 	partitionID  int64
 	collectionID int64
@@ -323,7 +321,7 @@ func (w *SegmentWriter) WrittenMemorySize() uint64 {
 	return w.writer.WrittenMemorySize()
 }
 
-func (w *SegmentWriter) Write(v *Value) error {
+func (w *SegmentWriter) Write(v *storage.Value) error {
 	ts := typeutil.Timestamp(v.Timestamp)
 	if ts < w.tsFrom {
 		w.tsFrom = ts
@@ -347,10 +345,6 @@ func (w *SegmentWriter) IsFull() bool {
 	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
 }
 
-func (w *SegmentWriter) IsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
-	return w.writer.WrittenMemorySize() > binLogMaxSize
-}
-
 func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
 	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
@@ -370,15 +364,15 @@ func (w *SegmentWriter) FlushAndIsEmpty() bool {
 	return w.writer.WrittenMemorySize() == 0
 }
 
-func (w *SegmentWriter) GetTimeRange() *TimeRange {
-	return NewTimeRange(w.tsFrom, w.tsTo)
+func (w *SegmentWriter) GetTimeRange() *writebuffer.TimeRange {
+	return writebuffer.NewTimeRange(w.tsFrom, w.tsTo)
 }
 
-func (w *SegmentWriter) SerializeYield() ([]*Blob, *TimeRange, error) {
+func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRange, error) {
 	w.writer.Flush()
 	w.writer.Close()
 
-	fieldData := make([]*Blob, len(w.closers))
+	fieldData := make([]*storage.Blob, len(w.closers))
 	for i, f := range w.closers {
 		blob, err := f()
 		if err != nil {
@@ -419,7 +413,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 		return nil, err
 	}
 
-	stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxCount)
+	stats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxCount)
 	if err != nil {
 		return nil, err
 	}
@@ -443,13 +437,12 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, segID, par
 }
 
 func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema,
-) (writer *SerializeWriter[*Value], closers []func() (*Blob, error), err error) {
-	fieldWriters := NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
-	closers = make([]func() (*Blob, error), 0, len(fieldWriters))
+) (writer *storage.SerializeWriter[*storage.Value], closers []func() (*storage.Blob, error), err error) {
+	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
+	closers = make([]func() (*storage.Blob, error), 0, len(fieldWriters))
 	for _, w := range fieldWriters {
 		closers = append(closers, w.Finalize)
 	}
-
 	writer, err = storage.NewBinlogSerializeWriter(schema, partID, segID, fieldWriters, 100)
 	return
 }

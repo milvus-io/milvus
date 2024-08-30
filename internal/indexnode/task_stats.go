@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -162,7 +163,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 	)
 
 	numRows := st.req.GetNumRows()
-	writer, err := storage.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID())
+	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID())
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer", zap.Error(err))
 		return err
@@ -475,7 +476,7 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 	}
 }
 
-func serializeWrite(ctx context.Context, startID int64, writer *storage.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
+func serializeWrite(ctx context.Context, startID int64, writer *compaction.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
 	defer span.End()
 
@@ -511,10 +512,10 @@ func serializeWrite(ctx context.Context, startID int64, writer *storage.SegmentW
 	return
 }
 
-func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *storage.SegmentWriter, finalRowCount int64) (int64, *datapb.FieldBinlog, error) {
+func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *compaction.SegmentWriter, finalRowCount int64) (int64, *datapb.FieldBinlog, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "statslog serializeWrite")
 	defer span.End()
-	sblob, err := writer.Finish(finalRowCount)
+	sblob, err := writer.Finish()
 	if err != nil {
 		return 0, nil, err
 	}

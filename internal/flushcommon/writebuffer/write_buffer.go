@@ -382,7 +382,7 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, *storage.DeleteData, *storage.TimeRange, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		return nil, nil, nil, nil
@@ -575,7 +575,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
 	if timeRange != nil {
-		tsFrom, tsTo = timeRange.TimestampMin, timeRange.TimestampMax
+		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
 	}
 
 	if startPos != nil {

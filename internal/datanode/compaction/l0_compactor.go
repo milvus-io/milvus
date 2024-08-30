@@ -187,7 +187,7 @@ func getMaxBatchSize(baseMemSize, memLimit float64) int {
 	return batchSize
 }
 
-func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*storage.SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWriters map[int64]*SegmentDeltaWriter) ([]*datapb.CompactionSegment, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact serializeUpload")
 	defer span.End()
 	allBlobs := make(map[string][]byte)
@@ -241,7 +241,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
 	allDelta *storage.DeleteData,
 	segmentBfs map[int64]*pkoracle.BloomFilterSet,
-) map[int64]*storage.SegmentDeltaWriter {
+) map[int64]*SegmentDeltaWriter {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
 
@@ -253,7 +253,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 
 	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
 
-	targetSegBuffer := make(map[int64]*storage.SegmentDeltaWriter)
+	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
 	retMap.Range(func(key int, value *BatchApplyRet) bool {
 		startIdx := value.StartIdx
 		pk2SegmentIDs := value.Segment2Hits
@@ -264,7 +264,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 					writer, ok := targetSegBuffer[segmentID]
 					if !ok {
 						segment := allSeg[segmentID]
-						writer = storage.NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
 						targetSegBuffer[segmentID] = writer
 					}
 					writer.Write(allDelta.Pks[startIdx+i], allDelta.Tss[startIdx+i])

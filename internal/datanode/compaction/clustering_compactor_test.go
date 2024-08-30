@@ -51,7 +51,7 @@ type ClusteringCompactionTaskSuite struct {
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
 	mockID       atomic.Int64
-	segWriter    *storage.SegmentWriter
+	segWriter    *SegmentWriter
 
 	task *clusteringCompactionTask
 
@@ -172,7 +172,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
-	segWriter, err := storage.NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
+	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
 	s.Require().NoError(err)
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
@@ -304,7 +304,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 
 	s.Run("upload failed", func() {
 		schema := genCollectionSchema()
-		segWriter, err := storage.NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
+		segWriter, err := NewSegmentWriter(schema, 1000, SegmentID, PartitionID, CollectionID)
 		s.Require().NoError(err)
 		for i := 0; i < 2000; i++ {
 			v := storage.Value{
