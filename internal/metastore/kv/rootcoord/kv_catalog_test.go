@@ -2322,12 +2322,18 @@ func TestRBAC_Grant(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = &Catalog{Txn: kvmock}
 
-			errorRole       = "error-role"
-			errorRolePrefix = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, errorRole+"/")
+			errorRole           = "error-role"
+			errorRolePrefix     = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, errorRole+"/")
+			loadErrorRole       = "load-error-role"
+			loadErrorRolePrefix = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, loadErrorRole+"/")
+			granteeID           = "123456"
+			granteePrefix       = funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, granteeID+"/")
 		)
 
-		kvmock.EXPECT().RemoveWithPrefix(errorRolePrefix).Call.Return(errors.New("mock removeWithPrefix error"))
-		kvmock.EXPECT().RemoveWithPrefix(mock.Anything).Call.Return(nil)
+		kvmock.EXPECT().LoadWithPrefix(loadErrorRolePrefix).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(nil, []string{granteeID}, nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, []string{errorRolePrefix, granteePrefix}, mock.Anything).Call.Return(errors.New("mock removeWithPrefix error"))
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil)
 
 		tests := []struct {
 			isValid bool
@@ -2337,6 +2343,7 @@ func TestRBAC_Grant(t *testing.T) {
 		}{
 			{true, "role1", "valid role1"},
 			{false, errorRole, "invalid errorRole"},
+			{false, loadErrorRole, "invalid load errorRole"},
 		}
 
 		for _, test := range tests {

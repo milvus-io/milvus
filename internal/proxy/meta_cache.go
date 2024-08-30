@@ -1221,6 +1221,12 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		for user := range m.userToRoles {
 			delete(m.userToRoles[user], op.OpKey)
 		}
+
+		for policy := range m.privilegeInfos {
+			if funcutil.PolicyCheckerWithRole(policy, op.OpKey) {
+				delete(m.privilegeInfos, policy)
+			}
+		}
 	case typeutil.CacheRefresh:
 		resp, err := m.rootCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
 		if err != nil {
