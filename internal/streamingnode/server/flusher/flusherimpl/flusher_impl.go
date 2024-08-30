@@ -50,8 +50,7 @@ type flusherImpl struct {
 	wbMgr     writebuffer.BufferManager
 	cpUpdater *util.ChannelCheckpointUpdater
 
-	tasks    *typeutil.ConcurrentMap[string, ChannelTask]
-	scanners *typeutil.ConcurrentMap[string, wal.Scanner] // watched scanners
+	channelLifetimes *typeutil.ConcurrentMap[string, ChannelLifetime]
 
 	notifyCh       chan struct{}
 	stopChan       lifetime.SafeChan
@@ -67,16 +66,15 @@ func NewFlusher(chunkManager storage.ChunkManager) flusher.Flusher {
 func newFlusherWithParam(params *util.PipelineParams) flusher.Flusher {
 	fgMgr := pipeline.NewFlowgraphManager()
 	return &flusherImpl{
-		broker:         params.Broker,
-		fgMgr:          fgMgr,
-		syncMgr:        params.SyncMgr,
-		wbMgr:          params.WriteBufferManager,
-		cpUpdater:      params.CheckpointUpdater,
-		tasks:          typeutil.NewConcurrentMap[string, ChannelTask](),
-		scanners:       typeutil.NewConcurrentMap[string, wal.Scanner](),
-		notifyCh:       make(chan struct{}, 1),
-		stopChan:       lifetime.NewSafeChan(),
-		pipelineParams: params,
+		broker:           params.Broker,
+		fgMgr:            fgMgr,
+		syncMgr:          params.SyncMgr,
+		wbMgr:            params.WriteBufferManager,
+		cpUpdater:        params.CheckpointUpdater,
+		channelLifetimes: typeutil.NewConcurrentMap[string, ChannelLifetime](),
+		notifyCh:         make(chan struct{}, 1),
+		stopChan:         lifetime.NewSafeChan(),
+		pipelineParams:   params,
 	}
 }
 
@@ -96,22 +94,15 @@ func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 }
 
 func (f *flusherImpl) RegisterVChannel(vchannel string, wal wal.WAL) {
-	if f.scanners.Contain(vchannel) {
-		return
+	_, ok := f.channelLifetimes.GetOrInsert(vchannel, NewChannelLifetime(f, vchannel, wal))
+	if !ok {
+		log.Info("flusher register vchannel done", zap.String("vchannel", vchannel))
 	}
-	f.tasks.GetOrInsert(vchannel, NewChannelTask(f, vchannel, wal))
 	f.notify()
-	log.Info("flusher register vchannel done", zap.String("vchannel", vchannel))
 }
 
 func (f *flusherImpl) UnregisterPChannel(pchannel string) {
-	f.tasks.Range(func(vchannel string, task ChannelTask) bool {
-		if funcutil.ToPhysicalChannel(vchannel) == pchannel {
-			f.UnregisterVChannel(vchannel)
-		}
-		return true
-	})
-	f.scanners.Range(func(vchannel string, scanner wal.Scanner) bool {
+	f.channelLifetimes.Range(func(vchannel string, _ ChannelLifetime) bool {
 		if funcutil.ToPhysicalChannel(vchannel) == pchannel {
 			f.UnregisterVChannel(vchannel)
 		}
@@ -120,18 +111,9 @@ func (f *flusherImpl) UnregisterPChannel(pchannel string) {
 }
 
 func (f *flusherImpl) UnregisterVChannel(vchannel string) {
-	if task, ok := f.tasks.Get(vchannel); ok {
-		task.Cancel()
+	if clt, ok := f.channelLifetimes.GetAndRemove(vchannel); ok {
+		clt.Cancel()
 	}
-	if scanner, ok := f.scanners.GetAndRemove(vchannel); ok {
-		err := scanner.Close()
-		if err != nil {
-			log.Warn("scanner error", zap.String("vchannel", vchannel), zap.Error(err))
-		}
-	}
-	f.fgMgr.RemoveFlowgraph(vchannel)
-	f.wbMgr.RemoveChannel(vchannel)
-	log.Info("flusher unregister vchannel done", zap.String("vchannel", vchannel))
 }
 
 func (f *flusherImpl) notify() {
@@ -154,16 +136,14 @@ func (f *flusherImpl) Start() {
 				return
 			case <-f.notifyCh:
 				futures := make([]*conc.Future[any], 0)
-				f.tasks.Range(func(vchannel string, task ChannelTask) bool {
+				f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
 					future := GetExecPool().Submit(func() (any, error) {
-						err := task.Run()
+						err := lifetime.Run()
 						if err != nil {
 							log.Warn("build pipeline failed", zap.String("vchannel", vchannel), zap.Error(err))
-							// Notify to trigger retry.
-							f.notify()
+							f.notify() // Notify to trigger retry.
 							return nil, err
 						}
-						f.tasks.Remove(vchannel)
 						return nil, nil
 					})
 					futures = append(futures, future)
@@ -178,11 +158,8 @@ func (f *flusherImpl) Start() {
 func (f *flusherImpl) Stop() {
 	f.stopChan.Close()
 	f.stopWg.Wait()
-	f.scanners.Range(func(vchannel string, scanner wal.Scanner) bool {
-		err := scanner.Close()
-		if err != nil {
-			log.Warn("scanner error", zap.String("vchannel", vchannel), zap.Error(err))
-		}
+	f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
+		lifetime.Cancel()
 		return true
 	})
 	f.fgMgr.ClearFlowgraphs()
