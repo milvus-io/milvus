@@ -691,9 +691,13 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	t.Run("Delete user or drop role", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:      merr.Success(),
-				PolicyInfos: []string{"policy1", "policy2", "policy3"},
-				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role2", "Collection", "collection1", "read", "default"),
+					"policy2",
+					"policy3",
+				},
+				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
