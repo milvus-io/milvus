@@ -433,8 +433,8 @@ TEST(storage, InsertDataFloatNullable) {
     FixedVector<float> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::FLOAT, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    std::array<uint8_t, 1> valid_data = {0x13};
+    field_data->FillFieldData(data.data(), valid_data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
@@ -457,7 +457,7 @@ TEST(storage, InsertDataFloatNullable) {
     data = {1, 2, 0, 0, 5};
     ASSERT_EQ(data, new_data);
     ASSERT_EQ(new_payload->get_null_count(), 2);
-    ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+    ASSERT_EQ(*new_payload->ValidData(), valid_data[0]);
 }
 
 TEST(storage, InsertDataDouble) {
