@@ -43,6 +43,7 @@ type (
 )
 
 // messageTypeMap maps the proto message type to the message type.
+// The header type should be mapped to the message type one by one, should not be N:M.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&TimeTickMessageHeader{}):         MessageTypeTimeTick,
 	reflect.TypeOf(&InsertMessageHeader{}):           MessageTypeInsert,
@@ -172,7 +173,18 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMe
 // Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return asSpecializedImmutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
-func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H, B], error) {
+func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage, opts ...OptAsImmutable) (specializedImmutableMessage[H, B], error) {
+	// If the message is already the target specialized message, return directly.
+	// !!! the opts will be ignored in this case.
+	if alreadyAs, ok := msg.(*specializedImmutableMessageImpl[H, B]); ok {
+		return alreadyAs, nil
+	}
+
+	var option asImmutableOption
+	for _, opt := range opts {
+		opt(&option)
+	}
+
 	underlying, ok := msg.(*immutableMessageImpl)
 	if !ok {
 		// maybe a txn message.
@@ -203,8 +215,8 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 		return nil, errors.Wrap(err, "failed to decode specialized header")
 	}
 	return &specializedImmutableMessageImpl[H, B]{
-		header:               header,
-		immutableMessageImpl: underlying,
+		header:                    header,
+		payloadControlMessageImpl: newPayloadControlMessage[B](underlying, option.bodyCalledHint),
 	}, nil
 }
 
@@ -245,9 +257,11 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.
+// specializedImmutableMessageImpl support the concurrent safe read operations to avoid redundant unmarshal operations.
+// and specialized also support the evict operation interface.
 type specializedImmutableMessageImpl[H proto.Message, B proto.Message] struct {
-	header H
-	*immutableMessageImpl
+	header                        H // is always not nil.
+	*payloadControlMessageImpl[B]   // the state of the payload.
 }
 
 // Header returns the message header.
@@ -255,22 +269,18 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 	return m.header
 }
 
-// Body returns the message body.
-func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.payload)
+// asImmutableOption is the option for as functions.
+type asImmutableOption struct {
+	bodyCalledHint int8
 }
 
-func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
-	var nilBody B
-	// Decode the specialized header.
-	// Must be pointer type.
-	t := reflect.TypeOf(nilBody)
-	t.Elem()
-	body := reflect.New(t.Elem()).Interface().(B)
+// OptAsImmutable is the option for as functions.
+type OptAsImmutable func(*asImmutableOption)
 
-	err := proto.Unmarshal(data, body)
-	if err != nil {
-		return nilBody, err
+// OptAsImmutableBodyCalledHint returns an option to set the body called hint.
+// The hint that how many times the Body() will be called to erase the redundant unmarshal operations.
+func OptAsImmutableBodyCalledHint(hint int8) OptAsImmutable {
+	return func(o *asImmutableOption) {
+		o.bodyCalledHint = hint
 	}
-	return body, nil
 }

@@ -1,6 +1,7 @@
 package adaptor
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -17,4 +18,7 @@ func TestIDConvension(t *testing.T) {
 	msgID := pulsar.EarliestMessageID()
 	id = MustGetMessageIDFromMQWrapperID(MustGetMQWrapperIDFromMessage(msgpulsar.NewPulsarID(msgID)))
 	assert.True(t, id.EQ(msgpulsar.NewPulsarID(msgID)))
+
+	id = MustGetMessageIDFromMQWrapperIDBytes("pulsar", []byte("\u0008\u0008\u0010\u0001\u0018\u0000 \u0000"))
+	fmt.Printf("id: %v\n", id)
 }

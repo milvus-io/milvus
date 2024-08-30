@@ -99,6 +99,9 @@ type ImmutableMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
+
+	// EvictPayload returns the evict payload of current message.
+	EvictPayload() ImmutableMessage
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.
