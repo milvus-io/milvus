@@ -153,11 +153,8 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
         if (mmap_enabled) {
-            column = std::make_shared<Column>(data_size,
-                                              dim,
-                                              data_type,
-                                              mcm_,
-                                              descriptor);
+            column = std::make_shared<Column>(
+                data_size, dim, data_type, mcm_, descriptor);
         } else {
             column = std::make_shared<Column>(field_data->get_num_rows(),
                                               field_meta);

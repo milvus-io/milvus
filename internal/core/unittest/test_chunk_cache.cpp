@@ -114,8 +114,7 @@ TEST_F(ChunkCacheTest, ReadByMemoryMode) {
                                         fake_id,
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
-                                        metric_type,
-                                        false);
+                                        metric_type);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
