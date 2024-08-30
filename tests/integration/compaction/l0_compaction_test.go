@@ -19,9 +19,11 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -38,7 +40,28 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *CompactionSuite) TestL0Compaction() {
+type L0CompactionSuite struct {
+	integration.MiniClusterSuite
+}
+
+func TestL0CompactionSuite(t *testing.T) {
+	suite.Run(t, new(L0CompactionSuite))
+}
+
+func (s *L0CompactionSuite) SetupSuite() {
+	s.MiniClusterSuite.SetupSuite()
+
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
+}
+
+func (s *L0CompactionSuite) TearDownSuite() {
+	s.MiniClusterSuite.TearDownSuite()
+
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
+}
+
+func (s *L0CompactionSuite) TestL0Compaction() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster

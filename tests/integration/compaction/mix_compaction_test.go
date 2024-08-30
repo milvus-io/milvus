@@ -19,9 +19,11 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -34,10 +36,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *CompactionSuite) TestMixCompaction() {
+type MixCompactionSuite struct {
+	integration.MiniClusterSuite
+}
+
+func TestMixCompaction(t *testing.T) {
+	suite.Run(t, new(MixCompactionSuite))
+}
+
+func (s *MixCompactionSuite) SetupSuite() {
+	s.MiniClusterSuite.SetupSuite()
+
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key, "1")
+}
+
+func (s *MixCompactionSuite) TearDownSuite() {
+	s.MiniClusterSuite.TearDownSuite()
+
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key)
+}
+
+func (s *MixCompactionSuite) TestMixCompaction() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
