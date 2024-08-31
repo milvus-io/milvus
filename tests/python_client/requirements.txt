@@ -15,7 +15,7 @@ pytest-xdist==2.5.0
 pymilvus==2.5.0rc70
 pymilvus[bulk_writer]==2.5.0rc70
 pytest-rerunfailures==9.1.1
-pytest_tagging==1.5.2
+pytest_tagging==1.5.3
 ndg-httpsclient
 pyopenssl
 pyasn1
