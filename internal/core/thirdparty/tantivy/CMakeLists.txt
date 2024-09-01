@@ -58,24 +58,39 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
 endif()
 
-add_executable(test_tantivy test.cpp)
-target_link_libraries(test_tantivy
-        tantivy_binding
-        boost_filesystem
-        dl
-        )
+# TODO: move these below tests to ut.
 
-add_executable(bench_tantivy bench.cpp)
-target_link_libraries(bench_tantivy
-        tantivy_binding
-        boost_filesystem
-        dl
-        )
+option(BUILD_TANTIVY_WITH_UT "compile tantivy with ut" OFF)
 
-add_executable(ffi_demo ffi_demo.cpp)
-target_link_libraries(ffi_demo
-        tantivy_binding
-        dl
-        )
+if (BUILD_TANTIVY_WITH_UT)
+    message(STATUS "compile tantivy with ut")
 
+    add_executable(test_tantivy test.cpp)
+    target_link_libraries(test_tantivy
+            tantivy_binding
+            boost_filesystem
+            dl
+            )
+
+    add_executable(bench_tantivy bench.cpp)
+    target_link_libraries(bench_tantivy
+            tantivy_binding
+            boost_filesystem
+            dl
+            )
+
+    add_executable(ffi_demo ffi_demo.cpp)
+    target_link_libraries(ffi_demo
+            tantivy_binding
+            dl
+            )
+
+    add_executable(tokenizer_demo tokenizer_demo.cpp)
+    target_link_libraries(tokenizer_demo
+            tantivy_binding
+            dl
+            )
+else ()
+endif ()
+        
 set( TANTIVY_INCLUDE_DIR ${LIB_HEADER_FOLDER};${CMAKE_CURRENT_SOURCE_DIR} CACHE INTERNAL "Path to tantivy include directory" )
