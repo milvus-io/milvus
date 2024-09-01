@@ -347,7 +347,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:        t.GetTotalRows(),
 		Schema:           t.GetSchema(),
 		BeginLogID:       beginLogID,
-		PreAllocatedSegments: &datapb.IDRange{
+		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: t.GetResultSegments()[0],
 			End:   t.GetResultSegments()[1],
 		},

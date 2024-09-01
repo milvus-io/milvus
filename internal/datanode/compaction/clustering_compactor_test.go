@@ -199,7 +199,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
 	s.task.plan.MaxSegmentRows = 2048
-	s.task.plan.PreAllocatedSegments = &datapb.IDRange{
+	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
 		Begin: time.Now().UnixMilli(),
 		End:   time.Now().UnixMilli() + 1000,
 	}
