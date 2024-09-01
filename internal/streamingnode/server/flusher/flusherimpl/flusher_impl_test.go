@@ -160,8 +160,7 @@ func TestFlusher_RegisterPChannel(t *testing.T) {
 
 	f.UnregisterPChannel(pchannel)
 	assert.Equal(t, 0, f.(*flusherImpl).fgMgr.GetFlowgraphCount())
-	assert.Equal(t, 0, f.(*flusherImpl).scanners.Len())
-	assert.Equal(t, 0, f.(*flusherImpl).tasks.Len())
+	assert.Equal(t, 0, f.(*flusherImpl).channelLifetimes.Len())
 }
 
 func TestFlusher_RegisterVChannel(t *testing.T) {
@@ -199,8 +198,7 @@ func TestFlusher_RegisterVChannel(t *testing.T) {
 		f.UnregisterVChannel(vchannel)
 	}
 	assert.Equal(t, 0, f.(*flusherImpl).fgMgr.GetFlowgraphCount())
-	assert.Equal(t, 0, f.(*flusherImpl).scanners.Len())
-	assert.Equal(t, 0, f.(*flusherImpl).tasks.Len())
+	assert.Equal(t, 0, f.(*flusherImpl).channelLifetimes.Len())
 }
 
 func TestFlusher_Concurrency(t *testing.T) {
@@ -248,6 +246,5 @@ func TestFlusher_Concurrency(t *testing.T) {
 	}
 
 	assert.Equal(t, 0, f.(*flusherImpl).fgMgr.GetFlowgraphCount())
-	assert.Equal(t, 0, f.(*flusherImpl).scanners.Len())
-	assert.Equal(t, 0, f.(*flusherImpl).tasks.Len())
+	assert.Equal(t, 0, f.(*flusherImpl).channelLifetimes.Len())
 }
