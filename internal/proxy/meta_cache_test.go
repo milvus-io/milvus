@@ -1196,6 +1196,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 		DataType:  schemapb.DataType_JSON,
 		IsDynamic: true,
 	}
+	clusteringKeyField := &schemapb.FieldSchema{
+		FieldID:         common.StartOfUserFieldID + 5,
+		Name:            "clustering_key",
+		DataType:        schemapb.DataType_Int32,
+		IsClusteringKey: true,
+	}
 
 	testCases := []testCase{
 		{
@@ -1229,11 +1235,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					partitionKeyField,
 					vectorField,
 					dynamicField,
+					clusteringKeyField,
 				},
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
 			expectErr:        false,
 		},
 		{
@@ -1248,11 +1255,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					partitionKeyField,
 					vectorField,
 					dynamicField,
+					clusteringKeyField,
 				},
 			},
-			loadFields:       []string{"pk", "part_key", "vector"},
+			loadFields:       []string{"pk", "part_key", "vector", "clustering_key"},
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
 			expectErr:        false,
 		},
 		{
@@ -1327,6 +1335,23 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			loadFields:       []string{"pk", "part_key"},
 			skipDynamicField: true,
 			expectErr:        true,
+		},
+		{
+			tag: "clustering_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+			},
+			loadFields: []string{"pk", "part_key", "vector"},
+			expectErr:  true,
 		},
 	}
 
