@@ -344,6 +344,10 @@ func (t *SyncTask) ChannelName() string {
 	return t.channelName
 }
 
+func (t *SyncTask) IsFlush() bool {
+	return t.isFlush
+}
+
 func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.FieldBinlog, *datapb.FieldBinlog) {
 	return t.insertBinlogs, t.statsBinlogs, t.deltaBinlog
 }
