@@ -1,6 +1,10 @@
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import (
+    FieldSchema, CollectionSchema, DataType,
+    Collection
+)
 from common.constants import *
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
@@ -5237,7 +5241,7 @@ class TestSearchBase(TestcaseBase):
 
 class TestSearchDSL(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_vector_only(self):
+    def test_search_vector_only(self):
         """
         target: test search normal scenario
         method: search vector only
@@ -5254,6 +5258,54 @@ class TestSearchDSL(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": ct.default_top_k})
+class TestSearchArray(TestcaseBase):
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("array_element_data_type", [DataType.INT64])
+    def test_search_array_with_inverted_index(self, array_element_data_type):
+        # create collection
+        additional_params = {"max_length": 1000} if array_element_data_type == DataType.VARCHAR else {}
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="contains", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_any", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_all", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="equals", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="array_length_field", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="array_access", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=128)
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # insert data
+        train_data, query_expr = cf.prepare_array_test_data(3000, hit_rate=0.05)
+        collection_w.insert(train_data)
+        index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
+        collection_w.create_index("emb", index_params=index_params)
+        for f in ["contains", "contains_any", "contains_all", "equals", "array_length_field", "array_access"]:
+            collection_w.create_index(f, {"index_type": "INVERTED"})
+        collection_w.load()
+
+        for item in query_expr:
+            expr = item["expr"]
+            ground_truth_candidate = item["ground_truth"]
+            res, _ = collection_w.search(
+                data = [np.array([random.random() for j in range(128)], dtype=np.dtype("float32"))],
+                anns_field="emb",
+                param={"metric_type": "L2", "params": {"M": 32, "efConstruction": 360}},
+                limit=10,
+                expr=expr,
+                output_fields=["*"],
+            )
+            assert len(res) == 1
+            for i in range(len(res)):
+                assert len(res[i]) == 10
+                for hit in res[i]:
+                    assert hit.id in ground_truth_candidate
 
 
 class TestSearchString(TestcaseBase):
