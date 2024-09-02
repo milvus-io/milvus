@@ -644,7 +644,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+30+30+10*0.5), progress)
-	assert.Equal(t, internalpb.ImportJobState_IndexBuilding, state)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
 	// stats state, len(targetStatsSegmentIDs) / (len(originalSegmentIDs) = 1
@@ -680,7 +680,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+30+30+10), progress)
-	assert.Equal(t, internalpb.ImportJobState_IndexBuilding, state)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
 	// completed state
