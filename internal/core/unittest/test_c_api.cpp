@@ -35,6 +35,7 @@
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "futures/Future.h"
+#include "futures/future_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -79,6 +80,8 @@ CRetrieve(CSegmentInterface c_segment,
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
     if (status.error_code != 0) {
         return status;
     }
@@ -104,6 +107,8 @@ CRetrieveByOffsets(CSegmentInterface c_segment,
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
     if (status.error_code != 0) {
         return status;
     }
