@@ -591,14 +591,10 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// importing state, segmentImportedRows/totalRows = 1, partial segments is in importing state
-	op1 := UpdateIsImporting(10, false)
-	op2 := UpdateImportedRows(10, 100)
-	err = meta.UpdateSegmentsInfo(op1, op2)
+	// importing state, segmentImportedRows/totalRows = 1
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(10, 100))
 	assert.NoError(t, err)
-	op1 = UpdateIsImporting(20, false)
-	op2 = UpdateImportedRows(20, 100)
-	err = meta.UpdateSegmentsInfo(op1, op2)
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(20, 100))
 	assert.NoError(t, err)
 	err = meta.UpdateSegmentsInfo(UpdateImportedRows(11, 100))
 	assert.NoError(t, err)
@@ -609,22 +605,82 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = meta.UpdateSegmentsInfo(UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
-	assert.Equal(t, int64(float32(10+30+30+30*2/6)), progress)
+	assert.Equal(t, int64(float32(10+30+30)), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// importing state, no segment is in importing state
-	err = meta.UpdateSegmentsInfo(UpdateIsImporting(11, false))
+	// stats state, len(targetStatsSegmentIDs) / (len(originalSegmentIDs) = 0.5
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateIsImporting(12, false))
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(100),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(10)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateIsImporting(21, false))
+	segment = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(110),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(11)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(UpdateIsImporting(22, false))
+	segment = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(120),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(12)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
-	assert.Equal(t, int64(10+40+40+10), progress)
-	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, int64(10+30+30+10*0.5), progress)
+	assert.Equal(t, internalpb.ImportJobState_IndexBuilding, state)
+	assert.Equal(t, "", reason)
+
+	// stats state, len(targetStatsSegmentIDs) / (len(originalSegmentIDs) = 1
+	segment = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(200),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(20)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
+	assert.NoError(t, err)
+	segment = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(210),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(21)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
+	assert.NoError(t, err)
+	segment = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             int64(220),
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{int64(22)},
+			IsSorted:       true,
+		},
+	}
+	err = meta.AddSegment(context.Background(), segment)
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta)
+	assert.Equal(t, int64(10+30+30+10), progress)
+	assert.Equal(t, internalpb.ImportJobState_IndexBuilding, state)
 	assert.Equal(t, "", reason)
 
 	// completed state

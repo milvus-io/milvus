@@ -423,7 +423,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	for _, segment := range all {
 		cloned := segment.Clone()
 		binlog.DecompressBinLogs(cloned.SegmentInfo)
-		if cloned.GetState() == commonpb.SegmentState_Dropped {
+		if cloned.GetState() == commonpb.SegmentState_Dropped && !cloned.GetIsImporting() {
 			drops[cloned.GetID()] = cloned
 			channels.Insert(cloned.GetInsertChannel())
 			// continue

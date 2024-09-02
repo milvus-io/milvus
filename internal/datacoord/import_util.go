@@ -355,11 +355,7 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 	return float32(len(completedTasks)) / float32(len(tasks))
 }
 
-func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, int64, int64) {
-	var (
-		importedRows int64
-		totalRows    int64
-	)
+func getImportRowsInfo(jobID int64, imeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
 	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
@@ -369,36 +365,65 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
 	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
-	var importingProgress float32 = 1
-	if totalRows != 0 {
-		importingProgress = float32(importedRows) / float32(totalRows)
-	}
-
-	var (
-		unsetIsImportingSegment int64
-		totalSegment            int64
-	)
-	for _, task := range tasks {
-		segmentIDs := task.(*importTask).GetSegmentIDs()
-		for _, segmentID := range segmentIDs {
-			segment := meta.GetSegment(segmentID)
-			if segment == nil {
-				log.Warn("cannot find segment, may be compacted", WrapTaskLog(task, zap.Int64("segmentID", segmentID))...)
-				continue
-			}
-			totalSegment++
-			if !segment.GetIsImporting() {
-				unsetIsImportingSegment++
-			}
-		}
-	}
-	var completedProgress float32 = 1
-	if totalSegment != 0 {
-		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
-	}
-	return importingProgress*0.5 + completedProgress*0.5, importedRows, totalRows
+	return
 }
 
+func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, int64, int64) {
+	importedRows, totalRows := getImportRowsInfo(jobID, imeta, meta)
+	if totalRows == 0 {
+		return 1, importedRows, totalRows
+	}
+	return float32(importedRows) / float32(totalRows), importedRows, totalRows
+}
+
+func getStatsProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
+	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		return 1
+	}
+	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSegmentIDs()
+	})
+	targetStatsSegments, _ := GetSegmentsStatsInfo(meta, originalSegmentIDs...)
+	if len(originalSegmentIDs) == 0 {
+		return 1
+	}
+	return float32(len(targetStatsSegments)) / float32(len(originalSegmentIDs))
+}
+
+func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
+	job := imeta.GetJob(jobID)
+	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
+		return 1
+	}
+	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSegmentIDs()
+	})
+	targetStatsSegments, _ := GetSegmentsStatsInfo(meta, originalSegmentIDs...)
+	if len(originalSegmentIDs) == 0 {
+		return 1
+	}
+	targetSegments := lo.Map(targetStatsSegments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	})
+	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		targetSegments = originalSegmentIDs
+	}
+	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegments)
+	return float32(len(originalSegmentIDs)-len(unindexed)) / float32(len(originalSegmentIDs))
+}
+
+// GetJobProgress calculates the importing job progress.
+// The weight of each status is as follows:
+// 10%: Pending
+// 30%: PreImporting
+// 30%: Importing
+// 10%: Stats
+// 10%: IndexBuilding
+// 10%: Completed
+// TODO: Wrap a function to map status to user status.
+// TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
 	if job == nil {
@@ -415,16 +440,20 @@ func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalp
 
 	case internalpb.ImportJobState_Importing:
 		progress, importedRows, totalRows := getImportingProgress(jobID, imeta, meta)
-		return 10 + 30 + int64(progress*60), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
+		return 10 + 30 + int64(progress*30), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
+
+	case internalpb.ImportJobState_Stats:
+		progress := getStatsProgress(jobID, imeta, meta)
+		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
+		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_IndexBuilding, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_IndexBuilding:
+		progress := getIndexBuildingProgress(jobID, imeta, meta)
+		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
+		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_IndexBuilding, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_Completed:
-		totalRows := int64(0)
-		tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
-		for _, task := range tasks {
-			totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
-				return file.GetTotalRows()
-			})
-		}
+		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
 		return 100, internalpb.ImportJobState_Completed, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_Failed:
@@ -517,4 +546,23 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		}
 	}
 	return segmentImportFiles, nil
+}
+
+func GetSegmentsStatsInfo(meta *meta, originalSegmentIDs ...int64) (targetStatsSegments, originalUnstatsSegments []*SegmentInfo) {
+	targetStatsSegments = make([]*SegmentInfo, 0, len(originalSegmentIDs))
+	originalUnstatsSegments = make([]*SegmentInfo, 0, len(originalSegmentIDs))
+	for _, segmentID := range originalSegmentIDs {
+		segment := meta.GetSegment(segmentID)
+		if segment == nil {
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			continue
+		}
+		compactTo, ok := meta.GetCompactionTo(segmentID)
+		if ok && compactTo != nil && compactTo.GetIsSorted() {
+			targetStatsSegments = append(targetStatsSegments, compactTo)
+		} else {
+			originalUnstatsSegments = append(originalUnstatsSegments, segment)
+		}
+	}
+	return
 }

@@ -38,6 +38,13 @@ const (
 	reqTimeoutInterval = time.Second * 10
 )
 
+type TaskScheduler interface {
+	Start()
+	Stop()
+	Submit(task Task)
+	AbortTask(taskID int64)
+}
+
 type taskScheduler struct {
 	sync.RWMutex
 
@@ -155,7 +162,7 @@ func (s *taskScheduler) notify() {
 	}
 }
 
-func (s *taskScheduler) enqueue(task Task) {
+func (s *taskScheduler) Submit(task Task) {
 	defer s.notify()
 
 	s.Lock()
@@ -164,7 +171,7 @@ func (s *taskScheduler) enqueue(task Task) {
 	if _, ok := s.tasks[taskID]; !ok {
 		s.tasks[taskID] = task
 		task.SetQueueTime(time.Now())
-		log.Info("taskScheduler enqueue task", zap.Int64("taskID", taskID))
+		log.Info("taskScheduler submit task", zap.Int64("taskID", taskID))
 	}
 }
 

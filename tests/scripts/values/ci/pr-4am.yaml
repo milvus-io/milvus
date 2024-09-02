@@ -3,6 +3,9 @@ metrics:
     enabled: true
 log:
   level: debug
+indexCoord:
+  scheduler:
+    interval: 100
 
 affinity:
   nodeAffinity:

@@ -85,7 +85,7 @@ type compactionPlanHandler struct {
 	chManager        ChannelManager
 	sessions         session.DataNodeManager
 	cluster          Cluster
-	analyzeScheduler *taskScheduler
+	analyzeScheduler TaskScheduler
 	handler          Handler
 
 	stopCh   chan struct{}
@@ -180,7 +180,7 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta, allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
+func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta, allocator allocator.Allocator, analyzeScheduler TaskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       make(map[int64]CompactionTask),

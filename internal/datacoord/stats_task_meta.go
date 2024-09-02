@@ -289,6 +289,17 @@ func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64) indexpb.
 	return t.GetState()
 }
 
+func (stm *statsTaskMeta) GetStatsTaskBySegmentID(segmentID int64) (*indexpb.StatsTask, error) {
+	stm.RLock()
+	defer stm.RUnlock()
+
+	t, ok := stm.segmentStatsTaskIndex[segmentID]
+	if !ok {
+		return nil, fmt.Errorf("task with segment %d not found", segmentID)
+	}
+	return t, nil
+}
+
 func (stm *statsTaskMeta) CanCleanedTasks() []int64 {
 	stm.RLock()
 	defer stm.RUnlock()

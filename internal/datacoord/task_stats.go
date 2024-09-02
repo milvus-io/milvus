@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
@@ -53,10 +54,10 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 		case <-ticker.C:
 			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 				segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting
+					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting && !seg.GetIsImporting()
 				}))
 				for _, segment := range segments {
-					if err := s.createStatsSegmentTask(segment); err != nil {
+					if err := CreateStatsSegmentTask(segment, s.allocator, s.meta, s.taskScheduler, s.buildIndexCh); err != nil {
 						log.Warn("create stats task for segment failed, wait for retry",
 							zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 						continue
@@ -70,16 +71,7 @@ func (s *Server) checkStatsTaskLoop(ctx context.Context) {
 				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
 				continue
 			}
-			// TODO @xiaocai2333: remove code after allow create stats task for importing segment
-			if segment.GetIsImporting() {
-				log.Info("segment is importing, skip stats task", zap.Int64("segmentID", segID))
-				select {
-				case s.buildIndexCh <- segID:
-				default:
-				}
-				continue
-			}
-			if err := s.createStatsSegmentTask(segment); err != nil {
+			if err := CreateStatsSegmentTask(segment, s.allocator, s.meta, s.taskScheduler, s.buildIndexCh); err != nil {
 				log.Warn("create stats task for segment failed, wait for retry",
 					zap.Int64("segmentID", segment.ID), zap.Error(err))
 				continue
@@ -117,13 +109,8 @@ func (s *Server) cleanupStatsTasksLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
-	if segment.GetIsSorted() || segment.GetIsImporting() {
-		// TODO @xiaocai2333: allow importing segment stats
-		log.Info("segment is sorted by segmentID", zap.Int64("segmentID", segment.GetID()))
-		return nil
-	}
-	start, _, err := s.allocator.AllocN(2)
+func CreateStatsSegmentTask(segment *SegmentInfo, alloc allocator.Allocator, meta *meta, ts TaskScheduler, buildIndexCh chan UniqueID) error {
+	start, _, err := alloc.AllocN(2)
 	if err != nil {
 		return err
 	}
@@ -139,13 +126,13 @@ func (s *Server) createStatsSegmentTask(segment *SegmentInfo) error {
 		FailReason:      "",
 		TargetSegmentID: start + 1,
 	}
-	if err = s.meta.statsTaskMeta.AddStatsTask(t); err != nil {
+	if err = meta.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
 			return nil
 		}
 		return err
 	}
-	s.taskScheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), s.buildIndexCh))
+	ts.Submit(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), buildIndexCh))
 	return nil
 }
 

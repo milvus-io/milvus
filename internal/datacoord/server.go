@@ -153,7 +153,7 @@ type Server struct {
 	indexNodeManager          *session.IndexNodeManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	taskScheduler *taskScheduler
+	taskScheduler TaskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -395,8 +395,8 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.statsCh)
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta, s.buildIndexCh, s.taskScheduler)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 

@@ -306,6 +306,8 @@ enum ImportJobState {
   Importing = 3;
   Failed = 4;
   Completed = 5;
+  Stats = 6;
+  IndexBuilding = 7;
 }
 
 message ImportFile {

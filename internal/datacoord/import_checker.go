@@ -48,6 +48,10 @@ type importChecker struct {
 	sm      Manager
 	imeta   ImportMeta
 
+	// for stats and index building
+	taskScheduler TaskScheduler
+	buildIndexCh  chan UniqueID
+
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -58,15 +62,19 @@ func NewImportChecker(meta *meta,
 	alloc allocator.Allocator,
 	sm Manager,
 	imeta ImportMeta,
+	buildIndexCh chan UniqueID,
+	taskScheduler TaskScheduler,
 ) ImportChecker {
 	return &importChecker{
-		meta:      meta,
-		broker:    broker,
-		cluster:   cluster,
-		alloc:     alloc,
-		sm:        sm,
-		imeta:     imeta,
-		closeChan: make(chan struct{}),
+		meta:          meta,
+		broker:        broker,
+		cluster:       cluster,
+		alloc:         alloc,
+		sm:            sm,
+		imeta:         imeta,
+		buildIndexCh:  buildIndexCh,
+		taskScheduler: taskScheduler,
+		closeChan:     make(chan struct{}),
 	}
 }
 
@@ -93,6 +101,10 @@ func (c *importChecker) Start() {
 					c.checkPreImportingJob(job)
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
+				case internalpb.ImportJobState_Stats:
+					c.checkStatsJob(job)
+				case internalpb.ImportJobState_IndexBuilding:
+					c.checkIndexBuildingJob(job)
 				case internalpb.ImportJobState_Failed:
 					c.tryFailingTasks(job)
 				}
@@ -241,41 +253,95 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
-	log := log.With(zap.Int64("jobID", job.GetJobID()),
-		zap.Int64("collectionID", job.GetCollectionID()))
 	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
 			return
 		}
 	}
+	err := c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	if err != nil {
+		log.Warn("failed to update job state to Stats", zap.Error(err))
+		return
+	}
+	log.Info("update import job state to Stats", zap.Int64("jobID", job.GetJobID()))
+}
 
-	segmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+func (c *importChecker) checkStatsJob(job ImportJob) {
+	updateJobState := func() {
+		err := c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_IndexBuilding))
+		if err != nil {
+			log.Warn("failed to update job state to IndexBuilding", zap.Error(err))
+			return
+		}
+		log.Info("update import job state to IndexBuilding", zap.Int64("jobID", job.GetJobID()))
+	}
+
+	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() || importutilv2.IsL0Import(job.GetOptions()) {
+		updateJobState()
+		return
+	}
+
+	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
+	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
+	targetStatsSegments, originalUnstatsSegments := GetSegmentsStatsInfo(c.meta, originalSegmentIDs...)
+	for _, segment := range originalUnstatsSegments {
+		if err := CreateStatsSegmentTask(segment, c.alloc, c.meta, c.taskScheduler, c.buildIndexCh); err != nil {
+			log.Warn("create stats task for segment fail", zap.Int64("jobID", job.GetJobID()),
+				zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+		}
+		log.Debug("waiting for stats task...", zap.Int64("jobID", job.GetJobID()), zap.Int64("segmentID", segment.GetID()))
+	}
 
-	// Verify completion of index building for imported segments.
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), segmentIDs)
+	// All segments are stats-ed. Update job state to `IndexBuilding`.
+	if len(targetStatsSegments) == len(originalSegmentIDs) {
+		updateJobState()
+	}
+}
+
+func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
+	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
+	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSegmentIDs()
+	})
+	targetStatsSegments, _ := GetSegmentsStatsInfo(c.meta, originalSegmentIDs...)
+
+	targetSegmentIDs := lo.Map(targetStatsSegments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	})
+	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		targetSegmentIDs = originalSegmentIDs
+	}
+
+	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
+		for _, segmentID := range unindexed {
+			select {
+			case c.buildIndexCh <- segmentID: // accelerate index building:
+			default:
+			}
+		}
 		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
 	}
 
-	unfinished := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
+	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
+	isImportingSegments := lo.Filter(append(originalSegmentIDs, targetSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(segmentID)
 		if segment == nil {
-			log.Warn("cannot find segment, may be compacted", zap.Int64("segmentID", segmentID))
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
 			return false
 		}
 		return segment.GetIsImporting()
 	})
-
-	channels, err := c.meta.GetSegmentsChannels(unfinished)
+	channels, err := c.meta.GetSegmentsChannels(isImportingSegments)
 	if err != nil {
 		log.Warn("get segments channels failed", zap.Error(err))
 		return
 	}
-	for _, segmentID := range unfinished {
+	for _, segmentID := range isImportingSegments {
 		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
 		if channelCP == nil {
 			log.Warn("nil channel checkpoint")
@@ -291,6 +357,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		}
 	}
 
+	// all finished, update import job state to `Completed`.
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
@@ -300,6 +367,20 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 	log.Info("import job completed")
 }
 
+func (c *importChecker) checkFailedJob(job ImportJob) {
+	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
+	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSegmentIDs()
+	})
+	for _, originalSegmentID := range originalSegmentIDs {
+		statsTask, err := c.meta.statsTaskMeta.GetStatsTaskBySegmentID(originalSegmentID)
+		if err == nil {
+			c.taskScheduler.AbortTask(statsTask.GetTaskID())
+		}
+	}
+	c.tryFailingTasks(job)
+}
+
 func (c *importChecker) tryFailingTasks(job ImportJob) {
 	tasks := c.imeta.GetTaskBy(WithJob(job.GetJobID()), WithStates(datapb.ImportTaskStateV2_Pending,
 		datapb.ImportTaskStateV2_InProgress, datapb.ImportTaskStateV2_Completed))
@@ -307,7 +388,7 @@ func (c *importChecker) tryFailingTasks(job ImportJob) {
 		return
 	}
 	log.Warn("Import job has failed, all tasks with the same jobID"+
-		" will be marked as failed", zap.Int64("jobID", job.GetJobID()))
+		" will be marked as failed", zap.Int64("jobID", job.GetJobID()), zap.String("reason", job.GetReason()))
 	for _, task := range tasks {
 		err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed),
 			UpdateReason(job.GetReason()))

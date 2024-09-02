@@ -72,7 +72,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	sm := NewMockManager(s.T())
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, sm, imeta).(*importChecker)
+	buildIndexCh := make(chan UniqueID, 1024)
+	mts := NewMockTaskScheduler(s.T())
+
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, sm, imeta, buildIndexCh, mts).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -174,7 +177,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	// test checkImportingJob
-	s.checker.checkImportingJob(job) // not completed
+	s.checker.checkImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
@@ -186,10 +189,10 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	for _, t := range importTasks {
+	for i, t := range importTasks {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:            rand.Int63(),
+				ID:            int64(i + 1),
 				State:         commonpb.SegmentState_Flushed,
 				IsImporting:   true,
 				InsertChannel: "ch0",
@@ -204,6 +207,34 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
+	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
+
+	// test check stats job
+	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
+	mts := s.checker.taskScheduler.(*MockTaskScheduler)
+	mts.EXPECT().Submit(mock.Anything).Return().Maybe()
+	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkStatsJob(job)
+	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
+	for i := range importTasks {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             int64(i+1) * 10,
+				State:          commonpb.SegmentState_Flushed,
+				IsImporting:    true,
+				InsertChannel:  "ch0",
+				CompactionFrom: []int64{int64(i + 1)},
+				IsSorted:       true,
+			},
+		}
+		err := s.checker.meta.AddSegment(context.Background(), segment)
+		s.NoError(err)
+	}
+	s.checker.checkStatsJob(job)
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.imeta.GetJob(job.GetJobID()).GetState())
+
+	// test check IndexBuilding job
+	s.checker.checkIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
