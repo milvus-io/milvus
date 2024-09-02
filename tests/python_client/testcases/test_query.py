@@ -3058,8 +3058,6 @@ class TestQueryArray(TestcaseBase):
                 expr=expr,
                 output_fields=["*"],
             )
-            log.info(res)
-            log.info(expr)
             assert len(res) == len(ground_truth)
             for i in range(len(res)):
                 assert res[i]["id"] == ground_truth[i]
