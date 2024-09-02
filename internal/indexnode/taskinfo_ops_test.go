@@ -76,9 +76,14 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsResult", func() {
-		s.node.storeStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
+		s.node.storeStatsSortResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
+		)
+	})
+
+	s.Run("storeStatsTextIndexResult", func() {
+		s.node.storeStatsTextIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
 			map[int64]*datapb.TextIndexStats{
 				100: {
 					FieldID:    100,
@@ -87,8 +92,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					LogSize:    1024,
 					MemorySize: 1024,
 				},
-			},
-		)
+			})
 	})
 
 	s.Run("getStatsTaskInfo", func() {

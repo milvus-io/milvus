@@ -89,7 +89,7 @@ func newTaskScheduler(
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
 	}
-	ts.reloadFromKV()
+	ts.reloadFromMeta()
 	return ts
 }
 
@@ -104,7 +104,7 @@ func (s *taskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *taskScheduler) reloadFromKV() {
+func (s *taskScheduler) reloadFromMeta() {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range s.meta.indexMeta.getSegmentIndexes(segment.ID) {
@@ -142,6 +142,25 @@ func (s *taskScheduler) reloadFromKV() {
 				queueTime: time.Now(),
 				startTime: time.Now(),
 				endTime:   time.Now(),
+			}
+		}
+	}
+
+	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
+	for taskID, t := range allStatsTasks {
+		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
+			s.tasks[taskID] = &statsTask{
+				taskID: taskID,
+				nodeID: t.NodeID,
+				taskInfo: &workerpb.StatsResult{
+					TaskID:     taskID,
+					State:      t.GetState(),
+					FailReason: t.GetFailReason(),
+				},
+				queueTime:  time.Now(),
+				startTime:  time.Now(),
+				endTime:    time.Now(),
+				subJobType: t.GetSubJobType(),
 			}
 		}
 	}

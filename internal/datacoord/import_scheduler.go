@@ -51,8 +51,6 @@ type importScheduler struct {
 	alloc   allocator.Allocator
 	imeta   ImportMeta
 
-	buildIndexCh chan UniqueID
-
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -61,15 +59,13 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator.Allocator,
 	imeta ImportMeta,
-	buildIndexCh chan UniqueID,
 ) ImportScheduler {
 	return &importScheduler{
-		meta:         meta,
-		cluster:      cluster,
-		alloc:        alloc,
-		imeta:        imeta,
-		buildIndexCh: buildIndexCh,
-		closeChan:    make(chan struct{}),
+		meta:      meta,
+		cluster:   cluster,
+		alloc:     alloc,
+		imeta:     imeta,
+		closeChan: make(chan struct{}),
 	}
 }
 
@@ -320,7 +316,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				return
 			}
 			select {
-			case s.buildIndexCh <- info.GetSegmentID(): // accelerate index building:
+			case getBuildIndexChSingleton().getChannel() <- info.GetSegmentID(): // accelerate index building:
 			default:
 			}
 		}

@@ -634,6 +634,7 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 			EndLogID:        s.logID + 200,
 			NumRows:         s.numRows,
 			BinlogMaxSize:   131000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
 		}
 
 		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -661,7 +662,6 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 			if resp.GetStatsJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
 				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
 				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetStatsLogs()))
-				s.Zero(len(resp.GetStatsJobResults().GetResults()[0].GetDeltaLogs()))
 				s.Equal(s.numRows, resp.GetStatsJobResults().GetResults()[0].GetNumRows())
 				break
 			}

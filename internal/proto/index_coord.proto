@@ -311,4 +311,12 @@ message StatsTask {
     JobState state = 8;
     string fail_reason = 9;
     int64 target_segmentID = 10;
+    index.StatsSubJob subJobType = 11;
+    bool canRecycle = 12;
+}
+
+enum StatsSubJob {
+    Sort = 0;
+    TextIndexJob = 1;
+    BM25Job=2;
 }

@@ -122,25 +122,12 @@ func (s *statsTaskSuite) SetupSuite() {
 					FailReason:    "",
 				},
 			},
-			segmentStatsTaskIndex: map[int64]*indexpb.StatsTask{
-				s.segID: {
-					CollectionID:  1,
-					PartitionID:   2,
-					SegmentID:     s.segID,
-					InsertChannel: "ch1",
-					TaskID:        s.taskID,
-					Version:       0,
-					NodeID:        0,
-					State:         indexpb.JobState_JobStateInit,
-					FailReason:    "",
-				},
-			},
 		},
 	}
 }
 
 func (s *statsTaskSuite) TestTaskStats_PreCheck() {
-	st := newStatsTask(s.taskID, s.segID, s.targetID, nil)
+	st := newStatsTask(s.taskID, s.segID, s.targetID, indexpb.StatsSubJob_Sort)
 
 	s.Equal(s.taskID, st.GetTaskID())
 
@@ -421,7 +408,6 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 								Channel:       "ch1",
 								InsertLogs:    nil,
 								StatsLogs:     nil,
-								DeltaLogs:     nil,
 								TextStatsLogs: nil,
 								NumRows:       65535,
 							},

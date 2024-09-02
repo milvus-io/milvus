@@ -243,6 +243,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(300, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
+
 	s.NotEmpty(segment.Field2StatslogPaths)
 	s.Empty(segment.Deltalogs)
 }

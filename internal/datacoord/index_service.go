@@ -142,7 +142,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 					continue
 				}
 			}
-		case segID := <-s.buildIndexCh:
+		case segID := <-getBuildIndexChSingleton().getChannel():
 			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
 			segment := s.meta.GetSegment(segID)
 			if segment == nil {

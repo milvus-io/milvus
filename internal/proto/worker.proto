@@ -133,14 +133,15 @@ message CreateStatsRequest {
   repeated data.FieldBinlog delta_logs = 8;
   index.StorageConfig storage_config = 9;
   schema.CollectionSchema schema = 10;
-  int64 targetSegmentID = 11;
-  int64 startLogID = 12;
-  int64 endLogID = 13;
-  int64 num_rows = 14;
-  int64 collection_ttl = 15;
-  uint64 current_ts = 16;
-  int64 task_version = 17;
-  uint64 binlogMaxSize = 18;
+  index.StatsSubJob subJobType = 11;
+  int64 targetSegmentID = 12;
+  int64 startLogID = 13;
+  int64 endLogID = 14;
+  int64 num_rows = 15;
+  int64 collection_ttl = 16;
+  uint64 current_ts = 17;
+  int64 task_version = 18;
+  uint64 binlogMaxSize = 19;
 }
 
 message CreateJobV2Request {
@@ -195,9 +196,8 @@ message StatsResult {
   string channel = 7;
   repeated data.FieldBinlog insert_logs = 8;
   repeated data.FieldBinlog stats_logs = 9;
-  repeated data.FieldBinlog delta_logs = 10;
-  map<int64, data.TextIndexStats> text_stats_logs = 11;
-  int64 num_rows = 12;
+  map<int64, data.TextIndexStats> text_stats_logs = 10;
+  int64 num_rows = 11;
 }
 
 message StatsResults {
