@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -40,13 +41,23 @@ var _ Task = (*analyzeTask)(nil)
 type analyzeTask struct {
 	taskID   int64
 	nodeID   int64
-	taskInfo *indexpb.AnalyzeResult
+	taskInfo *workerpb.AnalyzeResult
 
 	queueTime time.Time
 	startTime time.Time
 	endTime   time.Time
 
-	req *indexpb.AnalyzeRequest
+	req *workerpb.AnalyzeRequest
+}
+
+func newAnalyzeTask(taskID int64) *analyzeTask {
+	return &analyzeTask{
+		taskID: taskID,
+		taskInfo: &workerpb.AnalyzeResult{
+			TaskID: taskID,
+			State:  indexpb.JobState_JobStateInit,
+		},
+	}
 }
 
 func (at *analyzeTask) GetTaskID() int64 {
@@ -57,7 +68,7 @@ func (at *analyzeTask) GetNodeID() int64 {
 	return at.nodeID
 }
 
-func (at *analyzeTask) ResetNodeID() {
+func (at *analyzeTask) ResetTask(mt *meta) {
 	at.nodeID = 0
 }
 
@@ -124,33 +135,10 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	if t == nil {
 		log.Ctx(ctx).Info("task is nil, delete it", zap.Int64("taskID", at.GetTaskID()))
 		at.SetState(indexpb.JobState_JobStateNone, "analyze task is nil")
-		return true
+		return false
 	}
 
-	var storageConfig *indexpb.StorageConfig
-	if Params.CommonCfg.StorageType.GetValue() == "local" {
-		storageConfig = &indexpb.StorageConfig{
-			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
-			StorageType: Params.CommonCfg.StorageType.GetValue(),
-		}
-	} else {
-		storageConfig = &indexpb.StorageConfig{
-			Address:          Params.MinioCfg.Address.GetValue(),
-			AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
-			UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
-			BucketName:       Params.MinioCfg.BucketName.GetValue(),
-			RootPath:         Params.MinioCfg.RootPath.GetValue(),
-			UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
-			IAMEndpoint:      Params.MinioCfg.IAMEndpoint.GetValue(),
-			StorageType:      Params.CommonCfg.StorageType.GetValue(),
-			Region:           Params.MinioCfg.Region.GetValue(),
-			UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
-			CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
-			RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		}
-	}
-	at.req = &indexpb.AnalyzeRequest{
+	at.req = &workerpb.AnalyzeRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskID:        at.GetTaskID(),
 		CollectionID:  t.CollectionID,
@@ -161,7 +149,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 		Dim:           t.Dim,
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
 		Version:       t.Version + 1,
-		StorageConfig: storageConfig,
+		StorageConfig: createStorageConfig(),
 	}
 
 	// When data analyze occurs, segments must not be discarded. Such as compaction, GC, etc.
@@ -179,7 +167,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
 				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
 			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
-			return true
+			return false
 		}
 
 		totalSegmentsRows += info.GetNumOfRows()
@@ -194,10 +182,10 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 
 	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
 	if err != nil {
-		log.Ctx(ctx).Info("analyze task get collection info failed", zap.Int64("collectionID",
+		log.Ctx(ctx).Warn("analyze task get collection info failed", zap.Int64("collectionID",
 			segments[0].GetCollectionID()), zap.Error(err))
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
-		return true
+		return false
 	}
 
 	schema := collInfo.Schema
@@ -212,7 +200,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	dim, err := storage.GetDimFromParams(field.TypeParams)
 	if err != nil {
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
-		return true
+		return false
 	}
 	at.req.Dim = int64(dim)
 
@@ -221,7 +209,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 		log.Ctx(ctx).Info("data size is too small, skip analyze task", zap.Float64("raw data size", totalSegmentsRawDataSize), zap.Int64("num clusters", numClusters), zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
 		at.SetState(indexpb.JobState_JobStateFinished, "")
-		return true
+		return false
 	}
 	if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
 		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
@@ -233,17 +221,17 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	at.req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	at.req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 
-	return false
+	return true
 }
 
 func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
-	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: at.req.GetClusterID(),
 		TaskID:    at.req.GetTaskID(),
 		JobType:   indexpb.JobType_JobTypeAnalyzeJob,
-		Request: &indexpb.CreateJobV2Request_AnalyzeRequest{
+		Request: &workerpb.CreateJobV2Request_AnalyzeRequest{
 			AnalyzeRequest: at.req,
 		},
 	})
@@ -261,12 +249,12 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	return true
 }
 
-func (at *analyzeTask) setResult(result *indexpb.AnalyzeResult) {
+func (at *analyzeTask) setResult(result *workerpb.AnalyzeResult) {
 	at.taskInfo = result
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
-	resp, err := client.QueryJobsV2(ctx, &indexpb.QueryJobsV2Request{
+	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []int64{at.GetTaskID()},
 		JobType:   indexpb.JobType_JobTypeAnalyzeJob,
@@ -304,7 +292,7 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 }
 
 func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
-	resp, err := client.DropJobsV2(ctx, &indexpb.DropJobsV2Request{
+	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{at.GetTaskID()},
 		JobType:   indexpb.JobType_JobTypeAnalyzeJob,

@@ -129,6 +129,7 @@ type Server struct {
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
+	statsCh         chan UniqueID
 	buildIndexCh    chan UniqueID
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
@@ -205,6 +206,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
+		statsCh:                make(chan UniqueID, 1024),
 		buildIndexCh:           make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
@@ -393,7 +395,7 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.buildIndexCh)
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.statsCh)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
@@ -425,7 +427,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startDataCoord() {
-	s.taskScheduler.Start()
+	s.startTaskScheduler()
 	s.startServerLoop()
 
 	// http.Register(&http.Handler{
@@ -669,7 +671,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
 	}
 }
 
@@ -720,7 +722,6 @@ func (s *Server) startServerLoop() {
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
-	s.startIndexService(s.serverLoopCtx)
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
@@ -728,6 +729,13 @@ func (s *Server) startServerLoop() {
 	if !streamingutil.IsStreamingServiceEnabled() {
 		s.syncSegmentsScheduler.Start()
 	}
+}
+
+func (s *Server) startTaskScheduler() {
+	s.taskScheduler.Start()
+
+	s.startIndexService(s.serverLoopCtx)
+	s.startStatsTasksCheckLoop(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
@@ -981,7 +989,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	select {
-	case s.buildIndexCh <- segmentID:
+	case s.statsCh <- segmentID:
 	default:
 	}
 

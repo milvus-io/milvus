@@ -170,6 +170,10 @@ type DataCoordCatalog interface {
 	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
 	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
 	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error
+
+	ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error)
+	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
+	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {

@@ -34,29 +34,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type TaskState int
+type LifetimeState int
 
 const (
-	Pending TaskState = iota
+	Pending LifetimeState = iota
 	Cancel
 	Done
 )
 
-type ChannelTask interface {
+type ChannelLifetime interface {
 	Run() error
 	Cancel()
 }
 
-type channelTask struct {
+type channelLifetime struct {
 	mu       sync.Mutex
-	state    TaskState
-	f        *flusherImpl
+	state    LifetimeState
 	vchannel string
 	wal      wal.WAL
+	scanner  wal.Scanner
+	f        *flusherImpl
 }
 
-func NewChannelTask(f *flusherImpl, vchannel string, wal wal.WAL) ChannelTask {
-	return &channelTask{
+func NewChannelLifetime(f *flusherImpl, vchannel string, wal wal.WAL) ChannelLifetime {
+	return &channelLifetime{
 		state:    Pending,
 		f:        f,
 		vchannel: vchannel,
@@ -64,13 +65,10 @@ func NewChannelTask(f *flusherImpl, vchannel string, wal wal.WAL) ChannelTask {
 	}
 }
 
-func (c *channelTask) Run() error {
+func (c *channelLifetime) Run() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.state == Cancel {
-		return nil
-	}
-	if c.f.fgMgr.HasFlowgraph(c.vchannel) {
+	if c.state == Cancel || c.state == Done {
 		return nil
 	}
 	log.Info("start to build pipeline", zap.String("vchannel", c.vchannel))
@@ -110,14 +108,14 @@ func (c *channelTask) Run() error {
 	}
 	ds.Start()
 	c.f.fgMgr.AddFlowgraph(ds)
-	c.f.scanners.Insert(c.vchannel, scanner)
+	c.scanner = scanner
 	c.state = Done
 
 	log.Info("build pipeline done", zap.String("vchannel", c.vchannel))
 	return nil
 }
 
-func (c *channelTask) Cancel() {
+func (c *channelLifetime) Cancel() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch c.state {
@@ -126,11 +124,9 @@ func (c *channelTask) Cancel() {
 	case Cancel:
 		return
 	case Done:
-		if scanner, ok := c.f.scanners.GetAndRemove(c.vchannel); ok {
-			err := scanner.Close()
-			if err != nil {
-				log.Warn("scanner error", zap.String("vchannel", c.vchannel), zap.Error(err))
-			}
+		err := c.scanner.Close()
+		if err != nil {
+			log.Warn("scanner error", zap.String("vchannel", c.vchannel), zap.Error(err))
 		}
 		c.f.fgMgr.RemoveFlowgraph(c.vchannel)
 		c.f.wbMgr.RemoveChannel(c.vchannel)

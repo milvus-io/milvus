@@ -79,12 +79,12 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 			Field2StatslogPaths: nil,
 			Deltalogs:           nil,
 		}},
-		TimeoutInSeconds:     10,
-		Type:                 datapb.CompactionType_MixCompaction,
-		Schema:               s.meta.GetSchema(),
-		BeginLogID:           19530,
-		PreAllocatedSegments: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
-		MaxSize:              64 * 1024 * 1024,
+		TimeoutInSeconds:       10,
+		Type:                   datapb.CompactionType_MixCompaction,
+		Schema:                 s.meta.GetSchema(),
+		BeginLogID:             19530,
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		MaxSize:                64 * 1024 * 1024,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, s.plan)
@@ -130,7 +130,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 			Value:     row,
 		}
 		err := s.segWriter.Write(v)
-		s.segWriter.writer.Flush()
+		s.segWriter.FlushAndIsFull()
 		s.Require().NoError(err)
 
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
@@ -205,6 +205,43 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 	segment := result.GetSegments()[0]
 	s.EqualValues(19531, segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
+	s.NotEmpty(segment.InsertLogs)
+	s.NotEmpty(segment.Field2StatslogPaths)
+	s.Empty(segment.Deltalogs)
+}
+
+func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
+	segments := []int64{1001, 1002, 1003}
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	for _, segID := range segments {
+		s.initMultiRowsSegBuffer(segID, 100, 3)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+
+		s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			IsSorted:     true,
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
+	s.Equal(1, len(result.GetSegments()))
+	s.True(result.GetSegments()[0].GetIsSorted())
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(19531, segment.GetSegmentID())
+	s.EqualValues(300, segment.GetNumOfRows())
 	s.NotEmpty(segment.InsertLogs)
 	s.NotEmpty(segment.Field2StatslogPaths)
 	s.Empty(segment.Deltalogs)
@@ -497,6 +534,25 @@ func getRow(magic int64) map[int64]interface{} {
 	}
 }
 
+func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int64) {
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, magic, PartitionID, CollectionID)
+	s.Require().NoError(err)
+
+	for i := int64(0); i < numRows; i++ {
+		v := storage.Value{
+			PK:        storage.NewInt64PrimaryKey(magic + i*step),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Value:     getRow(magic + i*step),
+		}
+		err = segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+
+	segWriter.FlushAndIsFull()
+
+	s.segWriter = segWriter
+}
+
 func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
 	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, magic, PartitionID, CollectionID)
 	s.Require().NoError(err)
@@ -508,7 +564,7 @@ func (s *MixCompactionTaskSuite) initSegBuffer(magic int64) {
 	}
 	err = segWriter.Write(&v)
 	s.Require().NoError(err)
-	segWriter.writer.Flush()
+	segWriter.FlushAndIsFull()
 
 	s.segWriter = segWriter
 }

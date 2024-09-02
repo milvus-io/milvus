@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -41,7 +41,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of IndexNode.
 type Client struct {
-	grpcClient grpcclient.GrpcClient[indexpb.IndexNodeClient]
+	grpcClient grpcclient.GrpcClient[workerpb.IndexNodeClient]
 	addr       string
 	sess       *sessionutil.Session
 }
@@ -60,7 +60,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	config := &Params.IndexNodeGrpcClientCfg
 	client := &Client{
 		addr:       addr,
-		grpcClient: grpcclient.NewClientBase[indexpb.IndexNodeClient](config, "milvus.proto.index.IndexNode"),
+		grpcClient: grpcclient.NewClientBase[workerpb.IndexNodeClient](config, "milvus.proto.index.IndexNode"),
 		sess:       sess,
 	}
 	// node shall specify node id
@@ -80,16 +80,16 @@ func (c *Client) Close() error {
 	return c.grpcClient.Close()
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) indexpb.IndexNodeClient {
-	return indexpb.NewIndexNodeClient(cc)
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) workerpb.IndexNodeClient {
+	return workerpb.NewIndexNodeClient(cc)
 }
 
 func (c *Client) getAddr() (string, error) {
 	return c.addr, nil
 }
 
-func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(indexClient indexpb.IndexNodeClient) (*T, error)) (*T, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
+func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(indexClient workerpb.IndexNodeClient) (*T, error)) (*T, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client workerpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -103,41 +103,41 @@ func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(indexClient i
 
 // GetComponentStates gets the component states of IndexNode.
 func (c *Client) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*milvuspb.ComponentStates, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*milvuspb.ComponentStates, error) {
 		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*milvuspb.StringResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*milvuspb.StringResponse, error) {
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 }
 
 // CreateJob sends the build index request to IndexNode.
-func (c *Client) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+func (c *Client) CreateJob(ctx context.Context, req *workerpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*commonpb.Status, error) {
 		return client.CreateJob(ctx, req)
 	})
 }
 
 // QueryJobs query the task info of the index task.
-func (c *Client) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest, opts ...grpc.CallOption) (*indexpb.QueryJobsResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.QueryJobsResponse, error) {
+func (c *Client) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequest, opts ...grpc.CallOption) (*workerpb.QueryJobsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*workerpb.QueryJobsResponse, error) {
 		return client.QueryJobs(ctx, req)
 	})
 }
 
 // DropJobs query the task info of the index task.
-func (c *Client) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+func (c *Client) DropJobs(ctx context.Context, req *workerpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*commonpb.Status, error) {
 		return client.DropJobs(ctx, req)
 	})
 }
 
 // GetJobStats query the task info of the index task.
-func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest, opts ...grpc.CallOption) (*indexpb.GetJobStatsResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.GetJobStatsResponse, error) {
+func (c *Client) GetJobStats(ctx context.Context, req *workerpb.GetJobStatsRequest, opts ...grpc.CallOption) (*workerpb.GetJobStatsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*workerpb.GetJobStatsResponse, error) {
 		return client.GetJobStats(ctx, req)
 	})
 }
@@ -148,7 +148,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*internalpb.ShowConfigurationsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
 }
@@ -159,25 +159,25 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*milvuspb.GetMetricsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})
 }
 
-func (c *Client) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+func (c *Client) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*commonpb.Status, error) {
 		return client.CreateJobV2(ctx, req)
 	})
 }
 
-func (c *Client) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Request, opts ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.QueryJobsV2Response, error) {
+func (c *Client) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Request, opts ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*workerpb.QueryJobsV2Response, error) {
 		return client.QueryJobsV2(ctx, req)
 	})
 }
 
-func (c *Client) DropJobsV2(ctx context.Context, req *indexpb.DropJobsV2Request, opt ...grpc.CallOption) (*commonpb.Status, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+func (c *Client) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Request, opt ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client workerpb.IndexNodeClient) (*commonpb.Status, error) {
 		return client.DropJobsV2(ctx, req)
 	})
 }

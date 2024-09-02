@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -79,7 +79,7 @@ func TestIndexNodeServer(t *testing.T) {
 
 	t.Run("CreateJob", func(t *testing.T) {
 		inm.EXPECT().CreateJob(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		req := &indexpb.CreateJobRequest{
+		req := &workerpb.CreateJobRequest{
 			ClusterID: "",
 			BuildID:   0,
 			IndexID:   0,
@@ -91,10 +91,10 @@ func TestIndexNodeServer(t *testing.T) {
 	})
 
 	t.Run("QueryJob", func(t *testing.T) {
-		inm.EXPECT().QueryJobs(mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
+		inm.EXPECT().QueryJobs(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsResponse{
 			Status: merr.Success(),
 		}, nil)
-		req := &indexpb.QueryJobsRequest{}
+		req := &workerpb.QueryJobsRequest{}
 		resp, err := server.QueryJobs(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -102,7 +102,7 @@ func TestIndexNodeServer(t *testing.T) {
 
 	t.Run("DropJobs", func(t *testing.T) {
 		inm.EXPECT().DropJobs(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		req := &indexpb.DropJobsRequest{}
+		req := &workerpb.DropJobsRequest{}
 		resp, err := server.DropJobs(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -132,10 +132,10 @@ func TestIndexNodeServer(t *testing.T) {
 	})
 
 	t.Run("GetTaskSlots", func(t *testing.T) {
-		inm.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
+		inm.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
 			Status: merr.Success(),
 		}, nil)
-		req := &indexpb.GetJobStatsRequest{}
+		req := &workerpb.GetJobStatsRequest{}
 		resp, err := server.GetJobStats(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -143,17 +143,17 @@ func TestIndexNodeServer(t *testing.T) {
 
 	t.Run("CreateJobV2", func(t *testing.T) {
 		inm.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		req := &indexpb.CreateJobV2Request{}
+		req := &workerpb.CreateJobV2Request{}
 		resp, err := server.CreateJobV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
 	t.Run("QueryJobsV2", func(t *testing.T) {
-		inm.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&indexpb.QueryJobsV2Response{
+		inm.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 			Status: merr.Success(),
 		}, nil)
-		req := &indexpb.QueryJobsV2Request{}
+		req := &workerpb.QueryJobsV2Request{}
 		resp, err := server.QueryJobsV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -161,7 +161,7 @@ func TestIndexNodeServer(t *testing.T) {
 
 	t.Run("DropJobsV2", func(t *testing.T) {
 		inm.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		req := &indexpb.DropJobsV2Request{}
+		req := &workerpb.DropJobsV2Request{}
 		resp, err := server.DropJobsV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())

@@ -169,6 +169,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 											},
 										},
 									},
+									IsSorted: true,
 								},
 							},
 							2: {
@@ -195,6 +196,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 											},
 										},
 									},
+									IsSorted: true,
 								},
 							},
 							3: {
@@ -207,6 +209,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
+									IsSorted:       true,
 								},
 							},
 						},
@@ -457,6 +460,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							InsertChannel: "ch1",
 							CollectionID:  2,
 							PartitionID:   1,
+							IsSorted:      true,
 						},
 						{
 							SegmentID: 2,
@@ -478,17 +482,18 @@ func Test_compactionTrigger_force(t *testing.T) {
 							InsertChannel: "ch1",
 							CollectionID:  2,
 							PartitionID:   1,
+							IsSorted:      true,
 						},
 					},
 					// StartTime:        0,
-					TimeoutInSeconds:     Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-					Type:                 datapb.CompactionType_MixCompaction,
-					Channel:              "ch1",
-					TotalRows:            200,
-					Schema:               schema,
-					PreAllocatedSegments: &datapb.IDRange{Begin: 100, End: 200},
-					SlotUsage:            8,
-					MaxSize:              1342177280,
+					TimeoutInSeconds:       Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+					Type:                   datapb.CompactionType_MixCompaction,
+					Channel:                "ch1",
+					TotalRows:              200,
+					Schema:                 schema,
+					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
+					SlotUsage:              8,
+					MaxSize:                1342177280,
 				},
 			},
 		},
@@ -672,6 +677,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 						},
 					},
 				},
+				IsSorted: true,
 			},
 		}
 
@@ -757,6 +763,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 									},
 								},
 							},
+							IsSorted: true,
 						},
 						{
 							SegmentID: 2,
@@ -775,6 +782,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 									},
 								},
 							},
+							IsSorted: true,
 						},
 					},
 					StartTime:        3,
@@ -1005,6 +1013,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
 	mock0Allocator := newMockAllocator(t)
@@ -1194,6 +1203,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
 
@@ -1389,6 +1399,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
 
@@ -1619,6 +1630,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 						},
 					},
 				},
+				IsSorted: true,
 			},
 			lastFlushTime: time.Now(),
 		}
@@ -2115,6 +2127,7 @@ func (s *CompactionTriggerSuite) genSeg(segID, numRows int64) *datapb.SegmentInf
 				},
 			},
 		},
+		IsSorted: true,
 	}
 }
 

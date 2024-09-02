@@ -2521,6 +2521,12 @@ func TestValidateLoadFieldsList(t *testing.T) {
 		DataType:  schemapb.DataType_JSON,
 		IsDynamic: true,
 	}
+	clusteringKeyField := &schemapb.FieldSchema{
+		FieldID:         common.StartOfUserFieldID + 5,
+		Name:            common.MetaFieldName,
+		DataType:        schemapb.DataType_Int32,
+		IsClusteringKey: true,
+	}
 
 	addSkipLoadAttr := func(f *schemapb.FieldSchema, flag bool) *schemapb.FieldSchema {
 		result := typeutil.Clone(f)
@@ -2544,6 +2550,7 @@ func TestValidateLoadFieldsList(t *testing.T) {
 					partitionKeyField,
 					vectorField,
 					dynamicField,
+					clusteringKeyField,
 				},
 			},
 			expectErr: false,
@@ -2592,6 +2599,23 @@ func TestValidateLoadFieldsList(t *testing.T) {
 					partitionKeyField,
 					addSkipLoadAttr(vectorField, true),
 					dynamicField,
+				},
+			},
+			expectErr: true,
+		},
+		{
+			tag: "clustering_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					dynamicField,
+					addSkipLoadAttr(clusteringKeyField, true),
 				},
 			},
 			expectErr: true,

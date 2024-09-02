@@ -188,7 +188,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 
@@ -1012,6 +1012,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 			Level:               segment.Level,
 			CollectionID:        segment.CollectionID,
 			PartitionID:         segment.PartitionID,
+			IsSorted:            segment.IsSorted,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			analyzeResult, err := t.scalarAnalyzeSegment(ctx, segmentClone)

@@ -150,6 +150,7 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 	s.NoError(err)
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+	log.Info("index create done")
 
 	for i := 1; i < replica; i++ {
 		s.Cluster.AddQueryNode()

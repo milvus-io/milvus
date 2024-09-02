@@ -477,7 +477,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.SetupTest()
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}

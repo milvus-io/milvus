@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -71,6 +72,7 @@ type CompactionMeta interface {
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
 	GetCompactionTaskMeta() *compactionTaskMeta
+	GetStatsTaskMeta() *statsTaskMeta
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -88,6 +90,7 @@ type meta struct {
 	analyzeMeta        *analyzeMeta
 	partitionStatsMeta *partitionStatsMeta
 	compactionTaskMeta *compactionTaskMeta
+	statsTaskMeta      *statsTaskMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -104,6 +107,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetStatsTaskMeta() *statsTaskMeta {
+	return m.statsTaskMeta
 }
 
 type channelCPs struct {
@@ -157,6 +164,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	stm, err := newStatsTaskMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -168,6 +180,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		chunkManager:       chunkManager,
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
+		statsTaskMeta:      stm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -1533,6 +1546,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
+				IsSorted: compactToSegment.GetIsSorted(),
 			})
 
 		// L1 segment with NumRows=0 will be discarded, so no need to change the metric
@@ -1926,4 +1940,68 @@ func (m *meta) CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
 		return err
 	}
 	return nil
+}
+
+func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.StatsResult) (*segMetricMutation, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	log := log.With(zap.Int64("collectionID", result.GetCollectionID()),
+		zap.Int64("partitionID", result.GetPartitionID()),
+		zap.Int64("old segmentID", oldSegmentID),
+		zap.Int64("target segmentID", result.GetSegmentID()))
+
+	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]int)}
+
+	oldSegment := m.segments.GetSegment(oldSegmentID)
+	if oldSegment == nil {
+		log.Warn("old segment is not found with stats task")
+		return nil, merr.WrapErrSegmentNotFound(oldSegmentID)
+	}
+
+	cloned := oldSegment.Clone()
+	cloned.DroppedAt = uint64(time.Now().UnixNano())
+	cloned.Compacted = true
+
+	// metrics mutation for compaction from segments
+	updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:                  result.GetSegmentID(),
+		CollectionID:        result.GetCollectionID(),
+		PartitionID:         result.GetPartitionID(),
+		InsertChannel:       result.GetChannel(),
+		NumOfRows:           result.GetNumRows(),
+		State:               commonpb.SegmentState_Flushed,
+		MaxRowNum:           cloned.GetMaxRowNum(),
+		Binlogs:             result.GetInsertLogs(),
+		Statslogs:           result.GetStatsLogs(),
+		TextStatsLogs:       result.GetTextStatsLogs(),
+		CreatedByCompaction: true,
+		CompactionFrom:      []int64{oldSegmentID},
+		LastExpireTime:      cloned.GetLastExpireTime(),
+		Level:               datapb.SegmentLevel_L1,
+		StartPosition:       cloned.GetStartPosition(),
+		DmlPosition:         cloned.GetDmlPosition(),
+		IsSorted:            true,
+		IsImporting:         cloned.GetIsImporting(),
+	}
+	segment := NewSegmentInfo(segmentInfo)
+	if segment.GetNumOfRows() > 0 {
+		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+	} else {
+		segment.State = commonpb.SegmentState_Dropped
+	}
+
+	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", result.GetNumRows()))
+
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
+		log.Warn("fail to alter segments and new segment", zap.Error(err))
+		return nil, err
+	}
+
+	m.segments.SetSegment(oldSegmentID, cloned)
+	m.segments.SetSegment(result.GetSegmentID(), segment)
+
+	return metricMutation, nil
 }
