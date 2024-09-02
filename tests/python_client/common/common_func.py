@@ -163,12 +163,12 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
     array_length_ratio = len(array_length_result) / size
     array_access_ratio = len(array_access_result) / size
 
-    log.info("\nProportion of arrays that contain the value:", contains_ratio)
-    log.info("Proportion of arrays that contain any of the values:", contains_any_ratio)
-    log.info("Proportion of arrays that contain all of the values:", contains_all_ratio)
-    log.info("Proportion of arrays that equal the target array:", equals_ratio)
-    log.info("Proportion of arrays that have the target array length:", array_length_ratio)
-    log.info("Proportion of arrays that have the target array access:", array_access_ratio)
+    log.info(f"\nProportion of arrays that contain the value: {contains_ratio}")
+    log.info(f"Proportion of arrays that contain any of the values: {contains_any_ratio}")
+    log.info(f"Proportion of arrays that contain all of the values: {contains_all_ratio}")
+    log.info(f"Proportion of arrays that equal the target array: {equals_ratio}")
+    log.info(f"Proportion of arrays that have the target array length: {array_length_ratio}")
+    log.info(f"Proportion of arrays that have the target array access: {array_access_ratio}")
 
 
 
