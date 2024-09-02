@@ -85,6 +85,9 @@ type compactionPlanHandler struct {
 	executingGuard lock.RWMutex
 	executingTasks map[int64]CompactionTask // planID -> task
 
+	cleaningGuard lock.RWMutex
+	cleaningTasks map[int64]CompactionTask // planID -> task
+
 	meta             CompactionMeta
 	allocator        allocator
 	chManager        ChannelManager
@@ -187,13 +190,14 @@ func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm Chann
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       make(map[int64]CompactionTask),
+		executingTasks:   make(map[int64]CompactionTask),
+		cleaningTasks:    make(map[int64]CompactionTask),
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
 		allocator:        allocator,
 		stopCh:           make(chan struct{}),
 		cluster:          cluster,
-		executingTasks:   make(map[int64]CompactionTask),
 		taskNumber:       atomic.NewInt32(0),
 		analyzeScheduler: analyzeScheduler,
 		handler:          handler,
@@ -377,6 +381,7 @@ func (c *compactionPlanHandler) loopCheck() {
 			if err != nil {
 				log.Info("fail to update compaction", zap.Error(err))
 			}
+			c.cleanFailedTasks()
 		}
 	}
 }
@@ -639,6 +644,11 @@ func (c *compactionPlanHandler) assignNodeIDs(tasks []CompactionTask) {
 	}
 }
 
+// checkCompaction retrieves executing tasks and calls each task's Process() method
+// to evaluate its state and progress through the state machine.
+// Completed tasks are removed from executingTasks.
+// Tasks that fail or timeout are moved from executingTasks to cleaningTasks,
+// where task-specific clean logic is performed asynchronously.
 func (c *compactionPlanHandler) checkCompaction() error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
@@ -675,7 +685,35 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	}
 	c.executingGuard.Unlock()
 	c.taskNumber.Sub(int32(len(finishedTasks)))
+
+	// insert task need to clean
+	c.cleaningGuard.Lock()
+	for _, t := range finishedTasks {
+		if t.GetState() == datapb.CompactionTaskState_failed || t.GetState() == datapb.CompactionTaskState_timeout {
+			c.cleaningTasks[t.GetPlanID()] = t
+		}
+	}
+	c.cleaningGuard.Unlock()
 	return nil
+}
+
+// cleanFailedTasks performs task define Clean logic
+// while compactionPlanHandler.Clean is to do garbage collection for cleaned tasks
+func (c *compactionPlanHandler) cleanFailedTasks() {
+	c.cleaningGuard.RLock()
+	cleanedTasks := make([]CompactionTask, 0)
+	for _, t := range c.cleaningTasks {
+		clean := t.Clean()
+		if clean {
+			cleanedTasks = append(cleanedTasks, t)
+		}
+	}
+	c.cleaningGuard.RUnlock()
+	c.cleaningGuard.Lock()
+	for _, t := range cleanedTasks {
+		delete(c.cleaningTasks, t.GetPlanID())
+	}
+	c.cleaningGuard.Unlock()
 }
 
 func (c *compactionPlanHandler) pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
