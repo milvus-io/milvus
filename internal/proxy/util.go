@@ -634,9 +634,6 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 }
 
 func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
-	// ignore error if not found
-	// partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
-
 	var vectorCnt int
 	for _, field := range schema.Fields {
 		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
@@ -657,6 +654,10 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 
 		if field.IsPartitionKey {
 			return merr.WrapErrParameterInvalidMsg("Partition Key field %s cannot skip loading", field.GetName())
+		}
+
+		if field.IsClusteringKey {
+			return merr.WrapErrParameterInvalidMsg("Clustering Key field %s cannot skip loading", field.GetName())
 		}
 	}
 

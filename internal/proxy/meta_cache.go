@@ -218,8 +218,9 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.FieldSchema) error {
 	// ignore error if not found
 	partitionKeyField, _ := s.schemaHelper.GetPartitionKeyField()
+	clusteringKeyField, _ := s.schemaHelper.GetClusteringKeyField()
 
-	var hasPrimaryKey, hasPartitionKey, hasVector bool
+	var hasPrimaryKey, hasPartitionKey, hasClusteringKey, hasVector bool
 	for _, field := range fields {
 		if field.GetFieldID() == s.pkField.GetFieldID() {
 			hasPrimaryKey = true
@@ -229,6 +230,9 @@ func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 		}
 		if field.IsPartitionKey {
 			hasPartitionKey = true
+		}
+		if field.IsClusteringKey {
+			hasClusteringKey = true
 		}
 	}
 
@@ -240,6 +244,9 @@ func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 	}
 	if partitionKeyField != nil && !hasPartitionKey {
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain partition key field %s", names, partitionKeyField.GetName())
+	}
+	if clusteringKeyField != nil && !hasClusteringKey {
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clsutering key field %s", names, clusteringKeyField.GetName())
 	}
 	return nil
 }
