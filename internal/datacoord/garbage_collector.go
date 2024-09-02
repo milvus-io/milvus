@@ -163,6 +163,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedIndexes(ctx)
 			gc.recycleUnusedSegIndexes(ctx)
 			gc.recycleUnusedAnalyzeFiles(ctx)
+			gc.recycleUnusedTextIndexFiles(ctx)
 		})
 	}()
 	go func() {
@@ -465,9 +466,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		}
 
 		logs := getLogs(segment)
+		for key := range getTextLogs(segment) {
+			logs[key] = struct{}{}
+		}
+
 		log.Info("GC segment start...", zap.Int("insert_logs", len(segment.GetBinlogs())),
 			zap.Int("delta_logs", len(segment.GetDeltalogs())),
-			zap.Int("stats_logs", len(segment.GetStatslogs())))
+			zap.Int("stats_logs", len(segment.GetStatslogs())),
+			zap.Int("text_logs", len(segment.GetTextStatsLogs())))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			continue
@@ -559,6 +565,17 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 		}
 	}
 	return logs
+}
+
+func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
+	textLogs := make(map[string]struct{})
+	for _, flog := range sinfo.GetTextStatsLogs() {
+		for _, file := range flog.GetFiles() {
+			textLogs[file] = struct{}{}
+		}
+	}
+
+	return textLogs
 }
 
 // removeObjectFiles remove file from oss storage, return error if any log failed to remove.
@@ -817,4 +834,65 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 		}
 		log.Info("analyze stats files recycle success", zap.Int64("taskID", taskID))
 	}
+}
+
+// recycleUnusedTextIndexFiles load meta file info and compares OSS keys
+// if missing found, performs gc cleanup
+func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedTextIndexFiles...")
+	defer func() { log.Info("recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start))) }()
+
+	hasTextIndexSegments := gc.meta.SelectSegments(SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return len(info.GetTextStatsLogs()) != 0
+	}))
+	fileNum := 0
+	deletedFilesNum := atomic.NewInt32(0)
+
+	for _, seg := range hasTextIndexSegments {
+		for _, fieldStats := range seg.GetTextStatsLogs() {
+			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			// clear low version task
+			for i := int64(1); i < fieldStats.GetVersion(); i++ {
+				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.TextIndexPath,
+					seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fieldStats.GetFieldID(), i)
+				futures := make([]*conc.Future[struct{}], 0)
+
+				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					file := files.FilePath
+
+					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+						log := log.With(zap.String("file", file))
+						log.Info("garbageCollector recycleUnusedTextIndexFiles remove file...")
+
+						if err := gc.option.cli.Remove(ctx, file); err != nil {
+							log.Warn("garbageCollector recycleUnusedTextIndexFiles remove file failed", zap.Error(err))
+							return struct{}{}, err
+						}
+						deletedFilesNum.Inc()
+						log.Info("garbageCollector recycleUnusedTextIndexFiles remove file success")
+						return struct{}{}, nil
+					})
+					futures = append(futures, future)
+					return true
+				})
+
+				// Wait for all remove tasks done.
+				if err := conc.BlockOnAll(futures...); err != nil {
+					// error is logged, and can be ignored here.
+					log.Warn("some task failure in remove object pool", zap.Error(err))
+				}
+
+				log = log.With(zap.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+				if err != nil {
+					log.Warn("text index files recycle failed when walk with prefix", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
+	log.Info("text index files recycle done")
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

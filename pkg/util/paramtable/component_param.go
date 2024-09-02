@@ -3230,6 +3230,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+
+	EnableStatsTask   ParamItem `refreshable:"true"`
+	TaskCheckInterval ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3854,7 +3857,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.IndexTaskSchedulerInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "100",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
 
@@ -4033,6 +4036,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
+
+	p.EnableStatsTask = ParamItem{
+		Key:          "dataCoord.statsTask.enable",
+		Version:      "2.5.0",
+		Doc:          "enable stats task",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.EnableStatsTask.Init(base.mgr)
+
+	p.TaskCheckInterval = ParamItem{
+		Key:          "dataCoord.taskCheckInterval",
+		Version:      "2.5.0",
+		Doc:          "task check interval seconds",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.TaskCheckInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

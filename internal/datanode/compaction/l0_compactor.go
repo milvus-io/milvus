@@ -205,7 +205,7 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 			return nil, err
 		}
 
-		blobKey, _ := binlog.BuildLogPath(storage.DeleteBinlog, writer.collectionID, writer.partitionID, writer.segmentID, -1, logID)
+		blobKey, _ := binlog.BuildLogPath(storage.DeleteBinlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), -1, logID)
 
 		allBlobs[blobKey] = blob.GetValue()
 		deltalog := &datapb.Binlog{

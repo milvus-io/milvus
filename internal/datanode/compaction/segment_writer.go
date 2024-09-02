@@ -350,6 +350,11 @@ func (w *SegmentWriter) FlushAndIsFull() bool {
 	return w.writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
 }
 
+func (w *SegmentWriter) FlushAndIsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
+	w.writer.Flush()
+	return w.writer.WrittenMemorySize() > binLogMaxSize
+}
+
 func (w *SegmentWriter) IsEmpty() bool {
 	return w.writer.WrittenMemorySize() == 0
 }

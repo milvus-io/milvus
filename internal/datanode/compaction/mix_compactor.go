@@ -259,10 +259,29 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	res, err := t.mergeSplit(ctxTimeout, allBatchPaths, deltaPk2Ts)
-	if err != nil {
-		log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))
-		return nil, err
+	allSorted := true
+	for _, segment := range t.plan.GetSegmentBinlogs() {
+		if !segment.GetIsSorted() {
+			allSorted = false
+			break
+		}
+	}
+
+	var res []*datapb.CompactionSegment
+	if allSorted && len(t.plan.GetSegmentBinlogs()) > 1 {
+		log.Info("all segments are sorted, use merge sort")
+		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
+			t.plan.GetSegmentBinlogs(), deltaPk2Ts, t.tr, t.currentTs, t.plan.GetCollectionTtl())
+		if err != nil {
+			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
+			return nil, err
+		}
+	} else {
+		res, err = t.mergeSplit(ctxTimeout, allBatchPaths, deltaPk2Ts)
+		if err != nil {
+			log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))
+			return nil, err
+		}
 	}
 
 	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)))

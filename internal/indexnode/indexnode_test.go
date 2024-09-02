@@ -30,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -181,6 +183,7 @@ type IndexNodeSuite struct {
 	segID         int64
 	fieldID       int64
 	logID         int64
+	numRows       int64
 	data          []*Blob
 	in            *IndexNode
 	storageConfig *indexpb.StorageConfig
@@ -195,13 +198,14 @@ func (s *IndexNodeSuite) SetupTest() {
 	s.collID = 1
 	s.partID = 2
 	s.segID = 3
-	s.fieldID = 102
+	s.fieldID = 111
 	s.logID = 10000
+	s.numRows = 3000
 	paramtable.Init()
 	Params.MinioCfg.RootPath.SwapTempValue("indexnode-ut")
 
 	var err error
-	s.data, err = generateTestData(s.collID, s.partID, s.segID, 1025)
+	s.data, err = generateTestData(s.collID, s.partID, s.segID, 3000)
 	s.NoError(err)
 
 	s.storageConfig = &indexpb.StorageConfig{
@@ -264,7 +268,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			buildID := int64(1)
 			dataPath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, s.fieldID, s.logID+13)
 			s.NoError(err)
-			req := &indexpb.CreateJobRequest{
+			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
 				IndexFilePrefix: "indexnode-ut/index_files",
 				BuildID:         buildID,
@@ -290,7 +294,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 						Key: "dim", Value: "8",
 					},
 				},
-				NumRows: 1025,
+				NumRows: s.numRows,
 			}
 
 			status, err := s.in.CreateJob(ctx, req)
@@ -299,7 +303,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			s.NoError(err)
 
 			for {
-				resp, err := s.in.QueryJobs(ctx, &indexpb.QueryJobsRequest{
+				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
 					BuildIDs:  []int64{buildID},
 				})
@@ -314,7 +318,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 				time.Sleep(time.Second)
 			}
 
-			status, err = s.in.DropJobs(ctx, &indexpb.DropJobsRequest{
+			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
 				BuildIDs:  []int64{buildID},
 			})
@@ -325,7 +329,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 
 		s.Run("v2.4.x", func() {
 			buildID := int64(2)
-			req := &indexpb.CreateJobRequest{
+			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
 				IndexFilePrefix: "indexnode-ut/index_files",
 				BuildID:         buildID,
@@ -351,7 +355,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 						Key: "dim", Value: "8",
 					},
 				},
-				NumRows:             1025,
+				NumRows:             s.numRows,
 				CurrentIndexVersion: 0,
 				CollectionID:        s.collID,
 				PartitionID:         s.partID,
@@ -368,7 +372,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			s.NoError(err)
 
 			for {
-				resp, err := s.in.QueryJobs(ctx, &indexpb.QueryJobsRequest{
+				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
 					BuildIDs:  []int64{buildID},
 				})
@@ -383,7 +387,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 				time.Sleep(time.Second)
 			}
 
-			status, err = s.in.DropJobs(ctx, &indexpb.DropJobsRequest{
+			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
 				BuildIDs:  []int64{buildID},
 			})
@@ -394,7 +398,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 
 		s.Run("v2.5.x", func() {
 			buildID := int64(3)
-			req := &indexpb.CreateJobRequest{
+			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
 				IndexFilePrefix: "indexnode-ut/index_files",
 				BuildID:         buildID,
@@ -419,7 +423,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 						Key: "dim", Value: "8",
 					},
 				},
-				NumRows:             1025,
+				NumRows:             s.numRows,
 				CurrentIndexVersion: 0,
 				CollectionID:        s.collID,
 				PartitionID:         s.partID,
@@ -442,7 +446,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			s.NoError(err)
 
 			for {
-				resp, err := s.in.QueryJobs(ctx, &indexpb.QueryJobsRequest{
+				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
 					BuildIDs:  []int64{buildID},
 				})
@@ -457,7 +461,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 				time.Sleep(time.Second)
 			}
 
-			status, err = s.in.DropJobs(ctx, &indexpb.DropJobsRequest{
+			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
 				BuildIDs:  []int64{buildID},
 			})
@@ -473,10 +477,10 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 
 	s.Run("int64 inverted", func() {
 		buildID := int64(10)
-		fieldID := int64(13)
-		dataPath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, s.fieldID, s.logID+13)
+		fieldID := int64(103)
+		dataPath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, fieldID, s.logID+5)
 		s.NoError(err)
-		req := &indexpb.CreateJobRequest{
+		req := &workerpb.CreateJobRequest{
 			ClusterID:       "cluster1",
 			IndexFilePrefix: "indexnode-ut/index_files",
 			BuildID:         buildID,
@@ -489,8 +493,8 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 				},
 			},
 			TypeParams: nil,
-			NumRows:    1025,
-			DataIds:    []int64{s.logID + 13},
+			NumRows:    s.numRows,
+			DataIds:    []int64{s.logID + 5},
 			Field: &schemapb.FieldSchema{
 				FieldID:  fieldID,
 				Name:     "int64",
@@ -504,7 +508,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 		s.NoError(err)
 
 		for {
-			resp, err := s.in.QueryJobs(ctx, &indexpb.QueryJobsRequest{
+			resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 				ClusterID: "cluster1",
 				BuildIDs:  []int64{buildID},
 			})
@@ -515,13 +519,167 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 			if resp.GetIndexInfos()[0].GetState() == commonpb.IndexState_Finished {
 				break
 			}
-			require.Equal(s.T(), resp.GetIndexInfos()[0].GetState(), commonpb.IndexState_InProgress)
+			require.Equal(s.T(), commonpb.IndexState_InProgress, resp.GetIndexInfos()[0].GetState())
 			time.Sleep(time.Second)
 		}
 
-		status, err = s.in.DropJobs(ctx, &indexpb.DropJobsRequest{
+		status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 			ClusterID: "cluster1",
 			BuildIDs:  []int64{buildID},
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+	})
+}
+
+func (s *IndexNodeSuite) Test_CreateAnalyzeTask() {
+	ctx := context.Background()
+
+	s.Run("normal case", func() {
+		taskID := int64(200)
+		req := &workerpb.AnalyzeRequest{
+			ClusterID:    "cluster1",
+			TaskID:       taskID,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			FieldID:      s.fieldID,
+			FieldName:    "floatVector",
+			FieldType:    schemapb.DataType_FloatVector,
+			SegmentStats: map[int64]*indexpb.SegmentStats{
+				s.segID: {
+					ID:      s.segID,
+					NumRows: s.numRows,
+					LogIDs:  []int64{s.logID + 13},
+				},
+			},
+			Version:             1,
+			StorageConfig:       s.storageConfig,
+			Dim:                 8,
+			MaxTrainSizeRatio:   0.8,
+			NumClusters:         1,
+			MinClusterSizeRatio: 0.01,
+			MaxClusterSizeRatio: 10,
+			MaxClusterSize:      5 * 1024 * 1024 * 1024,
+		}
+
+		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster1",
+			TaskID:    taskID,
+			JobType:   indexpb.JobType_JobTypeAnalyzeJob,
+			Request: &workerpb.CreateJobV2Request_AnalyzeRequest{
+				AnalyzeRequest: req,
+			},
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+
+		for {
+			resp, err := s.in.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+				ClusterID: "cluster1",
+				TaskIDs:   []int64{taskID},
+				JobType:   indexpb.JobType_JobTypeAnalyzeJob,
+			})
+			s.NoError(err)
+			err = merr.Error(resp.GetStatus())
+			s.NoError(err)
+			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
+			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
+				s.Equal("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
+				break
+			}
+			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
+			time.Sleep(time.Second)
+		}
+
+		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
+			ClusterID: "cluster1",
+			TaskIDs:   []int64{taskID},
+			JobType:   indexpb.JobType_JobTypeAnalyzeJob,
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+	})
+}
+
+func (s *IndexNodeSuite) Test_CreateStatsTask() {
+	ctx := context.Background()
+
+	fieldBinlogs := make([]*datapb.FieldBinlog, 0)
+	for i, field := range generateTestSchema().GetFields() {
+		fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
+			FieldID: field.GetFieldID(),
+			Binlogs: []*datapb.Binlog{{
+				LogID: s.logID + int64(i),
+			}},
+		})
+	}
+	s.Run("normal case", func() {
+		taskID := int64(100)
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       "cluster2",
+			TaskID:          taskID,
+			CollectionID:    s.collID,
+			PartitionID:     s.partID,
+			InsertChannel:   "ch1",
+			SegmentID:       s.segID,
+			InsertLogs:      fieldBinlogs,
+			DeltaLogs:       nil,
+			StorageConfig:   s.storageConfig,
+			Schema:          generateTestSchema(),
+			TargetSegmentID: s.segID + 1,
+			StartLogID:      s.logID + 100,
+			EndLogID:        s.logID + 200,
+			NumRows:         s.numRows,
+			BinlogMaxSize:   131000,
+		}
+
+		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster2",
+			TaskID:    taskID,
+			JobType:   indexpb.JobType_JobTypeStatsJob,
+			Request: &workerpb.CreateJobV2Request_StatsRequest{
+				StatsRequest: req,
+			},
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+
+		for {
+			resp, err := s.in.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+				ClusterID: "cluster2",
+				TaskIDs:   []int64{taskID},
+				JobType:   indexpb.JobType_JobTypeStatsJob,
+			})
+			s.NoError(err)
+			err = merr.Error(resp.GetStatus())
+			s.NoError(err)
+			s.Equal(1, len(resp.GetStatsJobResults().GetResults()))
+			if resp.GetStatsJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
+				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
+				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetStatsLogs()))
+				s.Zero(len(resp.GetStatsJobResults().GetResults()[0].GetDeltaLogs()))
+				s.Equal(s.numRows, resp.GetStatsJobResults().GetResults()[0].GetNumRows())
+				break
+			}
+			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetStatsJobResults().GetResults()[0].GetState())
+			time.Sleep(time.Second)
+		}
+
+		slotResp, err := s.in.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+		s.NoError(err)
+		err = merr.Error(slotResp.GetStatus())
+		s.NoError(err)
+
+		s.Equal(int64(1), slotResp.GetTaskSlots())
+
+		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
+			ClusterID: "cluster2",
+			TaskIDs:   []int64{taskID},
+			JobType:   indexpb.JobType_JobTypeStatsJob,
 		})
 		s.NoError(err)
 		err = merr.Error(status)

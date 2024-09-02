@@ -1675,6 +1675,71 @@ TEST_P(ExprTest, test_term_pk) {
     }
 }
 
+TEST_P(ExprTest, test_term_pk_with_sorted) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto seg = CreateSealedSegment(
+        schema, nullptr, 1, SegcoreConfig::default_config(), false, true);
+    int N = 100000;
+    auto raw_data = DataGen(schema, N);
+
+    // load field data
+    auto fields = schema->get_fields();
+
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
+        auto field_meta = fields.at(FieldId(field_id));
+        info.channel->push(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
+
+        seg->LoadFieldData(FieldId(field_id), info);
+    }
+
+    std::vector<proto::plan::GenericValue> retrieve_ints;
+    for (int i = 0; i < 10; ++i) {
+        proto::plan::GenericValue val;
+        val.set_int64_val(i);
+        retrieve_ints.push_back(val);
+    }
+    auto expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64), retrieve_ints);
+    query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+    BitsetType final;
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
+    EXPECT_EQ(final.size(), N);
+    for (int i = 0; i < 10; ++i) {
+        EXPECT_EQ(final[i], true);
+    }
+    for (int i = 10; i < N; ++i) {
+        EXPECT_EQ(final[i], false);
+    }
+    retrieve_ints.clear();
+    for (int i = 0; i < 10; ++i) {
+        proto::plan::GenericValue val;
+        val.set_int64_val(i + N);
+        retrieve_ints.push_back(val);
+    }
+    expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64), retrieve_ints);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
+    EXPECT_EQ(final.size(), N);
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(final[i], false);
+    }
+}
+
 TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);

@@ -183,7 +183,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		err = segWriter.Write(&v)
 		s.Require().NoError(err)
 	}
-	segWriter.writer.Flush()
+	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
@@ -315,7 +315,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 			err = segWriter.Write(&v)
 			s.Require().NoError(err)
 		}
-		segWriter.writer.Flush()
+		segWriter.FlushAndIsFull()
 
 		kvs, _, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 		s.NoError(err)

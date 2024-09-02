@@ -33,6 +33,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -734,7 +735,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)
@@ -1136,7 +1137,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1153,7 +1154,7 @@ func TestMeta_FinishTask(t *testing.T) {
 		m.catalog = &datacoord.Catalog{
 			MetaKv: metakv,
 		}
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1164,7 +1165,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1372,7 +1373,7 @@ func TestRemoveSegmentIndex(t *testing.T) {
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, nil, createIndexMeta(catalog))
+	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

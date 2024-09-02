@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -468,8 +469,28 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	}
 }
 
-func createMeta(catalog metastore.DataCoordCatalog, am *analyzeMeta, im *indexMeta) *meta {
-	return &meta{
+type testMetaOption func(*meta)
+
+func withAnalyzeMeta(am *analyzeMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.analyzeMeta = am
+	}
+}
+
+func withIndexMeta(im *indexMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.indexMeta = im
+	}
+}
+
+func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
+	return func(mt *meta) {
+		mt.statsTaskMeta = stm
+	}
+}
+
+func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
+	mt := &meta{
 		catalog: catalog,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
@@ -637,9 +658,12 @@ func createMeta(catalog metastore.DataCoordCatalog, am *analyzeMeta, im *indexMe
 				},
 			},
 		},
-		analyzeMeta: am,
-		indexMeta:   im,
 	}
+
+	for _, opt := range opts {
+		opt(mt)
+	}
+	return mt
 }
 
 type taskSchedulerSuite struct {
@@ -720,7 +744,7 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 	}
 }
 
-func (s *taskSchedulerSuite) SetupTest() {
+func (s *taskSchedulerSuite) SetupSuite() {
 	paramtable.Init()
 	s.initParams()
 	Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("0")
@@ -745,19 +769,20 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		return nil
 	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+	//catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+		func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
 			once.Do(func() {
 				time.Sleep(time.Second * 3)
 			})
 			switch request.GetJobType() {
 			case indexpb.JobType_JobTypeIndexJob:
-				results := make([]*indexpb.IndexTaskInfo, 0)
+				results := make([]*workerpb.IndexTaskInfo, 0)
 				for _, buildID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.IndexTaskInfo{
+					results = append(results, &workerpb.IndexTaskInfo{
 						BuildID:             buildID,
 						State:               commonpb.IndexState_Finished,
 						IndexFileKeys:       []string{"file1", "file2", "file3"},
@@ -767,36 +792,36 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 						IndexStoreVersion:   1,
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_IndexJobResults{
-						IndexJobResults: &indexpb.IndexJobResults{
+					Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+						IndexJobResults: &workerpb.IndexJobResults{
 							Results: results,
 						},
 					},
 				}, nil
 			case indexpb.JobType_JobTypeAnalyzeJob:
-				results := make([]*indexpb.AnalyzeResult, 0)
+				results := make([]*workerpb.AnalyzeResult, 0)
 				for _, taskID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.AnalyzeResult{
+					results = append(results, &workerpb.AnalyzeResult{
 						TaskID:        taskID,
 						State:         indexpb.JobState_JobStateFinished,
 						CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
 						FailReason:    "",
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_AnalyzeJobResults{
-						AnalyzeJobResults: &indexpb.AnalyzeResults{
+					Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+						AnalyzeJobResults: &workerpb.AnalyzeResults{
 							Results: results,
 						},
 					},
 				}, nil
 			default:
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Status(errors.New("unknown job type")),
 					ClusterID: request.GetClusterID(),
 				}, nil
@@ -808,12 +833,12 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
-	mt := createMeta(catalog, s.createAnalyzeMeta(catalog), createIndexMeta(catalog))
+	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)))
 
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 	s.Equal(9, len(scheduler.tasks))
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
 	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
@@ -844,7 +869,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		s.NoError(err)
 		t := &analyzeTask{
 			taskID: taskID,
-			taskInfo: &indexpb.AnalyzeResult{
+			taskInfo: &workerpb.AnalyzeResult{
 				TaskID:     taskID,
 				State:      indexpb.JobState_JobStateInit,
 				FailReason: "",
@@ -935,7 +960,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager := session.NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
-			&analyzeMeta{
+			withAnalyzeMeta(&analyzeMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
 				tasks: map[int64]*indexpb.AnalyzeTask{
@@ -948,15 +973,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 						State:        indexpb.JobState_JobStateInit,
 					},
 				},
-			},
-			&indexMeta{
+			}),
+			withIndexMeta(&indexMeta{
 				RWMutex: sync.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
-			})
+			}))
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		mt.segments.DropSegment(1000)
 		scheduler.scheduleDuration = s.duration
@@ -991,11 +1016,11 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		workerManager := session.NewMockWorkerManager(s.T())
 
-		mt := createMeta(catalog, s.createAnalyzeMeta(catalog), &indexMeta{
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(&indexMeta{
 			RWMutex: sync.RWMutex{},
 			ctx:     ctx,
 			catalog: catalog,
-		})
+		}))
 
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
@@ -1013,7 +1038,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			},
 		}, nil)
 
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		// remove task in meta
 		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(1)
@@ -1070,19 +1095,19 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		// query result InProgress --> state: InProgress
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
-				results := make([]*indexpb.AnalyzeResult, 0)
+			func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
+				results := make([]*workerpb.AnalyzeResult, 0)
 				for _, taskID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.AnalyzeResult{
+					results = append(results, &workerpb.AnalyzeResult{
 						TaskID: taskID,
 						State:  indexpb.JobState_JobStateInProgress,
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_AnalyzeJobResults{
-						AnalyzeJobResults: &indexpb.AnalyzeResults{
+					Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+						AnalyzeJobResults: &workerpb.AnalyzeResults{
 							Results: results,
 						},
 					},
@@ -1092,20 +1117,20 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		// query result Retry --> state: retry
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
-				results := make([]*indexpb.AnalyzeResult, 0)
+			func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
+				results := make([]*workerpb.AnalyzeResult, 0)
 				for _, taskID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.AnalyzeResult{
+					results = append(results, &workerpb.AnalyzeResult{
 						TaskID:     taskID,
 						State:      indexpb.JobState_JobStateRetry,
 						FailReason: "node analyze data failed",
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_AnalyzeJobResults{
-						AnalyzeJobResults: &indexpb.AnalyzeResults{
+					Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+						AnalyzeJobResults: &workerpb.AnalyzeResults{
 							Results: results,
 						},
 					},
@@ -1122,7 +1147,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		// query result failed --> state: retry
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
-		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&indexpb.QueryJobsV2Response{
+		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 			Status: merr.Status(errors.New("query job failed")),
 		}, nil).Once()
 
@@ -1136,10 +1161,10 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		// query result not exists --> state: retry
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
-		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&indexpb.QueryJobsV2Response{
+		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 			Status:    merr.Success(),
 			ClusterID: "",
-			Result:    &indexpb.QueryJobsV2Response_AnalyzeJobResults{},
+			Result:    &workerpb.QueryJobsV2Response_AnalyzeJobResults{},
 		}, nil).Once()
 
 		// retry --> state: init
@@ -1164,10 +1189,10 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		// query result success --> state: finished
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
-				results := make([]*indexpb.AnalyzeResult, 0)
+			func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
+				results := make([]*workerpb.AnalyzeResult, 0)
 				for _, taskID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.AnalyzeResult{
+					results = append(results, &workerpb.AnalyzeResult{
 						TaskID: taskID,
 						State:  indexpb.JobState_JobStateFinished,
 						//CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
@@ -1179,11 +1204,11 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 						FailReason: "",
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_AnalyzeJobResults{
-						AnalyzeJobResults: &indexpb.AnalyzeResults{
+					Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+						AnalyzeJobResults: &workerpb.AnalyzeResults{
 							Results: results,
 						},
 					},
@@ -1226,11 +1251,11 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		workerManager := session.NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
-			&analyzeMeta{
+			withAnalyzeMeta(&analyzeMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-			},
-			&indexMeta{
+			}),
+			withIndexMeta(&indexMeta{
 				RWMutex: sync.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
@@ -1284,13 +1309,13 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 						},
 					},
 				},
-			})
+			}))
 
 		cm := mocks.NewChunkManager(s.T())
 		cm.EXPECT().RootPath().Return("ut-index")
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
@@ -1334,12 +1359,12 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 
 		// inProgress --> Finished
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
-		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&indexpb.QueryJobsV2Response{
+		in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			ClusterID: "",
-			Result: &indexpb.QueryJobsV2Response_IndexJobResults{
-				IndexJobResults: &indexpb.IndexJobResults{
-					Results: []*indexpb.IndexTaskInfo{
+			Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+				IndexJobResults: &workerpb.IndexJobResults{
+					Results: []*workerpb.IndexTaskInfo{
 						{
 							BuildID:        buildID,
 							State:          commonpb.IndexState_Finished,
@@ -1539,7 +1564,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler)
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
@@ -1564,12 +1589,12 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	}
 
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, request *indexpb.QueryJobsV2Request, option ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+		func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
 			switch request.GetJobType() {
 			case indexpb.JobType_JobTypeIndexJob:
-				results := make([]*indexpb.IndexTaskInfo, 0)
+				results := make([]*workerpb.IndexTaskInfo, 0)
 				for _, buildID := range request.GetTaskIDs() {
-					results = append(results, &indexpb.IndexTaskInfo{
+					results = append(results, &workerpb.IndexTaskInfo{
 						BuildID:             buildID,
 						State:               commonpb.IndexState_Finished,
 						IndexFileKeys:       []string{"file1", "file2"},
@@ -1579,17 +1604,17 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 						IndexStoreVersion:   0,
 					})
 				}
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status:    merr.Success(),
 					ClusterID: request.GetClusterID(),
-					Result: &indexpb.QueryJobsV2Response_IndexJobResults{
-						IndexJobResults: &indexpb.IndexJobResults{
+					Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+						IndexJobResults: &workerpb.IndexJobResults{
 							Results: results,
 						},
 					},
 				}, nil
 			default:
-				return &indexpb.QueryJobsV2Response{
+				return &workerpb.QueryJobsV2Response{
 					Status: merr.Status(errors.New("unknown job type")),
 				}, nil
 			}
@@ -1598,7 +1623,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	s.Run("success to get opt field on startup", func() {
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
@@ -1621,14 +1646,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		} {
 			mt.collections[collID].Schema.Fields[1].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 					s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
 				taskID: buildID,
 				nodeID: nodeID,
-				taskInfo: &indexpb.IndexTaskInfo{
+				taskInfo: &workerpb.IndexTaskInfo{
 					BuildID:    buildID,
 					State:      commonpb.IndexState_Unissued,
 					FailReason: "",
@@ -1644,14 +1669,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	s.Run("enqueue returns empty optional field when cfg disable", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",
@@ -1669,14 +1694,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		} {
 			mt.collections[collID].Schema.Fields[0].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
 				taskID: buildID,
 				nodeID: nodeID,
-				taskInfo: &indexpb.IndexTaskInfo{
+				taskInfo: &workerpb.IndexTaskInfo{
 					BuildID:    buildID,
 					State:      commonpb.IndexState_Unissued,
 					FailReason: "",
@@ -1699,14 +1724,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		} {
 			mt.collections[collID].Schema.Fields[1].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-				func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
+				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 					return merr.Success(), nil
 				}).Once()
 			t := &indexBuildTask{
 				taskID: buildID,
 				nodeID: nodeID,
-				taskInfo: &indexpb.IndexTaskInfo{
+				taskInfo: &workerpb.IndexTaskInfo{
 					BuildID:    buildID,
 					State:      commonpb.IndexState_Unissued,
 					FailReason: "",
@@ -1722,14 +1747,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",
@@ -1743,14 +1768,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	s.Run("enqueue partitionKeyIsolation is false when schema is not set", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",
@@ -1776,20 +1801,20 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	handler_isolation := NewNMockHandler(s.T())
 	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
 
-	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation)
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil)
 	scheduler_isolation.Start()
 
 	s.Run("enqueue partitionKeyIsolation is false when MV not enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",
@@ -1805,14 +1830,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "true"
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, true)
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",
@@ -1828,14 +1853,14 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "invalid"
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, in *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
 			taskID: buildID,
 			nodeID: nodeID,
-			taskInfo: &indexpb.IndexTaskInfo{
+			taskInfo: &workerpb.IndexTaskInfo{
 				BuildID:    buildID,
 				State:      commonpb.IndexState_Unissued,
 				FailReason: "",

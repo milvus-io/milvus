@@ -1012,6 +1012,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 			Level:               segment.Level,
 			CollectionID:        segment.CollectionID,
 			PartitionID:         segment.PartitionID,
+			IsSorted:            segment.IsSorted,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			analyzeResult, err := t.scalarAnalyzeSegment(ctx, segmentClone)

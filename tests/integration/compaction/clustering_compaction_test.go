@@ -45,6 +45,15 @@ type ClusteringCompactionSuite struct {
 	integration.MiniClusterSuite
 }
 
+func (s *ClusteringCompactionSuite) SetupSuite() {
+	paramtable.Init()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexTaskSchedulerInterval.Key, "100")
+
+	s.Require().NoError(s.SetupEmbedEtcd())
+}
+
 func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

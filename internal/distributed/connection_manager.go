@@ -33,9 +33,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -59,7 +59,7 @@ type ConnectionManager struct {
 	queryNodesMu sync.RWMutex
 	dataNodes    map[int64]datapb.DataNodeClient
 	dataNodesMu  sync.RWMutex
-	indexNodes   map[int64]indexpb.IndexNodeClient
+	indexNodes   map[int64]workerpb.IndexNodeClient
 	indexNodesMu sync.RWMutex
 
 	taskMu     sync.RWMutex
@@ -81,7 +81,7 @@ func NewConnectionManager(session *sessionutil.Session) *ConnectionManager {
 
 		queryNodes: make(map[int64]querypb.QueryNodeClient),
 		dataNodes:  make(map[int64]datapb.DataNodeClient),
-		indexNodes: make(map[int64]indexpb.IndexNodeClient),
+		indexNodes: make(map[int64]workerpb.IndexNodeClient),
 
 		buildTasks: make(map[int64]*buildClientTask),
 		notify:     make(chan int64),
@@ -187,7 +187,7 @@ func (cm *ConnectionManager) GetDataNodeClients() (map[int64]datapb.DataNodeClie
 	return cm.dataNodes, true
 }
 
-func (cm *ConnectionManager) GetIndexNodeClients() (map[int64]indexpb.IndexNodeClient, bool) {
+func (cm *ConnectionManager) GetIndexNodeClients() (map[int64]workerpb.IndexNodeClient, bool) {
 	cm.indexNodesMu.RLock()
 	defer cm.indexNodesMu.RUnlock()
 	_, ok := cm.dependencies[typeutil.IndexNodeRole]
@@ -295,7 +295,7 @@ func (cm *ConnectionManager) buildClients(session *sessionutil.Session, connecti
 	case typeutil.IndexNodeRole:
 		cm.indexNodesMu.Lock()
 		defer cm.indexNodesMu.Unlock()
-		cm.indexNodes[session.ServerID] = indexpb.NewIndexNodeClient(connection)
+		cm.indexNodes[session.ServerID] = workerpb.NewIndexNodeClient(connection)
 	}
 }
 

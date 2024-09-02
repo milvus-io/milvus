@@ -751,6 +751,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2InsertChannel := make(map[UniqueID]string)
 	segmentsNumOfRows := make(map[UniqueID]int64)
+	segment2TextStatsLogs := make(map[UniqueID]map[UniqueID]*datapb.TextIndexStats)
 	for id := range flushedIDs {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
@@ -812,6 +813,8 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
 		}
 
+		segment2TextStatsLogs[id] = segment.GetTextStatsLogs()
+
 		if len(segment.GetDeltalogs()) > 0 {
 			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
 		}
@@ -826,6 +829,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			Statslogs:     segment2StatsBinlogs[segmentID],
 			Deltalogs:     segment2DeltaBinlogs[segmentID],
 			InsertChannel: segment2InsertChannel[segmentID],
+			TextStatsLogs: segment2TextStatsLogs[segmentID],
 		}
 		binlogs = append(binlogs, sbl)
 	}

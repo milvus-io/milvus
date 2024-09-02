@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package milvus.proto.worker;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/workerpb";
+
+import "common.proto";
+import "internal.proto";
+import "milvus.proto";
+import "schema.proto";
+import "data_coord.proto";
+import "index_coord.proto";
+
+
+service IndexNode {
+  rpc GetComponentStates(milvus.GetComponentStatesRequest)
+      returns (milvus.ComponentStates) {
+  }
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest)
+      returns (milvus.StringResponse) {
+  }
+  rpc CreateJob(CreateJobRequest) returns (common.Status) {
+  }
+  rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {
+  }
+  rpc DropJobs(DropJobsRequest) returns (common.Status) {
+  }
+  rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {
+  }
+
+  rpc ShowConfigurations(internal.ShowConfigurationsRequest)
+      returns (internal.ShowConfigurationsResponse) {
+  }
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest)
+      returns (milvus.GetMetricsResponse) {
+  }
+
+  rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
+  }
+  rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {
+  }
+  rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {
+  }
+}
+
+message CreateJobRequest {
+  string clusterID = 1;
+  string index_file_prefix = 2;
+  int64 buildID = 3;
+  repeated string data_paths = 4;
+  int64 index_version = 5;
+  int64 indexID = 6;
+  string index_name = 7;
+  index.StorageConfig storage_config = 8;
+  repeated common.KeyValuePair index_params = 9;
+  repeated common.KeyValuePair type_params = 10;
+  int64 num_rows = 11;
+  int32 current_index_version = 12;
+  int64 collectionID = 13;
+  int64 partitionID = 14;
+  int64 segmentID = 15;
+  int64 fieldID = 16;
+  string field_name = 17;
+  schema.DataType field_type = 18;
+  string store_path = 19;
+  int64 store_version = 20;
+  string index_store_path = 21;
+  int64 dim = 22;
+  repeated int64 data_ids = 23;
+  repeated index.OptionalFieldInfo optional_scalar_fields = 24;
+  schema.FieldSchema field = 25;
+  bool partition_key_isolation = 26;
+}
+
+message QueryJobsRequest {
+  string clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message QueryJobsResponse {
+  common.Status status = 1;
+  string clusterID = 2;
+  repeated IndexTaskInfo index_infos = 3;
+}
+
+message DropJobsRequest {
+  string clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message GetJobStatsRequest {
+}
+
+message GetJobStatsResponse {
+  common.Status status = 1;
+  int64 total_job_num = 2;
+  int64 in_progress_job_num = 3;
+  int64 enqueue_job_num = 4;
+  int64 task_slots = 5;
+  repeated index.JobInfo job_infos = 6;
+  bool enable_disk = 7;
+}
+
+message AnalyzeRequest {
+  string clusterID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  int64 fieldID = 5;
+  string fieldName = 6;
+  schema.DataType field_type = 7;
+  map<int64, index.SegmentStats> segment_stats = 8;
+  int64 version = 9;
+  index.StorageConfig storage_config = 10;
+  int64 dim = 11;
+  double max_train_size_ratio = 12;
+  int64 num_clusters = 13;
+  schema.FieldSchema field = 14;
+  double min_cluster_size_ratio = 15;
+  double max_cluster_size_ratio = 16;
+  int64 max_cluster_size = 17;
+}
+
+message CreateStatsRequest {
+  string clusterID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  string insert_channel = 5;
+  int64 segmentID = 6;
+  repeated data.FieldBinlog insert_logs = 7;
+  repeated data.FieldBinlog delta_logs = 8;
+  index.StorageConfig storage_config = 9;
+  schema.CollectionSchema schema = 10;
+  int64 targetSegmentID = 11;
+  int64 startLogID = 12;
+  int64 endLogID = 13;
+  int64 num_rows = 14;
+  int64 collection_ttl = 15;
+  uint64 current_ts = 16;
+  int64 task_version = 17;
+  uint64 binlogMaxSize = 18;
+}
+
+message CreateJobV2Request {
+  string clusterID = 1;
+  int64 taskID = 2;
+  index.JobType job_type = 3;
+  oneof request {
+    AnalyzeRequest analyze_request = 4;
+    CreateJobRequest index_request = 5;
+    CreateStatsRequest stats_request = 6;
+  }
+}
+
+message QueryJobsV2Request {
+  string clusterID = 1;
+  repeated int64 taskIDs = 2;
+  index.JobType job_type = 3;
+}
+
+message IndexTaskInfo {
+  int64 buildID = 1;
+  common.IndexState state = 2;
+  repeated string index_file_keys = 3;
+  uint64 serialized_size = 4;
+  string fail_reason = 5;
+  int32 current_index_version = 6;
+  int64 index_store_version = 7;
+}
+
+message IndexJobResults {
+  repeated IndexTaskInfo results = 1;
+}
+
+message AnalyzeResult {
+  int64 taskID = 1;
+  index.JobState state = 2;
+  string fail_reason = 3;
+  string centroids_file = 4;
+}
+
+message AnalyzeResults {
+  repeated AnalyzeResult results = 1;
+}
+
+message StatsResult {
+  int64 taskID = 1;
+  index.JobState state = 2;
+  string fail_reason = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  int64 segmentID = 6;
+  string channel = 7;
+  repeated data.FieldBinlog insert_logs = 8;
+  repeated data.FieldBinlog stats_logs = 9;
+  repeated data.FieldBinlog delta_logs = 10;
+  map<int64, data.TextIndexStats> text_stats_logs = 11;
+  int64 num_rows = 12;
+}
+
+message StatsResults {
+  repeated StatsResult results = 1;
+}
+
+message QueryJobsV2Response {
+  common.Status status = 1;
+  string clusterID = 2;
+  oneof result {
+    IndexJobResults index_job_results = 3;
+    AnalyzeResults analyze_job_results = 4;
+    StatsResults stats_job_results = 5;
+  }
+}
+
+message DropJobsV2Request {
+  string clusterID = 1;
+  repeated int64 taskIDs = 2;
+  index.JobType job_type = 3;
+}

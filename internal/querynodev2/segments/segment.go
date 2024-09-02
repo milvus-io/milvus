@@ -291,7 +291,7 @@ func NewSegment(ctx context.Context,
 
 	var newPtr C.CSegmentInterface
 	_, err = GetDynamicPool().Submit(func() (any, error) {
-		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr)
+		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr, C.bool(loadInfo.GetIsSorted()))
 		err := HandleCStatus(ctx, &status, "NewSegmentFailed",
 			zap.Int64("collectionID", loadInfo.GetCollectionID()),
 			zap.Int64("partitionID", loadInfo.GetPartitionID()),

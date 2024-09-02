@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package indexnode
 
 import (
@@ -7,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -28,7 +45,7 @@ type indexTaskInfo struct {
 func (i *IndexNode) loadOrStoreIndexTask(ClusterID string, buildID UniqueID, info *indexTaskInfo) *indexTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	oldInfo, ok := i.indexTasks[key]
 	if ok {
 		return oldInfo
@@ -38,7 +55,7 @@ func (i *IndexNode) loadOrStoreIndexTask(ClusterID string, buildID UniqueID, inf
 }
 
 func (i *IndexNode) loadIndexTaskState(ClusterID string, buildID UniqueID) commonpb.IndexState {
-	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	task, ok := i.indexTasks[key]
@@ -49,7 +66,7 @@ func (i *IndexNode) loadIndexTaskState(ClusterID string, buildID UniqueID) commo
 }
 
 func (i *IndexNode) storeIndexTaskState(ClusterID string, buildID UniqueID, state commonpb.IndexState, failReason string) {
-	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if task, ok := i.indexTasks[key]; ok {
@@ -64,7 +81,7 @@ func (i *IndexNode) foreachIndexTaskInfo(fn func(ClusterID string, buildID Uniqu
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	for key, info := range i.indexTasks {
-		fn(key.ClusterID, key.BuildID, info)
+		fn(key.ClusterID, key.TaskID, info)
 	}
 }
 
@@ -75,7 +92,7 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	serializedSize uint64,
 	currentIndexVersion int32,
 ) {
-	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.indexTasks[key]; ok {
@@ -94,7 +111,7 @@ func (i *IndexNode) storeIndexFilesAndStatisticV2(
 	currentIndexVersion int32,
 	indexStoreVersion int64,
 ) {
-	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.indexTasks[key]; ok {
@@ -116,7 +133,7 @@ func (i *IndexNode) deleteIndexTaskInfos(ctx context.Context, keys []taskKey) []
 			deleted = append(deleted, info)
 			delete(i.indexTasks, key)
 			log.Ctx(ctx).Info("delete task infos",
-				zap.String("cluster_id", key.ClusterID), zap.Int64("build_id", key.BuildID))
+				zap.String("cluster_id", key.ClusterID), zap.Int64("build_id", key.TaskID))
 		}
 	}
 	return deleted
@@ -145,7 +162,7 @@ type analyzeTaskInfo struct {
 func (i *IndexNode) loadOrStoreAnalyzeTask(clusterID string, taskID UniqueID, info *analyzeTaskInfo) *analyzeTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	key := taskKey{ClusterID: clusterID, BuildID: taskID}
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
 	oldInfo, ok := i.analyzeTasks[key]
 	if ok {
 		return oldInfo
@@ -155,7 +172,7 @@ func (i *IndexNode) loadOrStoreAnalyzeTask(clusterID string, taskID UniqueID, in
 }
 
 func (i *IndexNode) loadAnalyzeTaskState(clusterID string, taskID UniqueID) indexpb.JobState {
-	key := taskKey{ClusterID: clusterID, BuildID: taskID}
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	task, ok := i.analyzeTasks[key]
@@ -166,11 +183,11 @@ func (i *IndexNode) loadAnalyzeTaskState(clusterID string, taskID UniqueID) inde
 }
 
 func (i *IndexNode) storeAnalyzeTaskState(clusterID string, taskID UniqueID, state indexpb.JobState, failReason string) {
-	key := taskKey{ClusterID: clusterID, BuildID: taskID}
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if task, ok := i.analyzeTasks[key]; ok {
-		log.Info("IndexNode store analyze task state", zap.String("clusterID", clusterID), zap.Int64("taskID", taskID),
+		log.Info("IndexNode store analyze task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.state = state
 		task.failReason = failReason
@@ -181,7 +198,7 @@ func (i *IndexNode) foreachAnalyzeTaskInfo(fn func(clusterID string, taskID Uniq
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	for key, info := range i.analyzeTasks {
-		fn(key.ClusterID, key.BuildID, info)
+		fn(key.ClusterID, key.TaskID, info)
 	}
 }
 
@@ -190,7 +207,7 @@ func (i *IndexNode) storeAnalyzeFilesAndStatistic(
 	taskID UniqueID,
 	centroidsFile string,
 ) {
-	key := taskKey{ClusterID: ClusterID, BuildID: taskID}
+	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.analyzeTasks[key]; ok {
@@ -203,7 +220,15 @@ func (i *IndexNode) getAnalyzeTaskInfo(clusterID string, taskID UniqueID) *analy
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 
-	return i.analyzeTasks[taskKey{ClusterID: clusterID, BuildID: taskID}]
+	if info, ok := i.analyzeTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
+		return &analyzeTaskInfo{
+			cancel:        info.cancel,
+			state:         info.state,
+			failReason:    info.failReason,
+			centroidsFile: info.centroidsFile,
+		}
+	}
+	return nil
 }
 
 func (i *IndexNode) deleteAnalyzeTaskInfos(ctx context.Context, keys []taskKey) []*analyzeTaskInfo {
@@ -216,7 +241,7 @@ func (i *IndexNode) deleteAnalyzeTaskInfos(ctx context.Context, keys []taskKey) 
 			deleted = append(deleted, info)
 			delete(i.analyzeTasks, key)
 			log.Ctx(ctx).Info("delete analyze task infos",
-				zap.String("clusterID", key.ClusterID), zap.Int64("taskID", key.BuildID))
+				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
 		}
 	}
 	return deleted
@@ -284,4 +309,132 @@ func (i *IndexNode) waitTaskFinish() {
 			return
 		}
 	}
+}
+
+type statsTaskInfo struct {
+	cancel        context.CancelFunc
+	state         indexpb.JobState
+	failReason    string
+	collID        UniqueID
+	partID        UniqueID
+	segID         UniqueID
+	insertChannel string
+	numRows       int64
+	insertLogs    []*datapb.FieldBinlog
+	statsLogs     []*datapb.FieldBinlog
+	textStatsLogs map[int64]*datapb.TextIndexStats
+}
+
+func (i *IndexNode) loadOrStoreStatsTask(clusterID string, taskID UniqueID, info *statsTaskInfo) *statsTaskInfo {
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
+	oldInfo, ok := i.statsTasks[key]
+	if ok {
+		return oldInfo
+	}
+	i.statsTasks[key] = info
+	return nil
+}
+
+func (i *IndexNode) getStatsTaskState(clusterID string, taskID UniqueID) indexpb.JobState {
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	task, ok := i.statsTasks[key]
+	if !ok {
+		return indexpb.JobState_JobStateNone
+	}
+	return task.state
+}
+
+func (i *IndexNode) storeStatsTaskState(clusterID string, taskID UniqueID, state indexpb.JobState, failReason string) {
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	if task, ok := i.statsTasks[key]; ok {
+		log.Info("IndexNode store stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
+			zap.String("state", state.String()), zap.String("fail reason", failReason))
+		task.state = state
+		task.failReason = failReason
+	}
+}
+
+func (i *IndexNode) storeStatsResult(
+	ClusterID string,
+	taskID UniqueID,
+	collID UniqueID,
+	partID UniqueID,
+	segID UniqueID,
+	channel string,
+	numRows int64,
+	insertLogs []*datapb.FieldBinlog,
+	statsLogs []*datapb.FieldBinlog,
+	fieldStatsLogs map[int64]*datapb.TextIndexStats,
+) {
+	key := taskKey{ClusterID: ClusterID, TaskID: taskID}
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	if info, ok := i.statsTasks[key]; ok {
+		info.collID = collID
+		info.partID = partID
+		info.segID = segID
+		info.insertChannel = channel
+		info.numRows = numRows
+		info.insertLogs = insertLogs
+		info.statsLogs = statsLogs
+		info.textStatsLogs = fieldStatsLogs
+		return
+	}
+}
+
+func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTaskInfo {
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+
+	if info, ok := i.statsTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
+		return &statsTaskInfo{
+			cancel:        info.cancel,
+			state:         info.state,
+			failReason:    info.failReason,
+			collID:        info.collID,
+			partID:        info.partID,
+			segID:         info.segID,
+			insertChannel: info.insertChannel,
+			numRows:       info.numRows,
+			insertLogs:    info.insertLogs,
+			statsLogs:     info.statsLogs,
+			textStatsLogs: info.textStatsLogs,
+		}
+	}
+	return nil
+}
+
+func (i *IndexNode) deleteStatsTaskInfos(ctx context.Context, keys []taskKey) []*statsTaskInfo {
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	deleted := make([]*statsTaskInfo, 0, len(keys))
+	for _, key := range keys {
+		info, ok := i.statsTasks[key]
+		if ok {
+			deleted = append(deleted, info)
+			delete(i.statsTasks, key)
+			log.Ctx(ctx).Info("delete stats task infos",
+				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
+		}
+	}
+	return deleted
+}
+
+func (i *IndexNode) deleteAllStatsTasks() []*statsTaskInfo {
+	i.stateLock.Lock()
+	deletedTasks := i.statsTasks
+	i.statsTasks = make(map[taskKey]*statsTaskInfo)
+	i.stateLock.Unlock()
+
+	deleted := make([]*statsTaskInfo, 0, len(deletedTasks))
+	for _, info := range deletedTasks {
+		deleted = append(deleted, info)
+	}
+	return deleted
 }

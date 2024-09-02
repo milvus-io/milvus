@@ -103,6 +103,9 @@ const (
 	AnalyzeStatsPath = `analyze_stats`
 	OffsetMapping    = `offset_mapping`
 	Centroids        = "centroids"
+
+	// TextIndexPath storage path const for text index
+	TextIndexPath = "text_log"
 )
 
 // Search, Index parameter keys
