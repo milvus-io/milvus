@@ -48,6 +48,7 @@ const (
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
+	GroupStrictSize      = "group_strict_size"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"

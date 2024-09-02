@@ -44,6 +44,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<int8_t>(iterators,
                                          search_info.topk_,
                                          search_info.group_size_,
+                                         search_info.group_strict_size_,
                                          *dataGetter,
                                          group_by_values,
                                          seg_offsets,
@@ -58,6 +59,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<int16_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
+                                          search_info.group_strict_size_,
                                           *dataGetter,
                                           group_by_values,
                                           seg_offsets,
@@ -72,6 +74,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<int32_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
+                                          search_info.group_strict_size_,
                                           *dataGetter,
                                           group_by_values,
                                           seg_offsets,
@@ -86,6 +89,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<int64_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
+                                          search_info.group_strict_size_,
                                           *dataGetter,
                                           group_by_values,
                                           seg_offsets,
@@ -99,6 +103,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<bool>(iterators,
                                        search_info.topk_,
                                        search_info.group_size_,
+                                       search_info.group_strict_size_,
                                        *dataGetter,
                                        group_by_values,
                                        seg_offsets,
@@ -113,6 +118,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             GroupIteratorsByType<std::string>(iterators,
                                               search_info.topk_,
                                               search_info.group_size_,
+                                              search_info.group_strict_size_,
                                               *dataGetter,
                                               group_by_values,
                                               seg_offsets,
@@ -136,6 +142,7 @@ GroupIteratorsByType(
     const std::vector<std::shared_ptr<VectorIterator>>& iterators,
     int64_t topK,
     int64_t group_size,
+    bool group_strict_size,
     const DataGetter<T>& data_getter,
     std::vector<GroupByValueType>& group_by_values,
     std::vector<int64_t>& seg_offsets,
@@ -147,6 +154,7 @@ GroupIteratorsByType(
         GroupIteratorResult<T>(iterator,
                                topK,
                                group_size,
+                               group_strict_size,
                                data_getter,
                                group_by_values,
                                seg_offsets,
@@ -161,13 +169,14 @@ void
 GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     int64_t topK,
                     int64_t group_size,
+                    bool group_strict_size,
                     const DataGetter<T>& data_getter,
                     std::vector<GroupByValueType>& group_by_values,
                     std::vector<int64_t>& offsets,
                     std::vector<float>& distances,
                     const knowhere::MetricType& metrics_type) {
     //1.
-    GroupByMap<T> groupMap(topK, group_size);
+    GroupByMap<T> groupMap(topK, group_size, group_strict_size);
 
     //2. do iteration until fill the whole map or run out of all data
     //note it may enumerate all data inside a segment and can block following
@@ -195,8 +204,8 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
 
     //4. save groupBy results
     for (auto iter = res.cbegin(); iter != res.cend(); iter++) {
-        offsets.push_back(std::get<0>(*iter));
-        distances.push_back(std::get<1>(*iter));
+        offsets.emplace_back(std::get<0>(*iter));
+        distances.emplace_back(std::get<1>(*iter));
         group_by_values.emplace_back(std::move(std::get<2>(*iter)));
     }
 }

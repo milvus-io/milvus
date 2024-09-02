@@ -474,6 +474,7 @@ TEST(GroupBY, SealedData) {
                                           search_params: "{\"ef\": 10}"
                                           group_by_field_id: 101,
                                           group_size: 5,
+                                          group_strict_size: true,
                                         >
                                         placeholder_tag: "$0"
 
@@ -796,6 +797,7 @@ TEST(GroupBY, GrowingIndex) {
                                           search_params: "{\"ef\": 10}"
                                           group_by_field_id: 101
                                           group_size: 3
+                                          group_strict_size: true
                                         >
                                         placeholder_tag: "$0"
 

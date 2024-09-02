@@ -63,6 +63,148 @@ class ParamInfo:
 param_info = ParamInfo()
 
 
+def generate_array_dataset(size, array_length, hit_probabilities, target_values):
+    dataset = []
+    target_array_length = target_values.get('array_length_field', None)
+    target_array_access = target_values.get('array_access', None)
+    all_target_values = set(
+        val for sublist in target_values.values() for val in (sublist if isinstance(sublist, list) else [sublist]))
+    for i in range(size):
+        entry = {"id": i}
+
+        # Generate random arrays for each condition
+        for condition in hit_probabilities.keys():
+            available_values = [val for val in range(1, 100) if val not in all_target_values]
+            array = random.sample(available_values, array_length)
+
+            # Ensure the array meets the condition based on its probability
+            if random.random() < hit_probabilities[condition]:
+                if condition == 'contains':
+                    if target_values[condition] not in array:
+                        array[random.randint(0, array_length - 1)] = target_values[condition]
+                elif condition == 'contains_any':
+                    if not any(val in array for val in target_values[condition]):
+                        array[random.randint(0, array_length - 1)] = random.choice(target_values[condition])
+                elif condition == 'contains_all':
+                    indices = random.sample(range(array_length), len(target_values[condition]))
+                    for idx, val in zip(indices, target_values[condition]):
+                        array[idx] = val
+                elif condition == 'equals':
+                    array = target_values[condition][:]
+                elif condition == 'array_length_field':
+                    array = [random.randint(0, 10) for _ in range(target_array_length)]
+                elif condition == 'array_access':
+                    array = [random.randint(0, 10) for _ in range(random.randint(10, 20))]
+                    array[target_array_access[0]] = target_array_access[1]
+                else:
+                    raise ValueError(f"Unknown condition: {condition}")
+
+            entry[condition] = array
+
+        dataset.append(entry)
+
+    return dataset
+
+def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
+    size = data_size  # Number of arrays in the dataset
+    array_length = 10  # Length of each array
+
+    # Probabilities that an array hits the target condition
+    hit_probabilities = {
+        'contains': hit_rate,
+        'contains_any': hit_rate,
+        'contains_all': hit_rate,
+        'equals': hit_rate,
+        'array_length_field': hit_rate,
+        'array_access': hit_rate
+    }
+
+    # Target values for each condition
+    target_values = {
+        'contains': 42,
+        'contains_any': [21, 37, 42],
+        'contains_all': [15, 30],
+        'equals': [1,2,3,4,5],
+        'array_length_field': 5, # array length == 5
+        'array_access': [0, 5] # index=0, and value == 5
+    }
+
+    # Generate dataset
+    dataset = generate_array_dataset(size, array_length, hit_probabilities, target_values)
+    data = {
+        "id": pd.Series([x["id"] for x in dataset]),
+        "contains": pd.Series([x["contains"] for x in dataset]),
+        "contains_any": pd.Series([x["contains_any"] for x in dataset]),
+        "contains_all": pd.Series([x["contains_all"] for x in dataset]),
+        "equals": pd.Series([x["equals"] for x in dataset]),
+        "array_length_field": pd.Series([x["array_length_field"] for x in dataset]),
+        "array_access": pd.Series([x["array_access"] for x in dataset]),
+        "emb": pd.Series([np.array([random.random() for j in range(dim)], dtype=np.dtype("float32")) for _ in
+                          range(size)])
+    }
+    # Define testing conditions
+    contains_value = target_values['contains']
+    contains_any_values = target_values['contains_any']
+    contains_all_values = target_values['contains_all']
+    equals_array = target_values['equals']
+
+    # Perform tests
+    contains_result = [d for d in dataset if contains_value in d["contains"]]
+    contains_any_result = [d for d in dataset if any(val in d["contains_any"] for val in contains_any_values)]
+    contains_all_result = [d for d in dataset if all(val in d["contains_all"] for val in contains_all_values)]
+    equals_result = [d for d in dataset if d["equals"] == equals_array]
+    array_length_result = [d for d in dataset if len(d["array_length_field"]) == target_values['array_length_field']]
+    array_access_result = [d for d in dataset if d["array_access"][0] == target_values['array_access'][1]]
+    # Calculate and log.info proportions
+    contains_ratio = len(contains_result) / size
+    contains_any_ratio = len(contains_any_result) / size
+    contains_all_ratio = len(contains_all_result) / size
+    equals_ratio = len(equals_result) / size
+    array_length_ratio = len(array_length_result) / size
+    array_access_ratio = len(array_access_result) / size
+
+    log.info(f"\nProportion of arrays that contain the value: {contains_ratio}")
+    log.info(f"Proportion of arrays that contain any of the values: {contains_any_ratio}")
+    log.info(f"Proportion of arrays that contain all of the values: {contains_all_ratio}")
+    log.info(f"Proportion of arrays that equal the target array: {equals_ratio}")
+    log.info(f"Proportion of arrays that have the target array length: {array_length_ratio}")
+    log.info(f"Proportion of arrays that have the target array access: {array_access_ratio}")
+
+
+
+    train_df = pd.DataFrame(data)
+
+    target_id = {
+        "contains": [r["id"] for r in contains_result],
+        "contains_any": [r["id"] for r in contains_any_result],
+        "contains_all": [r["id"] for r in contains_all_result],
+        "equals": [r["id"] for r in equals_result],
+        "array_length": [r["id"] for r in array_length_result],
+        "array_access": [r["id"] for r in array_access_result]
+    }
+    target_id_list = [target_id[key] for key in ["contains", "contains_any", "contains_all", "equals", "array_length", "array_access"]]
+
+
+    filters = [
+        "array_contains(contains, 42)",
+        "array_contains_any(contains_any, [21, 37, 42])",
+        "array_contains_all(contains_all, [15, 30])",
+        "equals == [1,2,3,4,5]",
+        "array_length(array_length_field) == 5",
+        "array_access[0] == 5"
+
+    ]
+    query_expr = []
+    for i in range(len(filters)):
+        item = {
+            "expr": filters[i],
+            "ground_truth": target_id_list[i],
+        }
+        query_expr.append(item)
+    return train_df, query_expr
+
+
+
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
