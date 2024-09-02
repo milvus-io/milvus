@@ -18,9 +18,6 @@ tolerations:
 
 log:
   level: debug
-indexCoord:
-  scheduler:
-    interval: 100
 proxy:
   resources:
     requests:

@@ -445,12 +445,12 @@ func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalp
 	case internalpb.ImportJobState_Stats:
 		progress := getStatsProgress(jobID, imeta, meta)
 		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
-		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_IndexBuilding, totalRows, totalRows, ""
+		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_IndexBuilding:
 		progress := getIndexBuildingProgress(jobID, imeta, meta)
 		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
-		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_IndexBuilding, totalRows, totalRows, ""
+		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_Completed:
 		_, totalRows := getImportRowsInfo(jobID, imeta, meta)
