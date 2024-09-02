@@ -78,8 +78,8 @@ class ColumnVector final : public BaseVector {
     // the size is the number of bits
     ColumnVector(TargetBitmap&& bitmap)
         : BaseVector(DataType::INT8, bitmap.size()) {
-        values_ = std::make_shared<FieldDataImpl<uint8_t, false>>(
-            bitmap.size(), DataType::INT8, false, std::move(bitmap).into());
+        values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
+                                                             std::move(bitmap));
     }
 
     virtual ~ColumnVector() override {
