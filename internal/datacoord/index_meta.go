@@ -210,6 +210,7 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 		for i, param2 := range req.GetUserIndexParams() {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
 				exist = true
+				break
 			} else if param1.Key == common.MetricTypeKey && param2.Key == param1.Key && useAutoIndex && !req.GetUserAutoindexMetricTypeSpecified() {
 				// when users use autoindex, metric type is the only thing they can specify
 				// if they do not specify metric type, will use autoindex default metric type
@@ -225,6 +226,7 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 					}
 				}
 				exist = true
+				break
 			}
 		}
 		if !exist {
@@ -232,7 +234,24 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 			break
 		}
 	}
-
+	// Check whether new index type match old, if not, only
+	// allow autoindex config changed when upgraded to new config
+	// using store meta config to rewrite new config
+	if !notEq && req.GetIsAutoIndex() && useAutoIndex {
+		for _, param1 := range fieldIndex.IndexParams {
+			if param1.Key == common.IndexTypeKey &&
+				indexparamcheck.IsScalarIndexType(param1.Value) {
+				for _, param2 := range req.GetIndexParams() {
+					if param1.Key == param2.Key && param1.Value != param2.Value {
+						req.IndexParams = make([]*commonpb.KeyValuePair, len(fieldIndex.IndexParams))
+						copy(req.IndexParams, fieldIndex.IndexParams)
+						break
+					}
+				}
+			}
+		}
+	}
+	log.Info("final request", zap.Any("create index request", req.String()))
 	return !notEq
 }
 
@@ -254,8 +273,10 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			}
 			errMsg := "at most one distinct index is allowed per field"
 			log.Warn(errMsg,
-				zap.String("source index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", index.IndexName, index.FieldID, index.IndexParams, index.TypeParams)),
-				zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetTypeParams())))
+				zap.String("source index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
+					index.IndexName, index.FieldID, index.IndexParams, index.UserIndexParams, index.TypeParams)),
+				zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
+					req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetUserIndexParams(), req.GetTypeParams())))
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
