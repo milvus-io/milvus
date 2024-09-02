@@ -129,6 +129,17 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
+	var groupStrictSize bool
+	groupStrictSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupStrictSize, searchParamsPair)
+	if err != nil {
+		groupStrictSize = false
+	} else {
+		groupStrictSize, err = strconv.ParseBool(groupStrictSizeStr)
+		if err != nil {
+			groupStrictSize = false
+		}
+	}
+
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
 	if isIterator == "True" && groupByFieldId > 0 {
 		return nil, 0, merr.WrapErrParameterInvalid("", "",
@@ -140,12 +151,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	return &planpb.QueryInfo{
-		Topk:           queryTopK,
-		MetricType:     metricType,
-		SearchParams:   searchParamStr,
-		RoundDecimal:   roundDecimal,
-		GroupByFieldId: groupByFieldId,
-		GroupSize:      groupSize,
+		Topk:            queryTopK,
+		MetricType:      metricType,
+		SearchParams:    searchParamStr,
+		RoundDecimal:    roundDecimal,
+		GroupByFieldId:  groupByFieldId,
+		GroupSize:       groupSize,
+		GroupStrictSize: groupStrictSize,
 	}, offset, nil
 }
 

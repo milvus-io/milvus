@@ -7,6 +7,10 @@ from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import ConnectionErrorMessage as cem
 from base.client_base import TestcaseBase
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
+from pymilvus import (
+    FieldSchema, CollectionSchema, DataType,
+    Collection
+)
 import threading
 from pymilvus import DefaultConfig
 from datetime import datetime
@@ -1520,7 +1524,7 @@ class TestQueryParams(TestcaseBase):
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
-        method: specify output_fields as "*" 
+        method: specify output_fields as "*"
         expected: output all scale field; output all fields
         """
         # init collection with fields: int64, float, float_vec, float_vector1
@@ -2566,7 +2570,7 @@ class TestQueryOperation(TestcaseBase):
         """
         target: test the scenario which query with many logical expressions
         method: 1. create collection
-                3. query the expr that like: int64 == 0 || int64 == 1 ........ 
+                3. query the expr that like: int64 == 0 || int64 == 1 ........
         expected: run successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -2577,14 +2581,14 @@ class TestQueryOperation(TestcaseBase):
         collection_w.load()
         multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
         _, check_res = collection_w.query(multi_exprs, output_fields=[f'{default_int_field_name}'])
-        assert(check_res == True) 
+        assert(check_res == True)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_multi_logical_exprs(self):
         """
         target: test the scenario which search with many logical expressions
         method: 1. create collection
-                3. search with the expr that like: int64 == 0 || int64 == 1 ........ 
+                3. search with the expr that like: int64 == 0 || int64 == 1 ........
         expected: run successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -2593,15 +2597,15 @@ class TestQueryOperation(TestcaseBase):
         collection_w.insert(df)
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-    
+
         multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
-    
+
         collection_w.load()
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         limit = 1000
         _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
                             ct.default_search_params, limit, multi_exprs)
-        assert(check_res == True) 
+        assert(check_res == True)
 
 class TestQueryString(TestcaseBase):
     """
@@ -2947,8 +2951,8 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_index(self):
         """
-        target: test query after create diskann index 
-        method: create a collection and build diskann index 
+        target: test query after create diskann index
+        method: create a collection and build diskann index
         expected: verify query result
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
@@ -2968,8 +2972,8 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_with_string_pk(self):
         """
-        target: test query after create diskann index 
-        method: create a collection with string pk and build diskann index 
+        target: test query after create diskann index
+        method: create a collection with string pk and build diskann index
         expected: verify query result
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
@@ -2986,7 +2990,7 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_with_scalar_field(self):
         """
-        target: test query with Scalar field 
+        target: test query with Scalar field
         method: create collection , string field is primary
                 collection load and insert empty data with string field
                 collection query uses string expr in string field
@@ -3015,6 +3019,48 @@ class TestQueryString(TestcaseBase):
         res, _ = collection_w.query(expr, output_fields=output_fields)
 
         assert len(res) == 4
+class TestQueryArray(TestcaseBase):
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("array_element_data_type", [DataType.INT64])
+    def test_query_array_with_inverted_index(self, array_element_data_type):
+        # create collection
+        additional_params = {"max_length": 1000} if array_element_data_type == DataType.VARCHAR else {}
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="contains", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_any", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_all", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="equals", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="array_length_field", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="array_access", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=128)
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # insert data
+        train_data, query_expr = cf.prepare_array_test_data(3000, hit_rate=0.05)
+        collection_w.insert(train_data)
+        index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
+        collection_w.create_index("emb", index_params=index_params)
+        for f in ["contains", "contains_any", "contains_all", "equals", "array_length_field", "array_access"]:
+            collection_w.create_index(f, {"index_type": "INVERTED"})
+        collection_w.load()
+
+        for item in query_expr:
+            expr = item["expr"]
+            ground_truth = item["ground_truth"]
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["*"],
+            )
+            assert len(res) == len(ground_truth)
+            for i in range(len(res)):
+                assert res[i]["id"] == ground_truth[i]
 
 
 class TestQueryCount(TestcaseBase):
