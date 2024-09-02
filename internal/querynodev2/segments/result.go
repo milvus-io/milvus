@@ -457,6 +457,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			// primary keys duplicate
 			skipDupCnt++
 			if ts != 0 && ts > idTsMap[pk] {
+				idTsMap[pk] = ts
 				lastIdx := len(selections) - 1
 				selections[lastIdx] = selection{
 					batchIndex:  sel,
