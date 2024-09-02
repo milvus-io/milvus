@@ -117,10 +117,11 @@ func (p *ResumableProducer) resumeLoop() {
 
 	for {
 		producer, err := p.createNewProducer()
-		p.producer.SwapProducer(producer, err)
 		if err != nil {
 			return
 		}
+		p.producer.SwapProducer(producer, err)
+
 
 		// Wait until the new producer is unavailable, trigger a new swap operation.
 		if err := p.waitUntilUnavailable(producer); err != nil {
