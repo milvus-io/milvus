@@ -277,11 +277,13 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 		log.Info("update import job state to IndexBuilding", zap.Int64("jobID", job.GetJobID()))
 	}
 
+	// Skip stats stage if not enable stats or is l0 import.
 	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() || importutilv2.IsL0Import(job.GetOptions()) {
 		updateJobState()
 		return
 	}
 
+	// Check and trigger stats tasks.
 	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	originalSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
