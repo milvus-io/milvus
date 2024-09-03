@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -137,6 +138,8 @@ type Server struct {
 	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	healthChecker *healthcheck.Checker
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -404,6 +407,8 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	s.healthChecker = healthcheck.NewChecker(interval, s.healthCheckFn)
 	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return err
 }
@@ -546,6 +551,7 @@ func (s *Server) startQueryCoord() error {
 
 	s.startServerLoop()
 	s.afterStart()
+	s.healthChecker.Start()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.QueryCoordRole, s.session.GetServerID())
 	return nil
@@ -582,7 +588,9 @@ func (s *Server) Stop() error {
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
-
+	if s.healthChecker != nil {
+		s.healthChecker.Close()
+	}
 	if s.jobScheduler != nil {
 		log.Info("stop job scheduler...")
 		s.jobScheduler.Stop()
