@@ -237,6 +237,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("Read Only", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -248,7 +249,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			return &internalpb.ListPolicyResponse{
 				Status: merr.Success(),
 				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String(), "default"),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String(), "default"),
 				},
 				UserRoles: []string{
 					funcutil.EncodeUserRoleCache("fooo", "role1"),
@@ -264,12 +265,16 @@ func TestPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{})
 		assert.NoError(t, err)
 
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{})
+		assert.NoError(t, err)
+
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{})
 		assert.Error(t, err)
 	})
 
 	t.Run("Read Write", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
@@ -281,7 +286,7 @@ func TestPrivilegeGroup(t *testing.T) {
 			return &internalpb.ListPolicyResponse{
 				Status: merr.Success(),
 				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String(), "default"),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String(), "default"),
 				},
 				UserRoles: []string{
 					funcutil.EncodeUserRoleCache("fooo", "role1"),
@@ -309,6 +314,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 	t.Run("Admin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")

@@ -42,7 +42,7 @@ func (s *PrivilegeGroupTestSuite) SetupSuite() {
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
-func (s *PrivilegeGroupTestSuite) TestBackup() {
+func (s *PrivilegeGroupTestSuite) TestPrivilegeGroup() {
 	ctx := GetContext(context.Background(), "root:123456")
 	// test empty rbac content
 	resp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
@@ -63,7 +63,7 @@ func (s *PrivilegeGroupTestSuite) TestBackup() {
 		Type: milvuspb.OperatePrivilegeType_Grant,
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
 			DbName:     util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
@@ -79,7 +79,7 @@ func (s *PrivilegeGroupTestSuite) TestBackup() {
 		Type: milvuspb.OperatePrivilegeType_Grant,
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: roleName},
-			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
 			DbName:     util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
@@ -117,7 +117,19 @@ func (s *PrivilegeGroupTestSuite) TestBackup() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp5.GetStatus()))
-	s.Len(resp5.GetEntities(), 3)
+	s.Len(resp5.GetEntities(), 1)
+
+	resp6, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: roleName},
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+			ObjectName: util.AnyWord,
+			DbName:     util.AnyWord,
+		},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp6.GetStatus()))
+	s.Len(resp6.GetEntities(), 2)
 }
 
 func TestPrivilegeGroup(t *testing.T) {
