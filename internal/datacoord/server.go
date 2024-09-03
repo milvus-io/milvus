@@ -52,6 +52,7 @@ import (
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -167,6 +168,8 @@ type Server struct {
 	streamingCoord *streamingcoord.Server
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	healthChecker *healthcheck.Checker
 }
 
 type CollectionNameInfo struct {
@@ -429,6 +432,8 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	s.healthChecker = healthcheck.NewChecker(interval, s.healthCheckFn)
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return nil
 }
@@ -773,6 +778,8 @@ func (s *Server) startServerLoop() {
 	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
 		s.syncSegmentsScheduler.Start()
 	}
+
+	s.healthChecker.Start()
 }
 
 func (s *Server) startTaskScheduler() {
@@ -1099,6 +1106,9 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	log.Info("datacoord server shutdown")
+	if s.healthChecker != nil {
+		s.healthChecker.Close()
+	}
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
 
