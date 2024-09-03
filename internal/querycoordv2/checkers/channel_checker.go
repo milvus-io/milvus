@@ -171,7 +171,6 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	}
 	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 
-	targets := c.targetMgr.GetSealedSegmentsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	versionsMap := make(map[string]*meta.DmChannel)
 	for _, ch := range dist {
 		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.GetChannelName())
@@ -184,13 +183,13 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 			continue
 		}
 
-		if err := utils.CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
+		if leaderView.UnServiceableError != nil {
 			log.RatedInfo(10, "replica has unavailable shard leader",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),
 				zap.Int64("leaderID", ch.Node),
 				zap.String("channel", ch.GetChannelName()),
-				zap.Error(err))
+				zap.Error(leaderView.UnServiceableError))
 			continue
 		}
 
