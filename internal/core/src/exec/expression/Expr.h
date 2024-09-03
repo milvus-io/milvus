@@ -323,6 +323,34 @@ class SegmentExpr : public Expr {
         return result;
     }
 
+    template <typename FUNC, typename... ValTypes>
+    TargetBitmap
+    ProcessTextMatchIndex(FUNC func, ValTypes... values) {
+        TargetBitmap result;
+
+        if (cached_match_res_ == nullptr) {
+            auto index = segment_->GetTextIndex(field_id_);
+            auto res = std::move(func(index, values...));
+            cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
+            if (cached_match_res_->size() < active_count_) {
+                // some entities are not visible in inverted index.
+                TargetBitmap tail(active_count_ - cached_match_res_->size());
+                cached_match_res_->append(tail);
+            }
+        }
+
+        // return batch size, not sure if we should use the data position.
+        auto real_batch_size =
+            current_data_chunk_pos_ + batch_size_ > active_count_
+                ? active_count_ - current_data_chunk_pos_
+                : batch_size_;
+        result.append(
+            *cached_match_res_, current_data_chunk_pos_, real_batch_size);
+        current_data_chunk_pos_ += real_batch_size;
+
+        return result;
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     void
     ProcessIndexChunksV2(FUNC func, ValTypes... values) {
@@ -399,6 +427,9 @@ class SegmentExpr : public Expr {
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
     TargetBitmap cached_index_chunk_res_{};
+
+    // Cache for text match.
+    std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
 };
 
 void

@@ -23,6 +23,9 @@
 #include "common/EasyAssert.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
+
+#include <index/TextMatchIndex.h>
+
 #include "indexbuilder/IndexFactory.h"
 #include "common/type_c.h"
 #include "storage/Types.h"
@@ -215,6 +218,71 @@ CreateIndex(CIndex* res_index,
                 field_type, config, fileManagerContext);
         index->Build();
         *res_index = index.release();
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+BuildTextIndex(CBinarySet* c_binary_set,
+               const uint8_t* serialized_build_index_info,
+               const uint64_t len) {
+    try {
+        auto build_index_info =
+            std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
+        auto res =
+            build_index_info->ParseFromArray(serialized_build_index_info, len);
+        AssertInfo(res, "Unmarshall build index info failed");
+
+        auto field_type =
+            static_cast<DataType>(build_index_info->field_schema().data_type());
+
+        auto storage_config =
+            get_storage_config(build_index_info->storage_config());
+        auto config = get_config(build_index_info);
+
+        // init file manager
+        milvus::storage::FieldDataMeta field_meta{
+            build_index_info->collectionid(),
+            build_index_info->partitionid(),
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
+
+        milvus::storage::IndexMeta index_meta{
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->buildid(),
+            build_index_info->index_version(),
+            "",
+            build_index_info->field_schema().name(),
+            field_type,
+            build_index_info->dim(),
+        };
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, chunk_manager);
+
+        auto index =
+            std::make_unique<index::TextMatchIndex>(fileManagerContext);
+        index->Build(config);
+        auto binary =
+            std::make_unique<knowhere::BinarySet>(index->Upload(config));
+        *c_binary_set = binary.release();
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";

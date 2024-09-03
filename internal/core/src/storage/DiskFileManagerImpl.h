@@ -33,28 +33,35 @@ class DiskFileManagerImpl : public FileManagerImpl {
  public:
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
 
-    virtual ~DiskFileManagerImpl();
+    ~DiskFileManagerImpl() override;
 
-    virtual bool
-    LoadFile(const std::string& filename) noexcept;
+    bool
+    LoadFile(const std::string& filename) noexcept override;
 
-    virtual bool
-    AddFile(const std::string& filename) noexcept;
+    bool
+    AddFile(const std::string& filename) noexcept override;
 
-    virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept;
+    std::optional<bool>
+    IsExisted(const std::string& filename) noexcept override;
 
-    virtual bool
-    RemoveFile(const std::string& filename) noexcept;
+    bool
+    RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    virtual std::string
-    GetName() const {
+    bool
+    AddTextLog(const std::string& filename) noexcept;
+
+ public:
+    std::string
+    GetName() const override {
         return "DiskFileManagerImpl";
     }
 
     std::string
     GetLocalIndexObjectPrefix();
+
+    std::string
+    GetLocalTextIndexPrefix();
 
     std::string
     GetIndexIdentifier();
@@ -74,6 +81,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
+
+    void
+    CacheTextLogToDisk(const std::vector<std::string>& remote_files);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -104,6 +114,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
+
+    std::string
+    GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
 
  private:
     // local file path (abs path)

@@ -141,6 +141,23 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 insert_record_);
         }
 
+        // index text.
+        if (field_meta.enable_match()) {
+            // TODO: iterate texts and call `AddText` instead of `AddTexts`. This may cost much more memory.
+            std::vector<std::string> texts(
+                insert_record_proto->fields_data(data_offset)
+                    .scalars()
+                    .string_data()
+                    .data()
+                    .begin(),
+                insert_record_proto->fields_data(data_offset)
+                    .scalars()
+                    .string_data()
+                    .data()
+                    .end());
+            AddTexts(field_id, texts.data(), num_rows, reserved_offset);
+        }
+
         // update average row data size
         auto field_data_size = GetRawDataSizeOfDataArray(
             &insert_record_proto->fields_data(data_offset),
@@ -802,6 +819,40 @@ void
 SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
                                          Timestamp timestamp) const {
     // DO NOTHING
+}
+
+void
+SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
+    std::unique_lock lock(mutex_);
+    const auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(IsStringDataType(field_meta.get_data_type()),
+               "cannot create text index on non-string type");
+    // todo: make this(200) configurable.
+    auto index = std::make_unique<index::TextMatchIndex>(200);
+    index->Commit();
+    index->CreateReader();
+    text_indexes_[field_id] = std::move(index);
+}
+
+void
+SegmentGrowingImpl::CreateTextIndexes() {
+    for (auto [field_id, field_meta] : schema_->get_fields()) {
+        if (IsStringDataType(field_meta.get_data_type()) &&
+            field_meta.enable_match()) {
+            CreateTextIndex(FieldId(field_id));
+        }
+    }
+}
+
+void
+SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
+                             const std::string* texts,
+                             size_t n,
+                             int64_t offset_begin) {
+    std::unique_lock lock(mutex_);
+    auto iter = text_indexes_.find(field_id);
+    AssertInfo(iter != text_indexes_.end(), "text index not found");
+    iter->second->AddTexts(n, texts, offset_begin);
 }
 
 }  // namespace milvus::segcore

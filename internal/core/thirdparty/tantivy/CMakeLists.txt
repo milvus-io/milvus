@@ -90,6 +90,18 @@ if (BUILD_TANTIVY_WITH_UT)
             tantivy_binding
             dl
             )
+
+    add_executable(text_demo text_demo.cpp)
+    target_link_libraries(text_demo
+            tantivy_binding
+            dl
+        )
+
+    add_executable(jieba_demo jieba_demo.cpp)
+    target_link_libraries(jieba_demo
+            tantivy_binding
+            dl
+        )
 else ()
 endif ()
         

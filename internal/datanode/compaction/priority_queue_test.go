@@ -4,8 +4,9 @@ import (
 	"container/heap"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type PriorityQueueSuite struct {
@@ -118,7 +119,6 @@ func (s *PriorityQueueSuite) PriorityQueueMergeSort() {
 			heap.Push(&pq, next)
 		}
 	}
-
 }
 
 func TestNewPriorityQueueSuite(t *testing.T) {

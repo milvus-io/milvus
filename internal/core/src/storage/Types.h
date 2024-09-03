@@ -125,6 +125,7 @@ struct MmapConfig {
     uint64_t disk_limit;
     uint64_t fix_file_size;
     bool growing_enable_mmap;
+    bool enable_mmap;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -132,6 +133,18 @@ struct MmapConfig {
     void
     SetEnableGrowingMmap(bool flag) {
         this->growing_enable_mmap = flag;
+    }
+    bool
+    GetEnableMmap() const {
+        return enable_mmap;
+    }
+    void
+    SetEnableMmap(bool flag) {
+        this->enable_mmap = flag;
+    }
+    std::string
+    GetMmapPath() {
+        return mmap_path;
     }
     std::string
     ToString() const {
@@ -141,7 +154,7 @@ struct MmapConfig {
            << ", disk_limit=" << disk_limit / (1024 * 1024) << "MB"
            << ", fix_file_size=" << fix_file_size / (1024 * 1024) << "MB"
            << ", growing_enable_mmap=" << std::boolalpha << growing_enable_mmap
-           << "]";
+           << ", enable_mmap=" << std::boolalpha << enable_mmap << "]";
         return ss.str();
     }
 };

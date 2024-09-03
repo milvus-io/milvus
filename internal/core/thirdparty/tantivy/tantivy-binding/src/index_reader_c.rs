@@ -22,6 +22,14 @@ pub extern "C" fn tantivy_free_index_reader(ptr: *mut c_void) {
 
 // -------------------------query--------------------
 #[no_mangle]
+pub extern "C" fn tantivy_reload_index(ptr: *mut c_void) {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real).reload();
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_index_count(ptr: *mut c_void) -> u32 {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe { (*real).count() }

@@ -173,6 +173,27 @@ func TestExpr_Like(t *testing.T) {
 	//}
 }
 
+func TestExpr_TextMatch(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`TextMatch(VarCharField, "query")`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`TextMatch(not_exist, "query")`,
+		`TextMatch(BoolField, "query")`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_BinaryRange(t *testing.T) {
 	schema := newTestSchema()
 	helper, err := typeutil.CreateSchemaHelper(schema)

@@ -10,6 +10,7 @@ expr:
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| expr LIKE StringLiteral                                                    # Like
+	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast
@@ -52,6 +53,7 @@ NE: '!=';
 
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
+TEXTMATCH: 'TextMatch';
 
 ADD: '+';
 SUB: '-';

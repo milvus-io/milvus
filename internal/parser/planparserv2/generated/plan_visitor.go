@@ -61,6 +61,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#ArrayLength.
 	VisitArrayLength(ctx *ArrayLengthContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TextMatch.
+	VisitTextMatch(ctx *TextMatchContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Term.
 	VisitTerm(ctx *TermContext) interface{}
 

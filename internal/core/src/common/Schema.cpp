@@ -72,7 +72,30 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
             auto max_len =
                 boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
-            schema->AddField(name, field_id, data_type, max_len, nullable);
+            bool enable_match = false;
+            if (type_map.count("enable_match")) {
+                auto param_str = type_map.at("enable_match");
+                std::transform(param_str.begin(),
+                               param_str.end(),
+                               param_str.begin(),
+                               ::tolower);
+
+                auto bool_cast = [](const std::string& arg) -> bool {
+                    std::istringstream ss(arg);
+                    bool b;
+                    ss >> std::boolalpha >> b;
+                    return b;
+                };
+
+                enable_match = bool_cast(param_str);
+            }
+            schema->AddField(name,
+                             field_id,
+                             data_type,
+                             max_len,
+                             nullable,
+                             enable_match,
+                             type_map);
         } else if (IsArrayDataType(data_type)) {
             schema->AddField(name,
                              field_id,

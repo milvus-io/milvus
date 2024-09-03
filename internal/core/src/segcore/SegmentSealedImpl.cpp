@@ -23,6 +23,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <boost/pointer_cast.hpp>
 
 #include "Utils.h"
 #include "Types.h"
@@ -1986,6 +1987,69 @@ SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
             return;
         }
     }
+}
+
+void
+SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
+    std::unique_lock lck(mutex_);
+
+    auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
+    std::unique_ptr<index::TextMatchIndex> index;
+    if (!cfg.GetEnableMmap()) {
+        // build text index in ram.
+        index = std::make_unique<index::TextMatchIndex>(
+            std::numeric_limits<int64_t>::max());
+    } else {
+        // build text index using mmap.
+        index = std::make_unique<index::TextMatchIndex>(cfg.GetMmapPath());
+    }
+
+    {
+        // build
+        auto iter = fields_.find(field_id);
+        if (iter != fields_.end()) {
+            auto column =
+                std::dynamic_pointer_cast<VariableColumn<std::string>>(
+                    iter->second);
+            AssertInfo(
+                column != nullptr,
+                "failed to create text index, field is not of text type: {}",
+                field_id.get());
+            auto n = column->NumRows();
+            for (size_t i = 0; i < n; i++) {
+                index->AddText(std::string(column->RawAt(i)), i);
+            }
+        } else {  // fetch raw data from index.
+            auto field_index_iter = scalar_indexings_.find(field_id);
+            AssertInfo(field_index_iter != scalar_indexings_.end(),
+                       "failed to create text index, neither raw data nor "
+                       "index are found");
+            auto ptr = field_index_iter->second.get();
+            AssertInfo(ptr->HasRawData(),
+                       "text raw data not found, trying to create text index "
+                       "from index, but this index don't contain raw data");
+            auto impl = dynamic_cast<index::ScalarIndex<std::string>*>(ptr);
+            AssertInfo(impl != nullptr,
+                       "failed to create text index, field index cannot be "
+                       "converted to string index");
+            auto n = impl->Size();
+            for (size_t i = 0; i < n; i++) {
+                index->AddText(impl->Reverse_Lookup(i), i);
+            }
+        }
+
+        // release the index writer and create index reader.
+        index->Finish();
+    }
+    index->Reload();
+    text_indexes_[field_id] = std::move(index);
+}
+
+void
+SegmentSealedImpl::LoadTextIndex(FieldId field_id,
+                                 std::unique_ptr<index::TextMatchIndex> index) {
+    std::unique_lock lck(mutex_);
+    text_indexes_[field_id] = std::move(index);
 }
 
 }  // namespace milvus::segcore
