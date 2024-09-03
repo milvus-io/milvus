@@ -33,6 +33,9 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 
 func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
+		if segment.TextStatsLogs == nil {
+			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+		}
 		for field, logs := range textIndexLogs {
 			segment.TextStatsLogs[field] = logs
 		}
