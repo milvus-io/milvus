@@ -82,6 +82,12 @@ type QueryNodeQuotaMetrics struct {
 	QueryQueue          ReadInfoInQueue
 	GrowingSegmentsSize int64
 	Effect              NodeEffect
+	DeleteBufferInfo    DeleteBufferInfo
+}
+
+type DeleteBufferInfo struct {
+	CollectionDeleteBufferNum  map[int64]int64
+	CollectionDeleteBufferSize map[int64]int64
 }
 
 type DataCoordQuotaMetrics struct {
