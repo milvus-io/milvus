@@ -528,8 +528,10 @@ func (mr *MilvusRoles) Run() {
 		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
 		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()), zap.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
 
+		tracer.NotifyTracerProviderUpdated()
+
 		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
-			initcore.InitTraceConfig(params)
+			initcore.ResetTraceConfig(params)
 			log.Info("Reset segcore tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
 		}
 	}))
