@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/pkg/kv"
 	"testing"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -302,6 +302,22 @@ func (c *mockDataNodeClient) DropCompactionPlan(ctx context.Context, req *datapb
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil
+}
+
+func (c *mockDataNodeClient) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
+	if c.state == commonpb.StateCode_Healthy {
+		return &milvuspb.CheckHealthResponse{
+			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			IsHealthy: true,
+			Reasons:   []string{},
+		}, nil
+	} else {
+		return &milvuspb.CheckHealthResponse{
+			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotReadyServe},
+			IsHealthy: false,
+			Reasons:   []string{"fails"},
+		}, nil
+	}
 }
 
 type mockRootCoordClient struct {
