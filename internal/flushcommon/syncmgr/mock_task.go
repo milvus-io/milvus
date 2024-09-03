@@ -139,6 +139,47 @@ func (_c *MockTask_HandleError_Call) RunAndReturn(run func(error)) *MockTask_Han
 	return _c
 }
 
+// IsFlush provides a mock function with given fields:
+func (_m *MockTask) IsFlush() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTask_IsFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsFlush'
+type MockTask_IsFlush_Call struct {
+	*mock.Call
+}
+
+// IsFlush is a helper method to define mock.On call
+func (_e *MockTask_Expecter) IsFlush() *MockTask_IsFlush_Call {
+	return &MockTask_IsFlush_Call{Call: _e.mock.On("IsFlush")}
+}
+
+func (_c *MockTask_IsFlush_Call) Run(run func()) *MockTask_IsFlush_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_IsFlush_Call) Return(_a0 bool) *MockTask_IsFlush_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_IsFlush_Call) RunAndReturn(run func() bool) *MockTask_IsFlush_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Run provides a mock function with given fields: _a0
 func (_m *MockTask) Run(_a0 context.Context) error {
 	ret := _m.Called(_a0)
