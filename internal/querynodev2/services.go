@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -53,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -1436,6 +1438,25 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	return merr.Success(), nil
+}
+
+func (node *QueryNode) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &milvuspb.CheckHealthResponse{
+			Status:  merr.Status(err),
+			Reasons: []string{err.Error()},
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	maxDelay := paramtable.Get().QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	minTsafeChannel, minTsafe := node.tSafeManager.Min()
+	if err := ratelimitutil.CheckTimeTickDelay(minTsafeChannel, minTsafe, maxDelay); err != nil {
+		msg := healthcheck.NewUnhealthyClusterMsg(typeutil.QueryNodeRole, node.GetNodeID(), err.Error(), healthcheck.TimeTickLagExceed)
+		return healthcheck.GetCheckHealthResponseFromClusterMsg(msg), nil
+	}
+
+	return healthcheck.OK(), nil
 }
 
 // DeleteBatch is the API to apply same delete data into multiple segments.

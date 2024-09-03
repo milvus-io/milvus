@@ -42,7 +42,7 @@ type ReleaseCollectionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 	proxyManager      proxyutil.ProxyClientManagerInterface
@@ -54,7 +54,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 	proxyManager proxyutil.ProxyClientManagerInterface,
@@ -81,8 +81,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
-
-	job.meta.CollectionManager.SetReleasing(req.GetCollectionID())
 
 	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
 	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
@@ -130,7 +128,7 @@ type ReleasePartitionJob struct {
 	meta              *meta.Meta
 	broker            meta.Broker
 	cluster           session.Cluster
-	targetMgr         *meta.TargetManager
+	targetMgr         meta.TargetManagerInterface
 	targetObserver    *observers.TargetObserver
 	checkerController *checkers.CheckerController
 	proxyManager      proxyutil.ProxyClientManagerInterface
@@ -142,7 +140,7 @@ func NewReleasePartitionJob(ctx context.Context,
 	meta *meta.Meta,
 	broker meta.Broker,
 	cluster session.Cluster,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
 	proxyManager proxyutil.ProxyClientManagerInterface,
