@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -2509,12 +2510,12 @@ func Test_CheckHealth(t *testing.T) {
 		return sm
 	}
 
-	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
+	getChannelManager := func(findWatcherOk bool) ChannelManager {
 		channelManager := NewMockChannelManager(t)
 		if findWatcherOk {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil).Maybe()
 		} else {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error")).Maybe()
 		}
 		return channelManager
 	}
@@ -2525,6 +2526,21 @@ func Test_CheckHealth(t *testing.T) {
 			VChannelNames: []string{"ch1", "ch2"},
 		},
 		2: nil,
+	}
+
+	newServer := func(isHealthy bool, findWatcherOk bool, meta *meta) *Server {
+		svr := &Server{
+			ctx:            context.TODO(),
+			sessionManager: getSessionManager(isHealthy),
+			channelManager: getChannelManager(findWatcherOk),
+			meta:           meta,
+			session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
+		}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.healthChecker = healthcheck.NewChecker(20*time.Millisecond, svr.healthCheckFn)
+		svr.healthChecker.Start()
+		time.Sleep(30 * time.Millisecond) // wait for next cycle for health checker
+		return svr
 	}
 
 	t.Run("not healthy", func(t *testing.T) {
@@ -2538,9 +2554,8 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("data node health check is fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(false)
+		svr := newServer(false, true, &meta{channelCPs: newChannelCps()})
+		defer svr.healthChecker.Close()
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2549,11 +2564,8 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check channel watched fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, false)
-		svr.meta = &meta{collections: collections}
+		svr := newServer(true, false, &meta{collections: collections, channelCPs: newChannelCps()})
+		defer svr.healthChecker.Close()
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2562,11 +2574,7 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check checkpoint fail", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, true)
-		svr.meta = &meta{
+		svr := newServer(true, true, &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
@@ -2576,8 +2584,8 @@ func Test_CheckHealth(t *testing.T) {
 					},
 				},
 			},
-		}
-
+		})
+		defer svr.healthChecker.Close()
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2586,11 +2594,7 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("ok", func(t *testing.T) {
-		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.sessionManager = getSessionManager(true)
-		svr.channelManager = getChannelManager(t, true)
-		svr.meta = &meta{
+		svr := newServer(true, true, &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
@@ -2608,7 +2612,8 @@ func Test_CheckHealth(t *testing.T) {
 					},
 				},
 			},
-		}
+		})
+		defer svr.healthChecker.Close()
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)

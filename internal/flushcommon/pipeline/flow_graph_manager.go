@@ -22,7 +22,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -43,6 +42,7 @@ type FlowgraphManager interface {
 	GetFlowgraphCount() int
 	GetCollectionIDs() []int64
 
+	GetMinTTFlowGraph() (string, typeutil.Timestamp)
 	GetChannelsJSON() string
 	GetSegmentsJSON() string
 	Close()
@@ -76,7 +76,6 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		fm.flowgraphs.Remove(channel)
 
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-		util.GetRateCollector().RemoveFlowGraphChannel(channel)
 	}
 }
 
@@ -118,6 +117,22 @@ func (fm *fgManagerImpl) GetCollectionIDs() []int64 {
 	})
 
 	return collectionSet.Collect()
+}
+
+// GetMinTTFlowGraph returns the vchannel and minimal time tick of flow graphs.
+func (fm *fgManagerImpl) GetMinTTFlowGraph() (string, typeutil.Timestamp) {
+	minTt := typeutil.MaxTimestamp
+	var channel string
+	fm.flowgraphs.Range(func(ch string, ds *DataSyncService) bool {
+		latestTimeTick := ds.timetickSender.GetLatestTimestamp(ch)
+		if minTt > latestTimeTick {
+			minTt = latestTimeTick
+			channel = ch
+		}
+		return true
+	})
+
+	return channel, minTt
 }
 
 // GetChannelsJSON  returns all channels in json format.

@@ -3708,7 +3708,7 @@ func TestDefaultPartition(t *testing.T) {
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
 
-	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
 	assert.NoError(t, err)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
