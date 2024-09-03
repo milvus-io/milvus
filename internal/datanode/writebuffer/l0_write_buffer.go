@@ -135,6 +135,17 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	})
 }
 
+func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+	for _, msg := range deleteMsgs {
+		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
+		pkTss := msg.GetTimestamps()
+		if len(pks) > 0 {
+			wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
+		}
+	}
+}
+
 func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
@@ -152,9 +163,15 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	// distribute delete msg
-	// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
-	wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
+	if streamingutil.IsStreamingServiceEnabled() {
+		// In streaming service mode, flushed segments no longer maintain a bloom filter.
+		// So, here we skip filtering delete entries by bf.
+		wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
+	} else {
+		// distribute delete msg
+		// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
+		wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
+	}
 
 	// update pk oracle
 	for _, inData := range groups {

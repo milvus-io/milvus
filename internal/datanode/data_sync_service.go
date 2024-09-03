@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"sync"
 
 	"go.uber.org/zap"
@@ -361,11 +362,12 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 			return nil, err
 		}
 	}
-	// init metaCache meta
-	metaCache, err := getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, storageCache)
-	if err != nil {
-		return nil, err
-	}
+	// In streaming service mode, flushed segments no longer maintain a bloom filter.
+	// So, here we skip loading the bloom filter for flushed segments.
+	info.Vchan.UnflushedSegments = unflushedSegmentInfos
+	metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
+	})
 
 	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }
