@@ -104,6 +104,10 @@ class ResponseChecker:
             # describe collection interface(high level api) response check
             result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_insert_result:
+            # check `insert` interface response
+            result = self.check_insert_response(check_items=self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -601,4 +605,19 @@ class ResponseChecker:
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
+        return True
+
+    def check_insert_response(self, check_items):
+        # check request successful
+        self.assert_succ(self.succ, True)
+
+        # get insert count
+        real = check_items.get("insert_count", None) if isinstance(check_items, dict) else None
+        if real is None:
+            real = len(self.kwargs_dict.get("data", [[]])[0])
+
+        # check insert count
+        error_message = "[CheckFunc] Insert count does not meet expectations, response:{0} != expected:{1}"
+        assert self.response.insert_count == real, error_message.format(self.response.insert_count, real)
+
         return True
