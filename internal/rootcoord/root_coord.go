@@ -2524,7 +2524,7 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 			return nil
 		}
 	}
-	return fmt.Errorf("not found the privilege name[%s]", entity.Privilege.Name)
+	return fmt.Errorf("not found the privilege name[%s] in object[%s]", entity.Privilege.Name, object)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
