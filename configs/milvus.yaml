@@ -977,31 +977,6 @@ quotaAndLimits:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.
     forceDeny: false
-    queueProtection:
-      enabled: false
-      # nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
-      # If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
-      # until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-      # int, default no limit
-      nqInQueueThreshold: -1
-      # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
-      # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
-      # until the latency of queuing no longer exceeds queueLatencyThreshold.
-      # The latency here refers to the averaged latency over a period of time.
-      # milliseconds, default no limit
-      queueLatencyThreshold: -1
-    resultProtection:
-      enabled: false
-      # maxReadResultRate indicated that the system was under backpressure for Search/Query path.
-      # If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
-      # until the read result rate no longer exceeds maxReadResultRate.
-      # MB/s, default no limit
-      maxReadResultRate: -1
-      maxReadResultRatePerDB: -1
-      maxReadResultRatePerCollection: -1
-    # colOffSpeed is the speed of search&query rates cool off.
-    # (0, 1]
-    coolOffSpeed: 0.9
 
 trace:
   # trace exporter type, default is stdout,
