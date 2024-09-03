@@ -19,6 +19,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -41,10 +42,15 @@ func (s *MaintenanceSuite) TestLoadCollection() {
 	defer cancel()
 	s.Run("success", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		fieldNames := []string{"id", "part", "vector"}
+		replicaNum := rand.Intn(3) + 1
 
 		done := atomic.NewBool(false)
 		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lcr *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, lcr.GetCollectionName())
+			s.ElementsMatch(fieldNames, lcr.GetLoadFields())
+			s.True(lcr.SkipLoadDynamicField)
+			s.EqualValues(replicaNum, lcr.GetReplicaNumber())
 			return merr.Success(), nil
 		}).Once()
 		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
@@ -62,7 +68,10 @@ func (s *MaintenanceSuite) TestLoadCollection() {
 		})
 		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
 
-		task, err := s.client.LoadCollection(ctx, NewLoadCollectionOption(collectionName))
+		task, err := s.client.LoadCollection(ctx, NewLoadCollectionOption(collectionName).
+			WithReplica(replicaNum).
+			WithLoadFields(fieldNames...).
+			WithSkipLoadDynamicField(true))
 		s.NoError(err)
 
 		ch := make(chan struct{})
@@ -103,11 +112,16 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 	s.Run("success", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		fieldNames := []string{"id", "part", "vector"}
+		replicaNum := rand.Intn(3) + 1
 
 		done := atomic.NewBool(false)
 		s.mock.EXPECT().LoadPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lpr *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, lpr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, lpr.GetPartitionNames())
+			s.ElementsMatch(fieldNames, lpr.GetLoadFields())
+			s.True(lpr.SkipLoadDynamicField)
+			s.EqualValues(replicaNum, lpr.GetReplicaNumber())
 			return merr.Success(), nil
 		}).Once()
 		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
@@ -126,7 +140,10 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 		})
 		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
 
-		task, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, []string{partitionName}))
+		task, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, []string{partitionName}).
+			WithReplica(replicaNum).
+			WithLoadFields(fieldNames...).
+			WithSkipLoadDynamicField(true))
 		s.NoError(err)
 
 		ch := make(chan struct{})

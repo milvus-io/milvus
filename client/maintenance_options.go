@@ -28,15 +28,19 @@ type LoadCollectionOption interface {
 }
 
 type loadCollectionOption struct {
-	collectionName string
-	interval       time.Duration
-	replicaNum     int
+	collectionName       string
+	interval             time.Duration
+	replicaNum           int
+	loadFields           []string
+	skipLoadDynamicField bool
 }
 
 func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
 	return &milvuspb.LoadCollectionRequest{
-		CollectionName: opt.collectionName,
-		ReplicaNumber:  int32(opt.replicaNum),
+		CollectionName:       opt.collectionName,
+		ReplicaNumber:        int32(opt.replicaNum),
+		LoadFields:           opt.loadFields,
+		SkipLoadDynamicField: opt.skipLoadDynamicField,
 	}
 }
 
@@ -46,6 +50,16 @@ func (opt *loadCollectionOption) CheckInterval() time.Duration {
 
 func (opt *loadCollectionOption) WithReplica(num int) *loadCollectionOption {
 	opt.replicaNum = num
+	return opt
+}
+
+func (opt *loadCollectionOption) WithLoadFields(loadFields ...string) *loadCollectionOption {
+	opt.loadFields = loadFields
+	return opt
+}
+
+func (opt *loadCollectionOption) WithSkipLoadDynamicField(skipFlag bool) *loadCollectionOption {
+	opt.skipLoadDynamicField = skipFlag
 	return opt
 }
 
@@ -65,22 +79,41 @@ type LoadPartitionsOption interface {
 var _ LoadPartitionsOption = (*loadPartitionsOption)(nil)
 
 type loadPartitionsOption struct {
-	collectionName string
-	partitionNames []string
-	interval       time.Duration
-	replicaNum     int
+	collectionName       string
+	partitionNames       []string
+	interval             time.Duration
+	replicaNum           int
+	loadFields           []string
+	skipLoadDynamicField bool
 }
 
 func (opt *loadPartitionsOption) Request() *milvuspb.LoadPartitionsRequest {
 	return &milvuspb.LoadPartitionsRequest{
-		CollectionName: opt.collectionName,
-		PartitionNames: opt.partitionNames,
-		ReplicaNumber:  int32(opt.replicaNum),
+		CollectionName:       opt.collectionName,
+		PartitionNames:       opt.partitionNames,
+		ReplicaNumber:        int32(opt.replicaNum),
+		LoadFields:           opt.loadFields,
+		SkipLoadDynamicField: opt.skipLoadDynamicField,
 	}
 }
 
 func (opt *loadPartitionsOption) CheckInterval() time.Duration {
 	return opt.interval
+}
+
+func (opt *loadPartitionsOption) WithReplica(num int) *loadPartitionsOption {
+	opt.replicaNum = num
+	return opt
+}
+
+func (opt *loadPartitionsOption) WithLoadFields(loadFields ...string) *loadPartitionsOption {
+	opt.loadFields = loadFields
+	return opt
+}
+
+func (opt *loadPartitionsOption) WithSkipLoadDynamicField(skipFlag bool) *loadPartitionsOption {
+	opt.skipLoadDynamicField = skipFlag
+	return opt
 }
 
 func NewLoadPartitionsOption(collectionName string, partitionsNames []string) *loadPartitionsOption {
