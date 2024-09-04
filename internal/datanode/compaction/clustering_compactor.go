@@ -458,7 +458,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
+		t.clusterBufferLocks.Lock(buffer.id)
 		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
+		t.clusterBufferLocks.Unlock(buffer.id)
 	}
 	return totalBufferSize
 }
