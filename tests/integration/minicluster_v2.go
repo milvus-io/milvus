@@ -129,6 +129,9 @@ type MiniClusterV2 struct {
 	datanodes   []*grpcdatanode.Server
 	dnid        atomic.Int64
 
+	proxyid atomic.Int64
+	proxies []*grpcproxy.Server
+
 	Extension *ReportChanExtension
 }
 
@@ -136,9 +139,10 @@ type OptionV2 func(cluster *MiniClusterV2)
 
 func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, error) {
 	cluster := &MiniClusterV2{
-		ctx:  ctx,
-		qnid: *atomic.NewInt64(10000),
-		dnid: *atomic.NewInt64(20000),
+		ctx:     ctx,
+		qnid:    *atomic.NewInt64(10000),
+		dnid:    *atomic.NewInt64(20000),
+		proxyid: *atomic.NewInt64(30000),
 	}
 	paramtable.Init()
 	cluster.Extension = InitReportExtension()
@@ -312,6 +316,49 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	}
 	log.Info(fmt.Sprintf("datanode %d ComponentStates:%v", id, resp))
 	cluster.datanodes = append(cluster.datanodes, node)
+	return node
+}
+
+func (cluster *MiniClusterV2) AddProxy() *grpcproxy.Server {
+	cluster.ptmu.Lock()
+	defer cluster.ptmu.Unlock()
+	cluster.proxyid.Inc()
+	id := cluster.proxyid.Load()
+	oid := paramtable.GetNodeID()
+	log.Info(fmt.Sprintf("adding extra proxy with id:%d", id))
+
+	port, err := cluster.GetAvailablePort()
+	if err != nil {
+		return nil
+	}
+	params.Save(params.ProxyGrpcServerCfg.Port.Key, fmt.Sprint(port))
+	defer params.Reset(params.ProxyGrpcServerCfg.Port.Key)
+
+	port1, err := cluster.GetAvailablePort()
+	if err != nil {
+		return nil
+	}
+	params.Save(params.ProxyGrpcServerCfg.InternalPort.Key, fmt.Sprint(port1))
+	defer params.Reset(params.ProxyGrpcServerCfg.Port.Key)
+
+	paramtable.SetNodeID(id)
+	node, err := grpcproxy.NewServer(context.TODO(), cluster.factory)
+	if err != nil {
+		return nil
+	}
+	err = node.Run()
+	if err != nil {
+		return nil
+	}
+	paramtable.SetNodeID(oid)
+
+	req := &milvuspb.GetComponentStatesRequest{}
+	resp, err := node.GetComponentStates(context.TODO(), req)
+	if err != nil {
+		return nil
+	}
+	log.Info(fmt.Sprintf("querynode %d ComponentStates:%v", id, resp))
+	cluster.proxies = append(cluster.proxies, node)
 	return node
 }
 

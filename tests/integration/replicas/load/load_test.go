@@ -30,11 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -441,58 +439,10 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	ctx := context.Background()
 
-	// prepare resource groups
-	rgNum := 4
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-			},
-		})
-	}
-
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetResourceGroups(), rgNum+1)
-
-	for i := 1; i < rgNum; i++ {
+	// prepare 4 qn to load 4 replicas
+	for i := 1; i < 4; i++ {
 		s.Cluster.AddQueryNode()
 	}
-
-	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
 
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
@@ -504,7 +454,7 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	})
 
 	// load collection without specified replica and rgs
-	s.loadCollection(collectionName, dbName, 4, rgs)
+	s.loadCollection(collectionName, dbName, 4, nil)
 	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -515,13 +465,9 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	collectionID := resp2.GetReplicas()[0].CollectionID
 
 	// mock 1 proxy without assign replica
-	session1 := sessionutil.NewSessionWithEtcd(ctx, paramtable.Get().EtcdCfg.RootPath.Key, s.Cluster.EtcdCli, sessionutil.WithResueNodeID(false))
-	session1.Init(typeutil.ProxyRole, "localhost", false, true)
-	session1.Register()
-	defer session1.Revoke(time.Second)
 	resp3, err := s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
-			SourceID: session1.GetServerID(),
+			SourceID: 1,
 		},
 
 		CollectionID: collectionID,
@@ -534,7 +480,7 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableAssignReplicaToProxy.Key)
 	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
-			SourceID: session1.GetServerID(),
+			SourceID: 1,
 		},
 
 		CollectionID: collectionID,
@@ -544,11 +490,11 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	s.Len(resp3.GetShards()[0].NodeIds, 4)
 
 	// mock 2 proxy without assign replica
-	session2 := sessionutil.NewSessionWithEtcd(ctx, paramtable.Get().EtcdCfg.RootPath.Key, s.Cluster.EtcdCli, sessionutil.WithResueNodeID(false))
-	session2.Init(typeutil.ProxyRole, "localhost", false, true)
+	proxy2 := s.Cluster.AddProxy()
+	defer proxy2.Stop()
 	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
-			SourceID: session2.GetServerID(),
+			SourceID: 1,
 		},
 
 		CollectionID: collectionID,
@@ -558,11 +504,10 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	s.Len(resp3.GetShards()[0].NodeIds, 2)
 
 	// mock 3 proxy without assign replica
-	session3 := sessionutil.NewSessionWithEtcd(ctx, paramtable.Get().EtcdCfg.RootPath.Key, s.Cluster.EtcdCli, sessionutil.WithResueNodeID(false))
-	session3.Init(typeutil.ProxyRole, "localhost", false, true)
+	proxy3 := s.Cluster.AddProxy()
 	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
-			SourceID: session3.GetServerID(),
+			SourceID: 1,
 		},
 
 		CollectionID: collectionID,
@@ -572,11 +517,10 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	s.Len(resp3.GetShards()[0].NodeIds, 4)
 
 	// mock 4 proxy without assign replica
-	session4 := sessionutil.NewSessionWithEtcd(ctx, paramtable.Get().EtcdCfg.RootPath.Key, s.Cluster.EtcdCli, sessionutil.WithResueNodeID(false))
-	session4.Init(typeutil.ProxyRole, "localhost", false, true)
+	proxy4 := s.Cluster.AddProxy()
 	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
-			SourceID: session4.GetServerID(),
+			SourceID: 1,
 		},
 
 		CollectionID: collectionID,
@@ -584,6 +528,32 @@ func (s *LoadTestSuite) TestAssignReplicaToProxy() {
 	s.NoError(err)
 	s.Len(resp3.GetShards(), 1)
 	s.Len(resp3.GetShards()[0].NodeIds, 1)
+
+	// reduce proxy num to 3
+	proxy4.Stop()
+	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		Base: &commonpb.MsgBase{
+			SourceID: 1,
+		},
+
+		CollectionID: collectionID,
+	})
+	s.NoError(err)
+	s.Len(resp3.GetShards(), 1)
+	s.Len(resp3.GetShards()[0].NodeIds, 4)
+
+	// reduce proxy num to 2
+	proxy3.Stop()
+	resp3, err = s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		Base: &commonpb.MsgBase{
+			SourceID: 1,
+		},
+
+		CollectionID: collectionID,
+	})
+	s.NoError(err)
+	s.Len(resp3.GetShards(), 1)
+	s.Len(resp3.GetShards()[0].NodeIds, 2)
 
 	s.releaseCollection(dbName, collectionName)
 }
