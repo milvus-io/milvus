@@ -1116,6 +1116,11 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		}
 	}
 
+	// set whether enable offset cache for bitmap index
+	if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+	}
+
 	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
 		return err
 	}
