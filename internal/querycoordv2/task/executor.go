@@ -35,6 +35,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -196,6 +197,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
+
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfos)
 
 	req := packLoadSegmentRequest(
 		task,
@@ -550,6 +553,8 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 		return err
 	}
 
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfo)
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
@@ -721,4 +726,16 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 
 	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes)
 	return loadInfo, indexInfos, nil
+}
+
+// setMetricTypeForMetaInfo it's a compatibility method for rolling upgrade from 2.3.x to 2.4
+func (ex *Executor) setMetricTypeForMetaInfo(metaInfo *querypb.LoadMetaInfo, indexInfos []*indexpb.IndexInfo) {
+	for _, info := range indexInfos {
+		for _, param := range info.IndexParams {
+			if param.GetKey() == common.MetricTypeKey {
+				metaInfo.MetricType = param.GetValue()
+				return
+			}
+		}
+	}
 }
