@@ -46,8 +46,19 @@ LogOut(const char* pattern, ...) {
 
     va_list vl;
     va_start(vl, pattern);
-    vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
+    int result = vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
     va_end(vl);
+
+    if (result < 0) {
+        std::cerr << "Error: vsnprintf failed to format the string."
+                  << std::endl;
+        return "Formatting Error";
+    } else if (static_cast<size_t>(result) >= len) {
+        std::cerr
+            << "Warning: Output was truncated. Buffer size was insufficient."
+            << std::endl;
+        return "Truncated Output";
+    }
 
     return {str_p.get()};
 }
@@ -98,11 +109,20 @@ get_thread_starttime() {
 
     int64_t pid = getpid();
     char filename[256];
-    snprintf(filename,
-             sizeof(filename),
-             "/proc/%lld/task/%lld/stat",
-             (long long)pid,   // NOLINT, TODO: How to solve this?
-             (long long)tid);  // NOLINT
+    int ret_snprintf =
+        snprintf(filename,
+                 sizeof(filename),
+                 "/proc/%lld/task/%lld/stat",
+                 (long long)pid,   // NOLINT, TODO: How to solve this?
+                 (long long)tid);  // NOLINT
+
+    if (ret_snprintf < 0 ||
+        static_cast<size_t>(ret_snprintf) >= sizeof(filename)) {
+        std::cerr << "Error: snprintf failed or output was truncated when "
+                     "creating filename."
+                  << std::endl;
+        throw std::runtime_error("Failed to format filename string.");
+    }
 
     int64_t val = 0;
     char comm[16], state;

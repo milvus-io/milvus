@@ -200,8 +200,9 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field vector don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 1, ct.err_msg: f"float vector field 'vector' is illegal, array type mismatch: "
+                                             f"invalid parameter[expected=need float vector][actual=got nil]"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -219,8 +220,8 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        error = {ct.err_code: 1, ct.err_msg: f"currently not support vector field as PrimaryField: invalid parameter"}
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -671,8 +672,9 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field vector don't match in entities[0]"}
-        client_w.upsert(client, collection_name, data= rows,
+        error = {ct.err_code: 1, ct.err_msg: f"float vector field 'vector' is illegal, array type mismatch: "
+                                             f"invalid parameter[expected=need float vector][actual=got nil]"}
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -690,7 +692,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
+        error = {ct.err_code: 1, ct.err_msg: f"currently not support vector field as PrimaryField: invalid parameter"}
         client_w.upsert(client, collection_name, data= rows,
                         check_task=CheckTasks.err_res, check_items=error)
 

@@ -2921,9 +2921,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
 
-	subLabel := GetCollectionRateSubLabel(request)
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()), subLabel)
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
@@ -3100,7 +3097,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3130,13 +3126,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		request.GetCollectionName(),
 	).Add(float64(receiveSize))
-
-	subLabel := GetCollectionRateSubLabel(request)
-	allNQ := int64(0)
-	for _, searchRequest := range request.Requests {
-		allNQ += searchRequest.GetNq()
-	}
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3297,7 +3286,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3612,7 +3600,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	).Inc()
 
 	sentSize := proto.Size(qt.result)
-	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
 	username := GetCurUserFromContextOrDefault(ctx)
@@ -6438,5 +6425,4 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 func DeregisterSubLabel(subLabel string) {
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLQuery.String(), subLabel)
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLSearch.String(), subLabel)
-	rateCol.DeregisterSubLabel(metricsinfo.ReadResultThroughput, subLabel)
 }

@@ -143,11 +143,13 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 				fmt.Sprintf("there should be one prefix for l0 import, but got %v", t.req.GetFiles()))
 			return
 		}
-		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
+		var pkField *schemapb.FieldSchema
+		pkField, err = typeutil.GetPrimaryFieldSchema(t.GetSchema())
 		if err != nil {
 			return
 		}
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, t.req.GetFiles()[0], bufferSize)
+		var reader binlog.L0Reader
+		reader, err = binlog.NewL0Reader(t.ctx, t.cm, pkField, t.req.GetFiles()[0], bufferSize)
 		if err != nil {
 			return
 		}
