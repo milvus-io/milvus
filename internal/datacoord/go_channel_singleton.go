@@ -18,10 +18,12 @@ package datacoord
 
 import "sync"
 
-var buildIndexCh chan UniqueID
-var statsTaskCh chan UniqueID
-var buildIndexChOnce sync.Once
-var statsTaskChOnce sync.Once
+var (
+	buildIndexCh     chan UniqueID
+	statsTaskCh      chan UniqueID
+	buildIndexChOnce sync.Once
+	statsTaskChOnce  sync.Once
+)
 
 func getBuildIndexChSingleton() chan UniqueID {
 	buildIndexChOnce.Do(func() {
