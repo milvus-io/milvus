@@ -1540,7 +1540,7 @@ please adjust in embedded Milvus: false`,
 	p.ReplicaSelectionPolicy = ParamItem{
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
-		DefaultValue: "round_robin",
+		DefaultValue: "look_aside",
 		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
