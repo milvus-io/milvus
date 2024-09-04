@@ -71,8 +71,6 @@ func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
 	getSubLabelRateMetric(internalpb.RateType_DQLSearch.String())
 	getRateMetric(internalpb.RateType_DQLQuery.String())
 	getSubLabelRateMetric(internalpb.RateType_DQLQuery.String())
-	getRateMetric(metricsinfo.ReadResultThroughput)
-	getSubLabelRateMetric(metricsinfo.ReadResultThroughput)
 	if err != nil {
 		return nil, err
 	}

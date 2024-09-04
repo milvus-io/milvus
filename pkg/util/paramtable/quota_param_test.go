@@ -17,7 +17,6 @@
 package paramtable
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -206,12 +205,6 @@ func TestQuotaParam(t *testing.T) {
 
 	t.Run("test limit reading", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyReading.GetAsBool())
-		assert.Equal(t, false, qc.QueueProtectionEnabled.GetAsBool())
-		assert.Equal(t, int64(math.MaxInt64), qc.NQInQueueThreshold.GetAsInt64())
-		assert.Equal(t, defaultMax, qc.QueueLatencyThreshold.GetAsFloat())
-		assert.Equal(t, false, qc.ResultProtectionEnabled.GetAsBool())
-		assert.Equal(t, defaultMax, qc.MaxReadResultRate.GetAsFloat())
-		assert.Equal(t, 0.9, qc.CoolOffSpeed.GetAsFloat())
 	})
 
 	t.Run("test disk quota", func(t *testing.T) {
