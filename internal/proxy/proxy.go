@@ -207,7 +207,6 @@ func (node *Proxy) initRateCollector() error {
 	// TODO: add bulkLoad rate
 	rateCol.Register(internalpb.RateType_DQLSearch.String())
 	rateCol.Register(internalpb.RateType_DQLQuery.String())
-	rateCol.Register(metricsinfo.ReadResultThroughput)
 	return nil
 }
 
