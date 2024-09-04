@@ -152,8 +152,9 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
     auto field_info = it->second;
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
+    const bool mmap_rss_not_need = true;
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_);
+        auto column = cc->Read(data_path, mmap_descriptor_, mmap_rss_not_need);
     }
 }
 
