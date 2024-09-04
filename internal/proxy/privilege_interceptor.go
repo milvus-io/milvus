@@ -41,7 +41,7 @@ p = sub, obj, act
 e = some(where (p.eft == allow))
 
 [matchers]
-m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || (r.sub == p.sub && dbMatch(r.obj, p.obj) && privilegeGroupContains(r.act, p.act))
+m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || (r.sub == p.sub && dbMatch(r.obj, p.obj) && privilegeGroupContains(r.act, p.act, r.obj, p.obj))
 `
 )
 
@@ -248,20 +248,38 @@ func DBMatchFunc(args ...interface{}) (interface{}, error) {
 	return db1 == db2, nil
 }
 
+func collMatch(requestObj, policyObj string) bool {
+	_, coll1 := funcutil.SplitObjectName(requestObj[strings.Index(requestObj, "-")+1:])
+	_, coll2 := funcutil.SplitObjectName(policyObj[strings.Index(policyObj, "-")+1:])
+
+	return coll2 == util.AnyWord || coll1 == coll2
+}
+
 func PrivilegeGroupContains(args ...interface{}) (interface{}, error) {
 	requestPrivilege := args[0].(string)
 	policyPrivilege := args[1].(string)
+	requestObj := args[2].(string)
+	policyObj := args[3].(string)
 
 	switch policyPrivilege {
 	case commonpb.ObjectPrivilege_PrivilegeAll.String():
 		return true, nil
 	case commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String():
+		// read only belong to collection object
+		if !collMatch(requestObj, policyObj) {
+			return false, nil
+		}
 		_, ok := roPrivileges[requestPrivilege]
 		return ok, nil
 	case commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String():
+		// read write belong to collection object
+		if !collMatch(requestObj, policyObj) {
+			return false, nil
+		}
 		_, ok := rwPrivileges[requestPrivilege]
 		return ok, nil
 	case commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String():
+		// admin belong to global object
 		_, ok := adminPrivileges[requestPrivilege]
 		return ok, nil
 	default:
