@@ -316,7 +316,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				return
 			}
 			select {
-			case getBuildIndexChSingleton().getChannel() <- info.GetSegmentID(): // accelerate index building:
+			case getBuildIndexChSingleton() <- info.GetSegmentID(): // accelerate index building:
 			default:
 			}
 		}

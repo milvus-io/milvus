@@ -995,7 +995,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	select {
-	case getStatsTaskChSingleton().getChannel() <- segmentID:
+	case getStatsTaskChSingleton() <- segmentID:
 	default:
 	}
 

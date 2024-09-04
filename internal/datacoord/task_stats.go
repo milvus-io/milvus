@@ -294,7 +294,7 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 			metricMutation.commit()
 
 			select {
-			case getBuildIndexChSingleton().getChannel() <- st.taskInfo.GetSegmentID():
+			case getBuildIndexChSingleton() <- st.taskInfo.GetSegmentID():
 			default:
 			}
 		case indexpb.StatsSubJob_TextIndexJob:

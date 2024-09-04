@@ -80,7 +80,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerTextIndexStatsTask()
 			jm.triggerBM25StatsTask()
 
-		case segID := <-getStatsTaskChSingleton().getChannel():
+		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
 			segment := jm.mt.GetSegment(segID)
 			if segment == nil {
@@ -91,7 +91,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			if segment.GetIsImporting() {
 				log.Info("segment is importing, skip stats task", zap.Int64("segmentID", segID))
 				select {
-				case getBuildIndexChSingleton().getChannel() <- segID:
+				case getBuildIndexChSingleton() <- segID:
 				default:
 				}
 				continue
