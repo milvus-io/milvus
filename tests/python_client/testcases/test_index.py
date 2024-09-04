@@ -2299,7 +2299,7 @@ class TestInvertedIndexValid(TestcaseBase):
     def test_binary_arith_expr_on_inverted_index(self):
         prefix = "test_binary_arith_expr_on_inverted_index"
         nb = 5000
-        collection_w = self.init_collection_general(prefix, insert_data=True, is_index=True, is_all_data_type=True)[0]
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, insert_data=True, is_index=True, is_all_data_type=True)
         index_name = "test_binary_arith_expr_on_inverted_index"
         scalar_index_params = {"index_type": "INVERTED"}
         collection_w.release()
