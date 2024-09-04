@@ -76,7 +76,8 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		//  because default value may already defined in milvus.yaml
 		//	and we don't want the fallback keys be overridden.
 		for _, key := range pi.FallbackKeys {
-			fallbackRaw, err := pi.manager.GetConfig(key)
+			var fallbackRaw string
+			fallbackRaw, err = pi.manager.GetConfig(key)
 			if err == nil {
 				raw = fallbackRaw
 				break
