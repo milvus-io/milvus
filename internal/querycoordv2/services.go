@@ -957,7 +957,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 				return true
 			})
 			replicas := lo.Keys(replicaShards)
-			average := len(proxyIDs) / len(replicas)
+			average := len(replicas) / len(proxyIDs)
 			if average == 0 {
 				average = 1
 			}
@@ -981,12 +981,11 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		permitAssignReplica := func() bool {
 			return proxyCount > 1 && len(replicaShards) > 1 && (len(replicaShards)%proxyCount == 0 || proxyCount%len(replicaShards) == 0)
 		}
-		log.Info("xxx", zap.Bool("allReplicaReady", allReplicaReady()), zap.Bool("permitAssignReplica", permitAssignReplica()), zap.Any("replicaShards", replicaShards), zap.Int("proxyCount", proxyCount))
 		if allReplicaReady() && permitAssignReplica() {
 			s.proxyAssignLock.Lock()
 			defer s.proxyAssignLock.Unlock()
 			proxyID := req.GetBase().GetSourceID()
-			if _, ok := s.proxyAssignedReplicas[proxyID]; !ok {
+			if _, ok := s.proxyAssignedReplicas[proxyID]; !ok || len(s.proxyAssignedReplicas[proxyID]) != proxyCount {
 				// assign replicas to proxyIDs
 				assignReplicas()
 
