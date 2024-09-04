@@ -2,9 +2,10 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ import (
 type TaskManager interface {
 	Start()
 	Stop()
-	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob) error
+	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
 	GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
@@ -124,7 +125,7 @@ func (jm *jobManager) createSortStatsTaskForSegment(segment *SegmentInfo) {
 			zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 		return
 	}
-	if err := jm.SubmitStatsTask(segment.GetID(), targetSegmentID, indexpb.StatsSubJob_Sort); err != nil {
+	if err := jm.SubmitStatsTask(segment.GetID(), targetSegmentID, indexpb.StatsSubJob_Sort, true); err != nil {
 		log.Warn("create stats task with sort for segment failed, wait for retry",
 			zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 		return
@@ -152,10 +153,11 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		segment.GetIsSorted()) {
 		return false
 	}
-	if segment.GetTextStatsLogs() == nil {
-		return true
-	}
+
 	for _, fieldID := range fieldIDs {
+		if segment.GetTextStatsLogs() == nil {
+			return true
+		}
 		if segment.GetTextStatsLogs()[fieldID] == nil {
 			return true
 		}
@@ -183,7 +185,7 @@ func (jm *jobManager) triggerTextIndexStatsTask() {
 		}))
 
 		for _, segment := range segments {
-			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob); err != nil {
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true); err != nil {
 				log.Warn("create stats task with text index for segment failed, wait for retry",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
@@ -207,7 +209,7 @@ func (jm *jobManager) triggerBM25StatsTask() {
 		}))
 
 		for _, segment := range segments {
-			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job); err != nil {
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true); err != nil {
 				log.Warn("create stats task with bm25 for segment failed, wait for retry",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
@@ -248,7 +250,8 @@ func (jm *jobManager) cleanupStatsTasksLoop() {
 	}
 }
 
-func (jm *jobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob) error {
+func (jm *jobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
+	subJobType indexpb.StatsSubJob, canRecycle bool) error {
 	originSegment := jm.mt.GetHealthySegment(originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
@@ -269,6 +272,7 @@ func (jm *jobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64, su
 		FailReason:      "",
 		TargetSegmentID: targetSegmentID,
 		SubJobType:      subJobType,
+		CanRecycle:      canRecycle,
 	}
 	if err = jm.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
