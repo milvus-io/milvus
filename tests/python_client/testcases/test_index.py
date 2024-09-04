@@ -1575,7 +1575,7 @@ class TestNewIndexAsync(TestcaseBase):
 class TestIndexString(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test create index about string 
+      The following cases are used to test create index about string
     ******************************************************************
     """
 
@@ -1583,7 +1583,7 @@ class TestIndexString(TestcaseBase):
     def test_create_index_with_string_field(self):
         """
         target: test create index with string field is not primary
-        method: 1.create collection and insert data 
+        method: 1.create collection and insert data
                 2.only create an index with string field is not primary
         expected: create index successfully
         """
@@ -1599,7 +1599,7 @@ class TestIndexString(TestcaseBase):
     def test_create_index_with_string_before_load(self):
         """
         target: test create index with string field before load
-        method: 1.create collection and insert data 
+        method: 1.create collection and insert data
                 2.create an index with string field before load
         expected: create index successfully
         """
@@ -1618,9 +1618,9 @@ class TestIndexString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_after_create_index_with_string(self):
         """
-        target: test load after create index with string field 
-        method: 1.create collection and insert data 
-                2.collection load after create index with string field 
+        target: test load after create index with string field
+        method: 1.create collection and insert data
+                2.collection load after create index with string field
         expected: create index successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -1639,8 +1639,8 @@ class TestIndexString(TestcaseBase):
     def test_create_index_with_string_field_is_primary(self):
         """
         target: test create index with string field is primary
-        method: 1.create collection  
-                2.insert data 
+        method: 1.create collection
+                2.insert data
                 3.only create an index with string field is primary
         expected: create index successfully
         """
@@ -1657,8 +1657,8 @@ class TestIndexString(TestcaseBase):
     def test_create_index_or_not_with_string_field(self):
         """
         target: test create index, half of the string fields are indexed and half are not
-        method: 1.create collection  
-                2.insert data 
+        method: 1.create collection
+                2.insert data
                 3.half of the indexes are created and half are not in the string fields
         expected: create index successfully
         """
@@ -1674,8 +1674,8 @@ class TestIndexString(TestcaseBase):
     def test_create_index_with_same_index_name(self):
         """
         target: test create index with different fields use same index name
-        method: 1.create collection  
-                2.insert data 
+        method: 1.create collection
+                2.insert data
                 3.only create index with different fields use same index name
         expected: create index successfully
         """
@@ -1693,9 +1693,9 @@ class TestIndexString(TestcaseBase):
     def test_create_different_index_fields(self):
         """
         target: test create index with different fields
-        method: 1.create collection  
+        method: 1.create collection
                 2.insert data
-                3.create different indexes with string and float vector field 
+                3.create different indexes with string and float vector field
         expected: create index successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -1712,9 +1712,9 @@ class TestIndexString(TestcaseBase):
     def test_create_different_index_binary_fields(self):
         """
         target: testing the creation of indexes with string and binary fields
-        method: 1.create collection  
+        method: 1.create collection
                 2.insert data
-                3.create different indexes with string and binary vector field 
+                3.create different indexes with string and binary vector field
         expected: create index successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -1802,7 +1802,7 @@ class TestIndexDiskann(TestcaseBase):
     def test_create_index_with_diskann_normal(self):
         """
         target: test create index with diskann
-        method: 1.create collection and insert data 
+        method: 1.create collection and insert data
                 2.create diskann index , then load data
                 3.search successfully
         expected: create index successfully
@@ -1842,9 +1842,9 @@ class TestIndexDiskann(TestcaseBase):
     def test_create_index_with_diskann_callback(self, _async):
         """
         target: test create index with diskann
-        method: 1.create collection and insert data 
+        method: 1.create collection and insert data
                 2.create diskann index ,then load
-                3.search 
+                3.search
         expected: create index successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -1960,7 +1960,7 @@ class TestIndexDiskann(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_more_than_three_index(self):
         """
-        target: test create diskann index 
+        target: test create diskann index
         method: 1.create collection and insert data
                 2.create different index
         expected: drop index successfully
@@ -2005,7 +2005,7 @@ class TestIndexDiskann(TestcaseBase):
         """
         target: test create diskann index with binary
         method: 1.create collection and insert binary data
-                2.create diskann index 
+                2.create diskann index
         expected: report an error
         """
         c_name = cf.gen_unique_str(prefix)
@@ -2294,6 +2294,22 @@ class TestInvertedIndexValid(TestcaseBase):
             scalar_index_params = {"index_type": f"{scalar_index[i]}"}
             collection_w.create_index(scalar_fields[i], index_params=scalar_index_params, index_name=index_name)
             assert collection_w.has_index(index_name=index_name)[0] is True
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_binary_arith_expr_on_inverted_index(self):
+        prefix = "test_binary_arith_expr_on_inverted_index"
+        nb = 5000
+        collection_w = self.init_collection_general(prefix, insert_data=True, is_index=True, is_all_data_type=True)[0]
+        index_name = "test_binary_arith_expr_on_inverted_index"
+        scalar_index_params = {"index_type": "INVERTED"}
+        collection_w.release()
+        collection_w.create_index(ct.default_int64_field_name, index_params=scalar_index_params, index_name=index_name)
+        collection_w.load()
+        # query and verify result
+        res = collection_w.query(expr=f"{ct.default_int64_field_name} % 10 == 0")[0]
+        query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+        filter_ids = set([_id for _id in insert_ids if _id % 10 == 0])
+        assert query_ids == set(filter_ids)
 
 
 class TestBitmapIndex(TestcaseBase):
