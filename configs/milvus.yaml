@@ -410,7 +410,7 @@ queryNode:
   mmap:
     vectorField: false # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
-    scalarField: false # Enable mmap for loading scalar data
+    scalarField: true # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
     growingMmapEnabled: false # Enable mmap for using in growing raw data
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
