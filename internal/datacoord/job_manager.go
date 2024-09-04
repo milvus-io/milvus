@@ -5,11 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -17,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type TaskManager interface {
+type StatsTaskManager interface {
 	Start()
 	Stop()
 	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
@@ -25,9 +24,9 @@ type TaskManager interface {
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
 
-var _ TaskManager = (*jobManager)(nil)
+var _ StatsTaskManager = (*statsJobManager)(nil)
 
-type jobManager struct {
+type statsJobManager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -42,9 +41,9 @@ type jobManager struct {
 func newJobManager(ctx context.Context,
 	mt *meta,
 	scheduler *taskScheduler,
-	allocator allocator.Allocator) *jobManager {
+	allocator allocator.Allocator) *statsJobManager {
 	ctx, cancel := context.WithCancel(ctx)
-	return &jobManager{
+	return &statsJobManager{
 		ctx:       ctx,
 		cancel:    cancel,
 		loopWg:    sync.WaitGroup{},
@@ -54,18 +53,18 @@ func newJobManager(ctx context.Context,
 	}
 }
 
-func (jm *jobManager) Start() {
+func (jm *statsJobManager) Start() {
 	jm.loopWg.Add(2)
 	go jm.triggerStatsTaskLoop()
 	go jm.cleanupStatsTasksLoop()
 }
 
-func (jm *jobManager) Stop() {
+func (jm *statsJobManager) Stop() {
 	jm.cancel()
 	jm.loopWg.Wait()
 }
 
-func (jm *jobManager) triggerStatsTaskLoop() {
+func (jm *statsJobManager) triggerStatsTaskLoop() {
 	log.Info("start checkStatsTaskLoop...")
 	defer jm.loopWg.Done()
 
@@ -102,7 +101,7 @@ func (jm *jobManager) triggerStatsTaskLoop() {
 	}
 }
 
-func (jm *jobManager) triggerSortStatsTask() {
+func (jm *statsJobManager) triggerSortStatsTask() {
 	segments := jm.mt.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
 		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted()
 	}))
@@ -118,7 +117,7 @@ func (jm *jobManager) triggerSortStatsTask() {
 	}
 }
 
-func (jm *jobManager) createSortStatsTaskForSegment(segment *SegmentInfo) {
+func (jm *statsJobManager) createSortStatsTaskForSegment(segment *SegmentInfo) {
 	targetSegmentID, err := jm.allocator.AllocID(jm.ctx)
 	if err != nil {
 		log.Warn("allocID for segment stats task failed",
@@ -132,7 +131,7 @@ func (jm *jobManager) createSortStatsTaskForSegment(segment *SegmentInfo) {
 	}
 }
 
-func (jm *jobManager) enableMatch(field *schemapb.FieldSchema) bool {
+func (jm *statsJobManager) enableMatch(field *schemapb.FieldSchema) bool {
 	if field.GetDataType() != schemapb.DataType_VarChar {
 		return false
 	}
@@ -144,7 +143,7 @@ func (jm *jobManager) enableMatch(field *schemapb.FieldSchema) bool {
 	return false
 }
 
-func (jm *jobManager) enableBM25() bool {
+func (jm *statsJobManager) enableBM25() bool {
 	return false
 }
 
@@ -170,7 +169,7 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-func (jm *jobManager) triggerTextIndexStatsTask() {
+func (jm *statsJobManager) triggerTextIndexStatsTask() {
 	collections := jm.mt.GetCollections()
 	for _, collection := range collections {
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -194,7 +193,7 @@ func (jm *jobManager) triggerTextIndexStatsTask() {
 	}
 }
 
-func (jm *jobManager) triggerBM25StatsTask() {
+func (jm *statsJobManager) triggerBM25StatsTask() {
 	collections := jm.mt.GetCollections()
 	for _, collection := range collections {
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -219,7 +218,7 @@ func (jm *jobManager) triggerBM25StatsTask() {
 }
 
 // cleanupStatsTasks clean up the finished/failed stats tasks
-func (jm *jobManager) cleanupStatsTasksLoop() {
+func (jm *statsJobManager) cleanupStatsTasksLoop() {
 	log.Info("start cleanupStatsTasksLoop...")
 	defer jm.loopWg.Done()
 
@@ -250,7 +249,7 @@ func (jm *jobManager) cleanupStatsTasksLoop() {
 	}
 }
 
-func (jm *jobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
+func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
 	subJobType indexpb.StatsSubJob, canRecycle bool) error {
 	originSegment := jm.mt.GetHealthySegment(originSegmentID)
 	if originSegment == nil {
@@ -284,11 +283,11 @@ func (jm *jobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
 	return nil
 }
 
-func (jm *jobManager) GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState {
+func (jm *statsJobManager) GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState {
 	return jm.mt.statsTaskMeta.GetStatsTaskStateBySegmentID(originSegmentID, subJobType)
 }
 
-func (jm *jobManager) DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error {
+func (jm *statsJobManager) DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error {
 	task := jm.mt.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
 	if task == nil {
 		return nil

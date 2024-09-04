@@ -18,34 +18,22 @@ package datacoord
 
 import "sync"
 
-type channelSingleton struct {
-	ch chan UniqueID
-}
-
-func (cs *channelSingleton) getChannel() chan UniqueID {
-	return cs.ch
-}
-
-var buildIndexCh *channelSingleton
-var statsTaskCh *channelSingleton
+var buildIndexCh chan UniqueID
+var statsTaskCh chan UniqueID
 var buildIndexChOnce sync.Once
 var statsTaskChOnce sync.Once
 
-func getBuildIndexChSingleton() *channelSingleton {
+func getBuildIndexChSingleton() chan UniqueID {
 	buildIndexChOnce.Do(func() {
-		buildIndexCh = &channelSingleton{
-			ch: make(chan UniqueID, 1024),
-		}
+		buildIndexCh = make(chan UniqueID, 1024)
 	})
 
 	return buildIndexCh
 }
 
-func getStatsTaskChSingleton() *channelSingleton {
+func getStatsTaskChSingleton() chan UniqueID {
 	statsTaskChOnce.Do(func() {
-		statsTaskCh = &channelSingleton{
-			ch: make(chan UniqueID, 1024),
-		}
+		statsTaskCh = make(chan UniqueID, 1024)
 	})
 	return statsTaskCh
 }

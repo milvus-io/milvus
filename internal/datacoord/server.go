@@ -152,7 +152,7 @@ type Server struct {
 	indexEngineVersionManager IndexEngineVersionManager
 
 	taskScheduler *taskScheduler
-	jobManager    *jobManager
+	jobManager    *statsJobManager
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -379,7 +379,7 @@ func (s *Server) initDataCoord() error {
 	log.Info("init task scheduler done")
 
 	s.initJobManager()
-	log.Info("init jobManager done")
+	log.Info("init statsJobManager done")
 
 	s.initCompaction()
 	log.Info("init compaction done")
@@ -1072,7 +1072,7 @@ func (s *Server) Stop() error {
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
 	s.jobManager.Stop()
-	logutil.Logger(s.ctx).Info("datacoord jobManager stopped")
+	logutil.Logger(s.ctx).Info("datacoord statsJobManager stopped")
 
 	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")

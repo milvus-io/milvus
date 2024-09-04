@@ -91,7 +91,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 		},
 	}
 
-	jm := &jobManager{
+	jm := &statsJobManager{
 		ctx:    ctx,
 		cancel: cancel,
 		loopWg: sync.WaitGroup{},
