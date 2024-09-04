@@ -48,9 +48,9 @@ const (
 
 type TriggerManager interface {
 	Start()
-	Stop()
+	Close()
 	IDLETrigger(ctx context.Context, collectionID int64)
-	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error)
+	ManualTrigger(ctx context.Context, collectionID int64, triggerType CompactionTriggerType) (UniqueID, error)
 }
 
 var _ TriggerManager = (*CompactionTriggerManager)(nil)
@@ -149,7 +149,7 @@ func (m *CompactionTriggerManager) startLoop() {
 			m.TimelyTrigger()
 		case <-idleTicker.C:
 			if m.compactionHandler.isEmpty() {
-				m.IDLETrigger(AllCollection)
+				m.IDLETrigger(context.Background(), AllCollection)
 			}
 		}
 	}
@@ -179,8 +179,7 @@ func (m *CompactionTriggerManager) TimelyTrigger() {
 	}
 }
 
-func (m *CompactionTriggerManager) IDLETrigger(collectionID int64) {
-	ctx := context.Background()
+func (m *CompactionTriggerManager) IDLETrigger(ctx context.Context, collectionID int64) {
 	collIDs := []int64{}
 	if collectionID == AllCollection {
 		collIDs = lo.Map(m.meta.GetCollections(), func(coll *collectionInfo, _ int) int64 {
@@ -290,7 +289,7 @@ func (m *CompactionTriggerManager) getSeperateViews(ctx context.Context, collInf
 		return nil
 	}
 
-	newTriggerID, err := m.allocator.allocID(ctx)
+	newTriggerID, err := m.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn("fail to allocate triggerID", zap.Error(err))
 		return nil
@@ -369,7 +368,7 @@ func (m *CompactionTriggerManager) buildTaskFromView(ctx context.Context, trigge
 	}
 	switch triggerType {
 	case TriggerTypeLevelZeroViewChange:
-		taskID, err := m.allocator.allocID(ctx)
+		taskID, err := m.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn("Failed to build compaction view to scheduler because allocate id fail", zap.Error(err))
 			return nil, err
@@ -399,8 +398,8 @@ func (m *CompactionTriggerManager) buildTaskFromView(ctx context.Context, trigge
 		// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
 		startID, endID, err := m.allocator.AllocN(11)
 		if err != nil {
-			log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
-			return
+			log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+			return nil, err
 		}
 
 		expectedSize := getExpectedSegmentSize(m.meta, collection)

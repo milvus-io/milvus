@@ -72,7 +72,7 @@ func (s *CompactionTriggerManagerSuite) TestStartClose() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetSeperateViews() {
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Once()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Once()
 	collInfo := &collectionInfo{ID: s.testLabel.CollectionID}
 	got := s.trigger.getSeperateViews(context.Background(), collInfo, NotForce)
 	s.NotEmpty(got)
@@ -127,11 +127,11 @@ func (s *CompactionTriggerManagerSuite) TestManualTrigger() {
 		s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
 		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
 			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: newTestScalarClusteringKeySchema()}, nil).Twice()
-		s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Once()
-		s.mockAlloc.EXPECT().allocN(mock.Anything).RunAndReturn(
+		s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Once()
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(
 			func(count int64) (int64, int64, error) {
 				return 99999, 99999 + count, nil
-			}).Once()
+			}).Twice()
 		triggerID, err := s.trigger.ManualTrigger(context.Background(), s.testLabel.CollectionID, TriggerTypeClustering)
 		s.NoError(err)
 		s.EqualValues(19530, triggerID)
@@ -143,7 +143,7 @@ func (s *CompactionTriggerManagerSuite) TestTrigger() {
 		s.SetupTest()
 		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Twice()
 		s.trigger.TimelyTrigger()
-		s.trigger.IDLETrigger(AllCollection)
+		s.trigger.IDLETrigger(context.Background(), AllCollection)
 	})
 
 	s.Run("collection auto compaction not enabled", func() {
@@ -154,7 +154,7 @@ func (s *CompactionTriggerManagerSuite) TestTrigger() {
 				Properties: map[string]string{common.CollectionAutoCompactionKey: "false"},
 			}, nil).Twice()
 		s.trigger.TimelyTrigger()
-		s.trigger.IDLETrigger(AllCollection)
+		s.trigger.IDLETrigger(context.Background(), AllCollection)
 	})
 
 	s.Run("collection auto compaction invalid value", func() {
@@ -165,14 +165,15 @@ func (s *CompactionTriggerManagerSuite) TestTrigger() {
 				Properties: map[string]string{common.CollectionAutoCompactionKey: "okokok"},
 			}, nil).Twice()
 		s.trigger.TimelyTrigger()
-		s.trigger.IDLETrigger(1)
+		s.trigger.IDLETrigger(context.Background(), 1)
 	})
 
 	s.Run("triggered", func() {
 		s.SetupTest()
 		s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
 			Return(&collectionInfo{ID: s.testLabel.CollectionID}, nil)
-		s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Times(5)
+		s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Times(4)
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(19530, 100000000, nil).Once()
 		s.mockPlanContext.EXPECT().isFull().Return(false).Times(3)
 		s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(
 			func(task *datapb.CompactionTask) error {
@@ -185,7 +186,7 @@ func (s *CompactionTriggerManagerSuite) TestTrigger() {
 		).Times(3)
 
 		s.trigger.TimelyTrigger()
-		s.trigger.IDLETrigger(AllCollection)
+		s.trigger.IDLETrigger(context.Background(), AllCollection)
 	})
 }
 
