@@ -202,8 +202,6 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateIndex.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropIndex.String(),
-		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
-		commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 		commonpb.ObjectPrivilege_PrivilegeLoad.String(),
@@ -220,6 +218,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
 	}
 	AdminPrivilegeGroup = []string{
+		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeQuery.String(),
 		commonpb.ObjectPrivilege_PrivilegeSearch.String(),
 		commonpb.ObjectPrivilege_PrivilegeIndexDetail.String(),
