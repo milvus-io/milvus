@@ -1389,8 +1389,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 	defer node.lifetime.Done()
 
-	log.Info("QueryNode received worker delete request")
-	log.Debug("Worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
+	log.Debug("QueryNode received worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
 
 	filters := []segments.SegmentFilter{
 		segments.WithID(req.GetSegmentId()),
