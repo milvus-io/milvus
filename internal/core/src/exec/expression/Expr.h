@@ -364,6 +364,25 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    template <typename T>
+    bool
+    IndexHasRawData() const {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+
+        using Index = index::ScalarIndex<IndexInnerType>;
+        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+            const Index& index =
+                segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+            if (!index.HasRawData()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void
     SetNotUseIndex() {
         use_index_ = false;
