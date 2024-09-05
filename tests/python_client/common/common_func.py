@@ -20,6 +20,8 @@ from common import common_type as ct
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
 import pickle
+import spacy
+from collections import Counter
 fake = Faker()
 """" Methods of processing data """
 
@@ -62,6 +64,25 @@ class ParamInfo:
 
 param_info = ParamInfo()
 
+
+def analyze_documents(texts):
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        print("Downloading language model for the spaCy POS tagger")
+        from spacy.cli import download
+        download("en_core_web_sm")
+        nlp = spacy.load("en_core_web_sm")
+    freq = Counter()
+    t0 = time.time()
+    for text in texts:
+
+        doc = nlp(text.lower())
+        tokens = [token.text for token in doc if not token.is_stop and not token.is_punct]
+        freq.update(tokens)
+    tt = time.time() - t0
+    log.info(f"Analyze document cost time: {tt}")
+    return freq
 
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))

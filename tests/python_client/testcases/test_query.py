@@ -6,12 +6,19 @@ from common import common_func as cf
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import ConnectionErrorMessage as cem
 from base.client_base import TestcaseBase
+from pymilvus import (
+    connections, list_collections,
+    FieldSchema, CollectionSchema, DataType,
+    Collection
+)
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
 import threading
 from pymilvus import DefaultConfig
 from datetime import datetime
 import time
-
+import nltk
+from nltk.tokenize import word_tokenize
+from collections import Counter
 import pytest
 import random
 import numpy as np
@@ -1520,7 +1527,7 @@ class TestQueryParams(TestcaseBase):
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
-        method: specify output_fields as "*" 
+        method: specify output_fields as "*"
         expected: output all scale field; output all fields
         """
         # init collection with fields: int64, float, float_vec, float_vector1
@@ -2566,7 +2573,7 @@ class TestQueryOperation(TestcaseBase):
         """
         target: test the scenario which query with many logical expressions
         method: 1. create collection
-                3. query the expr that like: int64 == 0 || int64 == 1 ........ 
+                3. query the expr that like: int64 == 0 || int64 == 1 ........
         expected: run successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -2577,14 +2584,14 @@ class TestQueryOperation(TestcaseBase):
         collection_w.load()
         multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
         _, check_res = collection_w.query(multi_exprs, output_fields=[f'{default_int_field_name}'])
-        assert(check_res == True) 
+        assert(check_res == True)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_multi_logical_exprs(self):
         """
         target: test the scenario which search with many logical expressions
         method: 1. create collection
-                3. search with the expr that like: int64 == 0 || int64 == 1 ........ 
+                3. search with the expr that like: int64 == 0 || int64 == 1 ........
         expected: run successfully
         """
         c_name = cf.gen_unique_str(prefix)
@@ -2593,15 +2600,15 @@ class TestQueryOperation(TestcaseBase):
         collection_w.insert(df)
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-    
+
         multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
-    
+
         collection_w.load()
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         limit = 1000
         _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
                             ct.default_search_params, limit, multi_exprs)
-        assert(check_res == True) 
+        assert(check_res == True)
 
 class TestQueryString(TestcaseBase):
     """
@@ -2947,8 +2954,8 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_index(self):
         """
-        target: test query after create diskann index 
-        method: create a collection and build diskann index 
+        target: test query after create diskann index
+        method: create a collection and build diskann index
         expected: verify query result
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
@@ -2968,8 +2975,8 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_with_string_pk(self):
         """
-        target: test query after create diskann index 
-        method: create a collection with string pk and build diskann index 
+        target: test query after create diskann index
+        method: create a collection with string pk and build diskann index
         expected: verify query result
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
@@ -2986,7 +2993,7 @@ class TestQueryString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_with_scalar_field(self):
         """
-        target: test query with Scalar field 
+        target: test query with Scalar field
         method: create collection , string field is primary
                 collection load and insert empty data with string field
                 collection query uses string expr in string field
@@ -4055,3 +4062,103 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, offset=offset, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size, "count": ct.default_nb - offset, "exp_ids": exp_ids})
+
+
+class TestQueryTextMatch(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test query iterator
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_normal(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        df = pd.read_parquet("hf://datasets/Cohere/movies/movies.parquet")
+        log.info(f"dataframe\n{df}")
+        df = df.astype(str)
+        log.info(f"dataframe\n{df}")
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "title": str(df["title"][i]),
+                "overview": str(df["overview"][i]),
+                "genres": str(df["genres"][i]),
+                "producer": str(df["producer"][i]),
+                "cast": str(df["cast"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+        collection_w.create_index("emb", {"metric_type": "L2", "index_type": "FLAT"})
+        collection_w.load()
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        # overview_word_freq = cf.analyze_documents(df["overview"].tolist())
+        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
+        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
+        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            # "overview": overview_word_freq,
+            "genres": genres_word_freq,
+            "producer": producer_word_freq,
+            "cast": cast_word_freq
+        }
+        text_fields = ["title", "genres", "producer", "cast"]
+        # query single field for one word
+        for field in text_fields:
+            expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            res = collection_w.query(
+                expr=expr,
+            )
+            print(res)
+
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_words = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_words.append(word)
+            string_of_top_10_words = " ".join(top_10_words)
+            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            res = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(res)
+        # query with text match
+        # r = collection.query(expr="TextMatch(title, 'The') and TextMatch(title, 'Catcher')",
+        #                      output_fields=["id", "title"])
+        # expr = f"TextMatch(title, '{}')"
+        #
+        # expr = "Title == 'The Dark Knight'"
+
+
+
+
+
