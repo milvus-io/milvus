@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -212,6 +213,20 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
+}
+
+func (suite *TargetObserverSuite) TestTriggerRelease() {
+	// Manually update next target
+	_, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
+
+	// manually release partition
+	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(suite.collectionID)
+	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
+	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
+
+	// manually release collection
+	suite.observer.ReleaseCollection(suite.collectionID)
 }
 
 func (suite *TargetObserverSuite) TearDownTest() {
