@@ -80,6 +80,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
+	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
@@ -583,6 +584,10 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	return results, nil
+}
+
+func (sd *shardDelegator) GetDeleteBufferSize() (entryNum int64, memorySize int64) {
+	return sd.deleteBuffer.Size()
 }
 
 type subTask[T any] struct {
