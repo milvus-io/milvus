@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package milvus.proto.worker;
+package milvus.proto.index;
 
 option go_package = "github.com/milvus-io/milvus/internal/proto/workerpb";
 

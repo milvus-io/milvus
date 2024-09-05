@@ -244,7 +244,8 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		PartitionKeyIsolation: partitionKeyIsolation,
 	}
 
-	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()))
+	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
+		zap.Int64("segID", segment.GetID()))
 	return true
 }
 

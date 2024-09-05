@@ -150,8 +150,10 @@ func (s *taskScheduler) reloadFromMeta() {
 	for taskID, t := range allStatsTasks {
 		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
 			s.tasks[taskID] = &statsTask{
-				taskID: taskID,
-				nodeID: t.NodeID,
+				taskID:          taskID,
+				segmentID:       t.GetSegmentID(),
+				targetSegmentID: t.GetTargetSegmentID(),
+				nodeID:          t.NodeID,
 				taskInfo: &workerpb.StatsResult{
 					TaskID:     taskID,
 					State:      t.GetState(),
@@ -310,13 +312,12 @@ func (s *taskScheduler) collectTaskMetrics() {
 			maxTaskRunningTime := make(map[string]int64)
 
 			collectMetricsFunc := func(taskID int64) {
-				s.taskLock.Lock(taskID)
-				defer s.taskLock.Unlock(taskID)
-
 				task := s.getTask(taskID)
 				if task == nil {
 					return
 				}
+				s.taskLock.Lock(taskID)
+				defer s.taskLock.Unlock(taskID)
 
 				state := task.GetState()
 				switch state {
