@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -125,6 +126,17 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		).Set(float64(numEntities))
 	}
 
+	deleteBufferNum := make(map[int64]int64)
+	deleteBufferSize := make(map[int64]int64)
+
+	node.delegators.Range(func(_ string, sd delegator.ShardDelegator) bool {
+		collectionID := sd.Collection()
+		entryNum, memorySize := sd.GetDeleteBufferSize()
+		deleteBufferNum[collectionID] += entryNum
+		deleteBufferSize[collectionID] += memorySize
+		return true
+	})
+
 	return &metricsinfo.QueryNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
@@ -137,6 +149,10 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
 			CollectionIDs: collections,
+		},
+		DeleteBufferInfo: metricsinfo.DeleteBufferInfo{
+			CollectionDeleteBufferNum:  deleteBufferNum,
+			CollectionDeleteBufferSize: deleteBufferSize,
 		},
 	}, nil
 }

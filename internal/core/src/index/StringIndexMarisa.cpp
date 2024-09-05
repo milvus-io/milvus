@@ -399,12 +399,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key > value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
             };
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
-            }
             break;
         }
         case OpType::GreaterEqual: {
@@ -412,11 +408,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key >= value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
-            }
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
             }
             break;
         }
