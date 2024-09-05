@@ -59,7 +59,7 @@ jobs:
         env:
           OS_NAME: 'ubuntu22.04'
         run: |
-          ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+          ./build/builder.sh /bin/bash -c "git config --global --add safe.directory /go/src/github.com/milvus-io/milvus && make check-proto-product && make verifiers"
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
