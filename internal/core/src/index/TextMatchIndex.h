@@ -22,10 +22,21 @@ using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for growing segment.
-    explicit TextMatchIndex(int64_t commit_interval_in_ms);
+    explicit TextMatchIndex(
+        int64_t commit_interval_in_ms,
+        const char* tokenizer_name,
+        const std::map<std::string, std::string>& tokenizer_params);
     // for sealed segment.
-    explicit TextMatchIndex(const std::string& path);
-    // for building/loading index.
+    explicit TextMatchIndex(
+        const std::string& path,
+        const char* tokenizer_name,
+        const std::map<std::string, std::string>& tokenizer_params);
+    // for building index.
+    explicit TextMatchIndex(
+        const storage::FileManagerContext& ctx,
+        const char* tokenizer_name,
+        const std::map<std::string, std::string>& tokenizer_params);
+    // for loading index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
  public:
@@ -55,6 +66,11 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     void
     CreateReader();
 
+    void
+    RegisterTokenizer(
+        const char* tokenizer_name,
+        const std::map<std::string, std::string>& tokenizer_params);
+
     TargetBitmap
     MatchQuery(const std::string& query);
 
@@ -63,6 +79,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     shouldTriggerCommit();
 
  private:
+    mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
 };

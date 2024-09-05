@@ -32,6 +32,8 @@ main(int argc, char* argv[]) {
             "们都有光明的前途",
             0);
         write_single_text("测试中文分词器的效果", 1);
+        write_single_text("黄金时代", 2);
+        write_single_text("青铜时代", 3);
         text_index.commit();
     }
 
@@ -48,6 +50,13 @@ main(int argc, char* argv[]) {
         auto result = to_set(text_index.match_query("效果"));
         assert(result.size() == 1);
         assert(result.find(1) != result.end());
+    }
+
+    {
+        auto result = to_set(text_index.match_query("时代"));
+        assert(result.size() == 2);
+        assert(result.find(2) != result.end());
+        assert(result.find(3) != result.end());
     }
 
     return 0;

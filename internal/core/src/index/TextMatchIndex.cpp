@@ -19,26 +19,38 @@
 namespace milvus::index {
 constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
 
-TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms)
+TextMatchIndex::TextMatchIndex(
+    int64_t commit_interval_in_ms,
+    const char* tokenizer_name,
+    const std::map<std::string, std::string>& tokenizer_params)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
     std::string field_name = "tmp_text_index";
-    wrapper_ =
-        std::make_shared<TantivyIndexWrapper>(field_name.c_str(), true, "");
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        field_name.c_str(), true, "", tokenizer_name, tokenizer_params);
 }
 
-TextMatchIndex::TextMatchIndex(const std::string& path)
+TextMatchIndex::TextMatchIndex(
+    const std::string& path,
+    const char* tokenizer_name,
+    const std::map<std::string, std::string>& tokenizer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     path_ = path;
     d_type_ = TantivyDataType::Text;
     std::string field_name = "tmp_text_index";
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field_name.c_str(), false, path_.c_str());
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
+                                                     false,
+                                                     path_.c_str(),
+                                                     tokenizer_name,
+                                                     tokenizer_params);
 }
 
-TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
+TextMatchIndex::TextMatchIndex(
+    const storage::FileManagerContext& ctx,
+    const char* tokenizer_name,
+    const std::map<std::string, std::string>& tokenizer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -50,18 +62,22 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
 
     boost::filesystem::create_directories(path_);
     d_type_ = TantivyDataType::Text;
-    if (tantivy_index_exist(path_.c_str())) {
-        LOG_INFO(
-            "text index {} already exists, which should happen in loading "
-            "progress",
-            path_);
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str());
-    } else {
-        std::string field_name =
-            std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), false, path_.c_str());
-    }
+    std::string field_name =
+        std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
+                                                     false,
+                                                     path_.c_str(),
+                                                     tokenizer_name,
+                                                     tokenizer_params);
+}
+
+TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
+    : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
+      last_commit_time_(stdclock::now()) {
+    schema_ = ctx.fieldDataMeta.field_schema;
+    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    d_type_ = TantivyDataType::Text;
 }
 
 BinarySet
@@ -135,8 +151,10 @@ TextMatchIndex::shouldTriggerCommit() {
 
 void
 TextMatchIndex::Commit() {
-    wrapper_->commit();
-    last_commit_time_.store(stdclock::now());
+    if (mtx_.try_lock()) {
+        wrapper_->commit();
+        last_commit_time_.store(stdclock::now());
+    }
 }
 
 void
@@ -149,11 +167,17 @@ TextMatchIndex::CreateReader() {
     wrapper_->create_reader();
 }
 
+void
+TextMatchIndex::RegisterTokenizer(
+    const char* tokenizer_name,
+    const std::map<std::string, std::string>& tokenizer_params) {
+    wrapper_->register_tokenizer(tokenizer_name, tokenizer_params);
+}
+
 TargetBitmap
 TextMatchIndex::MatchQuery(const std::string& query) {
     if (shouldTriggerCommit()) {
         Commit();
-        Reload();
     }
 
     auto cnt = wrapper_->count();

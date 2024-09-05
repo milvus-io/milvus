@@ -277,8 +277,12 @@ BuildTextIndex(CBinarySet* c_binary_set,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
-        auto index =
-            std::make_unique<index::TextMatchIndex>(fileManagerContext);
+        auto field_schema =
+            FieldMeta::ParseFrom(build_index_info->field_schema());
+        auto index = std::make_unique<index::TextMatchIndex>(
+            fileManagerContext,
+            "milvus_tokenizer",
+            field_schema.get_tokenizer_params());
         index->Build(config);
         auto binary =
             std::make_unique<knowhere::BinarySet>(index->Upload(config));

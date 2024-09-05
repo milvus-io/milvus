@@ -828,9 +828,12 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
     // todo: make this(200) configurable.
-    auto index = std::make_unique<index::TextMatchIndex>(200);
+    auto index = std::make_unique<index::TextMatchIndex>(
+        200, "milvus_tokenizer", field_meta.get_tokenizer_params());
     index->Commit();
     index->CreateReader();
+    index->RegisterTokenizer("milvus_tokenizer",
+                             field_meta.get_tokenizer_params());
     text_indexes_[field_id] = std::move(index);
 }
 

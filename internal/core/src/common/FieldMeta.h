@@ -115,20 +115,10 @@ class FieldMeta {
     }
 
     bool
-    enable_match() const {
-        if (!IsStringDataType(type_)) {
-            return false;
-        }
-        Assert(string_info_.has_value());
-        return string_info_->enable_match;
-    }
+    enable_match() const;
 
-    const auto&
-    get_string_params() const {
-        Assert(IsStringDataType(type_));
-        Assert(string_info_.has_value());
-        return string_info_->params;
-    }
+    std::map<std::string, std::string>
+    get_tokenizer_params() const;
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
@@ -190,6 +180,10 @@ class FieldMeta {
             return GetDataTypeSize(type_);
         }
     }
+
+ public:
+    static FieldMeta
+    ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto);
 
  private:
     struct VectorInfo {

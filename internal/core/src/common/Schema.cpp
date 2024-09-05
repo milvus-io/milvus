@@ -37,74 +37,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     for (const milvus::proto::schema::FieldSchema& child :
          schema_proto.fields()) {
         auto field_id = FieldId(child.fieldid());
-        auto name = FieldName(child.name());
-        auto nullable = child.nullable();
-        if (field_id.get() < 100) {
-            // system field id
-            auto is_system =
-                SystemProperty::Instance().SystemFieldVerify(name, field_id);
-            AssertInfo(is_system,
-                       "invalid system type: name(" + name.get() + "), id(" +
-                           std::to_string(field_id.get()) + ")");
-        }
 
-        auto data_type = DataType(child.data_type());
-
-        if (IsVectorDataType(data_type)) {
-            auto type_map = RepeatedKeyValToMap(child.type_params());
-            auto index_map = RepeatedKeyValToMap(child.index_params());
-
-            int64_t dim = 0;
-            if (!IsSparseFloatVectorDataType(data_type)) {
-                AssertInfo(type_map.count("dim"), "dim not found");
-                dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
-            }
-            if (!index_map.count("metric_type")) {
-                schema->AddField(
-                    name, field_id, data_type, dim, std::nullopt, false);
-            } else {
-                auto metric_type = index_map.at("metric_type");
-                schema->AddField(
-                    name, field_id, data_type, dim, metric_type, false);
-            }
-        } else if (IsStringDataType(data_type)) {
-            auto type_map = RepeatedKeyValToMap(child.type_params());
-            AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
-            auto max_len =
-                boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
-            bool enable_match = false;
-            if (type_map.count("enable_match")) {
-                auto param_str = type_map.at("enable_match");
-                std::transform(param_str.begin(),
-                               param_str.end(),
-                               param_str.begin(),
-                               ::tolower);
-
-                auto bool_cast = [](const std::string& arg) -> bool {
-                    std::istringstream ss(arg);
-                    bool b;
-                    ss >> std::boolalpha >> b;
-                    return b;
-                };
-
-                enable_match = bool_cast(param_str);
-            }
-            schema->AddField(name,
-                             field_id,
-                             data_type,
-                             max_len,
-                             nullable,
-                             enable_match,
-                             type_map);
-        } else if (IsArrayDataType(data_type)) {
-            schema->AddField(name,
-                             field_id,
-                             data_type,
-                             DataType(child.element_type()),
-                             nullable);
-        } else {
-            schema->AddField(name, field_id, data_type, nullable);
-        }
+        auto f = FieldMeta::ParseFrom(child);
+        schema->AddField(std::move(f));
 
         if (child.is_primary_key()) {
             AssertInfo(!schema->get_primary_field_id().has_value(),

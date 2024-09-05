@@ -334,6 +334,7 @@ class SegmentExpr : public Expr {
             cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
             if (cached_match_res_->size() < active_count_) {
                 // some entities are not visible in inverted index.
+                // only happend on growing segment.
                 TargetBitmap tail(active_count_ - cached_match_res_->size());
                 cached_match_res_->append(tail);
             }
