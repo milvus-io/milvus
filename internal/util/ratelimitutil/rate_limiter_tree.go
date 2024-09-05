@@ -167,6 +167,8 @@ func (rln *RateLimiterNode) GetID() int64 {
 type RateLimiterTree struct {
 	root *RateLimiterNode
 	mu   sync.RWMutex
+
+	clearCnt int
 }
 
 // NewRateLimiterTree returns a new RateLimiterTree.
@@ -182,6 +184,12 @@ func (m *RateLimiterTree) GetRootLimiters() *RateLimiterNode {
 func (m *RateLimiterTree) ClearInvalidLimiterNode(req *proxypb.LimiterNode) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.clearCnt < 20 {
+		m.clearCnt++
+		return
+	}
+	m.clearCnt = 0
 
 	reqDBLimits := req.GetChildren()
 	removeDBLimits := make([]int64, 0)
