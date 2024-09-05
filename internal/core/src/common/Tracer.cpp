@@ -110,8 +110,8 @@ GetTracer() {
 std::shared_ptr<trace::Span>
 StartSpan(const std::string& name, TraceContext* parentCtx) {
     trace::StartSpanOptions opts;
-    if (enable_trace.load() && parentCtx != nullptr && parentCtx->traceID != nullptr &&
-        parentCtx->spanID != nullptr) {
+    if (enable_trace.load() && parentCtx != nullptr &&
+        parentCtx->traceID != nullptr && parentCtx->spanID != nullptr) {
         if (EmptyTraceID(parentCtx) || EmptySpanID(parentCtx)) {
             return noop_trace_provider->GetTracer("noop")->StartSpan("noop");
         }
