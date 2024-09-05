@@ -242,6 +242,138 @@ func (s *NullDataSuite) run() {
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 	s.checkNullableFieldData(nullableFid.GetName(), queryResult.GetFieldsData(), start)
 
+	fieldsData[2] = integration.NewInt64FieldDataNullableWithStart(nullableFid.GetName(), rowNum, start)
+	fieldsDataForUpsert := make([]*schemapb.FieldData, 0)
+	fieldsDataForUpsert = append(fieldsDataForUpsert, integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, start))
+	fieldsDataForUpsert = append(fieldsDataForUpsert, fVecColumn)
+	nullableFidDataForUpsert := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: nullableFid.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{},
+					},
+				},
+			},
+		},
+		ValidData: make([]bool, rowNum),
+	}
+	fieldsDataForUpsert = append(fieldsDataForUpsert, nullableFidDataForUpsert)
+	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     fieldsData,
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     fieldsDataForUpsert,
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	s.NoError(err)
+	s.Equal(upsertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	// create index
+	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      fVecColumn.FieldName,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
+	})
+	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+	}
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+
+	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
+
+	desCollResp, err = c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	compactResp, err = c.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+		CollectionID: desCollResp.GetCollectionID(),
+	})
+
+	s.NoError(err)
+	s.Equal(compactResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+
+	compacted = func() bool {
+		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+			CompactionID: compactResp.GetCompactionID(),
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetState() == commonpb.CompactionState_Completed
+	}
+	for !compacted() {
+		time.Sleep(3 * time.Second)
+	}
+
+	// load
+	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+	}
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.WaitForLoad(ctx, collectionName)
+
+	// flush
+	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has = flushResp.GetCollSegIDs()[collectionName]
+	ids = segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has = flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+
+	segments, err = c.MetaWatcher.ShowSegments()
+	s.NoError(err)
+	s.NotEmpty(segments)
+	for _, segment := range segments {
+		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+	}
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// search
+	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	err = merr.CheckRPCCall(searchResult, err)
+	s.NoError(err)
+	s.checkNullableFieldData(nullableFid.GetName(), searchResult.GetResults().GetFieldsData(), start)
+
+	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           expr,
+		OutputFields:   []string{"nullableFid"},
+	})
+	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+	}
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
+	s.checkNullableFieldData(nullableFid.GetName(), queryResult.GetFieldsData(), start)
+
 	// // expr will not select null data
 	// exprResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
 	// 	DbName:         dbName,

@@ -932,7 +932,9 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				dst = append(dst, scalarFieldData)
 				fieldID2Data[srcFieldData.FieldId] = scalarFieldData
 			}
-			dstScalar := fieldID2Data[srcFieldData.FieldId].GetScalars()
+			fieldData := fieldID2Data[srcFieldData.FieldId]
+			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			dstScalar := fieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				if dstScalar.GetBoolData() == nil {
