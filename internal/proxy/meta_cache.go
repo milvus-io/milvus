@@ -246,7 +246,7 @@ func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain partition key field %s", names, partitionKeyField.GetName())
 	}
 	if clusteringKeyField != nil && !hasClusteringKey {
-		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clsutering key field %s", names, clusteringKeyField.GetName())
+		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clustering key field %s", names, clusteringKeyField.GetName())
 	}
 	return nil
 }
