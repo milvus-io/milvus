@@ -68,8 +68,6 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	log := log.Ctx(ctx).With(zap.Int64s("segments", ids))
-
 	getSegmentInfo := func(ids []int64) (*datapb.GetSegmentInfoResponse, error) {
 		infoResp, err := dc.client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -80,12 +78,13 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 			IncludeUnHealthy: true,
 		})
 		if err := merr.CheckRPCCall(infoResp, err); err != nil {
-			log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
+			log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Int64s("segments", ids), zap.Error(err))
 			return nil, err
 		}
+
 		err = binlog.DecompressMultiBinLogs(infoResp.GetInfos())
 		if err != nil {
-			log.Warn("Fail to DecompressMultiBinLogs", zap.Error(err))
+			log.Warn("Fail to DecompressMultiBinLogs", zap.Int64s("segments", ids), zap.Error(err))
 			return nil, err
 		}
 		return infoResp, nil
@@ -99,6 +98,7 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 
 		resp, err := getSegmentInfo(ids[startIdx:endIdx])
 		if err != nil {
+			log.Warn("Fail to get SegmentInfo", zap.Int("total segment num", len(ids)), zap.Int("returned num", startIdx))
 			return nil, err
 		}
 		ret = append(ret, resp.GetInfos()...)
