@@ -76,7 +76,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsResult", func() {
-		s.node.storeStatsSortResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
+		s.node.storePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 		)

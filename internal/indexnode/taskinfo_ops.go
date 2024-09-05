@@ -360,7 +360,7 @@ func (i *IndexNode) storeStatsTaskState(clusterID string, taskID UniqueID, state
 	}
 }
 
-func (i *IndexNode) storeStatsSortResult(
+func (i *IndexNode) storePKSortStatsResult(
 	ClusterID string,
 	taskID UniqueID,
 	collID UniqueID,

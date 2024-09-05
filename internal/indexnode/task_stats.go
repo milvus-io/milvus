@@ -267,7 +267,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		return nil, err
 	}
 
-	st.node.storeStatsSortResult(st.req.GetClusterID(),
+	st.node.storePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),

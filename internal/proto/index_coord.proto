@@ -316,7 +316,8 @@ message StatsTask {
 }
 
 enum StatsSubJob {
-    Sort = 0;
-    TextIndexJob = 1;
-    BM25Job=2;
+    None = 0;
+    Sort = 1;
+    TextIndexJob = 2;
+    BM25Job=3;
 }
