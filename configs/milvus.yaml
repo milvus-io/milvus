@@ -979,6 +979,14 @@ quotaAndLimits:
       enabled: false # switch to enable l0 segment row count quota
       lowWaterLevel: 32768 # l0 segment row count quota, low water level
       highWaterLevel: 65536 # l0 segment row count quota, low water level
+    deleteBufferRowCountProtection:
+      enabled: false # switch to enable delete buffer row count quota
+      lowWaterLevel: 32768 # delete buffer row count quota, low water level
+      highWaterLevel: 65536 # delete buffer row count quota, high water level
+    deleteBufferSizeProtection:
+      enabled: false # switch to enable delete buffer size quota
+      lowWaterLevel: 134217728 # delete buffer size quota, low water level
+      highWaterLevel: 268435456 # delete buffer size quota, high water level
   limitReading:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.

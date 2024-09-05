@@ -757,6 +757,10 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	updateCollectionFactor(growingSegFactors)
 	l0Factors := q.getL0SegmentsSizeFactor()
 	updateCollectionFactor(l0Factors)
+	deleteBufferRowCountFactors := q.getDeleteBufferRowCountFactor()
+	updateCollectionFactor(deleteBufferRowCountFactors)
+	deleteBufferSizeFactors := q.getDeleteBufferSizeFactor()
+	updateCollectionFactor(deleteBufferSizeFactors)
 
 	ttCollections := make([]int64, 0)
 	memoryCollections := make([]int64, 0)
@@ -1030,6 +1034,61 @@ func (q *QuotaCenter) getL0SegmentsSizeFactor() map[int64]float64 {
 		}
 		factor := float64(l0SegmentSizeHighWaterLevel-l0RowCount) / float64(l0SegmentSizeHighWaterLevel-l0segmentSizeLowWaterLevel)
 		collectionFactor[collectionID] = factor
+	}
+	return collectionFactor
+}
+
+func (q *QuotaCenter) getDeleteBufferRowCountFactor() map[int64]float64 {
+	if !Params.QuotaConfig.DeleteBufferRowCountProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	deleteBufferRowCountLowWaterLevel := Params.QuotaConfig.DeleteBufferRowCountLowWaterLevel.GetAsInt64()
+	deleteBufferRowCountHighWaterLevel := Params.QuotaConfig.DeleteBufferRowCountHighWaterLevel.GetAsInt64()
+
+	deleteBufferNum := make(map[int64]int64)
+	for _, queryNodeMetrics := range q.queryNodeMetrics {
+		for collectionID, num := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferNum {
+			deleteBufferNum[collectionID] += num
+		}
+		for collectionID, size := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferSize {
+			deleteBufferNum[collectionID] += size
+		}
+	}
+
+	collectionFactor := make(map[int64]float64)
+	for collID, rowCount := range map[int64]int64{100: 1000} {
+		if rowCount < deleteBufferRowCountLowWaterLevel {
+			continue
+		}
+		factor := float64(deleteBufferRowCountHighWaterLevel-rowCount) / float64(deleteBufferRowCountHighWaterLevel-deleteBufferRowCountLowWaterLevel)
+		collectionFactor[collID] = factor
+	}
+	return collectionFactor
+}
+
+func (q *QuotaCenter) getDeleteBufferSizeFactor() map[int64]float64 {
+	if !Params.QuotaConfig.DeleteBufferSizeProtectionEnabled.GetAsBool() {
+		return nil
+	}
+
+	deleteBufferRowCountLowWaterLevel := Params.QuotaConfig.DeleteBufferSizeLowWaterLevel.GetAsInt64()
+	deleteBufferRowCountHighWaterLevel := Params.QuotaConfig.DeleteBufferSizeHighWaterLevel.GetAsInt64()
+
+	deleteBufferSize := make(map[int64]int64)
+	for _, queryNodeMetrics := range q.queryNodeMetrics {
+		for collectionID, size := range queryNodeMetrics.DeleteBufferInfo.CollectionDeleteBufferSize {
+			deleteBufferSize[collectionID] += size
+		}
+	}
+
+	collectionFactor := make(map[int64]float64)
+	for collID, rowCount := range map[int64]int64{100: 1000} {
+		if rowCount < deleteBufferRowCountLowWaterLevel {
+			continue
+		}
+		factor := float64(deleteBufferRowCountHighWaterLevel-rowCount) / float64(deleteBufferRowCountHighWaterLevel-deleteBufferRowCountLowWaterLevel)
+		collectionFactor[collID] = factor
 	}
 	return collectionFactor
 }
