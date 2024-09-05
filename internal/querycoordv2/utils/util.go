@@ -45,7 +45,7 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 2. All QueryNodes in the distribution are online
 // 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
 // 4. All segments of the shard in target should be in the distribution
-func CheckLeaderAvailable(nodeMgr *session.NodeManager, leader *meta.LeaderView, currentTargets map[int64]*datapb.SegmentInfo) error {
+func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView) error {
 	log := log.Ctx(context.TODO()).
 		WithRateGroup("utils.CheckLeaderAvailable", 1, 60).
 		With(zap.Int64("leaderID", leader.ID))
@@ -68,16 +68,18 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, leader *meta.LeaderView,
 			return err
 		}
 	}
-
+	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, meta.CurrentTarget)
 	// Check whether segments are fully loaded
-	for segmentID, info := range currentTargets {
-		if info.GetInsertChannel() != leader.Channel {
-			continue
-		}
-
+	for segmentID, info := range segmentDist {
 		_, exist := leader.Segments[segmentID]
 		if !exist {
 			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
+			return merr.WrapErrSegmentLack(segmentID)
+		}
+
+		l0WithWrongLocation := info.GetLevel() == datapb.SegmentLevel_L0 && leader.Segments[segmentID].GetNodeID() != leader.ID
+		if l0WithWrongLocation {
+			log.RatedInfo(10, "leader is not available due to lack of L0 segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 	}
@@ -110,7 +112,6 @@ func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, di
 	nodeMgr *session.NodeManager, collectionID int64, channels map[string]*meta.DmChannel,
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
-	currentTargets := targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
 	for _, channel := range channels {
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
@@ -122,8 +123,8 @@ func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, di
 
 		readableLeaders := make(map[int64]*meta.LeaderView)
 		for _, leader := range leaders {
-			if err := CheckLeaderAvailable(nodeMgr, leader, currentTargets); err != nil {
-				multierr.AppendInto(&channelErr, err)
+			if leader.UnServiceableError != nil {
+				multierr.AppendInto(&channelErr, leader.UnServiceableError)
 				continue
 			}
 			readableLeaders[leader.ID] = leader
@@ -149,6 +150,9 @@ func GetShardLeadersWithChannels(m *meta.Meta, targetMgr *meta.TargetManager, di
 
 		// to avoid node down during GetShardLeaders
 		if len(ids) == 0 {
+			if channelErr == nil {
+				channelErr = merr.WrapErrChannelNotAvailable(channel.GetChannelName())
+			}
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
 			log.Warn(msg, zap.Error(channelErr))
 			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
