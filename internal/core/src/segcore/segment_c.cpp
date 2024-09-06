@@ -35,7 +35,8 @@ CStatus
 NewSegment(CCollection collection,
            SegmentType seg_type,
            int64_t segment_id,
-           CSegmentInterface* newSegment) {
+           CSegmentInterface* newSegment,
+           bool is_sorted_by_pk) {
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
@@ -50,7 +51,12 @@ NewSegment(CCollection collection,
             case Sealed:
             case Indexing:
                 segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(), col->get_index_meta(), segment_id);
+                    col->get_schema(),
+                    col->get_index_meta(),
+                    segment_id,
+                    milvus::segcore::SegcoreConfig::default_config(),
+                    false,
+                    is_sorted_by_pk);
                 break;
             default:
                 PanicInfo(milvus::UnexpectedError,

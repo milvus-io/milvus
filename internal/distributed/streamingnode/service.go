@@ -29,7 +29,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -76,21 +75,22 @@ type Server struct {
 	grpcServer *grpc.Server
 	lis        net.Listener
 
+	factory dependency.Factory
+
 	// component client
 	etcdCli      *clientv3.Client
 	tikvCli      *txnkv.Client
 	rootCoord    types.RootCoordClient
 	dataCoord    types.DataCoordClient
 	chunkManager storage.ChunkManager
-	f            dependency.Factory
 }
 
 // NewServer create a new StreamingNode server.
 func NewServer(f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
+		factory:        f,
 		grpcServerChan: make(chan struct{}),
-		f:              f,
 	}, nil
 }
 
@@ -180,6 +180,9 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initMeta(); err != nil {
 		return err
 	}
+	if err := s.initChunkManager(ctx); err != nil {
+		return err
+	}
 	if err := s.allocateAddress(); err != nil {
 		return err
 	}
@@ -192,14 +195,12 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initDataCoord(ctx); err != nil {
 		return err
 	}
-	if err := s.initChunkManager(ctx); err != nil {
-		return err
-	}
 	s.initGRPCServer()
 
 	// Create StreamingNode service.
 	s.streamingnode = streamingnodeserver.NewServerBuilder().
 		WithETCD(s.etcdCli).
+		WithChunkManager(s.chunkManager).
 		WithGRPCServer(s.grpcServer).
 		WithRootCoordClient(s.rootCoord).
 		WithDataCoordClient(s.dataCoord).
@@ -305,8 +306,8 @@ func (s *Server) initDataCoord(ctx context.Context) (err error) {
 
 func (s *Server) initChunkManager(ctx context.Context) (err error) {
 	log.Info("StreamingNode init chunk manager...")
-	s.f.Init(paramtable.Get())
-	manager, err := s.f.NewPersistentStorageChunkManager(ctx)
+	s.factory.Init(paramtable.Get())
+	manager, err := s.factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new chunk manager failed")
 	}
@@ -329,26 +330,25 @@ func (s *Server) initGRPCServer() {
 	serverIDGetter := func() int64 {
 		return s.session.ServerID
 	}
-	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(cfg.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(cfg.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(serverIDGetter),
 			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor,
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(serverIDGetter),
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
-		)))
+		)),
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+	)
 }
 
 // allocateAddress allocates a available address for streamingnode grpc server.

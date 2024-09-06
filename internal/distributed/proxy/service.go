@@ -192,9 +192,14 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		metrics.RestfulReqLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
 		).Observe(float64(latency.Milliseconds()))
-		metrics.RestfulSendBytes.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10), path,
-		).Add(float64(c.Writer.Size()))
+
+		// see https://github.com/milvus-io/milvus/issues/35767, counter cannot add negative value
+		// when response is not written(say timeout/network broken), panicking may happen if not check
+		if size := c.Writer.Size(); size > 0 {
+			metrics.RestfulSendBytes.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10), path,
+			).Add(float64(c.Writer.Size()))
+		}
 	})
 
 	ginHandler.Use(accesslog.AccessLogMiddleware)
@@ -293,13 +298,10 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
-	opts := tracer.GetInterceptorOpts()
-
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			accesslog.UnaryAccessLogInterceptor,
-			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.DatabaseInterceptor(),
 			proxy.UnaryServerHookInterceptor(),
@@ -320,6 +322,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {

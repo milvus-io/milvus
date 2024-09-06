@@ -30,7 +30,8 @@ namespace index {
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
     const storage::FileManagerContext& file_manager_context)
-    : is_built_(false),
+    : ScalarIndex<T>(HYBRID_INDEX_TYPE),
+      is_built_(false),
       bitmap_index_cardinality_limit_(DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND),
       file_manager_context_(file_manager_context) {
     if (file_manager_context.Valid()) {
@@ -226,8 +227,6 @@ void
 HybridScalarIndex<T>::BuildInternal(
     const std::vector<FieldDataPtr>& field_datas) {
     auto index = GetInternalIndex();
-    LOG_INFO("build hybrid index with internal index:{}",
-             ToString(internal_index_type_));
     index->BuildWithFieldData(field_datas);
 }
 
@@ -253,6 +252,13 @@ HybridScalarIndex<T>::Build(const Config& config) {
 
     SelectIndexBuildType(field_datas);
     BuildInternal(field_datas);
+    auto index_meta = file_manager_context_.indexMeta;
+    LOG_INFO(
+        "build hybrid index with internal index:{}, for segment_id:{}, "
+        "field_id:{}",
+        ToString(internal_index_type_),
+        index_meta.segment_id,
+        index_meta.field_id);
     is_built_ = true;
 }
 

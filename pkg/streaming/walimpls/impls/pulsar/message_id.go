@@ -2,6 +2,7 @@ package pulsar
 
 import (
 	"encoding/base64"
+	"fmt"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
@@ -83,4 +84,8 @@ func (id pulsarID) EQ(other message.MessageID) bool {
 
 func (id pulsarID) Marshal() string {
 	return base64.StdEncoding.EncodeToString(id.Serialize())
+}
+
+func (id pulsarID) String() string {
+	return fmt.Sprintf("%d/%d/%d", id.LedgerID(), id.EntryID(), id.BatchIdx())
 }

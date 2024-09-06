@@ -63,6 +63,7 @@ mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
 mkdir -p streamingpb
+mkdir -p workerpb
 
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
@@ -81,6 +82,7 @@ ${protoc_opt} --go_out=paths=source_relative:./planpb --go-grpc_out=require_unim
 ${protoc_opt} --go_out=paths=source_relative:./segcorepb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./clusteringpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
 
+${protoc_opt} --go_out=paths=source_relative:./workerpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./workerpb worker.proto|| { echo 'generate worker.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/pkg/eventlog/ --go_out=paths=source_relative:../../pkg/eventlog/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../pkg/eventlog/ event_log.proto || { echo 'generate event_log.proto failed'; exit 1; }
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend --go_out=paths=source_relative:../../cmd/tools/migration/backend/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../cmd/tools/migration/backend backup_header.proto || { echo 'generate backup_header.proto failed'; exit 1; }

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -308,20 +309,22 @@ func (node *DataNode) Start() error {
 			return
 		}
 
-		node.writeBufferManager.Start()
+		if !streamingutil.IsStreamingServiceEnabled() {
+			node.writeBufferManager.Start()
+
+			node.timeTickSender = util2.NewTimeTickSender(node.broker, node.session.ServerID,
+				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
+			node.timeTickSender.Start()
+
+			node.channelManager = channel.NewChannelManager(getPipelineParams(node), node.flowgraphManager)
+			node.channelManager.Start()
+
+			go node.channelCheckpointUpdater.Start()
+		}
 
 		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
-
-		node.timeTickSender = util2.NewTimeTickSender(node.broker, node.session.ServerID,
-			retry.Attempts(20), retry.Sleep(time.Millisecond*100))
-		node.timeTickSender.Start()
-
-		go node.channelCheckpointUpdater.Start()
-
-		node.channelManager = channel.NewChannelManager(getPipelineParams(node), node.flowgraphManager)
-		node.channelManager.Start()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})

@@ -198,6 +198,7 @@ enum StreamingCode {
     STREAMING_CODE_INVAILD_ARGUMENT       = 8;  // invalid argument
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
+    STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 

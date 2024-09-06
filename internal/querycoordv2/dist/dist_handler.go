@@ -32,6 +32,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -219,6 +220,11 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			TargetVersion:          lview.TargetVersion,
 			NumOfGrowingRows:       lview.GetNumOfGrowingRows(),
 			PartitionStatsVersions: lview.PartitionStatsVersions,
+		}
+		// check leader serviceable
+		// todo by weiliu1031: serviceable status should be maintained by delegator, to avoid heavy check here
+		if err := utils.CheckLeaderAvailable(dh.nodeManager, dh.target, view); err != nil {
+			view.UnServiceableError = err
 		}
 		updates = append(updates, view)
 	}

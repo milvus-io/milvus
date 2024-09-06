@@ -58,12 +58,13 @@ func (s *TxnSession) BeginRollback() {
 
 // AddNewMessage adds a new message to the session.
 func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// if the txn is expired, return error.
 	if err := s.checkIfExpired(timetick); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.state != message.TxnStateInFlight {
 		return status.NewInvalidTransactionState("AddNewMessage", message.TxnStateInFlight, s.state)
@@ -72,9 +73,9 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 	return nil
 }
 
-// AddNewMessageAndKeepalive decreases the in flight count of the session and keepalive the session.
+// AddNewMessageDoneAndKeepalive decreases the in flight count of the session and keepalive the session.
 // notify the committedWait channel if the in flight count is 0 and committed waited.
-func (s *TxnSession) AddNewMessageAndKeepalive(timetick uint64) {
+func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

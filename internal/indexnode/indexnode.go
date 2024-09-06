@@ -44,6 +44,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -83,7 +84,7 @@ func getCurrentIndexVersion(v int32) int32 {
 
 type taskKey struct {
 	ClusterID string
-	BuildID   UniqueID
+	TaskID    UniqueID
 }
 
 // IndexNode is a component that executes the task of building indexes.
@@ -105,10 +106,13 @@ type IndexNode struct {
 	etcdCli *clientv3.Client
 	address string
 
+	binlogIO io.BinlogIO
+
 	initOnce     sync.Once
 	stateLock    sync.Mutex
 	indexTasks   map[taskKey]*indexTaskInfo
 	analyzeTasks map[taskKey]*analyzeTaskInfo
+	statsTasks   map[taskKey]*statsTaskInfo
 }
 
 // NewIndexNode creates a new IndexNode component.
@@ -123,6 +127,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 		storageFactory: NewChunkMgrFactory(),
 		indexTasks:     make(map[taskKey]*indexTaskInfo),
 		analyzeTasks:   make(map[taskKey]*analyzeTaskInfo),
+		statsTasks:     make(map[taskKey]*statsTaskInfo),
 		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 	sc := NewTaskScheduler(b.loopCtx)
@@ -236,6 +241,27 @@ func (i *IndexNode) Start() error {
 	return startErr
 }
 
+func (i *IndexNode) deleteAllTasks() {
+	deletedIndexTasks := i.deleteAllIndexTasks()
+	for _, t := range deletedIndexTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
+	deletedAnalyzeTasks := i.deleteAllAnalyzeTasks()
+	for _, t := range deletedAnalyzeTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
+	deletedStatsTasks := i.deleteAllStatsTasks()
+	for _, t := range deletedStatsTasks {
+		if t.cancel != nil {
+			t.cancel()
+		}
+	}
+}
+
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
 	i.stopOnce.Do(func() {
@@ -253,18 +279,8 @@ func (i *IndexNode) Stop() error {
 		i.lifetime.Wait()
 		log.Info("Index node abnormal")
 		// cleanup all running tasks
-		deletedIndexTasks := i.deleteAllIndexTasks()
-		for _, t := range deletedIndexTasks {
-			if t.cancel != nil {
-				t.cancel()
-			}
-		}
-		deletedAnalyzeTasks := i.deleteAllAnalyzeTasks()
-		for _, t := range deletedAnalyzeTasks {
-			if t.cancel != nil {
-				t.cancel()
-			}
-		}
+		i.deleteAllTasks()
+
 		if i.sched != nil {
 			i.sched.Close()
 		}

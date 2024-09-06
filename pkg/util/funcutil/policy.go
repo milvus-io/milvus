@@ -132,3 +132,7 @@ func SplitObjectName(objectName string) (string, string) {
 	names := strings.Split(objectName, ".")
 	return names[0], names[1]
 }
+
+func PolicyCheckerWithRole(policy, roleName string) bool {
+	return strings.Contains(policy, fmt.Sprintf(`"V0":"%s"`, roleName))
+}

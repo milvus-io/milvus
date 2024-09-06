@@ -115,7 +115,7 @@ func TestPartitionsNumExceedsMax(t *testing.T) {
 	// create multi partitions
 	for i := 0; i < common.MaxPartitionNum-1; i++ {
 		// create par
-		parName := common.GenRandomString("par", 4)
+		parName := fmt.Sprintf("par_%d", i)
 		err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 		common.CheckErr(t, err, true)
 	}

@@ -14,6 +14,8 @@
 #include <opentelemetry/exporters/otlp/otlp_http_exporter_options.h>
 #include "log/Log.h"
 
+#include <atomic>
+#include <cstddef>
 #include <iomanip>
 #include <iostream>
 #include <utility>
@@ -42,12 +44,13 @@ namespace jaeger = opentelemetry::exporter::jaeger;
 namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
-static bool enable_trace = true;
+static std::atomic<bool> enable_trace = true;
 static std::shared_ptr<trace::TracerProvider> noop_trace_provider =
     std::make_shared<opentelemetry::trace::NoopTracerProvider>();
 
 void
 initTelemetry(const TraceConfig& cfg) {
+    bool export_created = true;
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> exporter;
     if (cfg.exporter == "stdout") {
         exporter = ostream::OStreamSpanExporterFactory::Create();
@@ -72,13 +75,13 @@ initTelemetry(const TraceConfig& cfg) {
             LOG_INFO("init otlp grpc exporter, endpoint: {}", opts.endpoint);
         } else {
             LOG_INFO("unknown otlp exporter method: {}", cfg.otlpMethod);
-            enable_trace = false;
+            export_created = false;
         }
     } else {
         LOG_INFO("Empty Trace");
-        enable_trace = false;
+        export_created = false;
     }
-    if (enable_trace) {
+    if (export_created) {
         auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
             std::move(exporter), {});
         resource::ResourceAttributes attributes = {
@@ -90,8 +93,10 @@ initTelemetry(const TraceConfig& cfg) {
             trace_sdk::TracerProviderFactory::Create(
                 std::move(processor), resource, std::move(sampler));
         trace::Provider::SetTracerProvider(provider);
+        enable_trace.store(true);
     } else {
         trace::Provider::SetTracerProvider(noop_trace_provider);
+        enable_trace.store(false);
     }
 }
 
@@ -105,8 +110,8 @@ GetTracer() {
 std::shared_ptr<trace::Span>
 StartSpan(const std::string& name, TraceContext* parentCtx) {
     trace::StartSpanOptions opts;
-    if (enable_trace && parentCtx != nullptr && parentCtx->traceID != nullptr &&
-        parentCtx->spanID != nullptr) {
+    if (enable_trace.load() && parentCtx != nullptr &&
+        parentCtx->traceID != nullptr && parentCtx->spanID != nullptr) {
         if (EmptyTraceID(parentCtx) || EmptySpanID(parentCtx)) {
             return noop_trace_provider->GetTracer("noop")->StartSpan("noop");
         }
@@ -122,21 +127,21 @@ StartSpan(const std::string& name, TraceContext* parentCtx) {
 thread_local std::shared_ptr<trace::Span> local_span;
 void
 SetRootSpan(std::shared_ptr<trace::Span> span) {
-    if (enable_trace) {
+    if (enable_trace.load()) {
         local_span = std::move(span);
     }
 }
 
 void
 CloseRootSpan() {
-    if (enable_trace) {
+    if (enable_trace.load()) {
         local_span = nullptr;
     }
 }
 
 void
 AddEvent(const std::string& event_label) {
-    if (enable_trace && local_span != nullptr) {
+    if (enable_trace.load() && local_span != nullptr) {
         local_span->AddEvent(event_label);
     }
 }

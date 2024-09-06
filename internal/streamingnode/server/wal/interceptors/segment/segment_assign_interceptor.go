@@ -5,12 +5,14 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -48,6 +50,8 @@ func (impl *segmentInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 		return impl.handleDropPartition(ctx, msg, appendOp)
 	case message.MessageTypeInsert:
 		return impl.handleInsertMessage(ctx, msg, appendOp)
+	case message.MessageTypeManualFlush:
+		return impl.handleManualFlushMessage(ctx, msg, appendOp)
 	default:
 		return appendOp(ctx, msg)
 	}
@@ -144,7 +148,7 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
 		if err != nil {
-			return nil, status.NewInner("segment assignment failure with error: %s", err.Error())
+			return nil, err
 		}
 		// once the segment assignment is done, we need to ack the result,
 		// if other partitions failed to assign segment or wal write failure,
@@ -162,12 +166,43 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 	return appendOp(ctx, msg)
 }
 
+// handleManualFlushMessage handles the manual flush message.
+func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	maunalFlushMsg, err := message.AsMutableManualFlushMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	header := maunalFlushMsg.Header()
+	segmentIDs, err := impl.assignManager.Get().SealAllSegmentsAndFenceUntil(ctx, header.GetCollectionId(), header.GetFlushTs())
+	if err != nil {
+		return nil, status.NewInner("segment seal failure with error: %s", err.Error())
+	}
+
+	// create extra response for manual flush message.
+	extraResponse, err := anypb.New(&message.ManualFlushExtraResponse{
+		SegmentIds: segmentIDs,
+	})
+	if err != nil {
+		return nil, status.NewInner("create extra response failed with error: %s", err.Error())
+	}
+
+	// send the manual flush message.
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	utility.AttachAppendResultExtra(ctx, extraResponse)
+	return msgID, nil
+}
+
 // Close closes the segment interceptor.
 func (impl *segmentInterceptor) Close() {
+	impl.cancel()
 	assignManager := impl.assignManager.Get()
 	if assignManager != nil {
 		// unregister the pchannels
-		resource.Resource().SegmentSealedInspector().UnregisterPChannelManager(assignManager)
+		inspector.GetSegmentSealedInspector().UnregisterPChannelManager(assignManager)
 		assignManager.Close(context.Background())
 	}
 }
@@ -199,7 +234,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.Interc
 		}
 
 		// register the manager into inspector, to do the seal asynchronously
-		resource.Resource().SegmentSealedInspector().RegsiterPChannelManager(pm)
+		inspector.GetSegmentSealedInspector().RegsiterPChannelManager(pm)
 		impl.assignManager.Set(pm)
 		impl.logger.Info("recover PChannel Assignment Manager success")
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
@@ -129,6 +130,7 @@ func TestSegmentAllocManager(t *testing.T) {
 		VChannel:     "v1",
 		PartitionID:  2,
 		PChannel:     "v1",
+		SegmentID:    3,
 	})
 	assert.True(t, m.IsNoWaitSeal())
 
@@ -195,7 +197,7 @@ func TestCreateAndDropCollection(t *testing.T) {
 	m, err := RecoverPChannelSegmentAllocManager(context.Background(), types.PChannelInfo{Name: "v1"}, f)
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
-	resource.Resource().SegmentSealedInspector().RegsiterPChannelManager(m)
+	inspector.GetSegmentSealedInspector().RegsiterPChannelManager(m)
 
 	ctx := context.Background()
 

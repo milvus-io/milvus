@@ -251,20 +251,30 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 
 // SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
-	schema             *schemapb.CollectionSchema
-	nameOffset         map[string]int
-	idOffset           map[int64]int
-	primaryKeyOffset   int
-	partitionKeyOffset int
-	dynamicFieldOffset int
-	loadFields         Set[int64]
+	schema              *schemapb.CollectionSchema
+	nameOffset          map[string]int
+	idOffset            map[int64]int
+	primaryKeyOffset    int
+	partitionKeyOffset  int
+	clusteringKeyOffset int
+	dynamicFieldOffset  int
+	loadFields          Set[int64]
 }
 
 func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
-	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1, partitionKeyOffset: -1, dynamicFieldOffset: -1, loadFields: NewSet(loadFields...)}
+	schemaHelper := SchemaHelper{
+		schema:              schema,
+		nameOffset:          make(map[string]int),
+		idOffset:            make(map[int64]int),
+		primaryKeyOffset:    -1,
+		partitionKeyOffset:  -1,
+		clusteringKeyOffset: -1,
+		dynamicFieldOffset:  -1,
+		loadFields:          NewSet(loadFields...),
+	}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
@@ -286,6 +296,13 @@ func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFie
 				return nil, errors.New("partition key is not unique")
 			}
 			schemaHelper.partitionKeyOffset = offset
+		}
+
+		if field.IsClusteringKey {
+			if schemaHelper.clusteringKeyOffset != -1 {
+				return nil, errors.New("clustering key is not unique")
+			}
+			schemaHelper.clusteringKeyOffset = offset
 		}
 
 		if field.IsDynamic {
@@ -317,6 +334,15 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 		return nil, fmt.Errorf("failed to get partition key field: no partition key in schema")
 	}
 	return helper.schema.Fields[helper.partitionKeyOffset], nil
+}
+
+// GetClusteringKeyField returns the schema of the clustering key.
+// If not found, an error shall be returned.
+func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, error) {
+	if helper.clusteringKeyOffset == -1 {
+		return nil, fmt.Errorf("failed to get clustering key field: not clustering key in schema")
+	}
+	return helper.schema.Fields[helper.clusteringKeyOffset], nil
 }
 
 // GetDynamicField returns the field schema of dynamic field if exists.

@@ -167,24 +167,37 @@ func (w *walAdaptorImpl) Available() <-chan struct{} {
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
+	logger := log.With(zap.Any("channel", w.Channel()), zap.String("processing", "WALClose"))
+	logger.Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
+
+	logger.Info("wal graceful close done, wait for operation to be finished...")
 
 	// begin to close the wal.
 	w.lifetime.SetState(lifetime.Stopped)
 	w.lifetime.Wait()
 	w.lifetime.Close()
 
+	logger.Info("wal begin to close scanners...")
+
 	// close all wal instances.
 	w.scanners.Range(func(id int64, s wal.Scanner) bool {
 		s.Close()
-		log.Info("close scanner by wal extend", zap.Int64("id", id), zap.Any("channel", w.Channel()))
+		log.Info("close scanner by wal adaptor", zap.Int64("id", id), zap.Any("channel", w.Channel()))
 		return true
 	})
+
+	logger.Info("scanner close done, close inner wal...")
 	w.inner.Close()
+
+	logger.Info("scanner close done, close interceptors...")
 	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
+
+	logger.Info("call wal cleanup function...")
 	w.cleanup()
+	logger.Info("wal closed")
 }
 
 type interceptorBuildResult struct {

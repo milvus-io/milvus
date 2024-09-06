@@ -195,6 +195,12 @@ To build the Milvus project, run the following command:
 $ make
 ```
 
+Milvus uses `conan` to manage 3rd-party dependencies. `conan` will check the consistency of these dependencies every time you run `make`. This process can take a considerable amount of time, especially if the network is poor. If you make sure that the 3rd-party dependencies are consistent, you can use the following command to skip this step:
+
+```shell
+$ make SKIP_3RDPARTY=1
+```
+
 If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.
 
 If you want to run the `bin/milvus` executable on the host machine, you need to set `LD_LIBRARY_PATH` temporarily:

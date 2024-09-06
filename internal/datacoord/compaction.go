@@ -102,7 +102,7 @@ func (c *compactionPlanHandler) getCompactionInfo(triggerID int64) *compactionIn
 
 func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	ret := &compactionInfo{}
-	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt int
+	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats int
 	mergeInfos := make(map[int64]*milvuspb.CompactionMergeInfo)
 
 	for _, task := range tasks {
@@ -128,12 +128,14 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 			cleanedCnt++
 		case datapb.CompactionTaskState_meta_saved:
 			metaSavedCnt++
+		case datapb.CompactionTaskState_statistic:
+			stats++
 		default:
 		}
 		mergeInfos[task.GetPlanID()] = getCompactionMergeInfo(task)
 	}
 
-	ret.executingCnt = executingCnt + pipeliningCnt + analyzingCnt + indexingCnt + metaSavedCnt
+	ret.executingCnt = executingCnt + pipeliningCnt + analyzingCnt + indexingCnt + metaSavedCnt + stats
 	ret.completedCnt = completedCnt
 	ret.timeoutCnt = timeoutCnt
 	ret.failedCnt = failedCnt

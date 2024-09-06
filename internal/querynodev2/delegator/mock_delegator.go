@@ -134,6 +134,57 @@ func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *Mo
 	return _c
 }
 
+// GetDeleteBufferSize provides a mock function with given fields:
+func (_m *MockShardDelegator) GetDeleteBufferSize() (int64, int64) {
+	ret := _m.Called()
+
+	var r0 int64
+	var r1 int64
+	if rf, ok := ret.Get(0).(func() (int64, int64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func() int64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_GetDeleteBufferSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDeleteBufferSize'
+type MockShardDelegator_GetDeleteBufferSize_Call struct {
+	*mock.Call
+}
+
+// GetDeleteBufferSize is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetDeleteBufferSize() *MockShardDelegator_GetDeleteBufferSize_Call {
+	return &MockShardDelegator_GetDeleteBufferSize_Call{Call: _e.mock.On("GetDeleteBufferSize")}
+}
+
+func (_c *MockShardDelegator_GetDeleteBufferSize_Call) Run(run func()) *MockShardDelegator_GetDeleteBufferSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetDeleteBufferSize_Call) Return(entryNum int64, memorySize int64) *MockShardDelegator_GetDeleteBufferSize_Call {
+	_c.Call.Return(entryNum, memorySize)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetDeleteBufferSize_Call) RunAndReturn(run func() (int64, int64)) *MockShardDelegator_GetDeleteBufferSize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitionStatsVersions provides a mock function with given fields: ctx
 func (_m *MockShardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int64]int64 {
 	ret := _m.Called(ctx)

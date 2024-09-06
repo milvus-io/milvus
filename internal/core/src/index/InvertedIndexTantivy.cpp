@@ -71,7 +71,8 @@ get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx)
-    : schema_(ctx.fieldDataMeta.field_schema) {
+    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
+      schema_(ctx.fieldDataMeta.field_schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     auto field =
@@ -147,6 +148,11 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     }
     auto binary_set = Serialize(config);
     mem_file_manager_->AddFile(binary_set);
+    auto remote_mem_path_to_size =
+        mem_file_manager_->GetRemotePathsToFileSize();
+    for (auto& file : remote_mem_path_to_size) {
+        ret.Append(file.first, nullptr, file.second);
+    }
     return ret;
 }
 
@@ -180,28 +186,34 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                          return file == index_type_file;
                                      }),
                       files_value.end());
-    disk_file_manager_->CacheIndexToDisk(files_value);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
+
     auto index_valid_data_file =
         mem_file_manager_->GetRemoteIndexObjectPrefix() +
         std::string("/index_null_offset");
-    std::vector<std::string> file;
-    file.push_back(index_valid_data_file);
-    auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
-    AssembleIndexDatas(index_datas);
-    BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->DataSize();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
+    auto it = std::find(
+        files_value.begin(), files_value.end(), index_valid_data_file);
+    if (it != files_value.end()) {
+        files_value.erase(it);
+        std::vector<std::string> file;
+        file.push_back(index_valid_data_file);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        AssembleIndexDatas(index_datas);
+        BinarySet binary_set;
+        for (auto& [key, data] : index_datas) {
+            auto size = data->DataSize();
+            auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+            auto buf = std::shared_ptr<uint8_t[]>(
+                (uint8_t*)const_cast<void*>(data->Data()), deleter);
+            binary_set.Append(key, buf, size);
+        }
+        auto index_valid_data = binary_set.GetByName("index_null_offset");
+        null_offset.resize((size_t)index_valid_data->size / sizeof(size_t));
+        memcpy(null_offset.data(),
+               index_valid_data->data.get(),
+               (size_t)index_valid_data->size);
     }
-    auto index_valid_data = binary_set.GetByName("index_null_offset");
-    null_offset.resize((size_t)index_valid_data->size / sizeof(size_t));
-    memcpy(null_offset.data(),
-           index_valid_data->data.get(),
-           (size_t)index_valid_data->size);
+    disk_file_manager_->CacheIndexToDisk(files_value);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 
 inline void
@@ -419,10 +431,10 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
         // only used in ut.
         auto arr = static_cast<const boost::container::vector<T>*>(values);
         for (size_t i = 0; i < n; i++) {
-            wrapper_->template add_multi_data(arr[i].data(), arr[i].size());
+            wrapper_->template add_multi_data(arr[i].data(), arr[i].size(), i);
         }
     } else {
-        wrapper_->add_data<T>(static_cast<const T*>(values), n);
+        wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
     }
     finish();
 }
@@ -448,20 +460,27 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                if (schema_.nullable()) {
+            int64_t offset = 0;
+            if (schema_.nullable()) {
+                for (const auto& data : field_datas) {
+                    auto n = data->get_num_rows();
                     for (int i = 0; i < n; i++) {
                         if (!data->is_valid(i)) {
                             null_offset.push_back(i);
                         }
                         wrapper_->add_multi_data<T>(
                             static_cast<const T*>(data->RawValue(i)),
-                            data->is_valid(i));
+                            data->is_valid(i),
+                            offset++);
                     }
-                    continue;
                 }
-                wrapper_->add_data<T>(static_cast<const T*>(data->Data()), n);
+            } else {
+                for (const auto& data : field_datas) {
+                    auto n = data->get_num_rows();
+                    wrapper_->add_data<T>(
+                        static_cast<const T*>(data->Data()), n, offset);
+                    offset += n;
+                }
             }
             break;
         }
@@ -482,6 +501,7 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -493,7 +513,9 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             wrapper_->template add_multi_data(
-                reinterpret_cast<const T*>(array_column[i].data()), length);
+                reinterpret_cast<const T*>(array_column[i].data()),
+                length,
+                offset++);
         }
     }
 }
@@ -502,6 +524,7 @@ template <>
 void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -518,7 +541,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                     array_column[i].template get_data<std::string>(j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
-            wrapper_->template add_multi_data(output.data(), length);
+            wrapper_->template add_multi_data(output.data(), length, offset++);
         }
     }
 }

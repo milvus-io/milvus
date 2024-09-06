@@ -17,8 +17,6 @@
 package metricsinfo
 
 import (
-	"time"
-
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -26,16 +24,9 @@ import (
 type RateMetricLabel = string
 
 const (
-	NQPerSecond             RateMetricLabel = "NQPerSecond"
-	SearchThroughput        RateMetricLabel = "SearchThroughput"
 	ReadResultThroughput    RateMetricLabel = "ReadResultThroughput"
 	InsertConsumeThroughput RateMetricLabel = "InsertConsumeThroughput"
 	DeleteConsumeThroughput RateMetricLabel = "DeleteConsumeThroughput"
-)
-
-const (
-	SearchQueueMetric string = "SearchQueue"
-	QueryQueueMetric  string = "QueryQueue"
 )
 
 const (
@@ -58,15 +49,6 @@ type FlowGraphMetric struct {
 	NumFlowGraph        int
 }
 
-// ReadInfoInQueue contains NQ num or task num in QueryNode's task queue.
-type ReadInfoInQueue struct {
-	UnsolvedQueue    int64
-	ReadyQueue       int64
-	ReceiveChan      int64
-	ExecuteChan      int64
-	AvgQueueDuration time.Duration
-}
-
 // NodeEffect contains the a node and its effected collection info.
 type NodeEffect struct {
 	NodeID        int64
@@ -78,10 +60,14 @@ type QueryNodeQuotaMetrics struct {
 	Hms                 HardwareMetrics
 	Rms                 []RateMetric
 	Fgm                 FlowGraphMetric
-	SearchQueue         ReadInfoInQueue
-	QueryQueue          ReadInfoInQueue
 	GrowingSegmentsSize int64
 	Effect              NodeEffect
+	DeleteBufferInfo    DeleteBufferInfo
+}
+
+type DeleteBufferInfo struct {
+	CollectionDeleteBufferNum  map[int64]int64
+	CollectionDeleteBufferSize map[int64]int64
 }
 
 type DataCoordQuotaMetrics struct {

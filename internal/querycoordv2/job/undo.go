@@ -78,10 +78,9 @@ func (u *UndoList) RollBack() {
 
 	if u.IsTargetUpdated {
 		if u.IsNewCollection {
-			u.targetMgr.RemoveCollection(u.CollectionID)
 			u.targetObserver.ReleaseCollection(u.CollectionID)
 		} else {
-			u.targetMgr.RemovePartition(u.CollectionID, u.LackPartitions...)
+			u.targetObserver.ReleasePartition(u.CollectionID, u.LackPartitions...)
 		}
 	}
 }

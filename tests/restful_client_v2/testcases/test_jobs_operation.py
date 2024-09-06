@@ -683,6 +683,8 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.skip("stats task will generate a new segment, "
+                      "using collectionID as prefix will import twice as much data")
     def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, bucket_name, root_path):
         # todo: copy binlog file to backup bucket

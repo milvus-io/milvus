@@ -14,7 +14,7 @@ from npy_append_array import NpyAppendArray
 from faker import Faker
 from pathlib import Path
 from minio import Minio
-from pymilvus import DataType
+from pymilvus import DataType, CollectionSchema
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
@@ -22,6 +22,12 @@ from customize.milvus_operator import MilvusOperator
 import pickle
 fake = Faker()
 """" Methods of processing data """
+
+
+try:
+    RNG = np.random.default_rng(seed=0)
+except ValueError as e:
+    RNG = None
 
 
 @singledispatch
@@ -61,6 +67,148 @@ class ParamInfo:
 
 
 param_info = ParamInfo()
+
+
+def generate_array_dataset(size, array_length, hit_probabilities, target_values):
+    dataset = []
+    target_array_length = target_values.get('array_length_field', None)
+    target_array_access = target_values.get('array_access', None)
+    all_target_values = set(
+        val for sublist in target_values.values() for val in (sublist if isinstance(sublist, list) else [sublist]))
+    for i in range(size):
+        entry = {"id": i}
+
+        # Generate random arrays for each condition
+        for condition in hit_probabilities.keys():
+            available_values = [val for val in range(1, 100) if val not in all_target_values]
+            array = random.sample(available_values, array_length)
+
+            # Ensure the array meets the condition based on its probability
+            if random.random() < hit_probabilities[condition]:
+                if condition == 'contains':
+                    if target_values[condition] not in array:
+                        array[random.randint(0, array_length - 1)] = target_values[condition]
+                elif condition == 'contains_any':
+                    if not any(val in array for val in target_values[condition]):
+                        array[random.randint(0, array_length - 1)] = random.choice(target_values[condition])
+                elif condition == 'contains_all':
+                    indices = random.sample(range(array_length), len(target_values[condition]))
+                    for idx, val in zip(indices, target_values[condition]):
+                        array[idx] = val
+                elif condition == 'equals':
+                    array = target_values[condition][:]
+                elif condition == 'array_length_field':
+                    array = [random.randint(0, 10) for _ in range(target_array_length)]
+                elif condition == 'array_access':
+                    array = [random.randint(0, 10) for _ in range(random.randint(10, 20))]
+                    array[target_array_access[0]] = target_array_access[1]
+                else:
+                    raise ValueError(f"Unknown condition: {condition}")
+
+            entry[condition] = array
+
+        dataset.append(entry)
+
+    return dataset
+
+def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
+    size = data_size  # Number of arrays in the dataset
+    array_length = 10  # Length of each array
+
+    # Probabilities that an array hits the target condition
+    hit_probabilities = {
+        'contains': hit_rate,
+        'contains_any': hit_rate,
+        'contains_all': hit_rate,
+        'equals': hit_rate,
+        'array_length_field': hit_rate,
+        'array_access': hit_rate
+    }
+
+    # Target values for each condition
+    target_values = {
+        'contains': 42,
+        'contains_any': [21, 37, 42],
+        'contains_all': [15, 30],
+        'equals': [1,2,3,4,5],
+        'array_length_field': 5, # array length == 5
+        'array_access': [0, 5] # index=0, and value == 5
+    }
+
+    # Generate dataset
+    dataset = generate_array_dataset(size, array_length, hit_probabilities, target_values)
+    data = {
+        "id": pd.Series([x["id"] for x in dataset]),
+        "contains": pd.Series([x["contains"] for x in dataset]),
+        "contains_any": pd.Series([x["contains_any"] for x in dataset]),
+        "contains_all": pd.Series([x["contains_all"] for x in dataset]),
+        "equals": pd.Series([x["equals"] for x in dataset]),
+        "array_length_field": pd.Series([x["array_length_field"] for x in dataset]),
+        "array_access": pd.Series([x["array_access"] for x in dataset]),
+        "emb": pd.Series([np.array([random.random() for j in range(dim)], dtype=np.dtype("float32")) for _ in
+                          range(size)])
+    }
+    # Define testing conditions
+    contains_value = target_values['contains']
+    contains_any_values = target_values['contains_any']
+    contains_all_values = target_values['contains_all']
+    equals_array = target_values['equals']
+
+    # Perform tests
+    contains_result = [d for d in dataset if contains_value in d["contains"]]
+    contains_any_result = [d for d in dataset if any(val in d["contains_any"] for val in contains_any_values)]
+    contains_all_result = [d for d in dataset if all(val in d["contains_all"] for val in contains_all_values)]
+    equals_result = [d for d in dataset if d["equals"] == equals_array]
+    array_length_result = [d for d in dataset if len(d["array_length_field"]) == target_values['array_length_field']]
+    array_access_result = [d for d in dataset if d["array_access"][0] == target_values['array_access'][1]]
+    # Calculate and log.info proportions
+    contains_ratio = len(contains_result) / size
+    contains_any_ratio = len(contains_any_result) / size
+    contains_all_ratio = len(contains_all_result) / size
+    equals_ratio = len(equals_result) / size
+    array_length_ratio = len(array_length_result) / size
+    array_access_ratio = len(array_access_result) / size
+
+    log.info(f"\nProportion of arrays that contain the value: {contains_ratio}")
+    log.info(f"Proportion of arrays that contain any of the values: {contains_any_ratio}")
+    log.info(f"Proportion of arrays that contain all of the values: {contains_all_ratio}")
+    log.info(f"Proportion of arrays that equal the target array: {equals_ratio}")
+    log.info(f"Proportion of arrays that have the target array length: {array_length_ratio}")
+    log.info(f"Proportion of arrays that have the target array access: {array_access_ratio}")
+
+
+
+    train_df = pd.DataFrame(data)
+
+    target_id = {
+        "contains": [r["id"] for r in contains_result],
+        "contains_any": [r["id"] for r in contains_any_result],
+        "contains_all": [r["id"] for r in contains_all_result],
+        "equals": [r["id"] for r in equals_result],
+        "array_length": [r["id"] for r in array_length_result],
+        "array_access": [r["id"] for r in array_access_result]
+    }
+    target_id_list = [target_id[key] for key in ["contains", "contains_any", "contains_all", "equals", "array_length", "array_access"]]
+
+
+    filters = [
+        "array_contains(contains, 42)",
+        "array_contains_any(contains_any, [21, 37, 42])",
+        "array_contains_all(contains_all, [15, 30])",
+        "equals == [1,2,3,4,5]",
+        "array_length(array_length_field) == 5",
+        "array_access[0] == 5"
+
+    ]
+    query_expr = []
+    for i in range(len(filters)):
+        item = {
+            "expr": filters[i],
+            "ground_truth": target_id_list[i],
+        }
+        query_expr.append(item)
+    return train_df, query_expr
+
 
 
 def gen_unique_str(str_value=None):
@@ -1088,20 +1236,23 @@ def gen_data_by_collection_field(field, nb=None, start=None):
     if data_type == DataType.BFLOAT16_VECTOR:
         dim = field.params['dim']
         if nb is None:
-            raw_vector = [random.random() for _ in range(dim)]
-            bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
-            return bytes(bf16_vector)
-        bf16_vectors = []
-        for i in range(nb):
-            raw_vector = [random.random() for _ in range(dim)]
-            bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
-            bf16_vectors.append(bytes(bf16_vector))
-        return bf16_vectors
+            return RNG.uniform(size=dim).astype(bfloat16)
+        return [RNG.uniform(size=dim).astype(bfloat16) for _ in range(int(nb))]
+        # if nb is None:
+        #     raw_vector = [random.random() for _ in range(dim)]
+        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+        #     return bytes(bf16_vector)
+        # bf16_vectors = []
+        # for i in range(nb):
+        #     raw_vector = [random.random() for _ in range(dim)]
+        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+        #     bf16_vectors.append(bytes(bf16_vector))
+        # return bf16_vectors
     if data_type == DataType.FLOAT16_VECTOR:
         dim = field.params['dim']
         if nb is None:
-            return [random.random() for i in range(dim)]
-        return [[random.random() for i in range(dim)] for _ in range(nb)]
+            return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
+        return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
     if data_type == DataType.BINARY_VECTOR:
         dim = field.params['dim']
         if nb is None:
@@ -1109,9 +1260,21 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             binary_byte = bytes(np.packbits(raw_vector, axis=-1).tolist())
             return binary_byte
         return [bytes(np.packbits([random.randint(0, 1) for _ in range(dim)], axis=-1).tolist()) for _ in range(nb)]
+    if data_type == DataType.SPARSE_FLOAT_VECTOR:
+        if nb is None:
+            return gen_sparse_vectors(nb=1)[0]
+        return gen_sparse_vectors(nb=nb)
     if data_type == DataType.ARRAY:
         max_capacity = field.params['max_capacity']
         element_type = field.element_type
+        if element_type == DataType.INT8:
+            if nb is None:
+                return [random.randint(-128, 127) for _ in range(max_capacity)]
+            return [[random.randint(-128, 127) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.INT16:
+            if nb is None:
+                return [random.randint(-32768, 32767) for _ in range(max_capacity)]
+            return [[random.randint(-32768, 32767) for _ in range(max_capacity)] for _ in range(nb)]
         if element_type == DataType.INT32:
             if nb is None:
                 return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
@@ -1137,7 +1300,6 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             if nb is None:
                 return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
             return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
-
     return None
 
 
@@ -1151,6 +1313,25 @@ def gen_data_by_collection_schema(schema, nb, r=0):
     fields = schema.fields
     for field in fields:
         data.append(gen_data_by_collection_field(field, nb, start_uid))
+    return data
+
+
+def gen_varchar_values(nb: int, length: int = 0):
+    return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+
+
+def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}):
+    """
+    generate default value according to the collection fields,
+    which can replace the value of the specified field
+    """
+    data = []
+    for field in schema.fields:
+        default_value = default_values.get(field.name, None)
+        if default_value is not None:
+            data.append(default_value)
+        elif field.auto_id is False:
+            data.append(gen_data_by_collection_field(field, nb, start_id * nb))
     return data
 
 
@@ -2146,3 +2327,71 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
         vectors = gen_sparse_vectors(num, dim)
 
     return vectors
+
+
+def field_types() -> dict:
+    return dict(sorted(dict(DataType.__members__).items(), key=lambda item: item[0], reverse=True))
+
+
+def get_array_element_type(data_type: str):
+    if hasattr(DataType, "ARRAY") and data_type.startswith(DataType.ARRAY.name):
+        element_type = data_type.lstrip(DataType.ARRAY.name).lstrip("_")
+        for _field in field_types().keys():
+            if str(element_type).upper().startswith(_field):
+                return _field, getattr(DataType, _field)
+        raise ValueError(f"[get_array_data_type] Can't find element type:{element_type} for array:{data_type}")
+    raise ValueError(f"[get_array_data_type] Data type is not start with array: {data_type}")
+
+
+def set_field_schema(field: str, params: dict):
+    for k, v in field_types().items():
+        if str(field).upper().startswith(k):
+            _kwargs = {}
+
+            _field_element, _data_type = k, DataType.NONE
+            if hasattr(DataType, "ARRAY") and _field_element == DataType.ARRAY.name:
+                _field_element, _data_type = get_array_element_type(field)
+                _kwargs.update({"max_capacity": ct.default_max_capacity, "element_type": _data_type})
+
+            if _field_element in [DataType.STRING.name, DataType.VARCHAR.name]:
+                _kwargs.update({"max_length": ct.default_length})
+
+            elif _field_element in [DataType.BINARY_VECTOR.name, DataType.FLOAT_VECTOR.name,
+                                    DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name]:
+                _kwargs.update({"dim": ct.default_dim})
+
+            if isinstance(params, dict):
+                _kwargs.update(params)
+            else:
+                raise ValueError(
+                    f"[set_field_schema] Field `{field}` params is not a dict, type: {type(params)}, params: {params}")
+            return ApiFieldSchemaWrapper().init_field_schema(name=field, dtype=v, **_kwargs)[0]
+    raise ValueError(f"[set_field_schema] Can't set field:`{field}` schema: {params}")
+
+
+def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
+    """
+    :param fields: List[str]
+    :param field_params: {<field name>: dict<field params>}
+            int64_1:
+                is_primary: bool
+                description: str
+            varchar_1:
+                is_primary: bool
+                description: str
+                max_length: int = 65535
+            array_int8_1:
+                max_capacity: int = 100
+            array_varchar_1:
+                max_capacity: int = 100
+                max_length: int = 65535
+            float_vector:
+                dim: int = 128
+    :param kwargs: <params for collection schema>
+            description: str
+            primary_field: str
+            auto_id: bool
+            enable_dynamic_field: bool
+    """
+    field_schemas = [set_field_schema(field=field, params=field_params.get(field, {})) for field in fields]
+    return ApiCollectionSchemaWrapper().init_collection_schema(fields=field_schemas, **kwargs)[0]

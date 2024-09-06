@@ -64,7 +64,7 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageAndKeepalive(0)
+	session.AddNewMessageDoneAndKeepalive(0)
 
 	// Test Commit.
 	err = session.RequestCommitAndWait(ctx, 0)
@@ -147,7 +147,7 @@ func TestManager(t *testing.T) {
 
 	closed := make(chan struct{})
 	go func() {
-		m.GracefulClose()
+		m.GracefulClose(context.Background())
 		close(closed)
 	}()
 

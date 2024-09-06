@@ -334,6 +334,54 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("primary field set nullable", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					Nullable:     true,
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("primary field set default_value", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_LongData{
+							LongData: 1,
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.Error(t, err)
+	})
+
 	t.Run("has system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{

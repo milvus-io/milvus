@@ -111,13 +111,18 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
-func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) int64 {
+func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) (int64, error) {
 	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
+	if len(candidates) == 0 {
+		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+			vchannel, partitionID)
+	}
+
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return candidates[r.Intn(len(candidates))].GetSegmentID()
+	return candidates[r.Intn(len(candidates))].GetSegmentID(), nil
 }
 
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {

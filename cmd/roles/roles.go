@@ -35,12 +35,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -377,6 +379,12 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(mr.ServerType)
 	}
 
+	// Initialize streaming service if enabled.
+	if streamingutil.IsStreamingServiceEnabled() {
+		streaming.Init()
+		defer streaming.Release()
+	}
+
 	expr.Init()
 	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
@@ -419,6 +427,35 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableQueryCoord {
 		queryCoord = mr.runQueryCoord(ctx, local, &wg)
 		componentMap[typeutil.QueryCoordRole] = queryCoord
+	}
+
+	waitCoordBecomeHealthy := func() {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("wait all coord become healthy loop quit")
+				return
+			default:
+				rcState := rootCoord.Health(ctx)
+				dcState := dataCoord.Health(ctx)
+				icState := indexCoord.Health(ctx)
+				qcState := queryCoord.Health(ctx)
+
+				if rcState == commonpb.StateCode_Healthy && dcState == commonpb.StateCode_Healthy && icState == commonpb.StateCode_Healthy && qcState == commonpb.StateCode_Healthy {
+					log.Info("all coord become healthy")
+					return
+				}
+				log.Info("wait all coord become healthy", zap.String("rootCoord", rcState.String()), zap.String("dataCoord", dcState.String()), zap.String("indexCoord", icState.String()), zap.String("queryCoord", qcState.String()))
+				time.Sleep(time.Second)
+			}
+		}
+	}
+
+	// In standalone mode, block the start process until the new coordinator is active to avoid the coexistence of the old coordinator and the new node/proxy
+	// 1. In the start/restart process, the new coordinator will become active immediately and will not be blocked
+	// 2. In the rolling upgrade process, the new coordinator will not be active until the old coordinator is down, and it will be blocked
+	if mr.Local {
+		waitCoordBecomeHealthy()
 	}
 
 	if mr.EnableQueryNode {
@@ -491,8 +528,10 @@ func (mr *MilvusRoles) Run() {
 		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
 		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()), zap.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
 
+		tracer.NotifyTracerProviderUpdated()
+
 		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
-			initcore.InitTraceConfig(params)
+			initcore.ResetTraceConfig(params)
 			log.Info("Reset segcore tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
 		}
 	}))

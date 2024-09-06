@@ -79,7 +79,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 
 	s.mockSessionMgr = session.NewMockDataNodeManager(s.T())
 
-	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil)
+	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
 	s.analyzeScheduler = scheduler
 }
 
@@ -370,7 +370,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result ready", func() {
@@ -403,7 +403,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result timeout", func() {
@@ -499,6 +499,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			CollectionID: 1,
 			IndexID:      3,
 		}
+
+		task.ResultSegments = []int64{10, 11}
 		err := s.meta.indexMeta.CreateIndex(index)
 		s.NoError(err)
 

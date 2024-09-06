@@ -1,6 +1,8 @@
 package rmq
 
 import (
+	"strconv"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -65,4 +67,8 @@ func (id rmqID) EQ(other message.MessageID) bool {
 // Marshal marshal the message id.
 func (id rmqID) Marshal() string {
 	return message.EncodeInt64(int64(id))
+}
+
+func (id rmqID) String() string {
+	return strconv.FormatInt(int64(id), 10)
 }

@@ -412,7 +412,7 @@ func (s *broadcastCreatePartitionMsgStep) Execute(ctx context.Context) ([]nested
 		}
 		msgs = append(msgs, msg)
 	}
-	if err := streaming.WAL().Utility().AppendMessagesWithOption(ctx, streaming.AppendOption{
+	if err := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
 		BarrierTimeTick: s.ts,
 	}, msgs...).UnwrapFirstError(); err != nil {
 		return nil, err

@@ -567,6 +567,49 @@ func (_c *MockCompactionMeta_GetSegment_Call) RunAndReturn(run func(int64) *Segm
 	return _c
 }
 
+// GetStatsTaskMeta provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetStatsTaskMeta() *statsTaskMeta {
+	ret := _m.Called()
+
+	var r0 *statsTaskMeta
+	if rf, ok := ret.Get(0).(func() *statsTaskMeta); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*statsTaskMeta)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetStatsTaskMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStatsTaskMeta'
+type MockCompactionMeta_GetStatsTaskMeta_Call struct {
+	*mock.Call
+}
+
+// GetStatsTaskMeta is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetStatsTaskMeta() *MockCompactionMeta_GetStatsTaskMeta_Call {
+	return &MockCompactionMeta_GetStatsTaskMeta_Call{Call: _e.mock.On("GetStatsTaskMeta")}
+}
+
+func (_c *MockCompactionMeta_GetStatsTaskMeta_Call) Run(run func()) *MockCompactionMeta_GetStatsTaskMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetStatsTaskMeta_Call) Return(_a0 *statsTaskMeta) *MockCompactionMeta_GetStatsTaskMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetStatsTaskMeta_Call) RunAndReturn(run func() *statsTaskMeta) *MockCompactionMeta_GetStatsTaskMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveCompactionTask provides a mock function with given fields: task
 func (_m *MockCompactionMeta) SaveCompactionTask(task *datapb.CompactionTask) error {
 	ret := _m.Called(task)

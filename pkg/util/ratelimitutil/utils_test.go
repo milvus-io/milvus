@@ -15,7 +15,7 @@ func TestGetQuotaErrorString(t *testing.T) {
 		{
 			name: "Test ErrorCode_ForceDeny",
 			args: commonpb.ErrorCode_ForceDeny,
-			want: "the writing has been deactivated by the administrator",
+			want: "access has been disabled by the administrator",
 		},
 		{
 			name: "Test ErrorCode_MemoryQuotaExhausted",

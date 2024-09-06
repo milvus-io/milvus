@@ -319,6 +319,7 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(bsw.memorySize))
+	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
 	if err := de.Write(w); err != nil {
 		return err
 	}

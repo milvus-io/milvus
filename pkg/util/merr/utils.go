@@ -810,6 +810,14 @@ func WrapErrIndexDuplicate(indexName string, msg ...string) error {
 	return err
 }
 
+func WrapErrTaskDuplicate(taskType string, msg ...string) error {
+	err := wrapFields(ErrTaskDuplicate, value("taskType", taskType))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 // Node related
 func WrapErrNodeNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrNodeNotFound, value("node", id))

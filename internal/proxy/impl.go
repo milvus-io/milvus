@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -2534,6 +2535,12 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
 	}
+	var enqueuedTask task = it
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &insertTaskByStreamingService{
+			insertTask: it,
+		}
+	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2550,7 +2557,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	log.Debug("Enqueue insert request in Proxy")
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.dmQueue.Enqueue(enqueuedTask); err != nil {
 		log.Warn("Failed to enqueue insert task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
@@ -2769,12 +2776,18 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
 	}
+	var enqueuedTask task = it
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &upsertTaskByStreamingService{
+			upsertTask: it,
+		}
+	}
 
 	log.Debug("Enqueue upsert request in Proxy",
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)))
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.dmQueue.Enqueue(enqueuedTask); err != nil {
 		log.Info("Failed to enqueue upsert task",
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -2907,9 +2920,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		metrics.SearchLabel,
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
-
-	subLabel := GetCollectionRateSubLabel(request)
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3087,7 +3097,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3117,13 +3126,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		request.GetCollectionName(),
 	).Add(float64(receiveSize))
-
-	subLabel := GetCollectionRateSubLabel(request)
-	allNQ := int64(0)
-	for _, searchRequest := range request.Requests {
-		allNQ += searchRequest.GetNq()
-	}
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3284,7 +3286,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3376,7 +3377,15 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	log.Debug(rpcReceived(method))
 
-	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
+	var enqueuedTask task = ft
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &flushTaskByStreamingService{
+			flushTask: ft,
+			chMgr:     node.chMgr,
+		}
+	}
+
+	if err := node.sched.dcQueue.Enqueue(enqueuedTask); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err))
@@ -3591,7 +3600,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	).Inc()
 
 	sentSize := proto.Size(qt.result)
-	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
 	username := GetCurUserFromContextOrDefault(ctx)
@@ -6417,5 +6425,4 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 func DeregisterSubLabel(subLabel string) {
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLQuery.String(), subLabel)
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLSearch.String(), subLabel)
-	rateCol.DeregisterSubLabel(metricsinfo.ReadResultThroughput, subLabel)
 }

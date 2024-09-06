@@ -234,7 +234,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		task = compaction.NewMixCompactionTask(
@@ -243,7 +243,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
-		if req.GetPreAllocatedSegments() == nil || req.GetPreAllocatedSegments().GetBegin() == 0 {
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		task = compaction.NewClusteringCompactionTask(

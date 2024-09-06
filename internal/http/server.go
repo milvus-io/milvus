@@ -87,6 +87,10 @@ func registerDefaults() {
 			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
 		}),
 	})
+	Register(&Handler{
+		Path:    StaticPath,
+		Handler: GetStaticHandler(),
+	})
 }
 
 func RegisterStopComponent(triggerComponentStop func(role string) error) {

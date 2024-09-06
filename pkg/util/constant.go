@@ -57,8 +57,9 @@ const (
 	NonDBID             = int64(0)
 	InvalidDBID         = int64(-1)
 
-	PrivilegeWord = "Privilege"
-	AnyWord       = "*"
+	PrivilegeWord      = "Privilege"
+	PrivilegeGroupWord = "PrivilegeGroup"
+	AnyWord            = "*"
 
 	IdentifierKey = "identifier"
 
@@ -110,6 +111,8 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowPartitions.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeHasPartition.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -146,6 +149,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropAlias.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListAliases.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -198,8 +202,6 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateIndex.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropIndex.String(),
-		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
-		commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 		commonpb.ObjectPrivilege_PrivilegeLoad.String(),
@@ -216,6 +218,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
 	}
 	AdminPrivilegeGroup = []string{
+		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeQuery.String(),
 		commonpb.ObjectPrivilege_PrivilegeSearch.String(),
 		commonpb.ObjectPrivilege_PrivilegeIndexDetail.String(),
@@ -291,7 +295,11 @@ func StringList(stringMap map[string]struct{}) []string {
 // MetaStore2API convert meta-store's privilege name to api's
 // example: PrivilegeAll -> All
 func MetaStore2API(name string) string {
-	return name[strings.Index(name, PrivilegeWord)+len(PrivilegeWord):]
+	prefix := PrivilegeWord
+	if strings.Contains(name, PrivilegeGroupWord) {
+		prefix = PrivilegeGroupWord
+	}
+	return name[strings.Index(name, prefix)+len(prefix):]
 }
 
 func PrivilegeNameForAPI(name string) string {
@@ -303,10 +311,17 @@ func PrivilegeNameForAPI(name string) string {
 }
 
 func PrivilegeNameForMetastore(name string) string {
+	// check if name is single privilege
 	dbPrivilege := PrivilegeWord + name
 	_, ok := commonpb.ObjectPrivilege_value[dbPrivilege]
 	if !ok {
-		return ""
+		// check if name is privilege group
+		dbPrivilege := PrivilegeGroupWord + name
+		_, ok := commonpb.ObjectPrivilege_value[dbPrivilege]
+		if !ok {
+			return ""
+		}
+		return dbPrivilege
 	}
 	return dbPrivilege
 }

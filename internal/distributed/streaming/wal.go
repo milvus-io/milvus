@@ -32,11 +32,10 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		handlerClient:                  handlerClient,
 		producerMutex:                  sync.Mutex{},
 		producers:                      make(map[string]*producer.ResumableProducer),
-		utility: &utility{
-			// TODO: optimize the pool size, use the streaming api but not goroutines.
-			appendExecutionPool:   conc.NewPool[struct{}](10),
-			dispatchExecutionPool: conc.NewPool[struct{}](10),
-		},
+
+		// TODO: optimize the pool size, use the streaming api but not goroutines.
+		appendExecutionPool:   conc.NewPool[struct{}](10),
+		dispatchExecutionPool: conc.NewPool[struct{}](10),
 	}
 }
 
@@ -48,13 +47,14 @@ type walAccesserImpl struct {
 	streamingCoordAssignmentClient client.Client
 	handlerClient                  handler.HandlerClient
 
-	producerMutex sync.Mutex
-	producers     map[string]*producer.ResumableProducer
-	utility       *utility
+	producerMutex         sync.Mutex
+	producers             map[string]*producer.ResumableProducer
+	appendExecutionPool   *conc.Pool[struct{}]
+	dispatchExecutionPool *conc.Pool[struct{}]
 }
 
-// Append writes a record to the log.
-func (w *walAccesserImpl) Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
+// RawAppend writes a record to the log.
+func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertNoSystemMessage(msg)
 	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
 		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
@@ -123,15 +123,6 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 		txnCtx:          appendResult.TxnCtx,
 		walAccesserImpl: w,
 	}, nil
-}
-
-// Utility returns the utility of the wal accesser.
-func (w *walAccesserImpl) Utility() Utility {
-	return &utility{
-		appendExecutionPool:   w.utility.appendExecutionPool,
-		dispatchExecutionPool: w.utility.dispatchExecutionPool,
-		walAccesserImpl:       w,
-	}
 }
 
 // Close closes all the wal accesser.

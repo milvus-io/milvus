@@ -88,7 +88,7 @@ func TestResumableProducer(t *testing.T) {
 	id, err = rp.Produce(ctx, msg)
 	assert.Nil(t, id)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, errs.ErrCanceled))
+	assert.True(t, errors.Is(err, errs.ErrCanceledOrDeadlineExceed))
 
 	// Test the underlying handler close.
 	close(ch2)

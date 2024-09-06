@@ -105,7 +105,7 @@ class BitmapIndexTest : public testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    "/tmp/test_bitmap/",
+                                    "/tmp/test-bitmap-index/",
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -137,6 +137,16 @@ class BitmapIndexTest : public testing::Test {
 
         config["index_files"] = index_files;
 
+        if (is_mmap_) {
+            config["enable_mmap"] = "true";
+            config["mmap_filepath"] = fmt::format("/{}/{}/{}/{}/{}",
+                                                  "/tmp/test-bitmap-index/",
+                                                  collection_id,
+                                                  1,
+                                                  segment_id,
+                                                  field_id);
+            ;
+        }
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
@@ -247,7 +257,7 @@ class BitmapIndexTest : public testing::Test {
                     auto should = ref(i);
                     ASSERT_EQ(ans, should)
                         << "op: " << op << ", @" << i << ", ans: " << ans
-                        << ", ref: " << should;
+                        << ", ref: " << should << "|" << data_[i];
                 }
             }
         }
@@ -318,6 +328,7 @@ class BitmapIndexTest : public testing::Test {
     DataType type_;
     size_t nb_;
     size_t cardinality_;
+    bool is_mmap_ = false;
     boost::container::vector<T> data_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
 };
@@ -400,4 +411,55 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV2,
 
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_HighCardinality,
                                BitmapIndexTestV2,
+                               BitmapType);
+
+template <typename T>
+class BitmapIndexTestV3 : public BitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->is_mmap_ = true;
+    }
+
+    virtual ~BitmapIndexTestV3() {
+    }
+};
+
+TYPED_TEST_SUITE_P(BitmapIndexTestV3);
+
+TYPED_TEST_P(BitmapIndexTestV3, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+TYPED_TEST_P(BitmapIndexTestV3, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV3, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV3, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV3, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
+using BitmapType =
+    testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV3,
+                            CountFuncTest,
+                            INFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
+                               BitmapIndexTestV3,
                                BitmapType);
