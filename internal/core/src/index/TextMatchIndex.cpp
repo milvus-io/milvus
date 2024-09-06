@@ -160,7 +160,10 @@ TextMatchIndex::Commit() {
 
 void
 TextMatchIndex::Reload() {
-    wrapper_->reload();
+    std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
+    if (lck.try_lock()) {
+        wrapper_->reload();
+    }
 }
 
 void
@@ -179,6 +182,7 @@ TargetBitmap
 TextMatchIndex::MatchQuery(const std::string& query) {
     if (shouldTriggerCommit()) {
         Commit();
+        Reload();
     }
 
     auto cnt = wrapper_->count();

@@ -23,6 +23,10 @@ main(int argc, char* argv[]) {
     {
         Map m;
         test_tokenizer(m, "football, basketball, pingpang");
+        test_tokenizer(m, "Avatar");
+        test_tokenizer(m, "Action, Adventure, Fantasy, Science Fiction");
+        test_tokenizer(m, "Ingenious Film Partners, Twentiesth Century Fox");
+        test_tokenizer(m, "Sam Worthington as Jack Sully");
     }
 
     // jieba tokenizer

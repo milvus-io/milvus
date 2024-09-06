@@ -57,11 +57,22 @@ GenTestSchema(std::map<std::string, std::string> params = {}) {
 }  // namespace
 
 TEST(ParseJson, Naive) {
-    std::string s(R"({"tokenizer": "jieba"})");
-    nlohmann::json j = nlohmann::json::parse(s);
-    auto m = j.get<std::map<std::string, std::string>>();
-    for (const auto& [k, v] : m) {
-        std::cout << k << ": " << v << std::endl;
+    {
+        std::string s(R"({"tokenizer": "jieba"})");
+        nlohmann::json j = nlohmann::json::parse(s);
+        auto m = j.get<std::map<std::string, std::string>>();
+        for (const auto& [k, v] : m) {
+            std::cout << k << ": " << v << std::endl;
+        }
+    }
+
+    {
+        std::string s(
+            R"({"analyzer":"stop","stop_words":["an","the"],"case_insensitive":false})");
+        nlohmann::json j = nlohmann::json::parse(s);
+        for (const auto& [key, value] : j.items()) {
+            std::cout << key << ": " << value.dump() << std::endl;
+        }
     }
 }
 

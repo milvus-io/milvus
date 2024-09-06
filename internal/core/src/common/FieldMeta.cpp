@@ -38,7 +38,11 @@ FieldMeta::get_tokenizer_params() const {
         return {};
     }
     nlohmann::json j = nlohmann::json::parse(iter->second);
-    return j.get<std::map<std::string, std::string>>();
+    std::map<std::string, std::string> ret;
+    for (const auto& [k, v] : j.items()) {
+        ret[k] = v.dump();
+    }
+    return ret;
 }
 
 FieldMeta

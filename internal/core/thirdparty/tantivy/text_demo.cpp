@@ -24,6 +24,10 @@ main(int argc, char* argv[]) {
     {
         write_single_text("football, basketball, pingpang", 0);
         write_single_text("swimming, football", 1);
+        write_single_text("Avatar", 2);
+        write_single_text("Action, Adventure, Fantasy, Science Fiction", 3);
+        write_single_text("Ingenious Film Partners, Twentiesth Century Fox", 4);
+        write_single_text("Sam Worthington as Jack Sully", 5);
         text_index.commit();
     }
 
@@ -52,6 +56,12 @@ main(int argc, char* argv[]) {
         assert(result.size() == 2);
         assert(result.find(0) != result.end());
         assert(result.find(1) != result.end());
+    }
+
+    {
+        auto result = to_set(text_index.match_query("avatar"));
+        assert(result.size() == 1);
+        assert(result.find(2) != result.end());
     }
 
     return 0;
