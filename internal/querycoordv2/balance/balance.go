@@ -30,15 +30,18 @@ import (
 )
 
 type SegmentAssignPlan struct {
-	Segment *meta.Segment
-	Replica *meta.Replica
-	From    int64 // -1 if empty
-	To      int64
+	Segment      *meta.Segment
+	Replica      *meta.Replica
+	From         int64 // -1 if empty
+	To           int64
+	FromScore    int64
+	ToScore      int64
+	SegmentScore int64
 }
 
 func (segPlan *SegmentAssignPlan) ToString() string {
-	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d]\n",
-		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To)
+	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, fromScore: %d, toScore: %d, segmentScore: %d]\n",
+		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.FromScore, segPlan.ToScore, segPlan.SegmentScore)
 }
 
 type ChannelAssignPlan struct {
