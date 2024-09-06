@@ -43,7 +43,9 @@ SearchOnSealedIndex(const Schema& schema,
     auto field_indexing = record.get_field_indexing(field_id);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info,"
-               "field index: {}, search info: {}", field_indexing->metric_type_, search_info.metric_type_);
+               "field index: {}, search info: {}",
+               field_indexing->metric_type_,
+               search_info.metric_type_);
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);
