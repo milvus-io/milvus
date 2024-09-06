@@ -736,11 +736,12 @@ func (c *compactionPlanHandler) getTasksByState(state datapb.CompactionTaskState
 }
 
 func (c *compactionPlanHandler) checkDelay(t CompactionTask) {
+	log := log.Ctx(context.TODO()).WithRateGroup("compactionPlanHandler.checkDelay", 1.0, 60.0)
 	maxExecDuration := maxCompactionTaskExecutionDuration[t.GetType()]
 	startTime := time.Unix(t.GetStartTime(), 0)
 	execDuration := time.Since(startTime)
 	if execDuration >= maxExecDuration {
-		log.Warn("compaction task is delay",
+		log.RatedWarn(60, "compaction task is delay",
 			zap.Int64("planID", t.GetPlanID()),
 			zap.String("type", t.GetType().String()),
 			zap.String("state", t.GetState().String()),
