@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -387,6 +388,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		// TODO should remove the index params in the field schema
 		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
 		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
+		}
+
+		if err := ctokenizer.ValidateTextSchema(field); err != nil {
 			return err
 		}
 	}
