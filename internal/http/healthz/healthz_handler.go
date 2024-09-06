@@ -52,7 +52,8 @@ type HealthResponse struct {
 }
 
 type HealthHandler struct {
-	indicators []Indicator
+	indicators   []Indicator
+	indicatorNum int
 
 	// unregister role when call stop by restful api
 	unregisterLock    sync.RWMutex
@@ -65,6 +66,10 @@ var defaultHandler = HealthHandler{}
 
 func Register(indicator Indicator) {
 	defaultHandler.indicators = append(defaultHandler.indicators, indicator)
+}
+
+func SetComponentNum(num int) {
+	defaultHandler.indicatorNum = num
 }
 
 func UnRegister(role string) {
@@ -86,11 +91,13 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		State: "OK",
 	}
 	ctx := context.Background()
+	healthNum := 0
 	for _, in := range handler.indicators {
 		handler.unregisterLock.RLock()
 		_, unregistered := handler.unregisteredRoles[in.GetName()]
 		handler.unregisterLock.RUnlock()
 		if unregistered {
+			healthNum++
 			continue
 		}
 		code := in.Health(ctx)
@@ -98,9 +105,13 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			Name: in.GetName(),
 			Code: code,
 		})
-		if code != commonpb.StateCode_Healthy && code != commonpb.StateCode_StandBy {
-			resp.State = fmt.Sprintf("component %s state is %s", in.GetName(), code.String())
+		if code == commonpb.StateCode_Healthy || code == commonpb.StateCode_StandBy {
+			healthNum++
 		}
+	}
+
+	if healthNum != handler.indicatorNum {
+		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", healthNum, handler.indicatorNum)
 	}
 
 	if resp.State == "OK" {
