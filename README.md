@@ -76,7 +76,7 @@ Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
 go: >= 1.21
 cmake: >= 3.26.4
-gcc: 7.5
+gcc: 9.5
 python: > 3.8 and  <= 3.11
 ```
 
