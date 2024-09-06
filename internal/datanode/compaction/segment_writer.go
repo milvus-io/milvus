@@ -47,6 +47,7 @@ type MultiSegmentWriter struct {
 	// segID -> fieldID -> binlogs
 
 	res []*datapb.CompactionSegment
+	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 }
 
 func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator allocator.Allocator, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64) *MultiSegmentWriter {
@@ -175,9 +176,27 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 	return writer.Write(v)
 }
 
-// Could return an empty list if every insert of the segment is deleted
+func (w *MultiSegmentWriter) appendEmptySegment() error {
+	writer, err := w.getWriter()
+	if err != nil {
+		return nil
+	}
+
+	w.res = append(w.res, &datapb.CompactionSegment{
+		SegmentID: writer.GetSegmentID(),
+		NumOfRows: 0,
+		Channel:   w.channel,
+	})
+	return nil
+}
+
+// DONOT return an empty list if every insert of the segment is deleted,
+// append an empty segment instead
 func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 	if w.current == -1 {
+		if err := w.appendEmptySegment(); err != nil {
+			return nil, err
+		}
 		return w.res, nil
 	}
 
