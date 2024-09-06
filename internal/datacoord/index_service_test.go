@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -237,7 +238,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.indexNodeManager = nodeManager
 		mockNode := mocks.NewMockIndexNodeClient(t)
 		nodeManager.SetClient(1001, mockNode)
-		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
+		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
 			Status:     merr.Success(),
 			EnableDisk: true,
 		}, nil)

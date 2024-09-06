@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
-	sinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
@@ -75,14 +74,12 @@ func Apply(opts ...optResourceInit) {
 // Done finish all initialization of resources.
 func Done() {
 	r.segmentAssignStatsManager = stats.NewStatsManager()
-	r.segmentSealedInspector = sinspector.NewSealedInspector(r.segmentAssignStatsManager.SealNotifier())
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.RootCoordClient())
 	assertNotNil(r.DataCoordClient())
 	assertNotNil(r.StreamingNodeCatalog())
 	assertNotNil(r.SegmentAssignStatsManager())
-	assertNotNil(r.SegmentSealedInspector())
 	assertNotNil(r.TimeTickInspector())
 }
 
@@ -103,7 +100,6 @@ type resourceImpl struct {
 	dataCoordClient           types.DataCoordClient
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
-	segmentSealedInspector    sinspector.SealOperationInspector
 	timeTickInspector         tinspector.TimeTickSyncInspector
 }
 
@@ -150,11 +146,6 @@ func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
 // SegmentAssignStatManager returns the segment assign stats manager.
 func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 	return r.segmentAssignStatsManager
-}
-
-// SegmentSealedInspector returns the segment sealed inspector.
-func (r *resourceImpl) SegmentSealedInspector() sinspector.SealOperationInspector {
-	return r.segmentSealedInspector
 }
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {

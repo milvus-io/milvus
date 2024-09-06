@@ -37,38 +37,6 @@ service IndexCoord {
     }
 }
 
-service IndexNode {
-    rpc GetComponentStates(milvus.GetComponentStatesRequest)
-        returns (milvus.ComponentStates) {
-    }
-    rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest)
-        returns (milvus.StringResponse) {
-    }
-    rpc CreateJob(CreateJobRequest) returns (common.Status) {
-    }
-    rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {
-    }
-    rpc DropJobs(DropJobsRequest) returns (common.Status) {
-    }
-    rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {
-    }
-
-    rpc ShowConfigurations(internal.ShowConfigurationsRequest)
-        returns (internal.ShowConfigurationsResponse) {
-    }
-    // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-    rpc GetMetrics(milvus.GetMetricsRequest)
-        returns (milvus.GetMetricsResponse) {
-    }
-
-    rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
-    }
-    rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {
-    }
-    rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {
-    }
-}
-
 message IndexInfo {
     int64 collectionID = 1;
     int64 fieldID = 2;
@@ -261,61 +229,6 @@ message OptionalFieldInfo {
     repeated int64 data_ids = 5;
 }
 
-message CreateJobRequest {
-    string clusterID = 1;
-    string index_file_prefix = 2;
-    int64 buildID = 3;
-    repeated string data_paths = 4;
-    int64 index_version = 5;
-    int64 indexID = 6;
-    string index_name = 7;
-    StorageConfig storage_config = 8;
-    repeated common.KeyValuePair index_params = 9;
-    repeated common.KeyValuePair type_params = 10;
-    int64 num_rows = 11;
-    int32 current_index_version = 12;
-    int64 collectionID = 13;
-    int64 partitionID = 14;
-    int64 segmentID = 15;
-    int64 fieldID = 16;
-    string field_name = 17;
-    schema.DataType field_type = 18;
-    string store_path = 19;
-    int64 store_version = 20;
-    string index_store_path = 21;
-    int64 dim = 22;
-    repeated int64 data_ids = 23;
-    repeated OptionalFieldInfo optional_scalar_fields = 24;
-    schema.FieldSchema field = 25;
-    bool partition_key_isolation = 26;
-}
-
-message QueryJobsRequest {
-    string clusterID = 1;
-    repeated int64 buildIDs = 2;
-}
-
-message IndexTaskInfo {
-    int64 buildID = 1;
-    common.IndexState state = 2;
-    repeated string index_file_keys = 3;
-    uint64 serialized_size = 4;
-    string fail_reason = 5;
-    int32 current_index_version = 6;
-    int64 index_store_version = 7;
-}
-
-message QueryJobsResponse {
-    common.Status status = 1;
-    string clusterID = 2;
-    repeated IndexTaskInfo index_infos = 3;
-}
-
-message DropJobsRequest {
-    string clusterID = 1;
-    repeated int64 buildIDs = 2;
-}
-
 message JobInfo {
     int64 num_rows = 1;
     int64 dim = 2;
@@ -323,19 +236,6 @@ message JobInfo {
     int64 end_time = 4;
     repeated common.KeyValuePair index_params = 5;
     int64 podID = 6;
-}
-
-message GetJobStatsRequest {
-}
-
-message GetJobStatsResponse {
-    common.Status status = 1;
-    int64 total_job_num = 2;
-    int64 in_progress_job_num = 3;
-    int64 enqueue_job_num = 4;
-    int64 task_slots = 5;
-    repeated JobInfo job_infos = 6;
-    bool enable_disk = 7;
 }
 
 message GetIndexStatisticsRequest {
@@ -379,79 +279,17 @@ message SegmentStats {
     repeated int64 logIDs = 3;
 }
 
-message AnalyzeRequest {
-    string clusterID = 1;
-    int64 taskID = 2;
-    int64 collectionID = 3;
-    int64 partitionID = 4;
-    int64 fieldID = 5;
-    string fieldName = 6;
-    schema.DataType field_type = 7;
-    map<int64, SegmentStats> segment_stats = 8;
-    int64 version = 9;
-    StorageConfig storage_config = 10;
-    int64 dim = 11;
-    double max_train_size_ratio = 12;
-    int64 num_clusters = 13;
-    schema.FieldSchema field = 14;
-    double min_cluster_size_ratio = 15;
-    double max_cluster_size_ratio = 16;
-    int64 max_cluster_size = 17;
-}
-
-message AnalyzeResult {
-    int64 taskID = 1;
-    JobState state = 2;
-    string fail_reason = 3;
-    string centroids_file = 4;
+message FieldLogPath {
+    int64 fieldID = 1;
+    repeated string file_paths = 2;
 }
 
 enum JobType {
     JobTypeNone = 0;
     JobTypeIndexJob = 1;
     JobTypeAnalyzeJob = 2;
+    JobTypeStatsJob = 3;
 }
-
-message CreateJobV2Request {
-    string clusterID = 1;
-    int64 taskID = 2;
-    JobType job_type = 3;
-    oneof request {
-        AnalyzeRequest analyze_request = 4;
-        CreateJobRequest index_request = 5;
-    }
-    //    JobDescriptor job = 3;
-}
-
-message QueryJobsV2Request {
-    string clusterID = 1;
-    repeated int64 taskIDs = 2;
-    JobType job_type = 3;
-}
-
-message IndexJobResults {
-    repeated IndexTaskInfo results = 1;
-}
-
-message AnalyzeResults {
-    repeated AnalyzeResult results = 1;
-}
-
-message QueryJobsV2Response {
-    common.Status status = 1;
-    string clusterID = 2;
-    oneof result {
-        IndexJobResults index_job_results = 3;
-        AnalyzeResults analyze_job_results = 4;
-    }
-}
-
-message DropJobsV2Request {
-    string clusterID = 1;
-    repeated int64 taskIDs = 2;
-    JobType job_type = 3;
-}
-
 
 enum JobState {
     JobStateNone = 0;
@@ -460,4 +298,17 @@ enum JobState {
     JobStateFinished = 3;
     JobStateFailed = 4;
     JobStateRetry = 5;
+}
+
+message StatsTask {
+    int64 collectionID = 1;
+    int64 partitionID = 2;
+    int64 segmentID = 3;
+    string insert_channel = 4;
+    int64 taskID = 5;
+    int64 version = 6;
+    int64 nodeID = 7;
+    JobState state = 8;
+    string fail_reason = 9;
+    int64 target_segmentID = 10;
 }

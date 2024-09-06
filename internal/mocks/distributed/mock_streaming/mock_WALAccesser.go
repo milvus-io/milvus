@@ -26,8 +26,123 @@ func (_m *MockWALAccesser) EXPECT() *MockWALAccesser_Expecter {
 	return &MockWALAccesser_Expecter{mock: &_m.Mock}
 }
 
-// Append provides a mock function with given fields: ctx, msgs, opts
-func (_m *MockWALAccesser) Append(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
+// AppendMessages provides a mock function with given fields: ctx, msgs
+func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+	_va := make([]interface{}, len(msgs))
+	for _i := range msgs {
+		_va[_i] = msgs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 streaming.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.MutableMessage) streaming.AppendResponses); ok {
+		r0 = rf(ctx, msgs...)
+	} else {
+		r0 = ret.Get(0).(streaming.AppendResponses)
+	}
+
+	return r0
+}
+
+// MockWALAccesser_AppendMessages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendMessages'
+type MockWALAccesser_AppendMessages_Call struct {
+	*mock.Call
+}
+
+// AppendMessages is a helper method to define mock.On call
+//   - ctx context.Context
+//   - msgs ...message.MutableMessage
+func (_e *MockWALAccesser_Expecter) AppendMessages(ctx interface{}, msgs ...interface{}) *MockWALAccesser_AppendMessages_Call {
+	return &MockWALAccesser_AppendMessages_Call{Call: _e.mock.On("AppendMessages",
+		append([]interface{}{ctx}, msgs...)...)}
+}
+
+func (_c *MockWALAccesser_AppendMessages_Call) Run(run func(ctx context.Context, msgs ...message.MutableMessage)) *MockWALAccesser_AppendMessages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.MutableMessage, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.MutableMessage)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessages_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Context, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AppendMessagesWithOption provides a mock function with given fields: ctx, opts, msgs
+func (_m *MockWALAccesser) AppendMessagesWithOption(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage) streaming.AppendResponses {
+	_va := make([]interface{}, len(msgs))
+	for _i := range msgs {
+		_va[_i] = msgs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, opts)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 streaming.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses); ok {
+		r0 = rf(ctx, opts, msgs...)
+	} else {
+		r0 = ret.Get(0).(streaming.AppendResponses)
+	}
+
+	return r0
+}
+
+// MockWALAccesser_AppendMessagesWithOption_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendMessagesWithOption'
+type MockWALAccesser_AppendMessagesWithOption_Call struct {
+	*mock.Call
+}
+
+// AppendMessagesWithOption is a helper method to define mock.On call
+//   - ctx context.Context
+//   - opts streaming.AppendOption
+//   - msgs ...message.MutableMessage
+func (_e *MockWALAccesser_Expecter) AppendMessagesWithOption(ctx interface{}, opts interface{}, msgs ...interface{}) *MockWALAccesser_AppendMessagesWithOption_Call {
+	return &MockWALAccesser_AppendMessagesWithOption_Call{Call: _e.mock.On("AppendMessagesWithOption",
+		append([]interface{}{ctx, opts}, msgs...)...)}
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Run(run func(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage)) *MockWALAccesser_AppendMessagesWithOption_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.MutableMessage, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.MutableMessage)
+			}
+		}
+		run(args[0].(context.Context), args[1].(streaming.AppendOption), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_AppendMessagesWithOption_Call) RunAndReturn(run func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RawAppend provides a mock function with given fields: ctx, msgs, opts
+func (_m *MockWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -59,21 +174,21 @@ func (_m *MockWALAccesser) Append(ctx context.Context, msgs message.MutableMessa
 	return r0, r1
 }
 
-// MockWALAccesser_Append_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Append'
-type MockWALAccesser_Append_Call struct {
+// MockWALAccesser_RawAppend_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RawAppend'
+type MockWALAccesser_RawAppend_Call struct {
 	*mock.Call
 }
 
-// Append is a helper method to define mock.On call
+// RawAppend is a helper method to define mock.On call
 //   - ctx context.Context
 //   - msgs message.MutableMessage
 //   - opts ...streaming.AppendOption
-func (_e *MockWALAccesser_Expecter) Append(ctx interface{}, msgs interface{}, opts ...interface{}) *MockWALAccesser_Append_Call {
-	return &MockWALAccesser_Append_Call{Call: _e.mock.On("Append",
+func (_e *MockWALAccesser_Expecter) RawAppend(ctx interface{}, msgs interface{}, opts ...interface{}) *MockWALAccesser_RawAppend_Call {
+	return &MockWALAccesser_RawAppend_Call{Call: _e.mock.On("RawAppend",
 		append([]interface{}{ctx, msgs}, opts...)...)}
 }
 
-func (_c *MockWALAccesser_Append_Call) Run(run func(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption)) *MockWALAccesser_Append_Call {
+func (_c *MockWALAccesser_RawAppend_Call) Run(run func(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption)) *MockWALAccesser_RawAppend_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]streaming.AppendOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -86,12 +201,12 @@ func (_c *MockWALAccesser_Append_Call) Run(run func(ctx context.Context, msgs me
 	return _c
 }
 
-func (_c *MockWALAccesser_Append_Call) Return(_a0 *types.AppendResult, _a1 error) *MockWALAccesser_Append_Call {
+func (_c *MockWALAccesser_RawAppend_Call) Return(_a0 *types.AppendResult, _a1 error) *MockWALAccesser_RawAppend_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockWALAccesser_Append_Call) RunAndReturn(run func(context.Context, message.MutableMessage, ...streaming.AppendOption) (*types.AppendResult, error)) *MockWALAccesser_Append_Call {
+func (_c *MockWALAccesser_RawAppend_Call) RunAndReturn(run func(context.Context, message.MutableMessage, ...streaming.AppendOption) (*types.AppendResult, error)) *MockWALAccesser_RawAppend_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -192,49 +307,6 @@ func (_c *MockWALAccesser_Txn_Call) Return(_a0 streaming.Txn, _a1 error) *MockWA
 }
 
 func (_c *MockWALAccesser_Txn_Call) RunAndReturn(run func(context.Context, streaming.TxnOption) (streaming.Txn, error)) *MockWALAccesser_Txn_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Utility provides a mock function with given fields:
-func (_m *MockWALAccesser) Utility() streaming.Utility {
-	ret := _m.Called()
-
-	var r0 streaming.Utility
-	if rf, ok := ret.Get(0).(func() streaming.Utility); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(streaming.Utility)
-		}
-	}
-
-	return r0
-}
-
-// MockWALAccesser_Utility_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Utility'
-type MockWALAccesser_Utility_Call struct {
-	*mock.Call
-}
-
-// Utility is a helper method to define mock.On call
-func (_e *MockWALAccesser_Expecter) Utility() *MockWALAccesser_Utility_Call {
-	return &MockWALAccesser_Utility_Call{Call: _e.mock.On("Utility")}
-}
-
-func (_c *MockWALAccesser_Utility_Call) Run(run func()) *MockWALAccesser_Utility_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockWALAccesser_Utility_Call) Return(_a0 streaming.Utility) *MockWALAccesser_Utility_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWALAccesser_Utility_Call) RunAndReturn(run func() streaming.Utility) *MockWALAccesser_Utility_Call {
 	_c.Call.Return(run)
 	return _c
 }

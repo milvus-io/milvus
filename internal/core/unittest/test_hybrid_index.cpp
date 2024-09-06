@@ -143,14 +143,16 @@ class HybridIndexTestV1 : public testing::Test {
         config["insert_files"] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "1000";
 
-        auto build_index =
-            indexbuilder::IndexFactory::GetInstance().CreateIndex(
-                type_, config, ctx);
-        build_index->Build();
+        {
+            auto build_index =
+                indexbuilder::IndexFactory::GetInstance().CreateIndex(
+                    type_, config, ctx);
+            build_index->Build();
 
-        auto binary_set = build_index->Upload();
-        for (const auto& [key, _] : binary_set.binary_map_) {
-            index_files.push_back(key);
+            auto binary_set = build_index->Upload();
+            for (const auto& [key, _] : binary_set.binary_map_) {
+                index_files.push_back(key);
+            }
         }
 
         index::CreateIndexInfo index_info{};

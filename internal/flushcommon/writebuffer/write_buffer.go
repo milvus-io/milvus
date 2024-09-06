@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -344,6 +345,11 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 
 			if syncTask.StartPosition() != nil {
 				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
+			}
+
+			if streamingutil.IsStreamingServiceEnabled() && syncTask.IsFlush() {
+				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
+				log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
 			}
 			return nil
 		}))

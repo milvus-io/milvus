@@ -35,6 +35,7 @@
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "futures/Future.h"
+#include "futures/future_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -79,6 +80,8 @@ CRetrieve(CSegmentInterface c_segment,
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
     if (status.error_code != 0) {
         return status;
     }
@@ -104,6 +107,8 @@ CRetrieveByOffsets(CSegmentInterface c_segment,
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();
+    future_destroy(future);
+
     if (status.error_code != 0) {
         return status;
     }
@@ -388,10 +393,10 @@ TEST(CApiTest, GetCollectionNameTest) {
 TEST(CApiTest, SegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     CSegmentInterface a_segment;
-    status = NewSegment(collection, Invalid, -1, &a_segment);
+    status = NewSegment(collection, Invalid, -1, &a_segment, false);
     ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -537,7 +542,7 @@ TEST(CApiTest, CApiCPlan_bfloat16) {
 TEST(CApiTest, InsertTest) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -564,7 +569,7 @@ TEST(CApiTest, InsertTest) {
 TEST(CApiTest, DeleteTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
@@ -590,7 +595,7 @@ TEST(CApiTest, DeleteTest) {
 TEST(CApiTest, MultiDeleteGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -712,7 +717,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 TEST(CApiTest, MultiDeleteSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -826,7 +831,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -931,7 +936,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1014,7 +1019,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 TEST(CApiTest, SearcTestWhenNullable) {
     auto c_collection = NewCollection(get_default_schema_config_nullable());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1082,7 +1087,7 @@ TEST(CApiTest, SearcTestWhenNullable) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, 111, &segment);
+    auto status = NewSegment(collection, Growing, 111, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1189,7 +1194,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1261,7 +1266,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1331,7 +1336,7 @@ TEST(CApiTest, SearchTest) {
 TEST(CApiTest, SearchTestWithExpr) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1398,7 +1403,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 TEST(CApiTest, RetrieveTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -1460,7 +1465,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
@@ -1491,7 +1496,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
@@ -1522,7 +1527,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 TEST(CApiTest, GetRowCountTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1552,7 +1557,7 @@ TEST(CApiTest, GetRowCountTest) {
 TEST(CApiTest, GetRealCount) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1602,7 +1607,7 @@ TEST(CApiTest, GetRealCount) {
 TEST(CApiTest, ReduceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1687,7 +1692,7 @@ TEST(CApiTest, ReduceNullResult) {
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1837,7 +1842,7 @@ testReduceSearchWithExpr(int N,
     }
     auto collection = NewCollection(schema_fun());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -2113,7 +2118,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2262,7 +2267,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2412,7 +2417,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2590,7 +2595,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
@@ -2770,7 +2775,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -2942,7 +2947,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
@@ -3116,7 +3121,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3296,7 +3301,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3476,7 +3481,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3673,7 +3678,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -3860,7 +3865,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
 
     int N = 1000;
@@ -3886,7 +3891,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, true);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -4039,7 +4044,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -4119,7 +4124,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -4500,7 +4505,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4565,7 +4570,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto c_collection =
         NewCollection(get_default_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4629,7 +4634,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4693,7 +4698,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4912,7 +4917,7 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -5062,7 +5067,7 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Growing, -1, &segment);
+    auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
@@ -5207,7 +5212,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
     auto c_collection =
         NewCollection(get_float16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -5272,7 +5277,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     auto c_collection =
         NewCollection(get_bfloat16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 

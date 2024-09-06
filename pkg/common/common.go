@@ -103,6 +103,9 @@ const (
 	AnalyzeStatsPath = `analyze_stats`
 	OffsetMapping    = `offset_mapping`
 	Centroids        = "centroids"
+
+	// TextIndexPath storage path const for text index
+	TextIndexPath = "text_log"
 )
 
 // Search, Index parameter keys
@@ -159,6 +162,7 @@ const (
 	DatabaseDiskQuotaKey        = "database.diskQuota.mb"
 	DatabaseMaxCollectionsKey   = "database.max.collections"
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
+	DatabaseForceDenyReadingKey = "database.force.deny.reading"
 
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"

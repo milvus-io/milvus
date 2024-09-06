@@ -124,6 +124,175 @@ class FieldDataBase {
     const bool nullable_;
 };
 
+template <typename Type>
+class FieldBitsetImpl : public FieldDataBase {
+ public:
+    FieldBitsetImpl() = delete;
+    FieldBitsetImpl(FieldBitsetImpl&&) = delete;
+    FieldBitsetImpl(const FieldBitsetImpl&) = delete;
+
+    FieldBitsetImpl&
+    operator=(FieldBitsetImpl&&) = delete;
+    FieldBitsetImpl&
+    operator=(const FieldBitsetImpl&) = delete;
+
+    explicit FieldBitsetImpl(DataType data_type, TargetBitmap&& bitmap)
+        : FieldDataBase(data_type, false), length_(bitmap.size()) {
+        data_ = std::move(bitmap).into();
+        cap_ = data_.size() * sizeof(Type) * 8;
+        Assert(cap_ >= length_);
+    }
+
+    // FillFieldData used for read and write with storage,
+    // no need to implement for bitset which used in runtime process.
+    void
+    FillFieldData(const void* source, ssize_t element_count) override {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const void* source, ssize_t element_count)"
+                  "not implemented for bitset");
+    }
+
+    void
+    FillFieldData(const void* field_data,
+                  const uint8_t* valid_data,
+                  ssize_t element_count) override {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const void* field_data, "
+                  "const uint8_t* valid_data, ssize_t element_count)"
+                  "not implemented for bitset");
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::Array> array) override {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const std::shared_ptr<arrow::Array>& array) "
+                  "not implemented for bitset");
+    }
+
+    virtual void
+    FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const std::shared_ptr<arrow::StringArray>& "
+                  "array) not implemented for bitset");
+    }
+
+    virtual void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const std::shared_ptr<arrow::BinaryArray>& "
+                  "array) not implemented for bitset");
+    }
+
+    std::string
+    GetName() const {
+        return "FieldBitsetImpl";
+    }
+
+    void*
+    Data() override {
+        return data_.data();
+    }
+
+    uint8_t*
+    ValidData() override {
+        PanicInfo(NotImplemented, "ValidData() not implemented for bitset");
+    }
+
+    const void*
+    RawValue(ssize_t offset) const override {
+        PanicInfo(NotImplemented,
+                  "RawValue(ssize_t offset) not implemented for bitset");
+    }
+
+    int64_t
+    Size() const override {
+        return DataSize() + ValidDataSize();
+    }
+
+    int64_t
+    DataSize() const override {
+        return sizeof(Type) * get_num_rows();
+    }
+
+    int64_t
+    DataSize(ssize_t offset) const override {
+        return sizeof(Type);
+    }
+
+    int64_t
+    ValidDataSize() const override {
+        return 0;
+    }
+
+    size_t
+    Length() const override {
+        return get_length();
+    }
+
+    bool
+    IsFull() const override {
+        auto cap_num_rows = get_num_rows();
+        auto filled_num_rows = get_length();
+        return cap_num_rows == filled_num_rows;
+    }
+
+    bool
+    IsNullable() const override {
+        return false;
+    }
+
+    void
+    Reserve(size_t cap) override {
+        std::lock_guard lck(cap_mutex_);
+        AssertInfo(cap % (8 * sizeof(Type)) == 0,
+                   "Reverse bitset size must be a multiple of {}",
+                   8 * sizeof(Type));
+        if (cap > cap_) {
+            data_.resize(cap / (8 * sizeof(Type)));
+            cap_ = cap;
+        }
+    }
+
+ public:
+    int64_t
+    get_num_rows() const override {
+        std::shared_lock lck(cap_mutex_);
+        return cap_;
+    }
+
+    size_t
+    get_length() const {
+        std::shared_lock lck(length_mutex_);
+        return length_;
+    }
+
+    int64_t
+    get_dim() const override {
+        return 1;
+    }
+
+    int64_t
+    get_null_count() const override {
+        PanicInfo(NotImplemented,
+                  "get_null_count() not implemented for bitset");
+    }
+
+    bool
+    is_valid(ssize_t offset) const override {
+        PanicInfo(NotImplemented,
+                  "is_valid(ssize_t offset) not implemented for bitset");
+    }
+
+ private:
+    FixedVector<Type> data_{};
+    // capacity that data_ can store
+    int64_t cap_;
+    mutable std::shared_mutex cap_mutex_;
+    // number of actual elements in data_
+    size_t length_{};
+    mutable std::shared_mutex length_mutex_;
+};
+
 template <typename Type, bool is_type_entire_row = false>
 class FieldDataImpl : public FieldDataBase {
  public:
@@ -159,8 +328,8 @@ class FieldDataImpl : public FieldDataBase {
         : FieldDataBase(type, nullable), dim_(is_type_entire_row ? 1 : dim) {
         AssertInfo(!nullable, "need to fill valid_data when nullable is true");
         data_ = std::move(data);
-        Assert(data.size() % dim == 0);
-        num_rows_ = data.size() / dim;
+        Assert(data_.size() % dim == 0);
+        num_rows_ = data_.size() / dim;
     }
 
     explicit FieldDataImpl(size_t dim,
@@ -173,8 +342,8 @@ class FieldDataImpl : public FieldDataBase {
                    "no need to fill valid_data when nullable is false");
         data_ = std::move(data);
         valid_data_ = std::move(valid_data);
-        Assert(data.size() % dim == 0);
-        num_rows_ = data.size() / dim;
+        Assert(data_.size() % dim == 0);
+        num_rows_ = data_.size() / dim;
     }
 
     void

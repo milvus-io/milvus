@@ -220,7 +220,10 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				continue
 			}
 			partitionID := t.GetPartitionIDs()[partitionIdx]
-			segmentID := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+			segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+			if err != nil {
+				return nil, nil, err
+			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil)
 			if err != nil {

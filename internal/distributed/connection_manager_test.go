@@ -32,9 +32,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -168,7 +168,7 @@ func TestConnectionManager(t *testing.T) {
 		indexNode := &testIndexNode{}
 		grpcServer := grpc.NewServer()
 		defer grpcServer.Stop()
-		indexpb.RegisterIndexNodeServer(grpcServer, indexNode)
+		workerpb.RegisterIndexNodeServer(grpcServer, indexNode)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.IndexNodeRole, lis.Addr().String(), true, false)
 		session.Register()
@@ -266,7 +266,7 @@ type testDataNode struct {
 }
 
 type testIndexNode struct {
-	indexpb.IndexNodeServer
+	workerpb.IndexNodeServer
 }
 
 func initSession(ctx context.Context) *sessionutil.Session {

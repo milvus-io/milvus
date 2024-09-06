@@ -1160,11 +1160,25 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 
 func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 	var (
-		k   = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, role.Name+"/")
-		err error
+		k          = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, role.Name+"/")
+		err        error
+		removeKeys []string
 	)
 
-	if err = kc.Txn.RemoveWithPrefix(k); err != nil {
+	removeKeys = append(removeKeys, k)
+
+	// the values are the grantee id list
+	_, values, err := kc.Txn.LoadWithPrefix(k)
+	if err != nil {
+		log.Warn("fail to load grant privilege entities", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	for _, v := range values {
+		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v+"/")
+		removeKeys = append(removeKeys, granteeIDKey)
+	}
+
+	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(nil, removeKeys); err != nil {
 		log.Error("fail to remove with the prefix", zap.String("key", k), zap.Error(err))
 	}
 	return err

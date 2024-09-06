@@ -38,15 +38,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type checkRequest struct {
-	CollectionID int64
-	Notifier     chan bool
+type targetOp int
+
+func (op *targetOp) String() string {
+	switch *op {
+	case UpdateCollection:
+		return "UpdateCollection"
+	case ReleaseCollection:
+		return "ReleaseCollection"
+	case ReleasePartition:
+		return "ReleasePartition"
+	default:
+		return "Unknown"
+	}
 }
+
+const (
+	UpdateCollection targetOp = iota + 1
+	ReleaseCollection
+	ReleasePartition
+)
 
 type targetUpdateRequest struct {
 	CollectionID  int64
+	PartitionIDs  []int64
 	Notifier      chan error
 	ReadyNotifier chan struct{}
+	opType        targetOp
 }
 
 type initRequest struct{}
@@ -60,8 +78,7 @@ type TargetObserver struct {
 	broker    meta.Broker
 	cluster   session.Cluster
 
-	initChan    chan initRequest
-	manualCheck chan checkRequest
+	initChan chan initRequest
 	// nextTargetLastUpdate map[int64]time.Time
 	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
 	updateChan           chan targetUpdateRequest
@@ -71,7 +88,8 @@ type TargetObserver struct {
 	dispatcher *taskDispatcher[int64]
 	keylocks   *lock.KeyLock[int64]
 
-	stopOnce sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewTargetObserver(
@@ -87,9 +105,8 @@ func NewTargetObserver(
 		distMgr:              distMgr,
 		broker:               broker,
 		cluster:              cluster,
-		manualCheck:          make(chan checkRequest, 10),
 		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
-		updateChan:           make(chan targetUpdateRequest),
+		updateChan:           make(chan targetUpdateRequest, 10),
 		readyNotifiers:       make(map[int64][]chan struct{}),
 		initChan:             make(chan initRequest),
 		keylocks:             lock.NewKeyLock[int64](),
@@ -101,19 +118,21 @@ func NewTargetObserver(
 }
 
 func (ob *TargetObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	ob.dispatcher.Start()
+		ob.dispatcher.Start()
 
-	ob.wg.Add(1)
-	go func() {
-		defer ob.wg.Done()
-		ob.schedule(ctx)
-	}()
+		ob.wg.Add(1)
+		go func() {
+			defer ob.wg.Done()
+			ob.schedule(ctx)
+		}()
 
-	// after target observer start, update target for all collection
-	ob.initChan <- initRequest{}
+		// after target observer start, update target for all collection
+		ob.initChan <- initRequest{}
+	})
 }
 
 func (ob *TargetObserver) Stop() {
@@ -149,23 +168,44 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			ob.dispatcher.AddTask(ob.meta.GetAll()...)
 
 		case req := <-ob.updateChan:
-			log := log.With(zap.Int64("collectionID", req.CollectionID))
-			log.Info("manually trigger update next target")
-			ob.keylocks.Lock(req.CollectionID)
-			err := ob.updateNextTarget(req.CollectionID)
-			ob.keylocks.Unlock(req.CollectionID)
-			if err != nil {
-				log.Warn("failed to manually update next target", zap.Error(err))
-				close(req.ReadyNotifier)
-			} else {
+			log.Info("manually trigger update target",
+				zap.Int64("collectionID", req.CollectionID),
+				zap.String("opType", req.opType.String()),
+			)
+			switch req.opType {
+			case UpdateCollection:
+				ob.keylocks.Lock(req.CollectionID)
+				err := ob.updateNextTarget(req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
+				if err != nil {
+					log.Warn("failed to manually update next target",
+						zap.Int64("collectionID", req.CollectionID),
+						zap.String("opType", req.opType.String()),
+						zap.Error(err))
+					close(req.ReadyNotifier)
+				} else {
+					ob.mut.Lock()
+					ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
+					ob.mut.Unlock()
+				}
+				req.Notifier <- err
+			case ReleaseCollection:
 				ob.mut.Lock()
-				ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
+				for _, notifier := range ob.readyNotifiers[req.CollectionID] {
+					close(notifier)
+				}
+				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
-			}
 
-			log.Info("manually trigger update target done")
-			req.Notifier <- err
-			log.Info("notify manually trigger update target done")
+				ob.targetMgr.RemoveCollection(req.CollectionID)
+				req.Notifier <- nil
+			case ReleasePartition:
+				ob.targetMgr.RemovePartition(req.CollectionID, req.PartitionIDs...)
+				req.Notifier <- nil
+			}
+			log.Info("manually trigger update target done",
+				zap.Int64("collectionID", req.CollectionID),
+				zap.String("opType", req.opType.String()))
 		}
 	}
 }
@@ -181,14 +221,6 @@ func (ob *TargetObserver) Check(ctx context.Context, collectionID int64, partiti
 }
 
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
-	if !ob.meta.Exist(collectionID) {
-		ob.ReleaseCollection(collectionID)
-		ob.targetMgr.RemoveCollection(collectionID)
-		log.Info("collection has been removed from target observer",
-			zap.Int64("collectionID", collectionID))
-		return
-	}
-
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
 
@@ -226,6 +258,7 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 
 	ob.updateChan <- targetUpdateRequest{
 		CollectionID:  collectionID,
+		opType:        UpdateCollection,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}
@@ -233,12 +266,26 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 }
 
 func (ob *TargetObserver) ReleaseCollection(collectionID int64) {
-	ob.mut.Lock()
-	defer ob.mut.Unlock()
-	for _, notifier := range ob.readyNotifiers[collectionID] {
-		close(notifier)
+	notifier := make(chan error)
+	defer close(notifier)
+	ob.updateChan <- targetUpdateRequest{
+		CollectionID: collectionID,
+		opType:       ReleaseCollection,
+		Notifier:     notifier,
 	}
-	delete(ob.readyNotifiers, collectionID)
+	<-notifier
+}
+
+func (ob *TargetObserver) ReleasePartition(collectionID int64, partitionID ...int64) {
+	notifier := make(chan error)
+	defer close(notifier)
+	ob.updateChan <- targetUpdateRequest{
+		CollectionID: collectionID,
+		PartitionIDs: partitionID,
+		opType:       ReleasePartition,
+		Notifier:     notifier,
+	}
+	<-notifier
 }
 
 func (ob *TargetObserver) clean() {

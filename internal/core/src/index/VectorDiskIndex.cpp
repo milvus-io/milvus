@@ -282,6 +282,14 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       search_config[RANGE_FILTER],
                                       GetMetricType());
             }
+
+            auto page_retain_order = GetValueFromConfig<bool>(
+                search_info.search_params_, PAGE_RETAIN_ORDER);
+            if (page_retain_order.has_value()) {
+                search_config[knowhere::meta::RETAIN_ITERATOR_ORDER] =
+                    page_retain_order.value();
+            }
+
             auto res = index_.RangeSearch(dataset, search_config, bitset);
 
             if (!res.has_value()) {

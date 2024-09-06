@@ -35,6 +35,7 @@
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
 #include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
 
@@ -49,7 +50,7 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     if (doc.HasParseError()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "json parse failed, error:{}",
-                  doc.GetParseError());
+                  rapidjson::GetParseError_En(doc.GetParseError()));
     }
 
     rapidjson::Document result_doc;

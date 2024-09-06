@@ -107,6 +107,54 @@ func (_c *MockSealOperator_IsNoWaitSeal_Call) RunAndReturn(run func() bool) *Moc
 	return _c
 }
 
+// MustSealSegments provides a mock function with given fields: ctx, infos
+func (_m *MockSealOperator) MustSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
+	_va := make([]interface{}, len(infos))
+	for _i := range infos {
+		_va[_i] = infos[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockSealOperator_MustSealSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MustSealSegments'
+type MockSealOperator_MustSealSegments_Call struct {
+	*mock.Call
+}
+
+// MustSealSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - infos ...stats.SegmentBelongs
+func (_e *MockSealOperator_Expecter) MustSealSegments(ctx interface{}, infos ...interface{}) *MockSealOperator_MustSealSegments_Call {
+	return &MockSealOperator_MustSealSegments_Call{Call: _e.mock.On("MustSealSegments",
+		append([]interface{}{ctx}, infos...)...)}
+}
+
+func (_c *MockSealOperator_MustSealSegments_Call) Run(run func(ctx context.Context, infos ...stats.SegmentBelongs)) *MockSealOperator_MustSealSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]stats.SegmentBelongs, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(stats.SegmentBelongs)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockSealOperator_MustSealSegments_Call) Return() *MockSealOperator_MustSealSegments_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSealOperator_MustSealSegments_Call) RunAndReturn(run func(context.Context, ...stats.SegmentBelongs)) *MockSealOperator_MustSealSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TryToSealSegments provides a mock function with given fields: ctx, infos
 func (_m *MockSealOperator) TryToSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
 	_va := make([]interface{}, len(infos))

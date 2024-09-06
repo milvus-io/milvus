@@ -5,11 +5,13 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -95,6 +97,22 @@ func (m *partitionSegmentManager) CollectShouldBeSealed() []*segmentAllocManager
 	defer m.mu.Unlock()
 
 	return m.collectShouldBeSealedWithPolicy(m.hitSealPolicy)
+}
+
+// CollectionMustSealed seals the specified segment.
+func (m *partitionSegmentManager) CollectionMustSealed(segmentID int64) *segmentAllocManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var target *segmentAllocManager
+	m.segments = lo.Filter(m.segments, func(segment *segmentAllocManager, _ int) bool {
+		if segment.inner.GetSegmentId() == segmentID {
+			target = segment
+			return false
+		}
+		return true
+	})
+	return target
 }
 
 // collectShouldBeSealedWithPolicy collects all segments that should be sealed by policy.
@@ -267,5 +285,5 @@ func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *Assign
 	if inserted, ack := newGrowingSegment.AllocRows(ctx, req); inserted {
 		return &AssignSegmentResult{SegmentID: newGrowingSegment.GetSegmentID(), Acknowledge: ack}, nil
 	}
-	return nil, errors.Errorf("too large insert message, cannot hold in empty growing segment, stats: %+v", req.InsertMetrics)
+	return nil, status.NewUnrecoverableError("too large insert message, cannot hold in empty growing segment, stats: %+v", req.InsertMetrics)
 }

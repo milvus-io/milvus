@@ -188,7 +188,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegments().GetBegin(), t.plan.GetPreAllocatedSegments().GetEnd())
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 
@@ -235,7 +235,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	defer t.cleanUp(ctx)
 
 	// 1, download delta logs to build deltaMap
-	deltaBlobs, _, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	deltaBlobs, _, err := composePaths(t.plan.GetSegmentBinlogs())
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
+		t.clusterBufferLocks.Lock(buffer.id)
 		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
+		t.clusterBufferLocks.Unlock(buffer.id)
 	}
 	return totalBufferSize
 }
@@ -1012,6 +1014,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 			Level:               segment.Level,
 			CollectionID:        segment.CollectionID,
 			PartitionID:         segment.PartitionID,
+			IsSorted:            segment.IsSorted,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			analyzeResult, err := t.scalarAnalyzeSegment(ctx, segmentClone)

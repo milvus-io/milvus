@@ -40,7 +40,8 @@
 namespace milvus::index {
 
 StringIndexMarisa::StringIndexMarisa(
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context)
+    : StringIndex(MARISA_TRIE) {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -314,12 +315,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key > value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
             };
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
-            }
             break;
         }
         case OpType::GreaterEqual: {
@@ -327,11 +324,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key >= value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
-            }
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
             }
             break;
         }

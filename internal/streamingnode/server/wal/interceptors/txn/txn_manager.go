@@ -5,9 +5,13 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 )
 
 // NewTxnManager creates a new transaction manager.
@@ -25,7 +29,7 @@ func NewTxnManager() *TxnManager {
 type TxnManager struct {
 	mu       sync.Mutex
 	sessions map[message.TxnID]*TxnSession
-	closed   chan struct{}
+	closed   lifetime.SafeChan
 }
 
 // BeginNewTxn starts a new transaction with a session.
@@ -75,7 +79,7 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 
 	// If the manager is on graceful shutdown and all transactions are cleaned up.
 	if len(m.sessions) == 0 && m.closed != nil {
-		close(m.closed)
+		m.closed.Close()
 	}
 }
 
@@ -92,15 +96,21 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 }
 
 // GracefulClose waits for all transactions to be cleaned up.
-func (m *TxnManager) GracefulClose() {
+func (m *TxnManager) GracefulClose(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed == nil {
-		m.closed = make(chan struct{})
+		m.closed = lifetime.NewSafeChan()
 		if len(m.sessions) == 0 {
-			close(m.closed)
+			m.closed.Close()
 		}
 	}
+	log.Info("there's still txn session in txn manager, waiting for them to be consumed", zap.Int("session count", len(m.sessions)))
 	m.mu.Unlock()
 
-	<-m.closed
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.closed.CloseCh():
+		return nil
+	}
 }

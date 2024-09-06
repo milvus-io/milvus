@@ -2,14 +2,12 @@ package message_test
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 )
@@ -45,28 +43,18 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, uint64(123), mutableMessage.TimeTick())
 	assert.Equal(t, uint64(456), mutableMessage.BarrierTimeTick())
 
-	lcMsgID := mock_message.NewMockMessageID(t)
-	lcMsgID.EXPECT().Marshal().Return("lcMsgID")
+	lcMsgID := walimplstest.NewTestMessageID(1)
 	mutableMessage.WithLastConfirmed(lcMsgID)
 	v, ok = mutableMessage.Properties().Get("_lc")
 	assert.True(t, ok)
-	assert.Equal(t, v, "lcMsgID")
+	assert.Equal(t, v, "1")
 
 	v, ok = mutableMessage.Properties().Get("_vc")
 	assert.True(t, ok)
 	assert.Equal(t, "v1", v)
 	assert.Equal(t, "v1", mutableMessage.VChannel())
 
-	msgID := mock_message.NewMockMessageID(t)
-	msgID.EXPECT().EQ(msgID).Return(true)
-	msgID.EXPECT().WALName().Return("testMsgID")
-	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data string) (message.MessageID, error) {
-		if data == "lcMsgID" {
-			return msgID, nil
-		}
-		panic(fmt.Sprintf("unexpected data: %s", data))
-	})
-
+	msgID := walimplstest.NewTestMessageID(1)
 	immutableMessage := message.NewImmutableMesasge(msgID,
 		[]byte("payload"),
 		map[string]string{
@@ -74,7 +62,7 @@ func TestMessage(t *testing.T) {
 			"_t":  "1",
 			"_tt": message.EncodeUint64(456),
 			"_v":  "1",
-			"_lc": "lcMsgID",
+			"_lc": "1",
 		})
 
 	assert.True(t, immutableMessage.MessageID().EQ(msgID))
@@ -84,7 +72,7 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 36, immutableMessage.EstimateSize())
+	assert.Equal(t, 30, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(1), immutableMessage.Version())
 	assert.Equal(t, uint64(456), immutableMessage.TimeTick())
 	assert.NotNil(t, immutableMessage.LastConfirmedMessageID())

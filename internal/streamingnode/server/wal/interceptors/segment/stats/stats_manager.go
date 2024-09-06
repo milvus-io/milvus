@@ -3,6 +3,11 @@ package stats
 import (
 	"fmt"
 	"sync"
+
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // StatsManager is the manager of stats.
@@ -23,6 +28,7 @@ type SegmentBelongs struct {
 	VChannel     string
 	CollectionID int64
 	PartitionID  int64
+	SegmentID    int64
 }
 
 // NewStatsManager creates a new stats manager.
@@ -151,6 +157,34 @@ func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 		}
 	}
 	return stats
+}
+
+// SealByTotalGrowingSegmentsSize seals the largest growing segment
+// if the total size of growing segments in ANY vchannel exceeds the threshold.
+func (m *StatsManager) SealByTotalGrowingSegmentsSize() SegmentBelongs {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for vchannel, metrics := range m.vchannelStats {
+		threshold := paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.GetAsUint64() * 1024 * 1024
+		if metrics.BinarySize >= threshold {
+			var (
+				largestSegment     int64  = 0
+				largestSegmentSize uint64 = 0
+			)
+			for segmentID, stats := range m.segmentStats {
+				if stats.Insert.BinarySize > largestSegmentSize {
+					largestSegmentSize = stats.Insert.BinarySize
+					largestSegment = segmentID
+				}
+			}
+			log.Info("seal by total growing segments size", zap.String("vchannel", vchannel),
+				zap.Uint64("vchannelGrowingSize", metrics.BinarySize), zap.Uint64("sealThreshold", threshold),
+				zap.Int64("sealSegment", largestSegment), zap.Uint64("sealSegmentSize", largestSegmentSize))
+			return m.segmentIndex[largestSegment]
+		}
+	}
+	return SegmentBelongs{}
 }
 
 // InsertOpeatationMetrics is the metrics of insert operation.

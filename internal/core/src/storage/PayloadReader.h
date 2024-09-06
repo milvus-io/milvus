@@ -29,7 +29,7 @@ class PayloadReader {
     explicit PayloadReader(const uint8_t* data,
                            int length,
                            DataType data_type,
-                           bool nullable);
+                           bool nullable_);
 
     ~PayloadReader() = default;
 
@@ -44,7 +44,7 @@ class PayloadReader {
  private:
     DataType column_type_;
     int dim_;
-    bool nullable;
+    bool nullable_;
     FieldDataPtr field_data_;
 };
 

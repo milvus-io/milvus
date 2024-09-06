@@ -123,9 +123,7 @@ func TestSkip(t *testing.T) {
 
 func TestBroadcastCreatePartitionMsgStep(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
-	u := mock_streaming.NewMockUtility(t)
-	u.EXPECT().AppendMessagesWithOption(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
-	wal.EXPECT().Utility().Return(u)
+	wal.EXPECT().AppendMessagesWithOption(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
 	streaming.SetWALForTest(wal)
 
 	step := &broadcastCreatePartitionMsgStep{

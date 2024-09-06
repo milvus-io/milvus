@@ -307,6 +307,32 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.ErrorIs(err, merr.ErrParameterInvalid)
 	}
 
+	// Test load existed collection with different load fields
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		req := &querypb.LoadCollectionRequest{
+			CollectionID: collection,
+			LoadFields:   []int64{100, 101},
+		}
+		job := NewLoadCollectionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.collectionObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
+	}
+
 	// Test load partition while collection exists
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
@@ -496,6 +522,34 @@ func (suite *JobSuite) TestLoadPartition() {
 			CollectionID:  collection,
 			PartitionIDs:  suite.partitions[collection],
 			ReplicaNumber: 3,
+		}
+		job := NewLoadPartitionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.collectionObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
+	}
+
+	// Test load partition with different load fields
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+			continue
+		}
+
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+			LoadFields:   []int64{100, 101},
 		}
 		job := NewLoadPartitionJob(
 			ctx,

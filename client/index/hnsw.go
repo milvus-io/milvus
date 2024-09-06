@@ -41,13 +41,13 @@ func (idx hnswIndex) Params() map[string]string {
 	}
 }
 
-func NewHNSWIndex(metricType MetricType, M int, efConstruction int) Index {
+func NewHNSWIndex(metricType MetricType, m int, efConstruction int) Index {
 	return hnswIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  HNSW,
 		},
-		m:              M,
+		m:              m,
 		efConstruction: efConstruction,
 	}
 }

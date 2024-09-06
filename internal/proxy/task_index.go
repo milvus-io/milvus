@@ -197,6 +197,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			}
 
 			indexParamsMap[common.IndexTypeKey] = indexType
+			cit.isAutoIndex = true
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]

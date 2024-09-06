@@ -4,13 +4,15 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
-	defaultSealAllInterval = 10 * time.Second
+	defaultSealAllInterval  = 10 * time.Second
+	defaultMustSealInterval = 200 * time.Millisecond
 )
 
 // NewSealedInspector creates a new seal inspector.
@@ -82,6 +84,9 @@ func (s *sealOperationInspectorImpl) background() {
 	sealAllTicker := time.NewTicker(defaultSealAllInterval)
 	defer sealAllTicker.Stop()
 
+	mustSealTicker := time.NewTicker(defaultMustSealInterval)
+	defer mustSealTicker.Stop()
+
 	var backoffCh <-chan time.Time
 	for {
 		if s.shouldEnableBackoff() {
@@ -112,6 +117,11 @@ func (s *sealOperationInspectorImpl) background() {
 				pm.TryToSealSegments(s.taskNotifier.Context())
 				return true
 			})
+		case <-mustSealTicker.C:
+			segmentBelongs := resource.Resource().SegmentAssignStatsManager().SealByTotalGrowingSegmentsSize()
+			if pm, ok := s.managers.Get(segmentBelongs.PChannel); ok {
+				pm.MustSealSegments(s.taskNotifier.Context(), segmentBelongs)
+			}
 		}
 	}
 }

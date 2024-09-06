@@ -39,10 +39,8 @@ func TestWAL(t *testing.T) {
 		handlerClient:                  handler,
 		producerMutex:                  sync.Mutex{},
 		producers:                      make(map[string]*producer.ResumableProducer),
-		utility: &utility{
-			appendExecutionPool:   conc.NewPool[struct{}](10),
-			dispatchExecutionPool: conc.NewPool[struct{}](10),
-		},
+		appendExecutionPool:            conc.NewPool[struct{}](10),
+		dispatchExecutionPool:          conc.NewPool[struct{}](10),
 	}
 	defer w.Close()
 
@@ -70,7 +68,7 @@ func TestWAL(t *testing.T) {
 	p.EXPECT().Close().Return()
 
 	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
-	result, err := w.Append(ctx, newInsertMessage(vChannel1))
+	result, err := w.RawAppend(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
@@ -107,7 +105,7 @@ func TestWAL(t *testing.T) {
 	err = txn.Rollback(ctx)
 	assert.NoError(t, err)
 
-	resp := w.Utility().AppendMessages(ctx,
+	resp := w.AppendMessages(ctx,
 		newInsertMessage(vChannel1),
 		newInsertMessage(vChannel2),
 		newInsertMessage(vChannel2),

@@ -61,3 +61,7 @@ func (id testMessageID) EQ(other message.MessageID) bool {
 func (id testMessageID) Marshal() string {
 	return strconv.FormatInt(int64(id), 10)
 }
+
+func (id testMessageID) String() string {
+	return strconv.FormatInt(int64(id), 10)
+}

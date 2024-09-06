@@ -691,9 +691,13 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	t.Run("Delete user or drop role", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{
-				Status:      merr.Success(),
-				PolicyInfos: []string{"policy1", "policy2", "policy3"},
-				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role2", "Collection", "collection1", "read", "default"),
+					"policy2",
+					"policy3",
+				},
+				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
@@ -1192,6 +1196,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 		DataType:  schemapb.DataType_JSON,
 		IsDynamic: true,
 	}
+	clusteringKeyField := &schemapb.FieldSchema{
+		FieldID:         common.StartOfUserFieldID + 5,
+		Name:            "clustering_key",
+		DataType:        schemapb.DataType_Int32,
+		IsClusteringKey: true,
+	}
 
 	testCases := []testCase{
 		{
@@ -1225,11 +1235,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					partitionKeyField,
 					vectorField,
 					dynamicField,
+					clusteringKeyField,
 				},
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
 			expectErr:        false,
 		},
 		{
@@ -1244,11 +1255,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					partitionKeyField,
 					vectorField,
 					dynamicField,
+					clusteringKeyField,
 				},
 			},
-			loadFields:       []string{"pk", "part_key", "vector"},
+			loadFields:       []string{"pk", "part_key", "vector", "clustering_key"},
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
 			expectErr:        false,
 		},
 		{
@@ -1323,6 +1335,23 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			loadFields:       []string{"pk", "part_key"},
 			skipDynamicField: true,
 			expectErr:        true,
+		},
+		{
+			tag: "clustering_key_not_loaded",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+			},
+			loadFields: []string{"pk", "part_key", "vector"},
+			expectErr:  true,
 		},
 	}
 

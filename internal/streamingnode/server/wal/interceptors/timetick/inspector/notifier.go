@@ -101,10 +101,17 @@ func (l *TimeTickNotifier) OnlyUpdateTs(timetick uint64) {
 // Or if the time tick is less than the last time tick, return channel.
 func (l *TimeTickNotifier) WatchAtMessageID(messageID message.MessageID, ts uint64) <-chan struct{} {
 	l.cond.L.Lock()
-	if l.info.IsZero() || !l.info.MessageID.EQ(messageID) {
+	// If incoming messageID is less than the producer messageID,
+	// the consumer can read the new greater messageID from wal,
+	// so the watch operation is not necessary.
+	if l.info.IsZero() || messageID.LT(l.info.MessageID) {
 		l.cond.L.Unlock()
 		return nil
 	}
+
+	// messageID may be greater than MessageID in notifier.
+	// because consuming operation is fast than produce operation.
+	// so doing a listening here.
 	if ts < l.info.TimeTick {
 		ch := make(chan struct{})
 		close(ch)
