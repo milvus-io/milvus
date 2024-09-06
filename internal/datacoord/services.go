@@ -1460,7 +1460,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 		return nil
 	}
 
-	log.Info("start flushing segments", zap.Int64s("segmentIDs", flushableIDs))
+	log.Info("start flushing segments", zap.Int64s("segmentIDs", flushableIDs), zap.Uint64("ts", ts))
 	// update segment last update triggered time
 	// it's ok to fail flushing, since next timetick after duration will re-trigger
 	s.setLastFlushTime(flushableSegments)
