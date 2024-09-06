@@ -151,7 +151,8 @@ TextMatchIndex::shouldTriggerCommit() {
 
 void
 TextMatchIndex::Commit() {
-    if (mtx_.try_lock()) {
+    std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
+    if (lck.try_lock()) {
         wrapper_->commit();
         last_commit_time_.store(stdclock::now());
     }
