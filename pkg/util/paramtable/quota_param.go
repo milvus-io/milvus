@@ -19,7 +19,6 @@ package paramtable
 import (
 	"fmt"
 	"math"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -135,37 +134,35 @@ type quotaConfig struct {
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
 
 	// limit writing
-	ForceDenyWriting                     ParamItem `refreshable:"true"`
-	TtProtectionEnabled                  ParamItem `refreshable:"true"`
-	MaxTimeTickDelay                     ParamItem `refreshable:"true"`
-	MemProtectionEnabled                 ParamItem `refreshable:"true"`
-	DataNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
-	DataNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
-	QueryNodeMemoryLowWaterLevel         ParamItem `refreshable:"true"`
-	QueryNodeMemoryHighWaterLevel        ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeProtectionEnabled ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeMinRateRatio      ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeLowWaterLevel     ParamItem `refreshable:"true"`
-	GrowingSegmentsSizeHighWaterLevel    ParamItem `refreshable:"true"`
-	DiskProtectionEnabled                ParamItem `refreshable:"true"`
-	DiskQuota                            ParamItem `refreshable:"true"`
-	DiskQuotaPerDB                       ParamItem `refreshable:"true"`
-	DiskQuotaPerCollection               ParamItem `refreshable:"true"`
-	DiskQuotaPerPartition                ParamItem `refreshable:"true"`
-	L0SegmentRowCountProtectionEnabled   ParamItem `refreshable:"true"`
-	L0SegmentRowCountLowWaterLevel       ParamItem `refreshable:"true"`
-	L0SegmentRowCountHighWaterLevel      ParamItem `refreshable:"true"`
+	ForceDenyWriting                      ParamItem `refreshable:"true"`
+	TtProtectionEnabled                   ParamItem `refreshable:"true"`
+	MaxTimeTickDelay                      ParamItem `refreshable:"true"`
+	MemProtectionEnabled                  ParamItem `refreshable:"true"`
+	DataNodeMemoryLowWaterLevel           ParamItem `refreshable:"true"`
+	DataNodeMemoryHighWaterLevel          ParamItem `refreshable:"true"`
+	QueryNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
+	QueryNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeProtectionEnabled  ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeMinRateRatio       ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeLowWaterLevel      ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeHighWaterLevel     ParamItem `refreshable:"true"`
+	DiskProtectionEnabled                 ParamItem `refreshable:"true"`
+	DiskQuota                             ParamItem `refreshable:"true"`
+	DiskQuotaPerDB                        ParamItem `refreshable:"true"`
+	DiskQuotaPerCollection                ParamItem `refreshable:"true"`
+	DiskQuotaPerPartition                 ParamItem `refreshable:"true"`
+	L0SegmentRowCountProtectionEnabled    ParamItem `refreshable:"true"`
+	L0SegmentRowCountLowWaterLevel        ParamItem `refreshable:"true"`
+	L0SegmentRowCountHighWaterLevel       ParamItem `refreshable:"true"`
+	DeleteBufferRowCountProtectionEnabled ParamItem `refreshable:"true"`
+	DeleteBufferRowCountLowWaterLevel     ParamItem `refreshable:"true"`
+	DeleteBufferRowCountHighWaterLevel    ParamItem `refreshable:"true"`
+	DeleteBufferSizeProtectionEnabled     ParamItem `refreshable:"true"`
+	DeleteBufferSizeLowWaterLevel         ParamItem `refreshable:"true"`
+	DeleteBufferSizeHighWaterLevel        ParamItem `refreshable:"true"`
 
 	// limit reading
-	ForceDenyReading               ParamItem `refreshable:"true"`
-	QueueProtectionEnabled         ParamItem `refreshable:"true"`
-	NQInQueueThreshold             ParamItem `refreshable:"true"`
-	QueueLatencyThreshold          ParamItem `refreshable:"true"`
-	ResultProtectionEnabled        ParamItem `refreshable:"true"`
-	MaxReadResultRate              ParamItem `refreshable:"true"`
-	MaxReadResultRatePerDB         ParamItem `refreshable:"true"`
-	MaxReadResultRatePerCollection ParamItem `refreshable:"true"`
-	CoolOffSpeed                   ParamItem `refreshable:"true"`
+	ForceDenyReading ParamItem `refreshable:"true"`
 }
 
 func (p *quotaConfig) init(base *BaseTable) {
@@ -1915,6 +1912,60 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 	}
 	p.L0SegmentRowCountHighWaterLevel.Init(base.mgr)
 
+	p.DeleteBufferRowCountProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.enabled",
+		Version:      "2.4.11",
+		DefaultValue: "false",
+		Doc:          "switch to enable delete buffer row count quota",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountProtectionEnabled.Init(base.mgr)
+
+	p.DeleteBufferRowCountLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.lowWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "32768",
+		Doc:          "delete buffer row count quota, low water level",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountLowWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferRowCountHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferRowCountProtection.highWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "65536",
+		Doc:          "delete buffer row count quota, high water level",
+		Export:       true,
+	}
+	p.DeleteBufferRowCountHighWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferSizeProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.enabled",
+		Version:      "2.4.11",
+		DefaultValue: "false",
+		Doc:          "switch to enable delete buffer size quota",
+		Export:       true,
+	}
+	p.DeleteBufferSizeProtectionEnabled.Init(base.mgr)
+
+	p.DeleteBufferSizeLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.lowWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "134217728", // 128MB
+		Doc:          "delete buffer size quota, low water level",
+		Export:       true,
+	}
+	p.DeleteBufferSizeLowWaterLevel.Init(base.mgr)
+
+	p.DeleteBufferSizeHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.deleteBufferSizeProtection.highWaterLevel",
+		Version:      "2.4.11",
+		DefaultValue: "268435456", // 256MB
+		Doc:          "delete buffer size quota, high water level",
+		Export:       true,
+	}
+	p.DeleteBufferSizeHighWaterLevel.Init(base.mgr)
+
 	// limit reading
 	p.ForceDenyReading = ParamItem{
 		Key:          "quotaAndLimits.limitReading.forceDeny",
@@ -1925,159 +1976,6 @@ specific conditions, such as collection has been dropped), ` + "true" + ` means 
 		Export: true,
 	}
 	p.ForceDenyReading.Init(base.mgr)
-
-	p.QueueProtectionEnabled = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.enabled",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.QueueProtectionEnabled.Init(base.mgr)
-
-	p.NQInQueueThreshold = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.nqInQueueThreshold",
-		Version:      "2.2.0",
-		DefaultValue: strconv.FormatInt(math.MaxInt64, 10),
-		Formatter: func(v string) string {
-			if !p.QueueProtectionEnabled.GetAsBool() {
-				return strconv.FormatInt(math.MaxInt64, 10)
-			}
-			threshold := getAsFloat(v)
-			// [0, inf)
-			if threshold < 0 {
-				return strconv.FormatInt(math.MaxInt64, 10)
-			}
-			return v
-		},
-		Doc: `nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
-If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
-until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-int, default no limit`,
-		Export: true,
-	}
-	p.NQInQueueThreshold.Init(base.mgr)
-
-	p.QueueLatencyThreshold = ParamItem{
-		Key:          "quotaAndLimits.limitReading.queueProtection.queueLatencyThreshold",
-		Version:      "2.2.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.QueueProtectionEnabled.GetAsBool() {
-				return max
-			}
-			level := getAsFloat(v)
-			// [0, inf)
-			if level < 0 {
-				return max
-			}
-			return v
-		},
-		Doc: `queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
-If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
-until the latency of queuing no longer exceeds queueLatencyThreshold.
-The latency here refers to the averaged latency over a period of time.
-milliseconds, default no limit`,
-		Export: true,
-	}
-	p.QueueLatencyThreshold.Init(base.mgr)
-
-	p.ResultProtectionEnabled = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.enabled",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.ResultProtectionEnabled.Init(base.mgr)
-
-	p.MaxReadResultRate = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRate",
-		Version:      "2.2.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Doc: `maxReadResultRate indicated that the system was under backpressure for Search/Query path.
-If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
-until the read result rate no longer exceeds maxReadResultRate.
-MB/s, default no limit`,
-		Export: true,
-	}
-	p.MaxReadResultRate.Init(base.mgr)
-
-	p.MaxReadResultRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerDB",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.MaxReadResultRatePerDB.Init(base.mgr)
-
-	p.MaxReadResultRatePerCollection = ParamItem{
-		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerCollection",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.ResultProtectionEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.MaxReadResultRatePerCollection.Init(base.mgr)
-
-	const defaultSpeed = "0.9"
-	p.CoolOffSpeed = ParamItem{
-		Key:          "quotaAndLimits.limitReading.coolOffSpeed",
-		Version:      "2.2.0",
-		DefaultValue: defaultSpeed,
-		Formatter: func(v string) string {
-			// (0, 1]
-			speed := getAsFloat(v)
-			if speed <= 0 || speed > 1 {
-				// log.Warn("CoolOffSpeed must in the range of `(0, 1]`, use default value", zap.Float64("speed", p.CoolOffSpeed), zap.Float64("default", defaultSpeed))
-				return defaultSpeed
-			}
-			return v
-		},
-		Doc: `colOffSpeed is the speed of search&query rates cool off.
-(0, 1]`,
-		Export: true,
-	}
-	p.CoolOffSpeed.Init(base.mgr)
 
 	p.AllocRetryTimes = ParamItem{
 		Key:          "quotaAndLimits.limits.allocRetryTimes",

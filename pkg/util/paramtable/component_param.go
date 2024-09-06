@@ -2654,8 +2654,10 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.4.6",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
-		Doc:          "Enable mmap for using in growing raw data",
-		Export:       true,
+		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data. 
+By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
+		Export: true,
 		Formatter: func(v string) string {
 			mmapEnabled := p.MmapEnabled.GetAsBool()
 			return strconv.FormatBool(mmapEnabled && getAsBool(v))
