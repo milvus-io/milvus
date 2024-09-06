@@ -3,6 +3,7 @@ package ack
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
@@ -12,7 +13,7 @@ func newAckDetail(ts uint64, lastConfirmedMessageID message.MessageID) *AckDetai
 		panic(fmt.Sprintf("ts should never less than 0 %d", ts))
 	}
 	return &AckDetail{
-		Timestamp:              ts,
+		BeginTimestamp:         ts,
 		LastConfirmedMessageID: lastConfirmedMessageID,
 		IsSync:                 false,
 		Err:                    nil,
@@ -21,8 +22,12 @@ func newAckDetail(ts uint64, lastConfirmedMessageID message.MessageID) *AckDetai
 
 // AckDetail records the information of acker.
 type AckDetail struct {
-	Timestamp              uint64
+	BeginTimestamp uint64 // the timestamp when acker is allocated.
+	EndTimestamp   uint64 // the timestamp when acker is acknowledged.
+	// for avoiding allocation of timestamp failure, the timestamp will use the ack manager last allocated timestamp.
 	LastConfirmedMessageID message.MessageID
+	MessageID              message.MessageID
+	TxnSession             *txn.TxnSession
 	IsSync                 bool
 	Err                    error
 }
@@ -41,5 +46,19 @@ func OptSync() AckOption {
 func OptError(err error) AckOption {
 	return func(detail *AckDetail) {
 		detail.Err = err
+	}
+}
+
+// OptMessageID marks the message id for acker.
+func OptMessageID(messageID message.MessageID) AckOption {
+	return func(detail *AckDetail) {
+		detail.MessageID = messageID
+	}
+}
+
+// OptTxnSession marks the session for acker.
+func OptTxnSession(session *txn.TxnSession) AckOption {
+	return func(detail *AckDetail) {
+		detail.TxnSession = session
 	}
 }

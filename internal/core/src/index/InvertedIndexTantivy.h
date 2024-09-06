@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <vector>
 #include "common/RegexQuery.h"
 #include "index/Index.h"
 #include "storage/FileManager.h"
@@ -33,7 +35,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManager = storage::DiskFileManagerImpl;
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
-    InvertedIndexTantivy() = default;
+    InvertedIndexTantivy() : ScalarIndex<T>(INVERTED_INDEX_TYPE) {
+    }
+
     explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx);
 
     ~InvertedIndexTantivy();
@@ -80,12 +84,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                      const void* values,
                      const Config& config = {}) override;
 
-    /*
-     * deprecated.
-     * TODO: why not remove this?
-     */
     BinarySet
-    Serialize(const Config& config /* not used */) override;
+    Serialize(const Config& config) override;
 
     BinarySet
     Upload(const Config& config = {}) override;
@@ -100,6 +100,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     const TargetBitmap
     In(size_t n, const T* values) override;
+
+    const TargetBitmap
+    IsNull() override;
+
+    const TargetBitmap
+    IsNotNull() override;
 
     const TargetBitmap
     InApplyFilter(
@@ -193,5 +199,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
+
+    // all data need to be built to align the offset
+    // so need to store null_offset in inverted index additionally
+    std::vector<size_t> null_offset{};
 };
 }  // namespace milvus::index

@@ -28,9 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -38,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -48,6 +47,8 @@ const (
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
+	GroupSizeKey         = "group_size"
+	GroupStrictSize      = "group_strict_size"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"
@@ -360,7 +361,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		// validate dense vector field type parameters
-		if typeutil.IsVectorType(field.DataType) {
+		isVectorType := typeutil.IsVectorType(field.DataType)
+		if isVectorType {
 			err = validateDimension(field)
 			if err != nil {
 				return err
@@ -382,9 +384,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 		}
+		// TODO should remove the index params in the field schema
+		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
+		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
+		}
 	}
 
 	if err := validateMultipleVectorFields(t.schema); err != nil {
+		return err
+	}
+
+	if err := validateLoadFieldsList(t.schema); err != nil {
 		return err
 	}
 
@@ -1426,107 +1437,6 @@ func (t *showPartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type flushTask struct {
-	baseTask
-	Condition
-	*milvuspb.FlushRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.FlushResponse
-
-	replicateMsgStream msgstream.MsgStream
-}
-
-func (t *flushTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *flushTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *flushTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *flushTask) Name() string {
-	return FlushTaskName
-}
-
-func (t *flushTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *flushTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *flushTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *flushTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *flushTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_Flush
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *flushTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (t *flushTask) Execute(ctx context.Context) error {
-	coll2Segments := make(map[string]*schemapb.LongArray)
-	flushColl2Segments := make(map[string]*schemapb.LongArray)
-	coll2SealTimes := make(map[string]int64)
-	coll2FlushTs := make(map[string]Timestamp)
-	channelCps := make(map[string]*msgpb.MsgPosition)
-	for _, collName := range t.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
-		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-		}
-		flushReq := &datapb.FlushRequest{
-			Base: commonpbutil.UpdateMsgBase(
-				t.Base,
-				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
-			),
-			CollectionID: collID,
-		}
-		resp, err := t.dataCoord.Flush(ctx, flushReq)
-		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
-		}
-		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
-		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
-		coll2SealTimes[collName] = resp.GetTimeOfSeal()
-		coll2FlushTs[collName] = resp.GetFlushTs()
-		channelCps = resp.GetChannelCps()
-	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
-	t.result = &milvuspb.FlushResponse{
-		Status:          merr.Success(),
-		DbName:          t.GetDbName(),
-		CollSegIDs:      coll2Segments,
-		FlushCollSegIDs: flushColl2Segments,
-		CollSealTimes:   coll2SealTimes,
-		CollFlushTs:     coll2FlushTs,
-		ChannelCps:      channelCps,
-	}
-	return nil
-}
-
-func (t *flushTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 type loadCollectionTask struct {
 	baseTask
 	Condition
@@ -1611,6 +1521,13 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	// TODO use load collection load field list after proto merged
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
+
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1658,6 +1575,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema))
@@ -1855,6 +1773,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// prepare load field list
+	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	if err != nil {
+		return err
+	}
 	// check index
 	indexResponse, err := t.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
@@ -1908,6 +1831,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
+		LoadFields:     loadFields,
 	}
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {

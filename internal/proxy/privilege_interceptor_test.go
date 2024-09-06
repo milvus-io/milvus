@@ -231,3 +231,299 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestPrivilegeGroup(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("grant ReadOnly to single collection", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String(), "default"),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll1",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ShowCollectionsRequest{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("grant ReadOnly to all collection", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String(), "default"),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll1",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ShowCollectionsRequest{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("grant ReadWrite to single collection", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String(), "default"),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{
+			CollectionName: "coll2",
+		})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
+		assert.Error(t, err)
+	})
+
+	t.Run("grant ReadWrite to all collection", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String(), "default"),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{
+			CollectionName: "coll1",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{
+			CollectionName: "coll2",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
+		assert.Error(t, err)
+	})
+
+	t.Run("Admin", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		initPrivilegeGroups()
+
+		var err error
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &mocks.MockQueryCoordClient{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String(), "default"),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+		defer CleanPrivilegeCache()
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SearchRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.InsertRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
+		assert.NoError(t, err)
+	})
+}

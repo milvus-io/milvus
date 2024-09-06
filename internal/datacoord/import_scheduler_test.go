@@ -27,6 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -37,7 +39,7 @@ type ImportSchedulerSuite struct {
 	collectionID int64
 
 	catalog   *mocks.DataCoordCatalog
-	alloc     *NMockAllocator
+	alloc     *allocator.MockAllocator
 	cluster   *MockCluster
 	meta      *meta
 	imeta     ImportMeta
@@ -60,9 +62,10 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 	s.cluster = NewMockCluster(s.T())
-	s.alloc = NewNMockAllocator(s.T())
+	s.alloc = allocator.NewMockAllocator(s.T())
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
@@ -105,12 +108,11 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		Slots: 1,
 	}, nil)
 	s.cluster.EXPECT().PreImport(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: nodeID,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: nodeID,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
@@ -174,18 +176,17 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 
 	// pending -> inProgress
 	const nodeID = 10
-	s.alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
-	s.alloc.EXPECT().allocTimestamp(mock.Anything).Return(300, nil)
+	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
+	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
 	s.cluster.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: nodeID,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: nodeID,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
@@ -242,12 +243,11 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
-	s.cluster.EXPECT().GetSessions().Return([]*Session{
-		{
-			info: &NodeInfo{
-				NodeID: 6,
-			},
-		},
+	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
+		sess := session.NewSession(&session.NodeInfo{
+			NodeID: 6,
+		}, nil)
+		return []*session.Session{sess}
 	})
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := &SegmentInfo{

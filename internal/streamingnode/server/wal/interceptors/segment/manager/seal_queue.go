@@ -95,7 +95,7 @@ func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentA
 	// send flush message into wal.
 	for collectionID, vchannelSegments := range sealedSegments {
 		for vchannel, segments := range vchannelSegments {
-			if err := q.sendFlushMessageIntoWAL(ctx, collectionID, vchannel, segments); err != nil {
+			if err := q.sendFlushSegmentsMessageIntoWAL(ctx, collectionID, vchannel, segments); err != nil {
 				q.logger.Warn("fail to send flush message into wal", zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Error(err))
 				undone = append(undone, segments...)
 				continue
@@ -146,6 +146,13 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 			continue
 		}
 
+		txnSem := segment.TxnSem()
+		if txnSem > 0 {
+			undone = append(undone, segment)
+			q.logger.Info("segment has been sealed, but there are flying txns, delay it", zap.Int64("segmentID", segment.GetSegmentID()), zap.Int32("txnSem", txnSem))
+			continue
+		}
+
 		// collect all sealed segments and no flying ack segment.
 		if _, ok := sealedSegments[segment.GetCollectionID()]; !ok {
 			sealedSegments[segment.GetCollectionID()] = make(map[string][]*segmentAllocManager)
@@ -158,15 +165,21 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 	return undone, sealedSegments
 }
 
-// sendFlushMessageIntoWAL sends a flush message into wal.
-func (m *sealQueue) sendFlushMessageIntoWAL(ctx context.Context, collectionID int64, vchannel string, segments []*segmentAllocManager) error {
+// sendFlushSegmentsMessageIntoWAL sends a flush message into wal.
+func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collectionID int64, vchannel string, segments []*segmentAllocManager) error {
 	segmentIDs := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-	msg, err := m.createNewFlushMessage(collectionID, vchannel, segmentIDs)
+	msg, err := message.NewFlushMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.FlushMessageHeader{}).
+		WithBody(&message.FlushMessageBody{
+			CollectionId: collectionID,
+			SegmentId:    segmentIDs,
+		}).BuildMutable()
 	if err != nil {
-		return errors.Wrap(err, "at create new flush message")
+		return errors.Wrap(err, "at create new flush segments message")
 	}
 
 	msgID, err := m.wal.Get().Append(ctx, msg)
@@ -179,7 +192,11 @@ func (m *sealQueue) sendFlushMessageIntoWAL(ctx context.Context, collectionID in
 }
 
 // createNewFlushMessage creates a new flush message.
-func (m *sealQueue) createNewFlushMessage(collectionID int64, vchannel string, segmentIDs []int64) (message.MutableMessage, error) {
+func (m *sealQueue) createNewFlushMessage(
+	collectionID int64,
+	vchannel string,
+	segmentIDs []int64,
+) (message.MutableMessage, error) {
 	// Create a flush message.
 	msg, err := message.NewFlushMessageBuilderV2().
 		WithVChannel(vchannel).

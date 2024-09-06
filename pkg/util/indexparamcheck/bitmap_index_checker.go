@@ -16,6 +16,9 @@ func (c *BITMAPChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c *BITMAPChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if field.IsPrimaryKey {
+		return fmt.Errorf("create bitmap index on primary key not supported")
+	}
 	mainType := field.GetDataType()
 	elemType := field.GetElementType()
 	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&

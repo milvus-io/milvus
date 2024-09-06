@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -46,7 +47,7 @@ type Broker interface {
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
-	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
+	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
@@ -114,14 +115,14 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 
 	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
 	if err != nil {
-		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
 	} else if replicaNum > 0 {
 		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
 	}
 
 	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.GetProperties())
 	if err != nil {
-		log.Warn("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
 	} else if len(rgs) > 0 {
 		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
 	}
@@ -135,7 +136,7 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		if replicaNum <= 0 {
 			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
 			if err != nil {
-				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+				log.Debug("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
 			} else if replicaNum > 0 {
 				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
 			}
@@ -144,7 +145,7 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		if len(rgs) == 0 {
 			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
 			if err != nil {
-				log.Warn("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+				log.Debug("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
 			} else if len(rgs) > 0 {
 				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
 			}
@@ -255,35 +256,54 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 	return recoveryInfo.Channels, recoveryInfo.Segments, nil
 }
 
-func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) (*datapb.GetSegmentInfoResponse, error) {
+func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) ([]*datapb.SegmentInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+
 	log := log.Ctx(ctx).With(
 		zap.Int64s("segments", ids),
 	)
 
-	req := &datapb.GetSegmentInfoRequest{
-		SegmentIDs:       ids,
-		IncludeUnHealthy: true,
-	}
-	resp, err := broker.dataCoord.GetSegmentInfo(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
-		return nil, err
+	getSegmentInfo := func(ids []UniqueID) (*datapb.GetSegmentInfoResponse, error) {
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       ids,
+			IncludeUnHealthy: true,
+		}
+		resp, err := broker.dataCoord.GetSegmentInfo(ctx, req)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+			return nil, err
+		}
+
+		if len(resp.Infos) == 0 {
+			log.Warn("No such segment in DataCoord")
+			return nil, fmt.Errorf("no such segment in DataCoord")
+		}
+
+		err = binlog.DecompressMultiBinLogs(resp.GetInfos())
+		if err != nil {
+			log.Warn("failed to DecompressMultiBinLogs", zap.Error(err))
+			return nil, err
+		}
+
+		return resp, nil
 	}
 
-	if len(resp.Infos) == 0 {
-		log.Warn("No such segment in DataCoord")
-		return nil, fmt.Errorf("no such segment in DataCoord")
+	ret := make([]*datapb.SegmentInfo, 0, len(ids))
+	batchSize := 1000
+	startIdx := 0
+	for startIdx < len(ids) {
+		endIdx := int(math.Min(float64(startIdx+batchSize), float64(len(ids))))
+
+		resp, err := getSegmentInfo(ids[startIdx:endIdx])
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, resp.GetInfos()...)
+		startIdx += batchSize
 	}
 
-	err = binlog.DecompressMultiBinLogs(resp.GetInfos())
-	if err != nil {
-		log.Warn("failed to DecompressMultiBinLogs", zap.Error(err))
-		return nil, err
-	}
-
-	return resp, nil
+	return ret, nil
 }
 
 func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {

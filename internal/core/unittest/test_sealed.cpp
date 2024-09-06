@@ -1715,7 +1715,7 @@ TEST(Sealed, WarmupChunkCache) {
     auto has = segment->HasRawData(vec_info.field_id);
     EXPECT_FALSE(has);
 
-    segment_sealed->WarmupChunkCache(FieldId(vec_info.field_id));
+    segment_sealed->WarmupChunkCache(FieldId(vec_info.field_id), true);
 
     auto ids_ds = GenRandomIds(N);
     auto result =
@@ -1872,7 +1872,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
+        pk_fid, 0, DataType::INT64, pk_field_data->Data(), nullptr, N);
     auto& skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
@@ -1914,7 +1914,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::INT32, false, 1, 10);
     int32_field_data->FillFieldData(int32s.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        i32_fid, 0, DataType::INT32, int32_field_data->Data(), N);
+        i32_fid, 0, DataType::INT32, int32_field_data->Data(), nullptr, N);
     less_than_1_skip =
         skip_index.CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
     ASSERT_TRUE(less_than_1_skip);
@@ -1925,7 +1925,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::INT16, false, 1, 10);
     int16_field_data->FillFieldData(int16s.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        i16_fid, 0, DataType::INT16, int16_field_data->Data(), N);
+        i16_fid, 0, DataType::INT16, int16_field_data->Data(), nullptr, N);
     bool less_than_12_skip =
         skip_index.CanSkipUnaryRange<int16_t>(i16_fid, 0, OpType::LessThan, 12);
     ASSERT_FALSE(less_than_12_skip);
@@ -1936,7 +1936,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::INT8, false, 1, 10);
     int8_field_data->FillFieldData(int8s.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        i8_fid, 0, DataType::INT8, int8_field_data->Data(), N);
+        i8_fid, 0, DataType::INT8, int8_field_data->Data(), nullptr, N);
     bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
         i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
@@ -1948,7 +1948,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::FLOAT, false, 1, 10);
     float_field_data->FillFieldData(floats.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        float_fid, 0, DataType::FLOAT, float_field_data->Data(), N);
+        float_fid, 0, DataType::FLOAT, float_field_data->Data(), nullptr, N);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
         float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
@@ -1960,7 +1960,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
         storage::CreateFieldData(DataType::DOUBLE, false, 1, 10);
     double_field_data->FillFieldData(doubles.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        double_fid, 0, DataType::DOUBLE, double_field_data->Data(), N);
+        double_fid, 0, DataType::DOUBLE, double_field_data->Data(), nullptr, N);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
         double_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
@@ -1984,7 +1984,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
         storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
     segment->LoadPrimitiveSkipIndex(
-        pk_fid, 0, DataType::INT64, pk_field_data->Data(), N);
+        pk_fid, 0, DataType::INT64, pk_field_data->Data(), nullptr, N);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
@@ -2000,6 +2000,117 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, false, true));
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, true, true));
+}
+
+TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
+
+    auto dataset = DataGen(schema, 5);
+    auto segment = CreateSealedSegment(schema);
+
+    //test for int64
+    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
+    std::array<uint8_t, 1> valid_data = {0x03};
+    FixedVector<bool> valid_data_ = {true, true, false, false, false};
+    auto int64s_field_data =
+        storage::CreateFieldData(DataType::INT64, true, 1, 5);
+
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    segment->LoadPrimitiveSkipIndex(i64_fid,
+                                    0,
+                                    DataType::INT64,
+                                    int64s_field_data->Data(),
+                                    valid_data_.data(),
+                                    5);
+    auto& skip_index = segment->GetSkipIndex();
+    bool equal_5_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
+    bool equal_4_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 4);
+    bool equal_2_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 2);
+    bool equal_1_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 1);
+    ASSERT_TRUE(equal_5_skip);
+    ASSERT_TRUE(equal_4_skip);
+    ASSERT_FALSE(equal_2_skip);
+    ASSERT_FALSE(equal_1_skip);
+    bool less_than_1_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 1);
+    bool less_than_5_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 5);
+    ASSERT_TRUE(less_than_1_skip);
+    ASSERT_FALSE(less_than_5_skip);
+    bool less_equal_than_1_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessEqual, 1);
+    bool less_equal_than_15_skip =
+        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 15);
+    ASSERT_FALSE(less_equal_than_1_skip);
+    ASSERT_FALSE(less_equal_than_15_skip);
+    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterThan, 10);
+    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterThan, 5);
+    bool greater_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterThan, 2);
+    bool greater_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterThan, 1);
+    ASSERT_TRUE(greater_than_10_skip);
+    ASSERT_TRUE(greater_than_5_skip);
+    ASSERT_TRUE(greater_than_2_skip);
+    ASSERT_FALSE(greater_than_1_skip);
+    bool greater_equal_than_3_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterEqual, 3);
+    bool greater_equal_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        i64_fid, 0, OpType::GreaterEqual, 2);
+    ASSERT_TRUE(greater_equal_than_3_skip);
+    ASSERT_FALSE(greater_equal_than_2_skip);
+}
+
+TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
+    auto dataset = DataGen(schema, 5);
+    auto segment = CreateSealedSegment(schema);
+
+    //test for int64
+    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
+    std::array<uint8_t, 1> valid_data = {0x03};
+    FixedVector<bool> valid_data_ = {true, true, false, false, false};
+    auto int64s_field_data =
+        storage::CreateFieldData(DataType::INT64, true, 1, 5);
+
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    segment->LoadPrimitiveSkipIndex(i64_fid,
+                                    0,
+                                    DataType::INT64,
+                                    int64s_field_data->Data(),
+                                    valid_data_.data(),
+                                    5);
+    auto& skip_index = segment->GetSkipIndex();
+    ASSERT_FALSE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
+    ASSERT_TRUE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, false));
+
+    ASSERT_FALSE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 3, true, true));
+    ASSERT_FALSE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 2, true, false));
+
+    ASSERT_TRUE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, false, true));
+    ASSERT_FALSE(
+        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, true, true));
 }
 
 TEST(Sealed, SkipIndexSkipStringRange) {

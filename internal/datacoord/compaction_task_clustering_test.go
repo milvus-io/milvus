@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -45,11 +47,10 @@ type ClusteringCompactionTaskSuite struct {
 	suite.Suite
 
 	mockID           atomic.Int64
-	mockAlloc        *NMockAllocator
+	mockAlloc        *allocator.MockAllocator
 	meta             *meta
-	mockSessMgr      *MockSessionManager
 	handler          *NMockHandler
-	session          *MockSessionManager
+	mockSessionMgr   *session.MockDataNodeManager
 	analyzeScheduler *taskScheduler
 }
 
@@ -61,16 +62,14 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.NoError(err)
 	s.meta = meta
 
-	s.mockSessMgr = NewMockSessionManager(s.T())
-
 	s.mockID.Store(time.Now().UnixMilli())
-	s.mockAlloc = NewNMockAllocator(s.T())
-	s.mockAlloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
 		start := s.mockID.Load()
 		end := s.mockID.Add(int64(x))
 		return start, end, nil
 	}).Maybe()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
 		end := s.mockID.Add(1)
 		return end, nil
 	}).Maybe()
@@ -78,9 +77,9 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.handler = NewNMockHandler(s.T())
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 
-	s.session = NewMockSessionManager(s.T())
+	s.mockSessionMgr = session.NewMockDataNodeManager(s.T())
 
-	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil)
+	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
 	s.analyzeScheduler = scheduler
 }
 
@@ -104,7 +103,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 			PartitionStatsVersion: 10000,
 		},
 	})
-	s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	task := s.generateBasicTask(false)
 
@@ -189,7 +188,7 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 		ResultSegments:     []int64{1000, 1100},
 	}
 
-	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.session, s.handler, s.analyzeScheduler)
+	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.mockSessionMgr, s.handler, s.analyzeScheduler)
 	task.maxRetryTimes = 0
 	return task
 }
@@ -235,7 +234,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrDataNodeSlotExhausted())
+		s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrDataNodeSlotExhausted())
 		task.State = datapb.CompactionTaskState_pipelining
 		s.False(task.Process())
 		s.Equal(int64(NullNodeID), task.GetNodeID())
@@ -259,7 +258,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessPipelining() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.State = datapb.CompactionTaskState_pipelining
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetState())
@@ -308,7 +307,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(1)).Once()
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(1)).Once()
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_pipelining, task.GetState())
 	})
@@ -331,10 +330,10 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(nil, nil).Once()
 		s.Equal(false, task.Process())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetState())
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_executing,
 		}, nil).Once()
 		s.Equal(false, task.Process())
@@ -359,7 +358,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{
 				{
@@ -371,7 +370,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result ready", func() {
@@ -392,7 +391,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{
 				{
@@ -404,7 +403,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 			},
 		}, nil).Once()
 		s.Equal(false, task.Process())
-		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(datapb.CompactionTaskState_statistic, task.GetState())
 	})
 
 	s.Run("process executing, compaction result timeout", func() {
@@ -427,7 +426,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_executing,
 			Segments: []*datapb.CompactionSegment{
 				{
@@ -446,31 +445,31 @@ func (s *ClusteringCompactionTaskSuite) TestProcessExecuting() {
 
 func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {
 	task := s.generateBasicTask(false)
-	s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+	s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,
 	}, nil).Once()
 	s.NoError(task.processExecuting())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 
-	s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+	s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,
 	}, nil).Once()
 	s.NoError(task.processExecuting())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 
-	s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+	s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_pipelining,
 	}, nil).Once()
 	s.NoError(task.processExecuting())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 
-	s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+	s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_completed,
 	}, nil).Once()
 	s.Error(task.processExecuting())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetState())
 
-	s.session.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+	s.mockSessionMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
 			{
@@ -500,6 +499,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			CollectionID: 1,
 			IndexID:      3,
 		}
+
+		task.ResultSegments = []int64{10, 11}
 		err := s.meta.indexMeta.CreateIndex(index)
 		s.NoError(err)
 
@@ -607,7 +608,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 				PartitionStatsVersion: 10000,
 			},
 		})
-		s.session.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mockSessionMgr.EXPECT().Compaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetState())

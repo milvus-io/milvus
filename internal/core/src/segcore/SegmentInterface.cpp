@@ -56,10 +56,21 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     AssertInfo(results.seg_offsets_.size() == size,
                "Size of result distances is not equal to size of ids");
 
+    std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
-        auto field_data =
-            bulk_subscript(field_id, results.seg_offsets_.data(), size);
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            field_data = std::move(bulk_subscript(field_id,
+                                                  results.seg_offsets_.data(),
+                                                  size,
+                                                  target_dynamic_fields));
+        } else {
+            field_data = std::move(
+                bulk_subscript(field_id, results.seg_offsets_.data(), size));
+        }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
 }
@@ -164,6 +175,16 @@ SegmentInternalInterface::FillTargetEntry(
         }
 
         if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        if (plan->schema_.get_dynamic_field_id().has_value() &&
+            plan->schema_.get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            auto col =
+                bulk_subscript(field_id, offsets, size, target_dynamic_fields);
+            fields_data->AddAllocated(col.release());
             continue;
         }
 
@@ -357,8 +378,10 @@ SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
                                                  int64_t chunk_id,
                                                  milvus::DataType data_type,
                                                  const void* chunk_data,
+                                                 const bool* valid_data,
                                                  int64_t count) {
-    skip_index_.LoadPrimitive(field_id, chunk_id, data_type, chunk_data, count);
+    skip_index_.LoadPrimitive(
+        field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
 void

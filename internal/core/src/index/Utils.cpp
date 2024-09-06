@@ -242,14 +242,15 @@ void
 AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
     if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
         auto slice_meta = index_datas.at(INDEX_FILE_SLICE_META);
-        Config meta_data = Config::parse(std::string(
-            static_cast<const char*>(slice_meta->Data()), slice_meta->Size()));
+        Config meta_data = Config::parse(
+            std::string(static_cast<const char*>(slice_meta->Data()),
+                        slice_meta->DataSize()));
 
         for (auto& item : meta_data[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-            // todo: support nullable index
+            // build index skip null value, so not need to set nullable == true
             auto new_field_data =
                 storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
@@ -258,7 +259,7 @@ AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
                 AssertInfo(index_datas.find(file_name) != index_datas.end(),
                            "lost index slice data");
                 auto data = index_datas.at(file_name);
-                auto len = data->Size();
+                auto len = data->DataSize();
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }
@@ -282,13 +283,13 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
         index_datas.erase(INDEX_FILE_SLICE_META);
         Config metadata = Config::parse(
             std::string(static_cast<const char*>(raw_metadata->Data()),
-                        raw_metadata->Size()));
+                        raw_metadata->DataSize()));
 
         for (auto& item : metadata[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-            // todo: support nullable index
+            // build index skip null value, so not need to set nullable == true
             auto new_field_data =
                 storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
@@ -299,7 +300,7 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
                 auto& channel = it->second;
                 auto data_array = storage::CollectFieldDataChannel(channel);
                 auto data = storage::MergeFieldData(data_array);
-                auto len = data->Size();
+                auto len = data->DataSize();
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }

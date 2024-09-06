@@ -54,3 +54,9 @@ func NewSortedIndex() Index {
 		indexType: Sorted,
 	}
 }
+
+func NewBitmapIndex() Index {
+	return scalarIndex{
+		indexType: BITMAP,
+	}
+}

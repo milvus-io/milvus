@@ -208,7 +208,6 @@ type commonConfig struct {
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
 	DataCoordSubName      ParamItem `refreshable:"false"`
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
-	DataCoordTicklePath   ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
@@ -277,6 +276,9 @@ type commonConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 	MaximumGOGCConfig                   ParamItem `refreshable:"false"`
 	MinimumGOGCConfig                   ParamItem `refreshable:"false"`
+	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
+	ReadWritePrivileges                 ParamItem `refreshable:"false"`
+	AdminPrivileges                     ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -286,6 +288,9 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
 		DefaultValue: "by-dev",
+		Doc: `Root name prefix of the channel when a message channel is created.
+It is recommended to change this parameter before starting Milvus for the first time.
+To share a Pulsar instance among multiple Milvus instances, consider changing this to a name rather than the default one for each Milvus instance before you start them.`,
 		PanicIfEmpty: true,
 		Forbidden:    true,
 		Export:       true,
@@ -309,8 +314,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordTimeTick.Init(base.mgr)
 
@@ -320,8 +329,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes its own statistics messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordStatistics}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordStatistics.Init(base.mgr)
 
@@ -331,8 +344,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the root coord publishes Data Manipulation Language (DML) messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.rootCoordDml}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.RootCoordDml.Init(base.mgr)
 
@@ -353,8 +370,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the query node publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.QueryCoordTimeTick.Init(base.mgr)
 
@@ -364,8 +385,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes time tick messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordTimeTick}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordTimeTick.Init(base.mgr)
 
@@ -375,8 +400,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Sub-name prefix of the message channel where the data coord publishes segment information messages.
+The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.dataCoordSegmentInfo}
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSegmentInfo.Init(base.mgr)
 
@@ -386,8 +415,11 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data coord.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataCoordSubName.Init(base.mgr)
 
@@ -399,22 +431,17 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.DataCoordWatchSubPath.Init(base.mgr)
 
-	p.DataCoordTicklePath = ParamItem{
-		Key:          "msgChannel.subNamePrefix.dataCoordWatchSubPath",
-		Version:      "2.2.3",
-		DefaultValue: "tickle",
-		PanicIfEmpty: true,
-	}
-	p.DataCoordTicklePath.Init(base.mgr)
-
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
 		DefaultValue: "dataNode",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
+		Doc: `Subscription name prefix of the data node.
+Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+It is recommended to change this parameter before starting Milvus for the first time.`,
+		Formatter: chanNamePrefix,
+		Export:    true,
 	}
 	p.DataNodeSubName.Init(base.mgr)
 
@@ -876,6 +903,27 @@ This helps Milvus-CDC synchronize incremental data`,
 		DefaultValue: "30",
 	}
 	p.MinimumGOGCConfig.Init(base.mgr)
+
+	p.ReadOnlyPrivileges = ParamItem{
+		Key:     "common.security.readonly.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-only privileges,  example: "PrivilegeQuery,PrivilegeSearch"`,
+	}
+	p.ReadOnlyPrivileges.Init(base.mgr)
+
+	p.ReadWritePrivileges = ParamItem{
+		Key:     "common.security.readwrite.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of read-write privileges,  example: "PrivilegeCreateCollection,PrivilegeDropCollection"`,
+	}
+	p.ReadWritePrivileges.Init(base.mgr)
+
+	p.AdminPrivileges = ParamItem{
+		Key:     "common.security.admin.privileges",
+		Version: "2.4.7",
+		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
+	}
+	p.AdminPrivileges.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2291,10 +2339,14 @@ type queryNodeConfig struct {
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
-	CacheEnabled                        ParamItem `refreshable:"false"`
-	CacheMemoryLimit                    ParamItem `refreshable:"false"`
-	MmapDirPath                         ParamItem `refreshable:"false"`
+	CacheMemoryLimit ParamItem `refreshable:"false"`
+	MmapDirPath      ParamItem `refreshable:"false"`
+	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
 	MmapEnabled                         ParamItem `refreshable:"false"`
+	MmapVectorField                     ParamItem `refreshable:"false"`
+	MmapVectorIndex                     ParamItem `refreshable:"false"`
+	MmapScalarField                     ParamItem `refreshable:"false"`
+	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2530,14 +2582,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.CacheMemoryLimit.Init(base.mgr)
 
-	p.CacheEnabled = ParamItem{
-		Key:          "queryNode.cache.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "",
-		Export:       true,
-	}
-	p.CacheEnabled.Init(base.mgr)
-
 	p.MmapDirPath = ParamItem{
 		Key:          "queryNode.mmap.mmapDirPath",
 		Version:      "2.3.0",
@@ -2558,18 +2602,80 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.4.0",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.mmapEnabled"},
-		Doc:          "Enable mmap for loading data",
-		Export:       true,
+		Doc:          "Deprecated: Enable mmap for loading data, including vector/scalar data and index",
+		Export:       false,
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.MmapVectorField = ParamItem{
+		Key:          "queryNode.mmap.vectorField",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading vector data",
+		Export: true,
+	}
+	p.MmapVectorField.Init(base.mgr)
+
+	p.MmapVectorIndex = ParamItem{
+		Key:          "queryNode.mmap.vectorIndex",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading vector index",
+		Export: true,
+	}
+	p.MmapVectorIndex.Init(base.mgr)
+
+	p.MmapScalarField = ParamItem{
+		Key:          "queryNode.mmap.scalarField",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading scalar data",
+		Export: true,
+	}
+	p.MmapScalarField.Init(base.mgr)
+
+	p.MmapScalarIndex = ParamItem{
+		Key:          "queryNode.mmap.scalarIndex",
+		Version:      "2.4.7",
+		DefaultValue: "false",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading scalar index",
+		Export: true,
+	}
+	p.MmapScalarIndex.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
-		Doc:          "Enable mmap for using in growing raw data",
-		Export:       true,
+		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data. 
+By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
+		Export: true,
 		Formatter: func(v string) string {
 			mmapEnabled := p.MmapEnabled.GetAsBool()
 			return strconv.FormatBool(mmapEnabled && getAsBool(v))
@@ -3126,6 +3232,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+
+	EnableStatsTask   ParamItem `refreshable:"true"`
+	TaskCheckInterval ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3750,7 +3859,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.IndexTaskSchedulerInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "100",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
 
@@ -3929,6 +4038,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
+
+	p.EnableStatsTask = ParamItem{
+		Key:          "dataCoord.statsTask.enable",
+		Version:      "2.5.0",
+		Doc:          "enable stats task",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.EnableStatsTask.Init(base.mgr)
+
+	p.TaskCheckInterval = ParamItem{
+		Key:          "dataCoord.taskCheckInterval",
+		Version:      "2.5.0",
+		Doc:          "task check interval seconds",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.TaskCheckInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3999,6 +4128,8 @@ type dataNodeConfig struct {
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	DeltalogFormat ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4345,7 +4476,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
-		Key:          "datanode.bloomFilterApplyParallelFactor",
+		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
 		DefaultValue: "4",
@@ -4353,6 +4484,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.DeltalogFormat = ParamItem{
+		Key:          "dataNode.storage.deltalog",
+		Version:      "2.5.0",
+		DefaultValue: "json",
+		Doc:          "deltalog format, options: [json, parquet]",
+		Export:       true,
+	}
+	p.DeltalogFormat.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

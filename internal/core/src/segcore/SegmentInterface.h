@@ -248,6 +248,7 @@ class SegmentInternalInterface : public SegmentInterface {
                            int64_t chunk_id,
                            DataType data_type,
                            const void* chunk_data,
+                           const bool* valid_data,
                            int64_t count);
 
     void
@@ -386,6 +387,13 @@ class SegmentInternalInterface : public SegmentInterface {
     bulk_subscript(FieldId field_id,
                    const int64_t* seg_offsets,
                    int64_t count) const = 0;
+
+    virtual std::unique_ptr<DataArray>
+    bulk_subscript(
+        FieldId field_ids,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

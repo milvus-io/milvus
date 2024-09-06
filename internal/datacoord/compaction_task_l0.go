@@ -27,6 +27,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -41,8 +43,8 @@ type l0CompactionTask struct {
 	result *datapb.CompactionPlanResult
 
 	span      trace.Span
-	allocator allocator
-	sessions  SessionManager
+	allocator allocator.Allocator
+	sessions  session.DataNodeManager
 	meta      CompactionMeta
 }
 
@@ -279,7 +281,7 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.allocN(1)
+	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +311,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			Level:         segInfo.GetLevel(),
 			InsertChannel: segInfo.GetInsertChannel(),
 			Deltalogs:     segInfo.GetDeltalogs(),
+			IsSorted:      segInfo.GetIsSorted(),
 		})
 	}
 
@@ -345,6 +348,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			Level:               info.GetLevel(),
 			CollectionID:        info.GetCollectionID(),
 			PartitionID:         info.GetPartitionID(),
+			IsSorted:            info.GetIsSorted(),
 		}
 	})
 

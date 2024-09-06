@@ -2,10 +2,24 @@ package inspector
 
 import (
 	"context"
+	"sync"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
+
+var (
+	segmentSealedInspector SealOperationInspector
+	initOnce               sync.Once
+)
+
+func GetSegmentSealedInspector() SealOperationInspector {
+	initOnce.Do(func() {
+		segmentSealedInspector = NewSealedInspector(resource.Resource().SegmentAssignStatsManager().SealNotifier())
+	})
+	return segmentSealedInspector
+}
 
 // SealOperationInspector is the inspector to check if a segment should be sealed or not.
 type SealOperationInspector interface {
@@ -35,6 +49,9 @@ type SealOperator interface {
 	// TryToSealWaitedSegment tries to seal the wait for sealing segment.
 	// Return false if there's some segment wait for seal but not sealed.
 	TryToSealWaitedSegment(ctx context.Context)
+
+	// MustSealSegments seals the given segments and waiting seal segments.
+	MustSealSegments(ctx context.Context, infos ...stats.SegmentBelongs)
 
 	// IsNoWaitSeal returns whether there's no segment wait for seal.
 	IsNoWaitSeal() bool

@@ -27,7 +27,7 @@ class TestIssues(TestcaseBase):
         schema = cf.gen_collection_schema(fields=[pk_field, int64_field, string_field, vector_field],
                                           auto_id=False, partition_key_field=par_key_field)
         c_name = cf.gen_unique_str("par_key")
-        collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema, num_partitions=9)
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema, num_partitions=9)
 
         # insert
         nb = 500
@@ -61,7 +61,7 @@ class TestIssues(TestcaseBase):
             seeds = 200
             rand_ids = random.sample(range(0, num_entities), seeds)
             rand_ids = [str(rand_ids[i]) for i in range(len(rand_ids))]
-            res = collection_w.query(expr=f"pk in {rand_ids}", output_fields=["pk", par_key_field])
+            res, _ = collection_w.query(expr=f"pk in {rand_ids}", output_fields=["pk", par_key_field])
             # verify every the random id exists
             assert len(res) == len(rand_ids)
 
@@ -69,8 +69,8 @@ class TestIssues(TestcaseBase):
             for i in range(len(res)):
                 pk = res[i].get("pk")
                 parkey_value = res[i].get(par_key_field)
-                res_parkey = collection_w.query(expr=f"{par_key_field}=={parkey_value} and pk=='{pk}'",
-                                                output_fields=["pk", par_key_field])
+                res_parkey, _ = collection_w.query(expr=f"{par_key_field}=={parkey_value} and pk=='{pk}'",
+                                                   output_fields=["pk", par_key_field])
                 if len(res_parkey) != 1:
                     log.info(f"dirty data found: pk {pk} with parkey {parkey_value}")
                     dirty_count += 1

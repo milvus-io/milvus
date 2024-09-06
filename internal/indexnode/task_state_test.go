@@ -27,4 +27,5 @@ func TestTaskState_String(t *testing.T) {
 	assert.Equal(t, TaskStateAbandon.String(), "Abandon")
 	assert.Equal(t, TaskStateRetry.String(), "Retry")
 	assert.Equal(t, TaskStateFailed.String(), "Failed")
+	assert.Equal(t, TaskState(100).String(), "None")
 }

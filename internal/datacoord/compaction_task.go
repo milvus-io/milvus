@@ -89,6 +89,12 @@ func setResultSegments(segments []int64) compactionTaskOpt {
 	}
 }
 
+func setTmpSegments(segments []int64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.TmpSegments = segments
+	}
+}
+
 func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.State = state

@@ -71,22 +71,22 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 ```bash
 {
     "go.toolsEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.testEnvVars": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.buildFlags": [
-        "-ldflags=-r /Users/zilliz/workspace/milvus/internal/core/output/lib"
+        "-ldflags=-r=/Users/zilliz/workspace/milvus/internal/core/output/lib"
     ],
     "terminal.integrated.env.linux": {
-        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
-        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
-        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+        "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
     },
     "go.useLanguageServer": true,
     "gopls": {
@@ -94,7 +94,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
     },
     "go.formatTool": "gofumpt",
     "go.lintTool": "golangci-lint",
-    "go.testTags": "dynamic",
+    "go.testTags": "test,dynamic",
     "go.testTimeout": "10m"
 }
 ```
@@ -193,6 +193,12 @@ To build the Milvus project, run the following command:
 
 ```shell
 $ make
+```
+
+Milvus uses `conan` to manage 3rd-party dependencies. `conan` will check the consistency of these dependencies every time you run `make`. This process can take a considerable amount of time, especially if the network is poor. If you make sure that the 3rd-party dependencies are consistent, you can use the following command to skip this step:
+
+```shell
+$ make SKIP_3RDPARTY=1
 ```
 
 If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.

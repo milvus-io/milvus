@@ -390,7 +390,8 @@ class TestInsertParams(TestcaseBase):
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
         error = {ct.err_code: 999,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {%s} field should be a int64, "
+                             "but got a {<class 'int'>} instead." % ct.default_int64_field_name}
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -513,7 +514,7 @@ class TestInsertOperation(TestcaseBase):
         data = [vectors, ["limit_1___________",
                           "limit_2___________"], ['1', '2']]
         error = {ct.err_code: 999,
-                 ct.err_msg: "invalid input, length of string exceeds max length"}
+                 ct.err_msg: "length of string exceeds max length"}
         collection_w.insert(
             data, check_task=CheckTasks.err_res, check_items=error)
 
@@ -814,16 +815,6 @@ class TestInsertOperation(TestcaseBase):
         for t in threads:
             t.join()
         assert collection_w.num_entities == ct.default_nb * thread_num
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="Currently primary keys are not unique")
-    def test_insert_multi_threading_auto_id(self):
-        """
-        target: test concurrent insert auto_id=True collection
-        method: 1.create auto_id=True collection 2.concurrent insert
-        expected: verify primary keys unique
-        """
-        pass
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_multi_times(self, dim):
@@ -1211,11 +1202,11 @@ class TestInsertInvalid(TestcaseBase):
                                               check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_invalid_with_pk_varchar_auto_id_true(self):
+    def test_insert_with_pk_varchar_auto_id_true(self):
         """
         target: test insert invalid with pk varchar and auto id true
         method: set pk varchar max length < 18, insert data
-        expected: raise exception
+        expected: varchar pk supports auto_id=true
         """
         string_field = cf.gen_string_field(is_primary=True, max_length=6)
         embedding_field = cf.gen_float_vec_field()
@@ -1547,8 +1538,56 @@ class TestUpsertValid(TestcaseBase):
         res = collection_w.query(exp, output_fields=[default_float_name])[0]
         assert [res[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_upsert_with_primary_key_string(self):
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_upsert_with_auto_id(self):
+        """
+        target: test upsert with auto id
+        method: 1. create a collection with autoID=true
+                2. upsert 10 entities with non-existing pks
+                verify: success, and the pks are auto-generated
+                3. query 10 entities to get the existing pks
+                4. upsert 10 entities with existing pks
+                verify: success, and the pks are re-generated, and the new pks are visibly
+        """
+        dim = 32
+        collection_w, _, _, insert_ids, _ = self.init_collection_general(pre_upsert, auto_id=True,
+                                                                         dim=dim, insert_data=True, with_json=False)
+        nb = 10
+        start = ct.default_nb * 10
+        data = cf.gen_default_list_data(dim=dim, nb=nb, start=start, with_json=False)
+        res_upsert1 = collection_w.upsert(data=data)[0]
+        collection_w.flush()
+        # assert the pks are auto-generated, and num_entities increased for upsert with non_existing pks
+        assert res_upsert1.primary_keys[0] > insert_ids[-1]
+        assert collection_w.num_entities == ct.default_nb + nb
+
+        # query 10 entities to get the existing pks
+        res_q = collection_w.query(expr='', limit=nb)[0]
+        print(f"res_q: {res_q}")
+        existing_pks = [res_q[i][ct.default_int64_field_name] for i in range(nb)]
+        existing_count = collection_w.query(expr=f"{ct.default_int64_field_name} in {existing_pks}",
+                                            output_fields=[ct.default_count_output])[0]
+        assert nb == existing_count[0].get(ct.default_count_output)
+        # upsert 10 entities with the existing pks
+        start = ct.default_nb * 20
+        data = cf.gen_default_list_data(dim=dim, nb=nb, start=start, with_json=False)
+        data[0] = existing_pks
+        res_upsert2 = collection_w.upsert(data=data)[0]
+        collection_w.flush()
+        # assert the new pks are auto-generated again
+        assert res_upsert2.primary_keys[0] > res_upsert1.primary_keys[-1]
+        existing_count = collection_w.query(expr=f"{ct.default_int64_field_name} in {existing_pks}",
+                                            output_fields=[ct.default_count_output])[0]
+        assert 0 == existing_count[0].get(ct.default_count_output)
+        res_q = collection_w.query(expr=f"{ct.default_int64_field_name} in {res_upsert2.primary_keys}",
+                                   output_fields=["*"])[0]
+        assert nb == len(res_q)
+        current_count = collection_w.query(expr='', output_fields=[ct.default_count_output])[0]
+        assert current_count[0].get(ct.default_count_output) == ct.default_nb + nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_upsert_with_primary_key_string(self, auto_id):
         """
         target: test upsert with string primary key
         method: 1. create a collection with pk string
@@ -1558,11 +1597,18 @@ class TestUpsertValid(TestcaseBase):
         """
         c_name = cf.gen_unique_str(pre_upsert)
         fields = [cf.gen_string_field(), cf.gen_float_vec_field(dim=ct.default_dim)]
-        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_string_field_name)
+        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_string_field_name,
+                                          auto_id=auto_id)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(2)]
-        collection_w.insert([["a", "b"], vectors])
-        collection_w.upsert([[" a", "b  "], vectors])
+        if not auto_id:
+            collection_w.insert([["a", "b"], vectors])
+            res_upsert = collection_w.upsert([[" a", "b  "], vectors])[0]
+            assert res_upsert.primary_keys[0] == " a" and res_upsert.primary_keys[1] == "b  "
+        else:
+            collection_w.insert([vectors])
+            res_upsert = collection_w.upsert([[" a", "b  "], vectors])[0]
+            assert res_upsert.primary_keys[0] != " a" and res_upsert.primary_keys[1] != "b  "
         assert collection_w.num_entities == 4
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2061,25 +2107,25 @@ class TestUpsertInvalid(TestcaseBase):
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=1000)
         error = {ct.err_code: 999, ct.err_msg: "['partition_1', 'partition_2'] has type <class 'list'>, "
-                                             "but expected one of: (<class 'bytes'>, <class 'str'>)"}
+                                               "but expected one of: (<class 'bytes'>, <class 'str'>)"}
         collection_w.upsert(data=data, partition_name=["partition_1", "partition_2"],
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="smellthemoon: behavior changed")
-    def test_upsert_with_auto_id(self):
+    def test_upsert_with_auto_id_pk_type_dismacth(self):
         """
-        target: test upsert with auto id
-        method: 1. create a collection with autoID=true
-                2. upsert data no pk
+        target: test upsert with auto_id and pk type dismatch
+        method: 1. create a collection with pk int64 and auto_id=True
+                2. upsert with pk string type dismatch
         expected: raise exception
         """
-        collection_w = self.init_collection_general(pre_upsert, auto_id=True, is_index=False)[0]
-        error = {ct.err_code: 999,
-                 ct.err_msg: "Upsert don't support autoid == true"}
-        float_vec_values = cf.gen_vectors(ct.default_nb, ct.default_dim)
-        data = [[np.float32(i) for i in range(ct.default_nb)], [str(i) for i in range(ct.default_nb)],
-                float_vec_values]
+        dim = 16
+        collection_w = self.init_collection_general(pre_upsert, auto_id=False,
+                                                    dim=dim, insert_data=True, with_json=False)[0]
+        nb = 10
+        data = cf.gen_default_list_data(dim=dim, nb=nb, with_json=False)
+        data[0] = [str(i) for i in range(nb)]
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

@@ -81,6 +81,24 @@ func NewInt64FieldDataWithStart(fieldName string, numRows int, start int64) *sch
 	}
 }
 
+func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *schemapb.FieldData {
+	validData, num := GenerateBoolArray(numRows)
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: GenerateInt64Array(num, int64(start)),
+					},
+				},
+			},
+		},
+		ValidData: validData,
+	}
+}
+
 func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
@@ -151,6 +169,18 @@ func GenerateSameInt64Array(numRows int, value int64) []int64 {
 		ret[i] = value
 	}
 	return ret
+}
+
+func GenerateBoolArray(numRows int) ([]bool, int) {
+	var num int
+	ret := make([]bool, numRows)
+	for i := 0; i < numRows; i++ {
+		ret[i] = i%2 == 0
+		if ret[i] {
+			num++
+		}
+	}
+	return ret, num
 }
 
 func GenerateSameStringArray(numRows int, value string) []string {

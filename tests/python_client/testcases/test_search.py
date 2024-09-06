@@ -1,6 +1,10 @@
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import (
+    FieldSchema, CollectionSchema, DataType,
+    Collection
+)
 from common.constants import *
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
@@ -4676,9 +4680,9 @@ class TestCollectionSearch(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         binary_schema = cf.gen_default_binary_collection_schema(dim=dim)
-        self.collection_wrap.init_collection(c_name, schema=binary_schema,
-                                             check_task=CheckTasks.err_res,
-                                             check_items={"err_code": 65535, "err_msg": f"invalid dimension {dim}."})
+        self.init_collection_wrap(c_name, schema=binary_schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 999, "err_msg": f"invalid dimension: {dim}."})
 
 
 class TestSearchBase(TestcaseBase):
@@ -5175,8 +5179,9 @@ class TestSearchBase(TestcaseBase):
         expected: search success
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=cf.gen_default_collection_schema())
+        nb = 2000
+        dim = 32
+        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False)[0]
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index(field_name, default_index, index_name="mmap_index")
@@ -5185,13 +5190,18 @@ class TestSearchBase(TestcaseBase):
         # search
         collection_w.load()
         search_params = cf.gen_search_param(index)[0]
-        vector = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vector, default_search_field, search_params, ct.default_limit)
+        vector = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vector, default_search_field, search_params, ct.default_limit,
+                            output_fields=["*"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": ct.default_limit})
         # enable mmap
         collection_w.release()
         collection_w.alter_index("mmap_index", {'mmap.enabled': False})
         collection_w.load()
         collection_w.search(vector, default_search_field, search_params, ct.default_limit,
+                            output_fields=["*"],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": ct.default_limit})
@@ -5206,34 +5216,32 @@ class TestSearchBase(TestcaseBase):
         """
         self._connect()
         dim = 64
-        c_name = cf.gen_unique_str(prefix)
-        default_schema = cf.gen_default_binary_collection_schema(auto_id=False, dim=dim,
-                                                                 primary_field=ct.default_int64_field_name)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        nb = 2000
+        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False, is_binary=True)[0]
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index,
                          "params": params, "metric_type": "JACCARD"}
-        collection_w.create_index("binary_vector", default_index, index_name="binary_idx_name")
+        collection_w.create_index(ct.default_binary_vec_field_name, default_index, index_name="binary_idx_name")
         collection_w.alter_index("binary_idx_name", {'mmap.enabled': True})
         collection_w.set_properties({'mmap.enabled': True})
         collection_w.load()
-        pro = collection_w.describe().get("properties")
+        pro = collection_w.describe()[0].get("properties")
         assert pro["mmap.enabled"] == 'True'
-        assert collection_w.index().params["mmap.enabled"] == 'True'
+        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
         # search
-        binary_vectors = cf.gen_binary_vectors(3000, dim)[1]
+        binary_vectors = cf.gen_binary_vectors(default_nq, dim)[1]
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        output_fields = [default_string_field_name]
-        collection_w.search(binary_vectors[:default_nq], "binary_vector", search_params,
+        output_fields = ["*"]
+        collection_w.search(binary_vectors, ct.default_binary_vec_field_name, search_params,
                             default_limit, default_search_string_exp, output_fields=output_fields,
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "limit": ct.default_top_k})
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
 
 
 class TestSearchDSL(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_vector_only(self):
+    def test_search_vector_only(self):
         """
         target: test search normal scenario
         method: search vector only
@@ -5250,6 +5258,54 @@ class TestSearchDSL(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": ct.default_top_k})
+class TestSearchArray(TestcaseBase):
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("array_element_data_type", [DataType.INT64])
+    def test_search_array_with_inverted_index(self, array_element_data_type):
+        # create collection
+        additional_params = {"max_length": 1000} if array_element_data_type == DataType.VARCHAR else {}
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="contains", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_any", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="contains_all", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="equals", dtype=DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params),
+            FieldSchema(name="array_length_field", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="array_access", dtype=DataType.ARRAY, element_type=array_element_data_type,
+                        max_capacity=2000, **additional_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=128)
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # insert data
+        train_data, query_expr = cf.prepare_array_test_data(3000, hit_rate=0.05)
+        collection_w.insert(train_data)
+        index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
+        collection_w.create_index("emb", index_params=index_params)
+        for f in ["contains", "contains_any", "contains_all", "equals", "array_length_field", "array_access"]:
+            collection_w.create_index(f, {"index_type": "INVERTED"})
+        collection_w.load()
+
+        for item in query_expr:
+            expr = item["expr"]
+            ground_truth_candidate = item["ground_truth"]
+            res, _ = collection_w.search(
+                data = [np.array([random.random() for j in range(128)], dtype=np.dtype("float32"))],
+                anns_field="emb",
+                param={"metric_type": "L2", "params": {"M": 32, "efConstruction": 360}},
+                limit=10,
+                expr=expr,
+                output_fields=["*"],
+            )
+            assert len(res) == 1
+            for i in range(len(res)):
+                assert len(res[i]) == 10
+                for hit in res[i]:
+                    assert hit.id in ground_truth_candidate
 
 
 class TestSearchString(TestcaseBase):
@@ -10389,7 +10445,7 @@ class TestSearchGroupBy(TestcaseBase):
                 3. search with group by
                 verify: the error code and msg
         """
-        if index in ["HNSW", "IVF_FLAT", "FLAT"]:
+        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8"]:
             pass    # Only HNSW and IVF_FLAT are supported
         else:
             metric = "L2"

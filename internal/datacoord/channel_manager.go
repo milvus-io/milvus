@@ -26,7 +26,9 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -67,7 +69,7 @@ type ChannelManagerImpl struct {
 	h          Handler
 	store      RWChannelStore
 	subCluster SubCluster // sessionManager
-	allocator  allocator
+	allocator  allocator.Allocator
 
 	factory       ChannelPolicyFactory
 	balancePolicy BalanceChannelPolicy
@@ -98,7 +100,7 @@ func NewChannelManager(
 	kv kv.TxnKV,
 	h Handler,
 	subCluster SubCluster, // sessionManager
-	alloc allocator,
+	alloc allocator.Allocator,
 	options ...ChannelmanagerOpt,
 ) (*ChannelManagerImpl, error) {
 	m := &ChannelManagerImpl{
@@ -159,7 +161,7 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 		m.finishRemoveChannel(info.NodeID, lo.Values(info.Channels)...)
 	}
 
-	if m.balanceCheckLoop != nil {
+	if m.balanceCheckLoop != nil && !streamingutil.IsStreamingServiceEnabled() {
 		log.Info("starting channel balance loop")
 		m.wg.Add(1)
 		go func() {
@@ -328,6 +330,12 @@ func (m *ChannelManagerImpl) Balance() {
 }
 
 func (m *ChannelManagerImpl) Match(nodeID UniqueID, channel string) bool {
+	if streamingutil.IsStreamingServiceEnabled() {
+		// Skip the channel matching check since the
+		// channel manager no longer manages channels in streaming mode.
+		return true
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -694,16 +702,27 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 	startTs := time.Now().Unix()
 	for _, ch := range op.Channels {
 		vcInfo := m.h.GetDataVChanPositions(ch, allPartitionID)
-		opID, err := m.allocator.allocID(context.Background())
+		opID, err := m.allocator.AllocID(context.Background())
 		if err != nil {
 			return err
+		}
+
+		schema := ch.GetSchema()
+		if schema == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			collInfo, err := m.h.GetCollection(ctx, ch.GetCollectionID())
+			if err != nil {
+				return err
+			}
+			schema = collInfo.Schema
 		}
 
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   reduceVChanSize(vcInfo),
 			StartTs: startTs,
 			State:   inferStateByOpType(op.Type),
-			Schema:  ch.GetSchema(),
+			Schema:  schema,
 			OpID:    opID,
 		}
 		ch.UpdateWatchInfo(info)

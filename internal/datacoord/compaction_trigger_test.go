@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -44,6 +45,7 @@ import (
 )
 
 type spyCompactionHandler struct {
+	t       *testing.T
 	spyChan chan *datapb.CompactionPlan
 	meta    *meta
 }
@@ -66,9 +68,9 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 		CompactionTask: task,
 		meta:           h.meta,
 	}
-	alloc := &MockAllocator0{}
+	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
-	t.ResultSegments = []int64{100}
+	t.ResultSegments = []int64{100, 200}
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
@@ -98,7 +100,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 	paramtable.Init()
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -124,6 +126,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 		},
 	}
+
+	mock0Allocator := newMock0Allocator(t)
 
 	tests := []struct {
 		name         string
@@ -165,6 +169,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 											},
 										},
 									},
+									IsSorted: true,
 								},
 							},
 							2: {
@@ -191,6 +196,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 											},
 										},
 									},
+									IsSorted: true,
 								},
 							},
 							3: {
@@ -203,6 +209,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
+									IsSorted:       true,
 								},
 							},
 						},
@@ -419,9 +426,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 						},
 					},
 				},
-				&MockAllocator0{},
+				mock0Allocator,
 				nil,
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			2,
@@ -453,6 +460,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							InsertChannel: "ch1",
 							CollectionID:  2,
 							PartitionID:   1,
+							IsSorted:      true,
 						},
 						{
 							SegmentID: 2,
@@ -474,16 +482,18 @@ func Test_compactionTrigger_force(t *testing.T) {
 							InsertChannel: "ch1",
 							CollectionID:  2,
 							PartitionID:   1,
+							IsSorted:      true,
 						},
 					},
 					// StartTime:        0,
-					TimeoutInSeconds:     Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-					Type:                 datapb.CompactionType_MixCompaction,
-					Channel:              "ch1",
-					TotalRows:            200,
-					Schema:               schema,
-					PreAllocatedSegments: &datapb.IDRange{Begin: 100},
-					SlotUsage:            8,
+					TimeoutInSeconds:       Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+					Type:                   datapb.CompactionType_MixCompaction,
+					Channel:                "ch1",
+					TotalRows:              200,
+					Schema:                 schema,
+					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
+					SlotUsage:              8,
+					MaxSize:                1342177280,
 				},
 			},
 		},
@@ -604,7 +614,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -667,6 +677,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 						},
 					},
 				},
+				IsSorted: true,
 			},
 		}
 
@@ -684,6 +695,8 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 
 		segmentInfos.segments[i] = info
 	}
+
+	mock0Allocator := newMockAllocator(t)
 
 	tests := []struct {
 		name      string
@@ -719,9 +732,9 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 					},
 					indexMeta: indexMeta,
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				nil,
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 2)},
 				nil,
 			},
 			args{
@@ -750,6 +763,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 									},
 								},
 							},
+							IsSorted: true,
 						},
 						{
 							SegmentID: 2,
@@ -768,12 +782,14 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 									},
 								},
 							},
+							IsSorted: true,
 						},
 					},
 					StartTime:        3,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
 					Channel:          "ch1",
+					MaxSize:          1342177280,
 				},
 			},
 		},
@@ -821,7 +837,7 @@ func sortPlanCompactionBinlogs(plan *datapb.CompactionPlan) {
 func Test_compactionTrigger_noplan(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -832,6 +848,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	}
 	Params.DataCoordCfg.MinSegmentToMerge.DefaultValue = "4"
 	vecFieldID := int64(201)
+	mock0Allocator := newMockAllocator(t)
 	tests := []struct {
 		name      string
 		fields    fields
@@ -918,9 +935,9 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 						},
 					},
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				make(chan *compactionSignal, 1),
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			args{
@@ -965,7 +982,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -996,8 +1013,10 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
+	mock0Allocator := newMockAllocator(t)
 
 	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
 		return map[UniqueID]*model.SegmentIndex{
@@ -1107,9 +1126,9 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 						},
 					},
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				make(chan *compactionSignal, 1),
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			false,
@@ -1155,7 +1174,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -1165,6 +1184,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 		compactTime  *compactTime
 	}
 	vecFieldID := int64(201)
+	mock0Allocator := newMockAllocator(t)
 
 	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
 		return &datapb.SegmentInfo{
@@ -1183,6 +1203,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
 
@@ -1294,9 +1315,9 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 						},
 					},
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				make(chan *compactionSignal, 1),
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			args{
@@ -1350,7 +1371,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -1378,6 +1399,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 					},
 				},
 			},
+			IsSorted: true,
 		}
 	}
 
@@ -1396,6 +1418,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			},
 		}
 	}
+	mock0Allocator := newMockAllocator(t)
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1484,9 +1507,9 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 						},
 					},
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				make(chan *compactionSignal, 1),
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
 			},
 			args{
@@ -1541,7 +1564,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	type fields struct {
 		meta              *meta
-		allocator         allocator
+		allocator         allocator.Allocator
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
@@ -1607,6 +1630,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 						},
 					},
 				},
+				IsSorted: true,
 			},
 			lastFlushTime: time.Now(),
 		}
@@ -1625,6 +1649,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 		segmentInfos.segments[i] = info
 	}
+
+	mock0Allocator := newMockAllocator(t)
 
 	tests := []struct {
 		name      string
@@ -1661,9 +1687,9 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 					},
 					indexMeta: indexMeta,
 				},
-				newMockAllocator(),
+				mock0Allocator,
 				make(chan *compactionSignal, 1),
-				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 10)},
+				&spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 10)},
 				nil,
 			},
 			args{
@@ -1728,10 +1754,11 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 // Test shouldDoSingleCompaction
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	indexMeta := newSegmentIndexMeta(nil)
+	mock0Allocator := newMockAllocator(t)
 	trigger := newCompactionTrigger(&meta{
 		indexMeta:  indexMeta,
 		channelCPs: newChannelCps(),
-	}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newIndexEngineVersionManager())
+	}, &compactionPlanHandler{}, mock0Allocator, newMockHandler(), newIndexEngineVersionManager())
 
 	// Test too many deltalogs.
 	var binlogs []*datapb.FieldBinlog
@@ -1946,7 +1973,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 	type args struct {
 		meta              *meta
 		compactionHandler compactionPlanContext
-		allocator         allocator
+		allocator         allocator.Allocator
 	}
 	tests := []struct {
 		name string
@@ -1957,7 +1984,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 			args{
 				&meta{},
 				&compactionPlanHandler{},
-				newMockAllocator(),
+				allocator.NewMockAllocator(t),
 			},
 		},
 	}
@@ -1996,7 +2023,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		channelCPs: newChannelCps(),
 		segments:   NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo),
 	}
-	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(),
+	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(t),
 		&ServerHandler{
 			&Server{
 				meta: m,
@@ -2073,7 +2100,7 @@ type CompactionTriggerSuite struct {
 
 	meta              *meta
 	tr                *compactionTrigger
-	allocator         *NMockAllocator
+	allocator         *allocator.MockAllocator
 	handler           *NMockHandler
 	compactionHandler *MockCompactionPlanContext
 	versionManager    *MockVersionManager
@@ -2100,6 +2127,7 @@ func (s *CompactionTriggerSuite) genSeg(segID, numRows int64) *datapb.SegmentInf
 				},
 			},
 		},
+		IsSorted: true,
 	}
 }
 
@@ -2239,7 +2267,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 		Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
 		MsgID:       []byte{1, 2, 3, 4},
 	})
-	s.allocator = NewNMockAllocator(s.T())
+	s.allocator = allocator.NewMockAllocator(s.T())
 	s.compactionHandler = NewMockCompactionPlanContext(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.versionManager = NewMockVersionManager(s.T())
@@ -2258,7 +2286,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
 			segmentID:    1,
@@ -2275,7 +2303,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "bad_value",
@@ -2304,7 +2332,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
@@ -2334,13 +2362,13 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
-		// s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocID(mock.Anything).Return(20000, nil)
 		start := int64(20000)
-		s.allocator.EXPECT().allocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
 		})
-		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
@@ -2361,28 +2389,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			partitionID:  s.partitionID,
 			channel:      s.channel,
 			isForce:      true,
-		})
-	})
-
-	s.Run("channel_cp_lag_too_large", func() {
-		defer s.SetupTest()
-		ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-		s.compactionHandler.EXPECT().isFull().Return(false)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		s.tr.handleSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
 		})
 	})
 }
@@ -2416,7 +2422,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleGlobalSignal(&compactionSignal{
 			segmentID:    1,
@@ -2433,7 +2439,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2455,7 +2461,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2477,13 +2483,13 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		// s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
-		// s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil).Maybe()
+		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().AllocID(mock.Anything).Return(20000, nil).Maybe()
 		start := int64(20000)
-		s.allocator.EXPECT().allocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
 		}).Maybe()
-		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2498,81 +2504,6 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			channel:      s.channel,
 			isForce:      true,
 		})
-	})
-
-	s.Run("channel_cp_lag_too_large", func() {
-		defer s.SetupTest()
-		ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
-		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-		tr := s.tr
-
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
-		})
-	})
-}
-
-func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
-	ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
-	s.Run("ok", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.True(result, "ok case, check shall return true")
-	})
-
-	s.Run("cp_healthzcheck_disabled", func() {
-		paramtable.Get().Save(ptKey, "0")
-		defer paramtable.Get().Reset(ptKey)
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.True(result, "channel cp always healthy when config disable this check")
-	})
-
-	s.Run("checkpoint_not_exist", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		delete(s.meta.channelCPs.checkpoints, s.channel)
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.False(result, "check shall fail when checkpoint not exist in meta")
-	})
-
-	s.Run("checkpoint_lag", func() {
-		paramtable.Get().Save(ptKey, "900")
-		defer paramtable.Get().Reset(ptKey)
-
-		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
-			ChannelName: s.channel,
-			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
-			MsgID:       []byte{1, 2, 3, 4},
-		}
-
-		result := s.tr.isChannelCheckpointHealthy(s.channel)
-		s.False(result, "check shall fail when checkpoint lag larger than config")
 	})
 }
 

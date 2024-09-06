@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -135,15 +136,6 @@ func (s *StorageV1SerializerSuite) getDeleteBuffer() *storage.DeleteData {
 	return buf
 }
 
-func (s *StorageV1SerializerSuite) getDeleteBufferZeroTs() *storage.DeleteData {
-	buf := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
-		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		buf.Append(pk, 0)
-	}
-	return buf
-}
-
 func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
 	pack := &SyncPack{}
 
@@ -159,8 +151,8 @@ func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
 	return pack
 }
 
-func (s *StorageV1SerializerSuite) getBfs() *metacache.BloomFilterSet {
-	bfs := metacache.NewBloomFilterSet()
+func (s *StorageV1SerializerSuite) getBfs() *pkoracle.BloomFilterSet {
+	bfs := pkoracle.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
 		Name:         "ID",
@@ -283,15 +275,6 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 func (s *StorageV1SerializerSuite) TestSerializeDelete() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	s.Run("serialize_failed", func() {
-		pack := s.getBasicPack()
-		pack.WithDeleteData(s.getDeleteBufferZeroTs())
-		pack.WithTimeRange(50, 100)
-
-		_, err := s.serializer.EncodeBuffer(ctx, pack)
-		s.Error(err)
-	})
 
 	s.Run("serialize_normal", func() {
 		pack := s.getBasicPack()

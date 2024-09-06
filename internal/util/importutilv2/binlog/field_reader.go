@@ -48,8 +48,9 @@ func (r *fieldReader) Next() (storage.FieldData, error) {
 	if err != nil {
 		return nil, err
 	}
+	// need append nulls
 	for _, rows := range rowsSet {
-		err = fieldData.AppendRows(rows)
+		err = fieldData.AppendRows(rows, nil)
 		if err != nil {
 			return nil, err
 		}

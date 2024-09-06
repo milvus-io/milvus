@@ -29,7 +29,9 @@ import (
 	"github.com/sbinet/npyio/npy"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -268,7 +270,10 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("failed to get max length %d of varchar from numpy file header, error: %v", maxLen, err))
 	}
-
+	maxLength, err := parameterutil.GetMaxLength(c.field)
+	if c.field.DataType == schemapb.DataType_VarChar && err != nil {
+		return nil, err
+	}
 	// read data
 	data := make([]string, 0, count)
 	for len(data) < int(count) {
@@ -285,6 +290,11 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read utf32 bytes from numpy file, error: %v", err))
 			}
 			str, err := decodeUtf32(raw, c.order)
+			if c.field.DataType == schemapb.DataType_VarChar {
+				if err = common.CheckVarcharLength(str, maxLength); err != nil {
+					return nil, err
+				}
+			}
 			if err != nil {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 bytes, error: %v", err))
 			}

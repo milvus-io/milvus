@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -41,6 +42,7 @@ type ImportCheckerSuite struct {
 	jobID   int64
 	imeta   ImportMeta
 	checker *importChecker
+	alloc   *allocator.MockAllocator
 }
 
 func (s *ImportCheckerSuite) SetupTest() {
@@ -55,9 +57,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 	cluster := NewMockCluster(s.T())
-	alloc := NewNMockAllocator(s.T())
+	s.alloc = allocator.NewMockAllocator(s.T())
 
 	imeta, err := NewImportMeta(catalog)
 	s.NoError(err)
@@ -69,7 +72,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	sm := NewMockManager(s.T())
 
-	checker := NewImportChecker(meta, broker, cluster, alloc, sm, imeta).(*importChecker)
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, sm, imeta).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -137,8 +140,8 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	job := s.imeta.GetJob(s.jobID)
 
 	// test checkPendingJob
-	alloc := s.checker.alloc.(*NMockAllocator)
-	alloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
 		id := rand.Int63()
 		return id, id + n, nil
 	})
@@ -216,8 +219,8 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	job := s.imeta.GetJob(s.jobID)
 
 	// test checkPendingJob
-	alloc := s.checker.alloc.(*NMockAllocator)
-	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(mockErr)
 
@@ -227,14 +230,14 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
-	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 	s.checker.checkPendingJob(job)
 	preimportTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
-	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
@@ -257,7 +260,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
-	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
@@ -266,7 +269,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	alloc.ExpectedCalls = nil
-	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	s.checker.checkPreImportingJob(job)
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(1, len(importTasks))

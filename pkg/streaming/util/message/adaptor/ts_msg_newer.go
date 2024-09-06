@@ -52,15 +52,11 @@ func (t *tsMsgImpl) SetTs(ts uint64) {
 
 type FlushMessageBody struct {
 	*tsMsgImpl
-	*message.FlushMessageBody
+	FlushMessage message.ImmutableFlushMessageV2
 }
 
 func NewFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	flushMsg, err := message.AsImmutableFlushMessageV2(msg)
-	if err != nil {
-		return nil, err
-	}
-	body, err := flushMsg.Body()
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +68,32 @@ func NewFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) 
 			},
 			ts:      msg.TimeTick(),
 			sz:      msg.EstimateSize(),
-			msgType: commonpb.MsgType(msg.MessageType()),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
 		},
-		FlushMessageBody: body,
+		FlushMessage: flushMsg,
+	}, nil
+}
+
+type ManualFlushMessageBody struct {
+	*tsMsgImpl
+	ManualFlushMessage message.ImmutableManualFlushMessageV2
+}
+
+func NewManualFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	flushMsg, err := message.AsImmutableManualFlushMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &ManualFlushMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		ManualFlushMessage: flushMsg,
 	}, nil
 }

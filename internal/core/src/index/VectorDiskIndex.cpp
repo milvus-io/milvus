@@ -282,6 +282,14 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       search_config[RANGE_FILTER],
                                       GetMetricType());
             }
+
+            auto page_retain_order = GetValueFromConfig<bool>(
+                search_info.search_params_, PAGE_RETAIN_ORDER);
+            if (page_retain_order.has_value()) {
+                search_config[knowhere::meta::RETAIN_ITERATOR_ORDER] =
+                    page_retain_order.value();
+            }
+
             auto res = index_.RangeSearch(dataset, search_config, bitset);
 
             if (!res.has_value()) {
@@ -406,9 +414,9 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         }
     }
 
-    if (config.contains(kMmapFilepath)) {
-        load_config.erase(kMmapFilepath);
-        load_config[kEnableMmap] = true;
+    if (config.contains(MMAP_FILE_PATH)) {
+        load_config.erase(MMAP_FILE_PATH);
+        load_config[ENABLE_MMAP] = true;
     }
 
     return load_config;

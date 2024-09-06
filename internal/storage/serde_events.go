@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -231,7 +232,7 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 	}), nil
 }
 
-func NewDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
 	reader, err := newCompositeBinlogRecordReader(blobs)
 	if err != nil {
 		return nil, err
@@ -318,6 +319,7 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(bsw.memorySize))
+	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -488,7 +490,7 @@ func (dsw *DeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) error {
 	return nil
 }
 
-func NewDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID) *DeltalogStreamWriter {
+func newDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID) *DeltalogStreamWriter {
 	return &DeltalogStreamWriter{
 		collectionID: collectionID,
 		partitionID:  partitionID,
@@ -501,8 +503,7 @@ func NewDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID) *Del
 	}
 }
 
-func NewDeltalogSerializeWriter(partitionID, segmentID UniqueID, eventWriter *DeltalogStreamWriter, batchSize int,
-) (*SerializeWriter[*DeleteLog], error) {
+func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int) (*SerializeWriter[*DeleteLog], error) {
 	rws := make(map[FieldID]RecordWriter, 1)
 	rw, err := eventWriter.GetRecordWriter()
 	if err != nil {
@@ -521,6 +522,7 @@ func NewDeltalogSerializeWriter(partitionID, segmentID UniqueID, eventWriter *De
 			}
 
 			builder.AppendValueFromString(string(strVal))
+			eventWriter.memorySize += len(strVal)
 			memorySize += uint64(len(strVal))
 		}
 		arr := []arrow.Array{builder.NewArray()}
@@ -638,12 +640,12 @@ func newSimpleArrowRecordReader(blobs []*Blob) (*simpleArrowRecordReader, error)
 	}, nil
 }
 
-func NewMultiFieldDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID, schema []*schemapb.FieldSchema) *MultiFieldDeltalogStreamWriter {
+func newMultiFieldDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID, pkType schemapb.DataType) *MultiFieldDeltalogStreamWriter {
 	return &MultiFieldDeltalogStreamWriter{
 		collectionID: collectionID,
 		partitionID:  partitionID,
 		segmentID:    segmentID,
-		fieldSchemas: schema,
+		pkType:       pkType,
 	}
 }
 
@@ -651,7 +653,7 @@ type MultiFieldDeltalogStreamWriter struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentID    UniqueID
-	fieldSchemas []*schemapb.FieldSchema
+	pkType       schemapb.DataType
 
 	memorySize int // To be updated on the fly
 	buf        bytes.Buffer
@@ -663,17 +665,18 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 		return dsw.rw, nil
 	}
 
-	fieldIds := make([]FieldID, len(dsw.fieldSchemas))
-	fields := make([]arrow.Field, len(dsw.fieldSchemas))
-
-	for i, fieldSchema := range dsw.fieldSchemas {
-		fieldIds[i] = fieldSchema.FieldID
-		dim, _ := typeutil.GetDim(fieldSchema)
-		fields[i] = arrow.Field{
-			Name:     fieldSchema.Name,
-			Type:     serdeMap[fieldSchema.DataType].arrowType(int(dim)),
-			Nullable: false, // No nullable check here.
-		}
+	fieldIds := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
+	fields := []arrow.Field{
+		{
+			Name:     "pk",
+			Type:     serdeMap[dsw.pkType].arrowType(0),
+			Nullable: false,
+		},
+		{
+			Name:     "ts",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+		},
 	}
 
 	rw, err := newMultiFieldRecordWriter(fieldIds, fields, &dsw.buf)
@@ -734,8 +737,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 	return nil
 }
 
-func NewDeltalogMultiFieldWriter(partitionID, segmentID UniqueID, eventWriter *MultiFieldDeltalogStreamWriter, batchSize int,
-) (*SerializeWriter[*DeleteLog], error) {
+func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, batchSize int) (*SerializeWriter[*DeleteLog], error) {
 	rw, err := eventWriter.GetRecordWriter()
 	if err != nil {
 		return nil, err
@@ -765,7 +767,7 @@ func NewDeltalogMultiFieldWriter(partitionID, segmentID UniqueID, eventWriter *M
 			for _, vv := range v {
 				pk := vv.Pk.GetValue().(int64)
 				pb.Append(pk)
-				memorySize += uint64(pk)
+				memorySize += 8
 			}
 		case schemapb.DataType_VarChar:
 			pb := builder.Field(0).(*array.StringBuilder)
@@ -780,8 +782,9 @@ func NewDeltalogMultiFieldWriter(partitionID, segmentID UniqueID, eventWriter *M
 
 		for _, vv := range v {
 			builder.Field(1).(*array.Int64Builder).Append(int64(vv.Ts))
-			memorySize += vv.Ts
+			memorySize += 8
 		}
+		eventWriter.memorySize += int(memorySize)
 
 		arr := []arrow.Array{builder.Field(0).NewArray(), builder.Field(1).NewArray()}
 
@@ -797,7 +800,7 @@ func NewDeltalogMultiFieldWriter(partitionID, segmentID UniqueID, eventWriter *M
 	}, batchSize), nil
 }
 
-func NewDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
 	reader, err := newSimpleArrowRecordReader(blobs)
 	if err != nil {
 		return nil, err
@@ -840,11 +843,11 @@ func NewDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog],
 // NewDeltalogDeserializeReader is the entry point for the delta log reader.
 // It includes NewDeltalogOneFieldReader, which uses the existing log format with only one column in a log file,
 // and NewDeltalogMultiFieldReader, which uses the new format and supports multiple fields in a log file.
-func NewDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func newDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
 	if supportMultiFieldFormat(blobs) {
-		return NewDeltalogMultiFieldReader(blobs)
+		return newDeltalogMultiFieldReader(blobs)
 	}
-	return NewDeltalogOneFieldReader(blobs)
+	return newDeltalogOneFieldReader(blobs)
 }
 
 // check delta log description data to see if it is the format with
@@ -852,12 +855,30 @@ func NewDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog]
 func supportMultiFieldFormat(blobs []*Blob) bool {
 	if len(blobs) > 0 {
 		reader, err := NewBinlogReader(blobs[0].Value)
-		defer reader.Close()
 		if err != nil {
 			return false
 		}
+		defer reader.Close()
 		version := reader.descriptorEventData.Extras[version]
 		return version != nil && version.(string) == MultiField
 	}
 	return false
+}
+
+func CreateDeltalogReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+	return newDeltalogDeserializeReader(blobs)
+}
+
+func CreateDeltalogWriter(collectionID, partitionID, segmentID UniqueID, pkType schemapb.DataType, batchSize int) (*SerializeWriter[*DeleteLog], func() (*Blob, error), error) {
+	format := paramtable.Get().DataNodeCfg.DeltalogFormat.GetValue()
+	if format == "json" {
+		eventWriter := newDeltalogStreamWriter(collectionID, partitionID, segmentID)
+		writer, err := newDeltalogSerializeWriter(eventWriter, batchSize)
+		return writer, eventWriter.Finalize, err
+	} else if format == "parquet" {
+		eventWriter := newMultiFieldDeltalogStreamWriter(collectionID, partitionID, segmentID, pkType)
+		writer, err := newDeltalogMultiFieldWriter(eventWriter, batchSize)
+		return writer, eventWriter.Finalize, err
+	}
+	return nil, nil, merr.WrapErrParameterInvalid("unsupported deltalog format %s", format)
 }

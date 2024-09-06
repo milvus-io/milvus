@@ -23,11 +23,8 @@ import (
 
 	"github.com/blang/semver/v4"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type Manager interface {
@@ -65,42 +62,6 @@ func (m *NodeManager) Stopping(nodeID int64) {
 	defer m.mu.Unlock()
 	if nodeInfo, ok := m.nodes[nodeID]; ok {
 		nodeInfo.SetState(NodeStateStopping)
-	}
-}
-
-func (m *NodeManager) Suspend(nodeID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	nodeInfo, ok := m.nodes[nodeID]
-	if !ok {
-		return merr.WrapErrNodeNotFound(nodeID)
-	}
-	switch nodeInfo.GetState() {
-	case NodeStateNormal:
-		nodeInfo.SetState(NodeStateSuspend)
-		return nil
-	default:
-		log.Warn("failed to suspend query node", zap.Int64("nodeID", nodeID), zap.String("state", nodeInfo.GetState().String()))
-		return merr.WrapErrNodeStateUnexpected(nodeID, nodeInfo.GetState().String(), "failed to suspend a query node")
-	}
-}
-
-func (m *NodeManager) Resume(nodeID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	nodeInfo, ok := m.nodes[nodeID]
-	if !ok {
-		return merr.WrapErrNodeNotFound(nodeID)
-	}
-
-	switch nodeInfo.GetState() {
-	case NodeStateSuspend:
-		nodeInfo.SetState(NodeStateNormal)
-		return nil
-
-	default:
-		log.Warn("failed to resume query node", zap.Int64("nodeID", nodeID), zap.String("state", nodeInfo.GetState().String()))
-		return merr.WrapErrNodeStateUnexpected(nodeID, nodeInfo.GetState().String(), "failed to resume query node")
 	}
 }
 
@@ -155,13 +116,11 @@ type ImmutableNodeInfo struct {
 const (
 	NodeStateNormal State = iota
 	NodeStateStopping
-	NodeStateSuspend
 )
 
 var stateNameMap = map[State]string{
 	NodeStateNormal:   NormalStateName,
 	NodeStateStopping: StoppingStateName,
-	NodeStateSuspend:  SuspendStateName,
 }
 
 func (s State) String() string {

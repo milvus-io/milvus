@@ -383,6 +383,76 @@ func (_c *MockRootCoordClient_AlterDatabase_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// BackupRBAC provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *milvuspb.BackupRBACMetaResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BackupRBACMetaRequest, ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BackupRBACMetaRequest, ...grpc.CallOption) *milvuspb.BackupRBACMetaResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.BackupRBACMetaResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.BackupRBACMetaRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_BackupRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BackupRBAC'
+type MockRootCoordClient_BackupRBAC_Call struct {
+	*mock.Call
+}
+
+// BackupRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.BackupRBACMetaRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) BackupRBAC(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_BackupRBAC_Call {
+	return &MockRootCoordClient_BackupRBAC_Call{Call: _e.mock.On("BackupRBAC",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_BackupRBAC_Call) Run(run func(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption)) *MockRootCoordClient_BackupRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.BackupRBACMetaRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_BackupRBAC_Call) Return(_a0 *milvuspb.BackupRBACMetaResponse, _a1 error) *MockRootCoordClient_BackupRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_BackupRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.BackupRBACMetaRequest, ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error)) *MockRootCoordClient_BackupRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckHealth provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -2730,6 +2800,76 @@ func (_c *MockRootCoordClient_RenameCollection_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MockRootCoordClient_RenameCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.RenameCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_RenameCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreRBAC provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreRBACMetaRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreRBACMetaRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RestoreRBACMetaRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_RestoreRBAC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreRBAC'
+type MockRootCoordClient_RestoreRBAC_Call struct {
+	*mock.Call
+}
+
+// RestoreRBAC is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.RestoreRBACMetaRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) RestoreRBAC(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_RestoreRBAC_Call {
+	return &MockRootCoordClient_RestoreRBAC_Call{Call: _e.mock.On("RestoreRBAC",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_RestoreRBAC_Call) Run(run func(ctx context.Context, in *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption)) *MockRootCoordClient_RestoreRBAC_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.RestoreRBACMetaRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_RestoreRBAC_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_RestoreRBAC_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_RestoreRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreRBACMetaRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_RestoreRBAC_Call {
 	_c.Call.Return(run)
 	return _c
 }

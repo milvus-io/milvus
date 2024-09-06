@@ -40,7 +40,8 @@
 namespace milvus::index {
 
 StringIndexMarisa::StringIndexMarisa(
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context)
+    : StringIndex(MARISA_TRIE) {
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -83,23 +84,29 @@ StringIndexMarisa::BuildWithFieldData(
     for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
-            keyset.push_back(
-                (*static_cast<const std::string*>(data->RawValue(i))).c_str());
+            if (data->is_valid(i)) {
+                keyset.push_back(
+                    (*static_cast<const std::string*>(data->RawValue(i)))
+                        .c_str());
+            }
         }
         total_num_rows += slice_num;
     }
     trie_.build(keyset);
 
     // fill str_ids_
-    str_ids_.resize(total_num_rows);
+    str_ids_.resize(total_num_rows, MARISA_NULL_KEY_ID);
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
-            auto str_id =
-                lookup(*static_cast<const std::string*>(data->RawValue(i)));
-            AssertInfo(valid_str_id(str_id), "invalid marisa key");
-            str_ids_[offset++] = str_id;
+            if (data->is_valid(i)) {
+                auto str_id =
+                    lookup(*static_cast<const std::string*>(data->RawValue(i)));
+                AssertInfo(valid_str_id(str_id), "invalid marisa key");
+                str_ids_[offset] = str_id;
+            }
+            offset++;
         }
     }
 
@@ -195,7 +202,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     file.Seek(0, SEEK_SET);
-    if (config.contains(kEnableMmap)) {
+    if (config.contains(ENABLE_MMAP)) {
         trie_.mmap(file_name.c_str());
     } else {
         trie_.read(file.Descriptor());
@@ -228,7 +235,7 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        auto size = data->Size();
+        auto size = data->DataSize();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
@@ -267,6 +274,32 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
             }
         }
     }
+    // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
+    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
+    for (size_t i = 0; i < offsets.size(); i++) {
+        bitset.reset(offsets[i]);
+    }
+    return bitset;
+}
+
+const TargetBitmap
+StringIndexMarisa::IsNull() {
+    TargetBitmap bitset(str_ids_.size());
+    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
+    for (size_t i = 0; i < offsets.size(); i++) {
+        bitset.set(offsets[i]);
+    }
+    return bitset;
+}
+
+const TargetBitmap
+StringIndexMarisa::IsNotNull() {
+    TargetBitmap bitset(str_ids_.size());
+    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
+    for (size_t i = 0; i < offsets.size(); i++) {
+        bitset.set(offsets[i]);
+    }
+    bitset.flip();
     return bitset;
 }
 
@@ -282,12 +315,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key > value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
             };
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
-            }
             break;
         }
         case OpType::GreaterEqual: {
@@ -295,11 +324,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 auto key = std::string(agent.key().ptr(), agent.key().length());
                 if (key >= value) {
                     ids.push_back(agent.key().id());
-                    break;
                 }
-            }
-            while (trie_.predictive_search(agent)) {
-                ids.push_back(agent.key().id());
             }
             break;
         }

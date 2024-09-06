@@ -212,6 +212,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         search_info.group_size_ = query_info_proto.group_size() > 0
                                       ? query_info_proto.group_size()
                                       : 1;
+        search_info.group_strict_size_ = query_info_proto.group_strict_size();
     }
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
@@ -305,6 +306,8 @@ ProtoParser::RetrievePlanNodeFromProto(
 
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
+    LOG_DEBUG("create search plan from proto: {}",
+              plan_node_proto.DebugString());
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);
@@ -320,12 +323,17 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         plan->target_entries_.push_back(field_id);
     }
+    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+        plan->target_dynamic_fields_.push_back(dynamic_field);
+    }
 
     return plan;
 }
 
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
+    LOG_DEBUG("create retrieve plan from proto: {}",
+              plan_node_proto.DebugString());
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
@@ -338,6 +346,10 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
     }
+    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+        retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
+    }
+
     return retrieve_plan;
 }
 

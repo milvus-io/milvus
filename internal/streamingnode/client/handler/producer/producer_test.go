@@ -51,7 +51,7 @@ func TestProducer(t *testing.T) {
 	recvCh <- &streamingpb.ProduceResponse{
 		Response: &streamingpb.ProduceResponse_Create{
 			Create: &streamingpb.CreateProducerResponse{
-				WalName: "test",
+				WalName: walimplstest.WALName,
 			},
 		},
 	}

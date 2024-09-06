@@ -30,7 +30,7 @@ func (p *producerWithResumingError) GetProducerAfterAvailable(ctx context.Contex
 	p.cond.L.Lock()
 	for p.err == nil && (p.producer == nil || !p.producer.IsAvailable()) {
 		if err := p.cond.Wait(ctx); err != nil {
-			return nil, errors.Mark(err, errs.ErrCanceled)
+			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 	}
 	err := p.err

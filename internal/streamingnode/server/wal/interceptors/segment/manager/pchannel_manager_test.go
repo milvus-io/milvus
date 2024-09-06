@@ -17,12 +17,15 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func TestSegmentAllocManager(t *testing.T) {
@@ -47,6 +50,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 100,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -59,6 +63,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1024 * 1024,
 			BinarySize: 1024 * 1024, // 1MB setting at paramtable.
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result2)
@@ -76,6 +81,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       1,
 			BinarySize: 1,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result3)
@@ -88,12 +94,43 @@ func TestSegmentAllocManager(t *testing.T) {
 	m.TryToSealWaitedSegment(ctx)
 	assert.True(t, m.IsNoWaitSeal()) // result2 is acked, so new seal segment will be sealed right away.
 
+	// interactive with txn
+	txnManager := txn.NewTxnManager()
+	txn, err := txnManager.BeginNewTxn(context.Background(), tsoutil.GetCurrentTime(), time.Second)
+	assert.NoError(t, err)
+	txn.BeginDone()
+
+	for i := 0; i < 3; i++ {
+		result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
+			CollectionID: 1,
+			PartitionID:  1,
+			InsertMetrics: stats.InsertMetrics{
+				Rows:       1024 * 1024,
+				BinarySize: 1024 * 1024, // 1MB setting at paramtable.
+			},
+			TxnSession: txn,
+			TimeTick:   tsoutil.GetCurrentTime(),
+		})
+		assert.NoError(t, err)
+		result.Ack()
+	}
+	// because of there's a txn session uncommitted, so the segment will not be sealed.
+	m.TryToSealSegments(ctx)
+	assert.False(t, m.IsNoWaitSeal())
+
+	err = txn.RequestCommitAndWait(context.Background(), 0)
+	assert.NoError(t, err)
+	txn.CommitDone()
+	m.TryToSealSegments(ctx)
+	assert.True(t, m.IsNoWaitSeal())
+
 	// Try to seal a partition.
 	m.TryToSealSegments(ctx, stats.SegmentBelongs{
 		CollectionID: 1,
 		VChannel:     "v1",
 		PartitionID:  2,
 		PChannel:     "v1",
+		SegmentID:    3,
 	})
 	assert.True(t, m.IsNoWaitSeal())
 
@@ -109,6 +146,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 100,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -120,6 +158,30 @@ func TestSegmentAllocManager(t *testing.T) {
 	// Should be sealed.
 	m.TryToSealSegments(ctx)
 	assert.True(t, m.IsNoWaitSeal())
+
+	// Test fence
+	ts := tsoutil.GetCurrentTime()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	ids, err := m.SealAllSegmentsAndFenceUntil(ctx, 1, ts)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, ids)
+	assert.False(t, m.IsNoWaitSeal())
+	m.TryToSealSegments(ctx)
+	assert.True(t, m.IsNoWaitSeal())
+
+	result, err = m.AssignSegment(ctx, &AssignSegmentRequest{
+		CollectionID: 1,
+		PartitionID:  3,
+		InsertMetrics: stats.InsertMetrics{
+			Rows:       100,
+			BinarySize: 100,
+		},
+		TimeTick: ts,
+	})
+	assert.ErrorIs(t, err, ErrFencedAssign)
+	assert.Nil(t, result)
 
 	m.Close(ctx)
 }
@@ -135,7 +197,7 @@ func TestCreateAndDropCollection(t *testing.T) {
 	m, err := RecoverPChannelSegmentAllocManager(context.Background(), types.PChannelInfo{Name: "v1"}, f)
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
-	resource.Resource().SegmentSealedInspector().RegsiterPChannelManager(m)
+	inspector.GetSegmentSealedInspector().RegsiterPChannelManager(m)
 
 	ctx := context.Background()
 
@@ -146,6 +208,7 @@ func TestCreateAndDropCollection(t *testing.T) {
 			Rows:       100,
 			BinarySize: 200,
 		},
+		TimeTick: tsoutil.GetCurrentTime(),
 	}
 
 	resp, err := m.AssignSegment(ctx, testRequest)

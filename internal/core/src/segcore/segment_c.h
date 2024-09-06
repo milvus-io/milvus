@@ -33,7 +33,8 @@ CStatus
 NewSegment(CCollection collection,
            SegmentType seg_type,
            int64_t segment_id,
-           CSegmentInterface* newSegment);
+           CSegmentInterface* newSegment,
+           bool is_sorted_by_pk);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -133,7 +134,9 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info);
 
 CStatus
-WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id);
+WarmupChunkCache(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 bool mmap_enabled);
 
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus

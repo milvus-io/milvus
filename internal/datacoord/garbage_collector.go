@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -53,6 +54,7 @@ type GcOption struct {
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
+	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
 }
 
@@ -161,6 +163,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedIndexes(ctx)
 			gc.recycleUnusedSegIndexes(ctx)
 			gc.recycleUnusedAnalyzeFiles(ctx)
+			gc.recycleUnusedTextIndexFiles(ctx)
 		})
 	}()
 	go func() {
@@ -463,9 +466,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		}
 
 		logs := getLogs(segment)
+		for key := range getTextLogs(segment) {
+			logs[key] = struct{}{}
+		}
+
 		log.Info("GC segment start...", zap.Int("insert_logs", len(segment.GetBinlogs())),
 			zap.Int("delta_logs", len(segment.GetDeltalogs())),
-			zap.Int("stats_logs", len(segment.GetStatslogs())))
+			zap.Int("stats_logs", len(segment.GetStatslogs())),
+			zap.Int("text_logs", len(segment.GetTextStatsLogs())))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			continue
@@ -489,7 +497,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 	collectionID2GcStatus := make(map[int64]bool)
 	skippedCnt := 0
 
-	log.Info("start to GC channel cp", zap.Int("vchannelCnt", len(channelCPs)))
+	log.Info("start to GC channel cp", zap.Int("vchannelCPCnt", len(channelCPs)))
 	for vChannel := range channelCPs {
 		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
 
@@ -500,8 +508,20 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 			continue
 		}
 
-		if _, ok := collectionID2GcStatus[collectionID]; !ok {
-			collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+		_, ok := collectionID2GcStatus[collectionID]
+		if !ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			has, err := gc.option.broker.HasCollection(ctx, collectionID)
+			if err == nil && !has {
+				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+			} else {
+				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
+				log.Debug("skip channel cp GC, the collection state is available",
+					zap.Int64("collectionID", collectionID),
+					zap.Bool("dropped", has), zap.Error(err))
+				collectionID2GcStatus[collectionID] = false
+			}
 		}
 
 		// Skip to GC if all segments meta of the corresponding collection are not removed
@@ -510,9 +530,12 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 			continue
 		}
 
-		if err := gc.meta.DropChannelCheckpoint(vChannel); err != nil {
+		err := gc.meta.DropChannelCheckpoint(vChannel)
+		if err != nil {
 			// Try to GC in the next gc cycle if drop channel cp meta fail.
-			log.Warn("failed to drop channel check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
+			log.Warn("failed to drop channelcp check point during gc", zap.String("vchannel", vChannel), zap.Error(err))
+		} else {
+			log.Info("GC channel cp", zap.String("vchannel", vChannel))
 		}
 	}
 
@@ -542,6 +565,17 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 		}
 	}
 	return logs
+}
+
+func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
+	textLogs := make(map[string]struct{})
+	for _, flog := range sinfo.GetTextStatsLogs() {
+		for _, file := range flog.GetFiles() {
+			textLogs[file] = struct{}{}
+		}
+	}
+
+	return textLogs
 }
 
 // removeObjectFiles remove file from oss storage, return error if any log failed to remove.
@@ -800,4 +834,65 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 		}
 		log.Info("analyze stats files recycle success", zap.Int64("taskID", taskID))
 	}
+}
+
+// recycleUnusedTextIndexFiles load meta file info and compares OSS keys
+// if missing found, performs gc cleanup
+func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedTextIndexFiles...")
+	defer func() { log.Info("recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start))) }()
+
+	hasTextIndexSegments := gc.meta.SelectSegments(SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return len(info.GetTextStatsLogs()) != 0
+	}))
+	fileNum := 0
+	deletedFilesNum := atomic.NewInt32(0)
+
+	for _, seg := range hasTextIndexSegments {
+		for _, fieldStats := range seg.GetTextStatsLogs() {
+			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
+			// clear low version task
+			for i := int64(1); i < fieldStats.GetVersion(); i++ {
+				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.TextIndexPath,
+					seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fieldStats.GetFieldID(), i)
+				futures := make([]*conc.Future[struct{}], 0)
+
+				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					file := files.FilePath
+
+					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+						log := log.With(zap.String("file", file))
+						log.Info("garbageCollector recycleUnusedTextIndexFiles remove file...")
+
+						if err := gc.option.cli.Remove(ctx, file); err != nil {
+							log.Warn("garbageCollector recycleUnusedTextIndexFiles remove file failed", zap.Error(err))
+							return struct{}{}, err
+						}
+						deletedFilesNum.Inc()
+						log.Info("garbageCollector recycleUnusedTextIndexFiles remove file success")
+						return struct{}{}, nil
+					})
+					futures = append(futures, future)
+					return true
+				})
+
+				// Wait for all remove tasks done.
+				if err := conc.BlockOnAll(futures...); err != nil {
+					// error is logged, and can be ignored here.
+					log.Warn("some task failure in remove object pool", zap.Error(err))
+				}
+
+				log = log.With(zap.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+				if err != nil {
+					log.Warn("text index files recycle failed when walk with prefix", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
+	log.Info("text index files recycle done")
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

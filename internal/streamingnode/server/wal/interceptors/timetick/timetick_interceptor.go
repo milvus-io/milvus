@@ -7,164 +7,201 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 )
 
-var _ interceptors.AppendInterceptor = (*timeTickAppendInterceptor)(nil)
+var _ interceptors.InterceptorWithReady = (*timeTickAppendInterceptor)(nil)
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	ready  chan struct{}
-
-	ackManager *ack.AckManager
-	ackDetails *ackDetails
-	sourceID   int64
+	operator   *timeTickSyncOperator
+	txnManager *txn.TxnManager
 }
 
 // Ready implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) Ready() <-chan struct{} {
-	return impl.ready
+	return impl.operator.Ready()
 }
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+	var txnSession *txn.TxnSession
 	if msg.MessageType() != message.MessageTypeTimeTick {
-		// Allocate new acker for message.
+		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
-		if acker, err = impl.ackManager.Allocate(ctx); err != nil {
-			return nil, errors.Wrap(err, "allocate timestamp failed")
+		if msg.BarrierTimeTick() == 0 {
+			if acker, err = impl.operator.AckManager().Allocate(ctx); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp failed")
+			}
+		} else {
+			if acker, err = impl.operator.AckManager().AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
+			}
 		}
-		defer func() {
-			acker.Ack(ack.OptError(err))
-			impl.ackManager.AdvanceLastConfirmedMessageID(msgID)
-		}()
 
-		// Assign timestamp to message and call append method.
+		// Assign timestamp to message and call the append method.
 		msg = msg.
 			WithTimeTick(acker.Timestamp()).                  // message assigned with these timetick.
 			WithLastConfirmed(acker.LastConfirmedMessageID()) // start consuming from these message id, the message which timetick greater than current timetick will never be lost.
+
+		defer func() {
+			if err != nil {
+				acker.Ack(ack.OptError(err))
+				return
+			}
+			acker.Ack(
+				ack.OptMessageID(msgID),
+				ack.OptTxnSession(txnSession),
+			)
+		}()
 	}
-	return append(ctx, msg)
+
+	switch msg.MessageType() {
+	case message.MessageTypeBeginTxn:
+		if txnSession, msg, err = impl.handleBegin(ctx, msg); err != nil {
+			return nil, err
+		}
+	case message.MessageTypeCommitTxn:
+		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer txnSession.CommitDone()
+	case message.MessageTypeRollbackTxn:
+		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer txnSession.RollbackDone()
+	case message.MessageTypeTimeTick:
+		// cleanup the expired transaction sessions and the already done transaction.
+		impl.txnManager.CleanupTxnUntil(msg.TimeTick())
+	default:
+		// handle the transaction body message.
+		if msg.TxnContext() != nil {
+			if txnSession, err = impl.handleTxnMessage(ctx, msg); err != nil {
+				return nil, err
+			}
+			defer func() {
+				if err != nil {
+					txnSession.AddNewMessageFail()
+				}
+				// perform keepalive for the transaction session if append success.
+				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+			}()
+		}
+	}
+
+	// Attach the txn session to the context.
+	// So the all interceptors of append operation can see it.
+	if txnSession != nil {
+		ctx = txn.WithTxnSession(ctx, txnSession)
+	}
+	msgID, err = impl.appendMsg(ctx, msg, append)
+	return
+}
+
+// GracefulClose implements InterceptorWithGracefulClose.
+func (impl *timeTickAppendInterceptor) GracefulClose() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	logger := log.With(zap.Any("pchannel", impl.operator.pchannel))
+	logger.Info("timeTickAppendInterceptor is closing, try to perform a txn manager graceful shutdown")
+	if err := impl.txnManager.GracefulClose(ctx); err != nil {
+		logger.Warn("timeTickAppendInterceptor is closed", zap.Error(err))
+		return
+	}
+	logger.Info("txnManager of timeTickAppendInterceptor is graceful closed")
 }
 
 // Close implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) Close() {
-	impl.cancel()
+	resource.Resource().TimeTickInspector().UnregisterSyncOperator(impl.operator)
+	impl.operator.Close()
 }
 
-// execute start a background task.
-func (impl *timeTickAppendInterceptor) executeSyncTimeTick(interval time.Duration, param interceptors.InterceptorBuildParam) {
-	underlyingWALImpls := param.WALImpls
-
-	logger := log.With(zap.Any("channel", underlyingWALImpls.Channel()))
-	logger.Info("start to sync time tick...")
-	defer logger.Info("sync time tick stopped")
-
-	if err := impl.blockUntilSyncTimeTickReady(underlyingWALImpls); err != nil {
-		logger.Warn("sync first time tick failed", zap.Error(err))
-		return
-	}
-
-	// interceptor is ready, wait for the final wal object is ready to use.
-	wal := param.WAL.Get()
-
-	// TODO: sync time tick message to wal periodically.
-	// Add a trigger on `AckManager` to sync time tick message without periodically.
-	// `AckManager` gather detail information, time tick sync can check it and make the message between tt more smaller.
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-impl.ctx.Done():
-			return
-		case <-ticker.C:
-			if err := impl.sendTsMsg(impl.ctx, wal.Append); err != nil {
-				log.Warn("send time tick sync message failed", zap.Error(err))
-			}
-		}
-	}
-}
-
-// blockUntilSyncTimeTickReady blocks until the first time tick message is sent.
-func (impl *timeTickAppendInterceptor) blockUntilSyncTimeTickReady(underlyingWALImpls walimpls.WALImpls) error {
-	logger := log.With(zap.Any("channel", underlyingWALImpls.Channel()))
-	logger.Info("start to sync first time tick")
-	defer logger.Info("sync first time tick done")
-
-	// Send first timetick message to wal before interceptor is ready.
-	for count := 0; ; count++ {
-		// Sent first timetick message to wal before ready.
-		// New TT is always greater than all tt on previous streamingnode.
-		// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
-		// Otherwise, the TT principle may be violated.
-		// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
-		// !!! Send a timetick message into walimpls directly is safe.
-		select {
-		case <-impl.ctx.Done():
-			return impl.ctx.Err()
-		default:
-		}
-		if err := impl.sendTsMsg(impl.ctx, underlyingWALImpls.Append); err != nil {
-			logger.Warn("send first timestamp message failed", zap.Error(err), zap.Int("retryCount", count))
-			// TODO: exponential backoff.
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		break
-	}
-	// interceptor is ready now.
-	close(impl.ready)
-	return nil
-}
-
-// syncAcknowledgedDetails syncs the timestamp acknowledged details.
-func (impl *timeTickAppendInterceptor) syncAcknowledgedDetails() {
-	// Sync up and get last confirmed timestamp.
-	ackDetails, err := impl.ackManager.SyncAndGetAcknowledged(impl.ctx)
+// handleBegin handle the begin transaction message.
+func (impl *timeTickAppendInterceptor) handleBegin(ctx context.Context, msg message.MutableMessage) (*txn.TxnSession, message.MutableMessage, error) {
+	beginTxnMsg, err := message.AsMutableBeginTxnMessageV2(msg)
 	if err != nil {
-		log.Warn("sync timestamp ack manager failed", zap.Error(err))
+		return nil, nil, err
 	}
-
-	// Add ack details to ackDetails.
-	impl.ackDetails.AddDetails(ackDetails)
+	// Begin transaction will generate a txn context.
+	session, err := impl.txnManager.BeginNewTxn(ctx, msg.TimeTick(), time.Duration(beginTxnMsg.Header().KeepaliveMilliseconds)*time.Millisecond)
+	if err != nil {
+		session.BeginRollback()
+		return nil, nil, err
+	}
+	session.BeginDone()
+	return session, msg.WithTxnContext(session.TxnContext()), nil
 }
 
-// sendTsMsg sends first timestamp message to wal.
-// TODO: TT lag warning.
-func (impl *timeTickAppendInterceptor) sendTsMsg(_ context.Context, appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)) error {
-	// Sync the timestamp acknowledged details.
-	impl.syncAcknowledgedDetails()
-
-	if impl.ackDetails.Empty() {
-		// No acknowledged info can be sent.
-		// Some message sent operation is blocked, new TT cannot be pushed forward.
-		return nil
-	}
-
-	// Construct time tick message.
-	msg, err := newTimeTickMsg(impl.ackDetails.LastAllAcknowledgedTimestamp(), impl.sourceID)
+// handleCommit handle the commit transaction message.
+func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg message.MutableMessage) (*txn.TxnSession, error) {
+	commitTxnMsg, err := message.AsMutableCommitTxnMessageV2(msg)
 	if err != nil {
-		return errors.Wrap(err, "at build time tick msg")
+		return nil, err
 	}
-
-	// Append it to wal.
-	msgID, err := appender(impl.ctx, msg)
+	session, err := impl.txnManager.GetSessionOfTxn(commitTxnMsg.TxnContext().TxnID)
 	if err != nil {
-		return errors.Wrapf(err,
-			"append time tick msg to wal failed, timestamp: %d, previous message counter: %d",
-			impl.ackDetails.LastAllAcknowledgedTimestamp(),
-			impl.ackDetails.Len(),
-		)
+		return nil, err
 	}
 
-	// Ack details has been committed to wal, clear it.
-	impl.ackDetails.Clear()
-	impl.ackManager.AdvanceLastConfirmedMessageID(msgID)
-	return nil
+	// Start commit the message.
+	if err = session.RequestCommitAndWait(ctx, msg.TimeTick()); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+// handleRollback handle the rollback transaction message.
+func (impl *timeTickAppendInterceptor) handleRollback(ctx context.Context, msg message.MutableMessage) (session *txn.TxnSession, err error) {
+	rollbackTxnMsg, err := message.AsMutableRollbackTxnMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	session, err = impl.txnManager.GetSessionOfTxn(rollbackTxnMsg.TxnContext().TxnID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Start commit the message.
+	if err = session.RequestRollback(ctx, msg.TimeTick()); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+// handleTxnMessage handle the transaction body message.
+func (impl *timeTickAppendInterceptor) handleTxnMessage(ctx context.Context, msg message.MutableMessage) (session *txn.TxnSession, err error) {
+	txnContext := msg.TxnContext()
+	session, err = impl.txnManager.GetSessionOfTxn(txnContext.TxnID)
+	if err != nil {
+		return nil, err
+	}
+	// Add the message to the transaction.
+	if err = session.AddNewMessage(ctx, msg.TimeTick()); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+// appendMsg is a helper function to append message.
+func (impl *timeTickAppendInterceptor) appendMsg(
+	ctx context.Context,
+	msg message.MutableMessage,
+	append func(context.Context, message.MutableMessage) (message.MessageID, error),
+) (message.MessageID, error) {
+	msgID, err := append(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	utility.AttachAppendResultTimeTick(ctx, msg.TimeTick())
+	utility.AttachAppendResultTxnContext(ctx, msg.TxnContext())
+	return msgID, nil
 }

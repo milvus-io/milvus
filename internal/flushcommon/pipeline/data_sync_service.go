@@ -26,12 +26,14 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
@@ -60,8 +62,8 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender *util.TimeTickSender // reference to TimeTickSender
-	compactor      compaction.Executor  // reference to compaction executor
+	timetickSender util.StatsUpdater   // reference to TimeTickSender
+	compactor      compaction.Executor // reference to compaction executor
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
@@ -138,7 +140,8 @@ func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParam
 func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
-	segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
+	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
+	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -149,7 +152,6 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				zap.String("segmentType", segType),
 			)
 			segment := item
-
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 				var stats []*storage.PkStatistics
 				var err error
@@ -157,8 +159,8 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				if err != nil {
 					return nil, err
 				}
-				segmentPks.Insert(segment.GetID(), stats)
-				if tickler != nil {
+				segmentPks.Insert(segment.GetID(), pkoracle.NewBloomFilterSet(stats...))
+				if !streamingutil.IsStreamingServiceEnabled() {
 					tickler.Inc()
 				}
 
@@ -168,9 +170,46 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			futures = append(futures, future)
 		}
 	}
+	lazyLoadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
+		for _, item := range segments {
+			log.Info("lazy load pk stats for segment",
+				zap.String("vChannelName", item.GetInsertChannel()),
+				zap.Int64("segmentID", item.GetID()),
+				zap.Int64("numRows", item.GetNumOfRows()),
+				zap.String("segmentType", segType),
+			)
+			segment := item
 
+			lazy := pkoracle.NewLazyPkstats()
+
+			// ignore lazy load future
+			_ = io.GetOrCreateStatsPool().Submit(func() (any, error) {
+				var stats []*storage.PkStatistics
+				var err error
+				stats, err = compaction.LoadStats(context.Background(), chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
+				if err != nil {
+					return nil, err
+				}
+				pkStats := pkoracle.NewBloomFilterSet(stats...)
+				lazy.SetPkStats(pkStats)
+				return struct{}{}, nil
+			})
+			segmentPks.Insert(segment.GetID(), lazy)
+			if tickler != nil {
+				tickler.Inc()
+			}
+		}
+	}
+
+	// growing segment cannot use lazy mode
 	loadSegmentStats("growing", unflushed)
-	loadSegmentStats("sealed", flushed)
+	lazy := paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()
+	// check paramtable to decide whether skip load BF stage when initializing
+	if lazy {
+		lazyLoadSegmentStats("sealed", flushed)
+	} else {
+		loadSegmentStats("sealed", flushed)
+	}
 
 	// use fetched segment info
 	info.Vchan.FlushedSegments = flushed
@@ -181,9 +220,9 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	}
 
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-		entries, _ := segmentPks.Get(segment.GetID())
-		return metacache.NewBloomFilterSet(entries...)
+	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+		pkStat, _ := segmentPks.Get(segment.GetID())
+		return pkStat
 	})
 
 	return metacache, nil
@@ -247,12 +286,15 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	// init flowgraph
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
-	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
+
+	var dmStreamNode *flowgraph.InputNode
+	dmStreamNode, err = newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
 	if err != nil {
 		return nil, err
 	}
 
-	ddNode, err := newDDNode(
+	var ddNode *ddNode
+	ddNode, err = newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -267,7 +309,8 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	}
 
 	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
-	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	var ttNode *ttNode
+	ttNode, err = newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	if err != nil {
 		return nil, err
 	}
@@ -323,11 +366,12 @@ func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *ut
 		}
 	}
 
-	// init metaCache meta
-	metaCache, err := initMetaCache(initCtx, pipelineParams.ChunkManager, info, nil, unflushedSegmentInfos, flushedSegmentInfos)
-	if err != nil {
-		return nil, err
-	}
+	// In streaming service mode, flushed segments no longer maintain a bloom filter.
+	// So, here we skip loading the bloom filter for flushed segments.
+	info.Vchan.UnflushedSegments = unflushedSegmentInfos
+	metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
+	})
 
 	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input)
 }

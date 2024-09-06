@@ -1,62 +1,82 @@
 use std::ops::Bound;
-use std::str::FromStr;
+use std::sync::Arc;
 
-use tantivy::directory::MmapDirectory;
 use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
+use crate::docid_collector::DocIdCollector;
 use crate::log::init_log;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
-pub struct IndexReaderWrapper {
-    pub field_name: String,
-    pub field: Field,
-    pub reader: IndexReader,
-    pub cnt: u32,
+pub(crate) struct IndexReaderWrapper {
+    pub(crate) field_name: String,
+    pub(crate) field: Field,
+    pub(crate) reader: IndexReader,
+    pub(crate) index: Arc<Index>,
+    pub(crate) id_field: Option<Field>,
 }
 
 impl IndexReaderWrapper {
-    pub fn new(index: &Index, field_name: &String, field: Field) -> IndexReaderWrapper {
+    pub fn load(path: &str) -> IndexReaderWrapper {
         init_log();
+
+        let index = Index::open_in_dir(path).unwrap();
+
+        IndexReaderWrapper::from_index(Arc::new(index))
+    }
+
+    pub fn from_index(index: Arc<Index>) -> IndexReaderWrapper {
+        let field = index.schema().fields().next().unwrap().0;
+        let schema = index.schema();
+        let field_name = String::from(schema.get_field_name(field));
+        let id_field: Option<Field> = match schema.get_field("doc_id") {
+            Ok(field) => Some(field),
+            Err(_) => None,
+        };
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
+            .reload_policy(ReloadPolicy::OnCommit) // OnCommit serve for growing segment.
             .try_into()
             .unwrap();
-        let metas = index.searchable_segment_metas().unwrap();
+        reader.reload().unwrap();
+
+        IndexReaderWrapper {
+            field_name,
+            field,
+            reader,
+            index,
+            id_field,
+        }
+    }
+
+    pub fn reload(&self) {
+        self.reader.reload().unwrap();
+    }
+
+    pub fn count(&self) -> u32 {
+        let metas = self.index.searchable_segment_metas().unwrap();
         let mut sum: u32 = 0;
         for meta in metas {
             sum += meta.max_doc();
         }
-        reader.reload().unwrap();
-        IndexReaderWrapper {
-            field_name: field_name.to_string(),
-            field,
-            reader,
-            cnt: sum,
-        }
+        sum
     }
 
-    pub fn load(path: &str) -> IndexReaderWrapper {
-        let dir = MmapDirectory::open(path).unwrap();
-        let index = Index::open(dir).unwrap();
-        let field = index.schema().fields().next().unwrap().0;
-        let schema = index.schema();
-        let field_name = schema.get_field_name(field);
-        IndexReaderWrapper::new(&index, &String::from_str(field_name).unwrap(), field)
-    }
-
-    pub fn count(&self) -> u32 {
-        self.cnt
-    }
-
-    fn search(&self, q: &dyn Query) -> Vec<u32> {
+    pub(crate) fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
-        let hits = searcher.search(q, &VecCollector).unwrap();
-        hits
+        match self.id_field {
+            Some(_) => {
+                // newer version with doc_id.
+                searcher.search(q, &DocIdCollector {}).unwrap()
+            }
+            None => {
+                // older version without doc_id, only one segment.
+                searcher.search(q, &VecCollector {}).unwrap()
+            }
+        }
     }
 
     pub fn term_query_i64(&self, term: i64) -> Vec<u32> {

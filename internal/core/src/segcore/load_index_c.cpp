@@ -221,7 +221,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         auto& index_params = load_index_info->index_params;
         auto field_type = load_index_info->field_type;
-
         auto engine_version = load_index_info->index_engine_version;
 
         milvus::index::CreateIndexInfo index_info;
@@ -271,7 +270,7 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
-        config["index_files"] = load_index_info->index_files;
+        config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager);
@@ -285,13 +284,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                        "mmap directory path is empty");
             auto filepath =
                 std::filesystem::path(load_index_info->mmap_dir_path) /
+                "index_files" / std::to_string(load_index_info->index_id) /
                 std::to_string(load_index_info->segment_id) /
-                std::to_string(load_index_info->field_id) /
-                std::to_string(load_index_info->index_id);
+                std::to_string(load_index_info->field_id);
 
-            config[kMmapFilepath] = filepath.string();
+            config[milvus::index::MMAP_FILE_PATH] = filepath.string();
         }
 
+        LOG_DEBUG("load index with configs: {}", config.dump());
         load_index_info->index->Load(ctx, config);
 
         span->End();

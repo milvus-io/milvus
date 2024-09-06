@@ -61,8 +61,11 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
   mkdir -p ${CI_LOG_PATH}
 fi
 
-echo "prepare e2e test"  
-install_pytest_requirements  
+# skip pip install when DISABLE_PIP_INSTALL is set
+if [ "${DISABLE_PIP_INSTALL:-}" = "" ]; then
+    echo "prepare e2e test"  
+    install_pytest_requirements  
+fi
 
 if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then

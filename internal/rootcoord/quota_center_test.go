@@ -245,7 +245,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		quotaCenter := NewQuotaCenter(pcm2, qc, dc2, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("get collection by id fail, datanode", func(t *testing.T) {
@@ -289,7 +289,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		quotaCenter := NewQuotaCenter(pcm2, qc, dc2, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test force deny reading collection", func(t *testing.T) {
@@ -563,95 +563,58 @@ func TestQuotaCenter(t *testing.T) {
 				ID:   0,
 				Name: "default",
 			},
+			{
+				ID:   1,
+				Name: "db1",
+			},
 		}, nil).Maybe()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		quotaCenter.clearMetrics()
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
-			0: collectionIDToPartitionIDs,
+			0: {1: {}},
+			1: {2: {}},
 		}
 		quotaCenter.dbs.Insert("default", 0)
-		quotaCenter.collections.Insert("0.col1", 1)
-		quotaCenter.collections.Insert("0.col2", 2)
-		quotaCenter.collections.Insert("0.col3", 3)
-		colSubLabel := ratelimitutil.GetCollectionSubLabel("default", "col1")
-		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
-			1: {Rms: []metricsinfo.RateMetric{
-				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
-				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
-				{Label: ratelimitutil.FormatSubLabel(internalpb.RateType_DQLSearch.String(), colSubLabel), Rate: 100},
-				{Label: ratelimitutil.FormatSubLabel(internalpb.RateType_DQLQuery.String(), colSubLabel), Rate: 100},
-			}},
-		}
+		quotaCenter.dbs.Insert("db1", 1)
 
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyReading.Key, "false")
-		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
-		paramtable.Get().Save(Params.QuotaConfig.QueueLatencyThreshold.Key, "100")
-		paramtable.Get().Save(Params.QuotaConfig.DQLLimitEnabled.Key, "true")
-		paramtable.Get().Save(Params.QuotaConfig.DQLMaxQueryRatePerCollection.Key, "500")
-		paramtable.Get().Save(Params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "500")
-
-		checkLimiter := func() {
-			for db, collections := range quotaCenter.readableCollections {
-				for collection := range collections {
-					if collection != 1 {
-						continue
-					}
-					limiters := quotaCenter.rateLimiter.GetCollectionLimiters(db, collection).GetLimiters()
-					searchLimit, _ := limiters.Get(internalpb.RateType_DQLSearch)
-					assert.Equal(t, Limit(100.0*0.9), searchLimit.Limit())
-
-					queryLimit, _ := limiters.Get(internalpb.RateType_DQLQuery)
-					assert.Equal(t, Limit(100.0*0.9), queryLimit.Limit())
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Unset()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, i int64, u uint64) (*model.Database, error) {
+				if i == 1 {
+					return &model.Database{
+						ID:   1,
+						Name: "db1",
+						Properties: []*commonpb.KeyValuePair{
+							{
+								Key:   common.DatabaseForceDenyReadingKey,
+								Value: "true",
+							},
+						},
+					}, nil
 				}
-			}
-		}
-
-		err := quotaCenter.resetAllCurrentRates()
-		assert.NoError(t, err)
-
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second),
-			}, Effect: metricsinfo.NodeEffect{
-				NodeID:        1,
-				CollectionIDs: []int64{1, 2, 3},
-			}},
-		}
-
+				return nil, errors.New("mock error")
+			}).Maybe()
+		quotaCenter.resetAllCurrentRates()
 		err = quotaCenter.calculateReadRates()
 		assert.NoError(t, err)
-		checkLimiter()
-
-		paramtable.Get().Save(Params.QuotaConfig.NQInQueueThreshold.Key, "100")
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {
-				SearchQueue: metricsinfo.ReadInfoInQueue{
-					UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold.GetAsInt64(),
-				},
-			},
-		}
-		err = quotaCenter.calculateReadRates()
 		assert.NoError(t, err)
-		checkLimiter()
+		rln := quotaCenter.rateLimiter.GetDatabaseLimiters(0)
+		limiters := rln.GetLimiters()
+		a, _ := limiters.Get(internalpb.RateType_DQLSearch)
+		assert.NotEqual(t, Limit(0), a.Limit())
+		b, _ := limiters.Get(internalpb.RateType_DQLQuery)
+		assert.NotEqual(t, Limit(0), b.Limit())
 
-		paramtable.Get().Save(Params.QuotaConfig.ResultProtectionEnabled.Key, "true")
-		paramtable.Get().Save(Params.QuotaConfig.MaxReadResultRate.Key, "1")
-		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
-			1: {
-				Rms: []metricsinfo.RateMetric{
-					{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
-					{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
-					{Label: ratelimitutil.FormatSubLabel(internalpb.RateType_DQLSearch.String(), colSubLabel), Rate: 100},
-					{Label: ratelimitutil.FormatSubLabel(internalpb.RateType_DQLQuery.String(), colSubLabel), Rate: 100},
-					{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
-				},
-			},
-		}
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {SearchQueue: metricsinfo.ReadInfoInQueue{}}}
-		err = quotaCenter.calculateReadRates()
-		assert.NoError(t, err)
-		checkLimiter()
+		rln = quotaCenter.rateLimiter.GetDatabaseLimiters(1)
+		limiters = rln.GetLimiters()
+		a, _ = limiters.Get(internalpb.RateType_DQLSearch)
+		assert.Equal(t, Limit(0), a.Limit())
+		b, _ = limiters.Get(internalpb.RateType_DQLQuery)
+		assert.Equal(t, Limit(0), b.Limit())
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {
@@ -1534,172 +1497,6 @@ func TestGetRateType(t *testing.T) {
 	t.Run("ddl cluster scope", func(t *testing.T) {
 		a := getRateTypes(internalpb.RateScope_Cluster, ddl)
 		assert.Equal(t, 5, a.Len())
-	})
-}
-
-func TestCalculateReadRates(t *testing.T) {
-	paramtable.Init()
-	ctx := context.Background()
-
-	t.Run("cool off db", func(t *testing.T) {
-		qc := mocks.NewMockQueryCoordClient(t)
-		meta := mockrootcoord.NewIMetaTable(t)
-		pcm := proxyutil.NewMockProxyClientManager(t)
-		dc := mocks.NewMockDataCoordClient(t)
-		core, _ := NewCore(ctx, nil)
-		core.tsoAllocator = newMockTsoAllocator()
-
-		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
-
-		Params.Save(Params.QuotaConfig.ForceDenyReading.Key, "false")
-		defer Params.Reset(Params.QuotaConfig.ForceDenyReading.Key)
-
-		Params.Save(Params.QuotaConfig.ResultProtectionEnabled.Key, "true")
-		defer Params.Reset(Params.QuotaConfig.ResultProtectionEnabled.Key)
-		Params.Save(Params.QuotaConfig.MaxReadResultRate.Key, "50")
-		defer Params.Reset(Params.QuotaConfig.MaxReadResultRate.Key)
-		Params.Save(Params.QuotaConfig.MaxReadResultRatePerDB.Key, "30")
-		defer Params.Reset(Params.QuotaConfig.MaxReadResultRatePerDB.Key)
-		Params.Save(Params.QuotaConfig.MaxReadResultRatePerCollection.Key, "20")
-		defer Params.Reset(Params.QuotaConfig.MaxReadResultRatePerCollection.Key)
-		Params.Save(Params.QuotaConfig.CoolOffSpeed.Key, "0.8")
-		defer Params.Reset(Params.QuotaConfig.CoolOffSpeed.Key)
-
-		Params.Save(Params.QuotaConfig.DQLLimitEnabled.Key, "true")
-		defer Params.Reset(Params.QuotaConfig.DQLLimitEnabled.Key)
-		Params.Save(Params.QuotaConfig.DQLMaxSearchRate.Key, "500")
-		defer Params.Reset(Params.QuotaConfig.DQLMaxSearchRate.Key)
-		Params.Save(Params.QuotaConfig.DQLMaxSearchRatePerDB.Key, "500")
-		defer Params.Reset(Params.QuotaConfig.DQLMaxSearchRatePerDB.Key)
-		Params.Save(Params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "500")
-		defer Params.Reset(Params.QuotaConfig.DQLMaxSearchRatePerCollection.Key)
-
-		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
-		quotaCenter.dbs = typeutil.NewConcurrentMap[string, int64]()
-		quotaCenter.collections = typeutil.NewConcurrentMap[string, int64]()
-		quotaCenter.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
-		quotaCenter.dbs.Insert("default", 1)
-		quotaCenter.dbs.Insert("test", 2)
-		quotaCenter.collections.Insert("1.col1", 10)
-		quotaCenter.collections.Insert("2.col2", 20)
-		quotaCenter.collections.Insert("2.col3", 30)
-		quotaCenter.collectionIDToDBID.Insert(10, 1)
-		quotaCenter.collectionIDToDBID.Insert(20, 2)
-		quotaCenter.collectionIDToDBID.Insert(30, 2)
-
-		searchLabel := internalpb.RateType_DQLSearch.String()
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{}
-		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
-			1: {
-				Rms: []metricsinfo.RateMetric{
-					{
-						Label: metricsinfo.ReadResultThroughput,
-						Rate:  40 * 1024 * 1024,
-					},
-					//{
-					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
-					//	Rate:  20 * 1024 * 1024,
-					//},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  15 * 1024 * 1024,
-					},
-					//{
-					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("test")),
-					//	Rate:  20 * 1024 * 1024,
-					//},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("test", "col2")),
-						Rate:  10 * 1024 * 1024,
-					},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("test", "col3")),
-						Rate:  10 * 1024 * 1024,
-					},
-					{
-						Label: searchLabel,
-						Rate:  20,
-					},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("default")),
-						Rate:  10,
-					},
-					//{
-					//	Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("test")),
-					//	Rate:  10,
-					//},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  10,
-					},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("test", "col2")),
-						Rate:  5,
-					},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("test", "col3")),
-						Rate:  5,
-					},
-				},
-			},
-			2: {
-				Rms: []metricsinfo.RateMetric{
-					{
-						Label: metricsinfo.ReadResultThroughput,
-						Rate:  20 * 1024 * 1024,
-					},
-					//{
-					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
-					//	Rate:  20 * 1024 * 1024,
-					//},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  20 * 1024 * 1024,
-					},
-					{
-						Label: searchLabel,
-						Rate:  20,
-					},
-					//{
-					//	Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("default")),
-					//	Rate:  20,
-					//},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  20,
-					},
-				},
-			},
-		}
-
-		quotaCenter.rateLimiter.GetRootLimiters().GetLimiters().Insert(internalpb.RateType_DQLSearch, ratelimitutil.NewLimiter(1000, 1000))
-		quotaCenter.rateLimiter.GetOrCreateCollectionLimiters(1, 10,
-			newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-			newParamLimiterFunc(internalpb.RateScope_Collection, allOps))
-		quotaCenter.rateLimiter.GetOrCreateCollectionLimiters(2, 20,
-			newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-			newParamLimiterFunc(internalpb.RateScope_Collection, allOps))
-		quotaCenter.rateLimiter.GetOrCreateCollectionLimiters(2, 30,
-			newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-			newParamLimiterFunc(internalpb.RateScope_Collection, allOps))
-
-		err := quotaCenter.calculateReadRates()
-		assert.NoError(t, err)
-
-		checkRate := func(rateNode *interalratelimitutil.RateLimiterNode, expectValue float64) {
-			searchRate, ok := rateNode.GetLimiters().Get(internalpb.RateType_DQLSearch)
-			assert.True(t, ok)
-			assert.EqualValues(t, expectValue, searchRate.Limit())
-		}
-
-		{
-			checkRate(quotaCenter.rateLimiter.GetRootLimiters(), float64(32))             // (20 + 20) * 0.8
-			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), float64(24))        // (20 + 10) * 0.8
-			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), float64(500))       // not cool off
-			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), float64(24))  // (20 + 10) * 0.8
-			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), float64(500)) // not cool off
-			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 30), float64(500)) // not cool off
-		}
 	})
 }
 

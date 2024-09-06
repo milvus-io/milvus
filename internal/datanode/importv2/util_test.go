@@ -153,7 +153,8 @@ func Test_PickSegment(t *testing.T) {
 	batchSize := 1 * 1024 * 1024
 
 	for totalSize > 0 {
-		picked := PickSegment(task.req.GetRequestSegments(), vchannel, partitionID)
+		picked, err := PickSegment(task.req.GetRequestSegments(), vchannel, partitionID)
+		assert.NoError(t, err)
 		importedSize[picked] += batchSize
 		totalSize -= batchSize
 	}
@@ -167,4 +168,8 @@ func Test_PickSegment(t *testing.T) {
 	fn(importedSize[int64(101)])
 	fn(importedSize[int64(102)])
 	fn(importedSize[int64(103)])
+
+	// test no candidate segments found
+	_, err := PickSegment(task.req.GetRequestSegments(), "ch-2", 20)
+	assert.Error(t, err)
 }

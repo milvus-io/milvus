@@ -21,10 +21,10 @@ TEST(CApiTest, StreamReduce) {
 
     //1. set up segments
     CSegmentInterface segment_1;
-    auto status = NewSegment(collection, Growing, -1, &segment_1);
+    auto status = NewSegment(collection, Growing, -1, &segment_1, false);
     ASSERT_EQ(status.error_code, Success);
     CSegmentInterface segment_2;
-    status = NewSegment(collection, Growing, -1, &segment_2);
+    status = NewSegment(collection, Growing, -1, &segment_2, false);
     ASSERT_EQ(status.error_code, Success);
 
     //2. insert data into segments
@@ -208,7 +208,7 @@ TEST(CApiTest, StreamReduceGroupBY) {
     }
 
     CSegmentInterface segment;
-    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     //2. generate data and insert

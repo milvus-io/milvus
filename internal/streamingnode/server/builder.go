@@ -5,6 +5,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -16,12 +18,13 @@ import (
 // ServerBuilder is used to build a server.
 // All component should be initialized before server initialization should be added here.
 type ServerBuilder struct {
-	etcdClient *clientv3.Client
-	grpcServer *grpc.Server
-	rc         types.RootCoordClient
-	dc         types.DataCoordClient
-	session    *sessionutil.Session
-	kv         kv.MetaKv
+	etcdClient   *clientv3.Client
+	grpcServer   *grpc.Server
+	rc           types.RootCoordClient
+	dc           types.DataCoordClient
+	session      *sessionutil.Session
+	kv           kv.MetaKv
+	chunkManager storage.ChunkManager
 }
 
 // NewServerBuilder creates a new server builder.
@@ -32,6 +35,12 @@ func NewServerBuilder() *ServerBuilder {
 // WithETCD sets etcd client to the server builder.
 func (b *ServerBuilder) WithETCD(e *clientv3.Client) *ServerBuilder {
 	b.etcdClient = e
+	return b
+}
+
+// WithChunkManager sets chunk manager to the server builder.
+func (b *ServerBuilder) WithChunkManager(cm storage.ChunkManager) *ServerBuilder {
+	b.chunkManager = cm
 	return b
 }
 
@@ -66,16 +75,20 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 }
 
 // Build builds a streaming node server.
-func (s *ServerBuilder) Build() *Server {
-	resource.Init(
-		resource.OptETCD(s.etcdClient),
-		resource.OptRootCoordClient(s.rc),
-		resource.OptDataCoordClient(s.dc),
-		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(s.kv)),
+func (b *ServerBuilder) Build() *Server {
+	resource.Apply(
+		resource.OptETCD(b.etcdClient),
+		resource.OptRootCoordClient(b.rc),
+		resource.OptDataCoordClient(b.dc),
+		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
+	resource.Apply(
+		resource.OptFlusher(flusherimpl.NewFlusher(b.chunkManager)),
+	)
+	resource.Done()
 	return &Server{
-		session:               s.session,
-		grpcServer:            s.grpcServer,
+		session:               b.session,
+		grpcServer:            b.grpcServer,
 		componentStateService: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 	}
 }

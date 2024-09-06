@@ -20,23 +20,76 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-func TestFlushMsgHandler(t *testing.T) {
+func TestFlushMsgHandler_HandleFlush(t *testing.T) {
+	vchannel := "ch-0"
+
 	// test failed
 	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	fn := flushMsgHandlerImpl(wbMgr)
-	fn("ch-0", []int64{1, 2, 3})
+	msg, err := message.NewFlushMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.FlushMessageHeader{}).
+		WithBody(&message.FlushMessageBody{
+			CollectionId: 0,
+			SegmentId:    []int64{1, 2, 3},
+		}).
+		BuildMutable()
+	assert.NoError(t, err)
+
+	handler := newFlushMsgHandler(wbMgr)
+	msgID := mock_message.NewMockMessageID(t)
+	im, err := message.AsImmutableFlushMessageV2(msg.IntoImmutableMessage(msgID))
+	assert.NoError(t, err)
+	err = handler.HandleFlush(vchannel, im)
+	assert.Error(t, err)
 
 	// test normal
 	wbMgr = writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	fn = flushMsgHandlerImpl(wbMgr)
-	fn("ch-0", []int64{1, 2, 3})
+	handler = newFlushMsgHandler(wbMgr)
+	err = handler.HandleFlush(vchannel, im)
+	assert.NoError(t, err)
+}
+
+func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
+	vchannel := "ch-0"
+
+	// test failed
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+
+	msg, err := message.NewManualFlushMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.ManualFlushMessageHeader{
+			CollectionId: 0,
+			FlushTs:      1000,
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		BuildMutable()
+	assert.NoError(t, err)
+
+	handler := newFlushMsgHandler(wbMgr)
+	msgID := mock_message.NewMockMessageID(t)
+	im, err := message.AsImmutableManualFlushMessageV2(msg.IntoImmutableMessage(msgID))
+	assert.NoError(t, err)
+	err = handler.HandleManualFlush(vchannel, im)
+	assert.Error(t, err)
+
+	// test normal
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	handler = newFlushMsgHandler(wbMgr)
+	err = handler.HandleManualFlush(vchannel, im)
+	assert.NoError(t, err)
 }

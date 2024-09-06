@@ -1,5 +1,6 @@
 import pytest
 import sys
+from typing import Dict, List
 from pymilvus import DefaultConfig
 
 from base.database_wrapper import ApiDatabaseWrapper
@@ -15,6 +16,7 @@ from base.high_level_api_wrapper import HighLevelApiWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import IndexPrams
 
 from pymilvus import ResourceGroupInfo
 
@@ -395,3 +397,23 @@ class TestcaseBase(Base):
 
         return tmp_user, tmp_pwd, tmp_role
 
+    def build_multi_index(self, index_params: Dict[str, IndexPrams], collection_obj: ApiCollectionWrapper = None):
+        collection_obj = collection_obj or self.collection_wrap
+        for k, v in index_params.items():
+            collection_obj.create_index(field_name=k, index_params=v.to_dict, index_name=k)
+        log.info(f"[TestcaseBase] Build all indexes done: {list(index_params.keys())}")
+        return collection_obj
+
+    def drop_multi_index(self, index_names: List[str], collection_obj: ApiCollectionWrapper = None,
+                         check_task=None, check_items=None):
+        collection_obj = collection_obj or self.collection_wrap
+        for n in index_names:
+            collection_obj.drop_index(index_name=n, check_task=check_task, check_items=check_items)
+        log.info(f"[TestcaseBase] Drop all indexes done: {index_names}")
+        return collection_obj
+
+    def show_indexes(self, collection_obj: ApiCollectionWrapper = None):
+        collection_obj = collection_obj or self.collection_wrap
+        indexes = {n.field_name: n.params for n in self.collection_wrap.indexes}
+        log.info("[TestcaseBase] Collection: `{0}` index: {1}".format(collection_obj.name, indexes))
+        return indexes

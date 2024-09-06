@@ -17,7 +17,7 @@
 package indexcgowrapper
 
 /*
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_core
 #include <stdlib.h>	// free
 #include "indexbuilder/index_c.h"
 */

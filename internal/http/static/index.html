@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milvus Expr Executor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+        }
+        .title {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            flex: 1;
+            width: 500px;
+            height: 400px;
+        }
+        .card h2 {
+            margin: 0 0 15px 0;
+            font-size: 1.25em;
+        }
+        .card input,
+        .card button {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 1em;
+        }
+        .card button {
+            background-color: #007bff;
+            color: #ffffff;
+            cursor: pointer;
+            border: none;
+        }
+        .card button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            text-align: left;
+        }
+        .result pre {
+            box-sizing: border-box;
+            overflow-x: hidden;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            width: 100%;
+            height: 85%;
+            padding: 10px;
+            background-color: #f9f9f9;
+            height: -webkit-fill-available;
+            margin-bottom: 35px;
+        }
+        .hint {
+            /* text-align: center; */
+            color: #777;
+            width: 80%;
+            height: 35%;
+            margin: 0px;
+        }
+
+        .hint p {
+            width: 100%;
+            height: 100%;
+            margin: 0px;
+            line-height: 1.2;
+            padding: 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border-left: 5px solid #007BFF;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        code {
+            background: #e7e7e7;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+<div class="title">Milvus Expr Executor</div>
+<div class="container">
+    <div class="card">
+        <h2>Input</h2>
+        <input type="text" id="auth" placeholder="Enter auth" onkeydown="handleEnter(event, 'code')">
+        <input type="text" id="code" placeholder="Enter code" onkeydown="handleEnter(event, 'submitButton')">
+        <button id="submitButton" onclick="submitForm()">Submit</button>
+    </div>
+    <div class="card result" id="result">
+        <h2>Result</h2>
+        <pre id="resultText"></pre>
+    </div>
+</div>
+<div class="hint">
+    <p><strong>Parameter meaning:</strong>
+The <code>auth</code> parameter is etcd root path, and the <code>code</code> parameter is expr execution expression.<br>
+<strong>Injection object:</strong>
+Currently, the objects injected by expr include: <code>param</code>, <code>proxy</code>, <code>rootcoord</code>, <code>querycoord</code>, <code>datacoord</code>, <code>quernode</code>, <code>datanode</code>. You can use this tool to get the running value of the object.<br>
+<strong>Usage example:</strong>
+1. Get a configuration: <code>param.CommonCfg.GracefulTime.GetValue()</code>
+2. Get a property value in the proxy object: <code>proxy.address</code>
+3. Determine whether a graph exists in the datanode: <code>datanode.flowgraphManager.HasFlowgraph("aaa")</code><br>
+<strong>Limitations:</strong>
+1. Variables cannot be modified.
+2. Methods with non-basic type parameters cannot be executed.
+3. Functions with multiple return values cannot be chained.</p>
+</div>
+<script>
+    function handleEnter(event, nextElementId) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            document.getElementById(nextElementId).focus();
+            if (nextElementId === 'submitButton') {
+                submitForm();
+            }
+        }
+    }
+
+    function submitForm() {
+        const auth = document.getElementById('auth').value;
+        const code = document.getElementById('code').value;
+
+        if (auth && code) {
+            const xhr = new XMLHttpRequest();
+            const hostUrl = window.location.origin;
+            xhr.open('GET', `${hostUrl}/expr?auth=${auth}&code=${code}`, true);
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    document.getElementById('resultText').textContent = JSON.stringify(JSON.parse(xhr.responseText), null, 2);
+                } else {
+                    document.getElementById('resultText').textContent = 'Error: ' + xhr.status;
+                }
+            };
+            xhr.send();
+        } else {
+            alert('Please fill in both fields.');
+        }
+    }
+</script>
+</body>
+</html>

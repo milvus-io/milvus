@@ -30,6 +30,7 @@ func newSegmentAllocManagerFromProto(
 		resource.Resource().SegmentAssignStatsManager().RegisterNewGrowingSegment(stats.SegmentBelongs{
 			CollectionID: inner.GetCollectionId(),
 			PartitionID:  inner.GetPartitionId(),
+			SegmentID:    inner.GetSegmentId(),
 			PChannel:     pchannel.Name,
 			VChannel:     inner.GetVchannel(),
 		}, inner.GetSegmentId(), stat)
@@ -40,6 +41,7 @@ func newSegmentAllocManagerFromProto(
 		inner:         inner,
 		immutableStat: stat,
 		ackSem:        atomic.NewInt32(0),
+		txnSem:        atomic.NewInt32(0),
 		dirtyBytes:    0,
 	}
 }
@@ -65,6 +67,7 @@ func newSegmentAllocManager(
 		immutableStat: nil, // immutable stat can be seen after sealed.
 		ackSem:        atomic.NewInt32(0),
 		dirtyBytes:    0,
+		txnSem:        atomic.NewInt32(0),
 	}
 }
 
@@ -88,6 +91,7 @@ type segmentAllocManager struct {
 	immutableStat *stats.SegmentStats // after sealed or flushed, the stat is immutable and cannot be seen by stats manager.
 	ackSem        *atomic.Int32       // the ackSem is increased when segment allocRows, decreased when the segment is acked.
 	dirtyBytes    uint64              // records the dirty bytes that didn't persist.
+	txnSem        *atomic.Int32       // the runnint txn count of the segment.
 }
 
 // GetCollectionID returns the collection id of the segment assignment meta.
@@ -131,19 +135,30 @@ func (s *segmentAllocManager) AckSem() int32 {
 	return s.ackSem.Load()
 }
 
+// TxnSem returns the txn sem.
+func (s *segmentAllocManager) TxnSem() int32 {
+	return s.txnSem.Load()
+}
+
 // AllocRows ask for rows from current segment.
 // Only growing and not fenced segment can alloc rows.
-func (s *segmentAllocManager) AllocRows(ctx context.Context, m stats.InsertMetrics) (bool, *atomic.Int32) {
+func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentRequest) (bool, *atomic.Int32) {
 	// if the segment is not growing or reach limit, return false directly.
 	if s.inner.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
 		return false, nil
 	}
-	inserted := resource.Resource().SegmentAssignStatsManager().AllocRows(s.GetSegmentID(), m)
+	inserted := resource.Resource().SegmentAssignStatsManager().AllocRows(s.GetSegmentID(), req.InsertMetrics)
 	if !inserted {
 		return false, nil
 	}
-	s.dirtyBytes += m.BinarySize
+	s.dirtyBytes += req.InsertMetrics.BinarySize
 	s.ackSem.Inc()
+
+	// register the txn session cleanup to the segment.
+	if req.TxnSession != nil {
+		s.txnSem.Inc()
+		req.TxnSession.RegisterCleanup(func() { s.txnSem.Dec() }, req.TimeTick)
+	}
 
 	// persist stats if too dirty.
 	s.persistStatsIfTooDirty(ctx)
@@ -239,6 +254,7 @@ func (m *mutableSegmentAssignmentMeta) Commit(ctx context.Context) error {
 		resource.Resource().SegmentAssignStatsManager().RegisterNewGrowingSegment(stats.SegmentBelongs{
 			CollectionID: m.original.GetCollectionID(),
 			PartitionID:  m.original.GetPartitionID(),
+			SegmentID:    m.original.GetSegmentID(),
 			PChannel:     m.original.pchannel.Name,
 			VChannel:     m.original.GetVChannel(),
 		}, m.original.GetSegmentID(), stats.NewSegmentStatFromProto(m.modifiedCopy.Stat))

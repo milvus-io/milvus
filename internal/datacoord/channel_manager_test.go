@@ -28,6 +28,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	kvmock "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
@@ -45,7 +47,7 @@ type ChannelManagerSuite struct {
 
 	mockKv      *kvmock.MetaKv
 	mockCluster *MockSubCluster
-	mockAlloc   *NMockAllocator
+	mockAlloc   *allocator.MockAllocator
 	mockHandler *NMockHandler
 }
 
@@ -94,7 +96,7 @@ func (s *ChannelManagerSuite) checkNoAssignment(m *ChannelManagerImpl, nodeID in
 func (s *ChannelManagerSuite) SetupTest() {
 	s.mockKv = kvmock.NewMetaKv(s.T())
 	s.mockCluster = NewMockSubCluster(s.T())
-	s.mockAlloc = NewNMockAllocator(s.T())
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).
 		RunAndReturn(func(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
@@ -103,7 +105,7 @@ func (s *ChannelManagerSuite) SetupTest() {
 				ChannelName:  ch.GetName(),
 			}
 		}).Maybe()
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.mockKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).RunAndReturn(
 		func(save map[string]string, removals []string, preds ...predicates.Predicate) error {
 			log.Info("test save and remove", zap.Any("save", save), zap.Any("removals", removals))
@@ -706,6 +708,80 @@ func (s *ChannelManagerSuite) TestStartup() {
 	s.checkAssignment(m, 2, "ch3", ToWatch)
 }
 
+func (s *ChannelManagerSuite) TestStartupNilSchema() {
+	chNodes := map[string]int64{
+		"ch1": 1,
+		"ch2": 1,
+		"ch3": 3,
+	}
+	var keys, values []string
+	for channel, nodeID := range chNodes {
+		keys = append(keys, fmt.Sprintf("channel_store/%d/%s", nodeID, channel))
+		info := generateWatchInfo(channel, datapb.ChannelWatchState_ToRelease)
+		info.Schema = nil
+		bs, err := proto.Marshal(info)
+		s.Require().NoError(err)
+		values = append(values, string(bs))
+	}
+	s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(keys, values, nil).Once()
+	s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	s.Require().NoError(err)
+	err = m.Startup(context.TODO(), nil, []int64{1, 3})
+	s.Require().NoError(err)
+
+	for ch, node := range chNodes {
+		channel, got := m.GetChannel(node, ch)
+		s.Require().True(got)
+		s.Nil(channel.GetSchema())
+		s.Equal(ch, channel.GetName())
+		log.Info("Recovered nil schema channel", zap.Any("channel", channel))
+	}
+
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(
+		&collectionInfo{ID: 111, Schema: &schemapb.CollectionSchema{Name: "coll111"}},
+		nil,
+	)
+
+	err = m.DeleteNode(1)
+	s.Require().NoError(err)
+
+	err = m.DeleteNode(3)
+	s.Require().NoError(err)
+
+	s.checkAssignment(m, bufferID, "ch1", Standby)
+	s.checkAssignment(m, bufferID, "ch2", Standby)
+	s.checkAssignment(m, bufferID, "ch3", Standby)
+
+	for ch := range chNodes {
+		channel, got := m.GetChannel(bufferID, ch)
+		s.Require().True(got)
+		s.NotNil(channel.GetSchema())
+		s.Equal(ch, channel.GetName())
+
+		s.NotNil(channel.GetWatchInfo())
+		s.NotNil(channel.GetWatchInfo().Schema)
+		log.Info("Recovered non-nil schema channel", zap.Any("channel", channel))
+	}
+
+	err = m.AddNode(7)
+	s.Require().NoError(err)
+	s.checkAssignment(m, 7, "ch1", ToWatch)
+	s.checkAssignment(m, 7, "ch2", ToWatch)
+	s.checkAssignment(m, 7, "ch3", ToWatch)
+
+	for ch := range chNodes {
+		channel, got := m.GetChannel(7, ch)
+		s.Require().True(got)
+		s.NotNil(channel.GetSchema())
+		s.Equal(ch, channel.GetName())
+
+		s.NotNil(channel.GetWatchInfo())
+		s.NotNil(channel.GetWatchInfo().Schema)
+		log.Info("non-nil schema channel", zap.Any("channel", channel))
+	}
+}
+
 func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 	chNodes := map[string]int64{
 		"ch1": 1,
@@ -715,8 +791,8 @@ func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 	}
 	s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 
-	s.mockAlloc = NewNMockAllocator(s.T())
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(0, errors.New("mock rootcoord failure"))
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(0, errors.New("mock rootcoord failure"))
 	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)
 

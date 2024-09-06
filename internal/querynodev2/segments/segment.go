@@ -17,7 +17,7 @@
 package segments
 
 /*
-#cgo pkg-config: milvus_segcore milvus_futures
+#cgo pkg-config: milvus_core
 
 #include "futures/future_c.h"
 #include "segcore/collection_c.h"
@@ -291,7 +291,7 @@ func NewSegment(ctx context.Context,
 
 	var newPtr C.CSegmentInterface
 	_, err = GetDynamicPool().Submit(func() (any, error) {
-		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr)
+		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr, C.bool(loadInfo.GetIsSorted()))
 		err := HandleCStatus(ctx, &status, "NewSegmentFailed",
 			zap.Int64("collectionID", loadInfo.GetCollectionID()),
 			zap.Int64("partitionID", loadInfo.GetPartitionID()),
@@ -873,7 +873,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, useMmap bool) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -911,9 +911,13 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}
 	}
 
+	// TODO retrieve_enable should be considered
 	collection := s.collection
-	mmapEnabled := useMmap || common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
-		(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
+	fieldSchema, err := getFieldSchema(collection.Schema(), fieldID)
+	if err != nil {
+		return err
+	}
+	mmapEnabled := isDataMmapEnable(fieldSchema)
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
@@ -1116,12 +1120,14 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 
+	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:       s.Collection(),
 		PartitionID:        s.Partition(),
 		SegmentID:          s.ID(),
 		Field:              fieldSchema,
-		EnableMmap:         isIndexMmapEnable(indexInfo),
+		EnableMmap:         enableMmap,
 		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		IndexID:            indexInfo.GetIndexID(),
 		IndexBuildID:       indexInfo.GetBuildID(),
@@ -1160,7 +1166,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	}
 
 	// 4.
-	s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
+	s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), isDataMmapEnable(fieldSchema))
 	warmupChunkCacheSpan := tr.RecordSpan()
 	log.Info("Finish loading index",
 		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
@@ -1208,12 +1214,13 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 	return nil
 }
 
-func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
+func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmapEnabled bool) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", fieldID),
+		zap.Bool("mmapEnabled", mmapEnabled),
 	)
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return
@@ -1227,7 +1234,8 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 	case "sync":
 		GetWarmupPool().Submit(func() (any, error) {
 			cFieldID := C.int64_t(fieldID)
-			status = C.WarmupChunkCache(s.ptr, cFieldID)
+			cMmapEnabled := C.bool(mmapEnabled)
+			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
 			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
 				log.Warn("warming up chunk cache synchronously failed", zap.Error(err))
 				return nil, err
@@ -1247,7 +1255,8 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 			defer s.ptrLock.RUnlock()
 
 			cFieldID := C.int64_t(fieldID)
-			status = C.WarmupChunkCache(s.ptr, cFieldID)
+			cMmapEnabled := C.bool(mmapEnabled)
+			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
 			if err := HandleCStatus(ctx, &status, ""); err != nil {
 				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
 				return nil, err

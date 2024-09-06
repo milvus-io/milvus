@@ -124,7 +124,8 @@ func (s *CompactionSuite) TestMixCompaction() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(rowNum/batch, len(segments))
+	// stats task happened
+	s.Equal(rowNum/batch, len(segments)/2)
 	for _, segment := range segments {
 		log.Info("show segment result", zap.String("segment", segment.String()))
 	}

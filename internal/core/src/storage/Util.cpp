@@ -27,7 +27,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
-#include "storage/AzureChunkManager.h"
+#include "storage/azure/AzureChunkManager.h"
 #endif
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -36,7 +36,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
 #ifdef USE_OPENDAL
-#include "storage/OpenDALChunkManager.h"
+#include "storage/opendal/OpenDALChunkManager.h"
 #endif
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -528,6 +528,7 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
                           std::string object_key) {
+    // index not use valid_data, so no need to set nullable==true
     auto field_data = CreateFieldData(DataType::INT8, false);
     field_data->FillFieldData(buf, batch_size);
     auto indexData = std::make_shared<IndexData>(field_data);
@@ -551,8 +552,8 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
                    ? -1
                    : field_meta.get_dim();
-    auto field_data = CreateFieldData(
-        field_meta.get_data_type(), field_meta.is_nullable(), dim, 0);
+    auto field_data =
+        CreateFieldData(field_meta.get_data_type(), false, dim, 0);
     field_data->FillFieldData(buf, element_count);
     auto insertData = std::make_shared<InsertData>(field_data);
     insertData->SetFieldDataMeta(field_data_meta);

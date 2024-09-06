@@ -11,9 +11,11 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -138,6 +140,17 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	})
 }
 
+func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+	for _, msg := range deleteMsgs {
+		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
+		pkTss := msg.GetTimestamps()
+		if len(pks) > 0 {
+			wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
+		}
+	}
+}
+
 func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
@@ -155,9 +168,15 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		}
 	}
 
-	// distribute delete msg
-	// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
-	wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
+	if streamingutil.IsStreamingServiceEnabled() {
+		// In streaming service mode, flushed segments no longer maintain a bloom filter.
+		// So, here we skip filtering delete entries by bf.
+		wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
+	} else {
+		// distribute delete msg
+		// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
+		wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
+	}
 
 	// update pk oracle
 	for _, inData := range groups {
@@ -211,7 +230,7 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			StartPosition: startPos,
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
+		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
 		log.Info("Add a new level zero segment",
 			zap.Int64("segmentID", segmentID),
 			zap.String("level", datapb.SegmentLevel_L0.String()),

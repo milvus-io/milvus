@@ -65,6 +65,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 
 	createIndexMsg := CreateIndexMsg{}
 	dropIndexMsg := DropIndexMsg{}
+	alterIndexMsg := AlterIndexMsg{}
 
 	loadCollectionMsg := LoadCollectionMsg{}
 	releaseCollectionMsg := ReleaseCollectionMsg{}
@@ -74,6 +75,15 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 
 	createDatabaseMsg := CreateDatabaseMsg{}
 	dropDatabaseMsg := DropDatabaseMsg{}
+	alterDatabaseMsg := AlterDatabaseMsg{}
+
+	createCredentialMsg := CreateUserMsg{}
+	deleteCredentialMsg := DeleteUserMsg{}
+	updateCredentialMsg := UpdateUserMsg{}
+	createRoleMsg := CreateRoleMsg{}
+	dropRoleMsg := DropRoleMsg{}
+	operateUserRoleMsg := OperateUserRoleMsg{}
+	operatePrivilegeMsg := OperatePrivilegeMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -87,6 +97,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateIndex] = createIndexMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropIndex] = dropIndexMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_AlterIndex] = alterIndexMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_LoadCollection] = loadCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_ReleaseCollection] = releaseCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_LoadPartitions] = loadPartitionsMsg.Unmarshal
@@ -94,6 +105,14 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_Flush] = flushMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateDatabase] = createDatabaseMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropDatabase] = dropDatabaseMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_AlterDatabase] = alterDatabaseMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateCredential] = createCredentialMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DeleteCredential] = deleteCredentialMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_UpdateCredential] = updateCredentialMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateRole] = createRoleMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropRole] = dropRoleMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_OperateUserRole] = operateUserRoleMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_OperatePrivilege] = operatePrivilegeMsg.Unmarshal
 
 	return p
 }

@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -35,9 +36,9 @@ import (
 //
 //go:generate mockery --name=Cluster --structname=MockCluster --output=./  --filename=mock_cluster.go --with-expecter --inpackage
 type Cluster interface {
-	Startup(ctx context.Context, nodes []*NodeInfo) error
-	Register(node *NodeInfo) error
-	UnRegister(node *NodeInfo) error
+	Startup(ctx context.Context, nodes []*session.NodeInfo) error
+	Register(node *session.NodeInfo) error
+	UnRegister(node *session.NodeInfo) error
 	Watch(ctx context.Context, ch RWChannel) error
 	Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
@@ -47,19 +48,19 @@ type Cluster interface {
 	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	QuerySlots() map[int64]int64
-	GetSessions() []*Session
+	GetSessions() []*session.Session
 	Close()
 }
 
 var _ Cluster = (*ClusterImpl)(nil)
 
 type ClusterImpl struct {
-	sessionManager SessionManager
+	sessionManager session.DataNodeManager
 	channelManager ChannelManager
 }
 
 // NewClusterImpl creates a new cluster
-func NewClusterImpl(sessionManager SessionManager, channelManager ChannelManager) *ClusterImpl {
+func NewClusterImpl(sessionManager session.DataNodeManager, channelManager ChannelManager) *ClusterImpl {
 	c := &ClusterImpl{
 		sessionManager: sessionManager,
 		channelManager: channelManager,
@@ -69,7 +70,7 @@ func NewClusterImpl(sessionManager SessionManager, channelManager ChannelManager
 }
 
 // Startup inits the cluster with the given data nodes.
-func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
+func (c *ClusterImpl) Startup(ctx context.Context, nodes []*session.NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}
@@ -79,7 +80,7 @@ func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
 		allNodes    []int64
 	)
 
-	lo.ForEach(nodes, func(info *NodeInfo, _ int) {
+	lo.ForEach(nodes, func(info *session.NodeInfo, _ int) {
 		if info.IsLegacy {
 			legacyNodes = append(legacyNodes, info.NodeID)
 		}
@@ -89,13 +90,13 @@ func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
 }
 
 // Register registers a new node in cluster
-func (c *ClusterImpl) Register(node *NodeInfo) error {
+func (c *ClusterImpl) Register(node *session.NodeInfo) error {
 	c.sessionManager.AddSession(node)
 	return c.channelManager.AddNode(node.NodeID)
 }
 
 // UnRegister removes a node from cluster
-func (c *ClusterImpl) UnRegister(node *NodeInfo) error {
+func (c *ClusterImpl) UnRegister(node *session.NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
 	return c.channelManager.DeleteNode(node.NodeID)
 }
@@ -204,7 +205,7 @@ func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 }
 
 // GetSessions returns all sessions
-func (c *ClusterImpl) GetSessions() []*Session {
+func (c *ClusterImpl) GetSessions() []*session.Session {
 	return c.sessionManager.GetSessions()
 }
 

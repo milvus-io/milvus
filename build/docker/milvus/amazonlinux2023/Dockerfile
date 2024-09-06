@@ -16,6 +16,10 @@ ARG TARGETARCH
 RUN yum install -y wget libgomp libaio libatomic openblas-devel && \
     rm -rf /var/cache/yum/*
 
+# Add Tini
+RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
+    chmod +x /tini
+
 COPY --chown=root:root --chmod=774 ./bin/ /milvus/bin/
 
 COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
@@ -28,9 +32,6 @@ ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
-# Add Tini
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH /tini
-RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus

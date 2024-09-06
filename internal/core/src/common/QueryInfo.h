@@ -27,6 +27,7 @@ namespace milvus {
 struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
+    bool group_strict_size_{false};
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;

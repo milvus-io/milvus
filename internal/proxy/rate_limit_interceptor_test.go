@@ -69,7 +69,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 			createdTimestamp: 1,
 		}, nil)
 		globalMetaCache = mockCache
-		database, col2part, rt, size, err := getRequestInfo(context.Background(), &milvuspb.InsertRequest{
+		database, col2part, rt, size, err := GetRequestInfo(context.Background(), &milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -85,7 +85,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.UpsertRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.UpsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -101,7 +101,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.DeleteRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DeleteRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -117,7 +117,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.ImportRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ImportRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
@@ -133,7 +133,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.SearchRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.SearchRequest{
 			Nq: 5,
 			PartitionNames: []string{
 				"p1",
@@ -146,7 +146,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 1, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.QueryRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.QueryRequest{
 			CollectionName: "foo",
 			PartitionNames: []string{
 				"p1",
@@ -160,7 +160,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 1, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.CreateCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -168,7 +168,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.LoadCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -176,7 +176,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.ReleaseCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ReleaseCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -184,7 +184,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.DropCollectionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
@@ -192,7 +192,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.CreatePartitionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreatePartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -200,7 +200,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.LoadPartitionsRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadPartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -208,7 +208,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.ReleasePartitionsRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ReleasePartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -216,7 +216,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.DropPartitionRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropPartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
@@ -224,7 +224,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.CreateIndexRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.CreateIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
@@ -232,7 +232,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.DropIndexRequest{})
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.DropIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
@@ -240,7 +240,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		database, col2part, rt, size, err = getRequestInfo(context.Background(), &milvuspb.FlushRequest{
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.FlushRequest{
 			CollectionNames: []string{
 				"col1",
 			},
@@ -251,22 +251,22 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, database, int64(100))
 		assert.Equal(t, 1, len(col2part))
 
-		database, _, rt, size, err = getRequestInfo(context.Background(), &milvuspb.ManualCompactionRequest{})
+		database, _, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ManualCompactionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
 		assert.Equal(t, database, int64(100))
 
-		_, _, _, _, err = getRequestInfo(context.Background(), nil)
+		_, _, _, _, err = GetRequestInfo(context.Background(), nil)
 		assert.Error(t, err)
 
-		_, _, _, _, err = getRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
+		_, _, _, _, err = GetRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
 		assert.NoError(t, err)
 	})
 
-	t.Run("test getFailedResponse", func(t *testing.T) {
+	t.Run("test GetFailedResponse", func(t *testing.T) {
 		testGetFailedResponse := func(req interface{}, rt internalpb.RateType, err error, fullMethod string) {
-			rsp := getFailedResponse(req, err)
+			rsp := GetFailedResponse(req, err)
 			assert.NotNil(t, rsp)
 		}
 
@@ -280,9 +280,9 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 
 		// test illegal
-		rsp := getFailedResponse(&milvuspb.SearchResults{}, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
+		rsp := GetFailedResponse(&milvuspb.SearchResults{}, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
-		rsp = getFailedResponse(nil, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
+		rsp = GetFailedResponse(nil, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
 	})
 
@@ -390,13 +390,13 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := getRequestInfo(ctx, &milvuspb.FlushRequest{
+			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.FlushRequest{
 				DbName: "foo",
 			})
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := getRequestInfo(ctx, &milvuspb.ManualCompactionRequest{})
+			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.ManualCompactionRequest{})
 			assert.Error(t, err)
 		}
 		{
@@ -429,7 +429,7 @@ func TestGetInfo(t *testing.T) {
 			assert.Error(t, err)
 		}
 		{
-			_, _, _, _, err := getRequestInfo(ctx, &milvuspb.FlushRequest{
+			_, _, _, _, err := GetRequestInfo(ctx, &milvuspb.FlushRequest{
 				DbName:          "foo",
 				CollectionNames: []string{"coo"},
 			})

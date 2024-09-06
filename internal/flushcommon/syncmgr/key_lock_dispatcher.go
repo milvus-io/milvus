@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
-//go:generate mockery --name=Task --structname=MockTask --output=./  --filename=mock_task.go --with-expecter --inpackage
 type Task interface {
 	SegmentID() int64
 	Checkpoint() *msgpb.MsgPosition
@@ -16,6 +15,7 @@ type Task interface {
 	ChannelName() string
 	Run(context.Context) error
 	HandleError(error)
+	IsFlush() bool
 }
 
 type keyLockDispatcher[K comparable] struct {

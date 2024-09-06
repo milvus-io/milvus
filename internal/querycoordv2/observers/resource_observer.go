@@ -36,7 +36,8 @@ type ResourceObserver struct {
 	wg     sync.WaitGroup
 	meta   *meta.Meta
 
-	stopOnce sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
@@ -46,11 +47,13 @@ func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 }
 
 func (ob *ResourceObserver) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	ob.cancel = cancel
+	ob.startOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		ob.cancel = cancel
 
-	ob.wg.Add(1)
-	go ob.schedule(ctx)
+		ob.wg.Add(1)
+		go ob.schedule(ctx)
+	})
 }
 
 func (ob *ResourceObserver) Stop() {

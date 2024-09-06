@@ -283,6 +283,10 @@ func WriteYaml(w io.Writer) {
 			name: "dataNode",
 		},
 		{
+			name:   "msgChannel",
+			header: "\n# This topic introduces the message channel-related configurations of Milvus.",
+		},
+		{
 			name:   "log",
 			header: "\n# Configures the system log output.",
 		},
@@ -323,6 +327,11 @@ func WriteYaml(w io.Writer) {
 #if initMemSize and MaxMemSize both set zero,
 #milvus will automatically initialize half of the available GPU memory,
 #maxMemSize will the whole available GPU memory.`,
+		},
+		{
+			name: "streamingNode",
+			header: `
+# Any configuration related to the streaming node server.`,
 		},
 	}
 	marshller := YamlMarshaller{w, groups, result}

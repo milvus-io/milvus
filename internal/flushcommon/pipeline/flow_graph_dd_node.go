@@ -33,9 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -154,7 +156,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				ddn.dropMode.Store(true)
 
 				log.Info("Stop compaction for dropped channel", zap.String("channel", ddn.vChannelName))
-				ddn.compactionExecutor.DiscardByDroppedChannel(ddn.vChannelName)
+				if !streamingutil.IsStreamingServiceEnabled() {
+					ddn.compactionExecutor.DiscardByDroppedChannel(ddn.vChannelName)
+				}
 				fgMsg.dropCollection = true
 			}
 
@@ -232,10 +236,32 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
-
-		case commonpb.MsgType_Flush:
-			if ddn.flushMsgHandler != nil {
-				ddn.flushMsgHandler(ddn.vChannelName, nil)
+		case commonpb.MsgType_FlushSegment:
+			flushMsg := msg.(*adaptor.FlushMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", flushMsg.FlushMessage.TimeTick()),
+			)
+			logger.Info("receive flush message")
+			if err := ddn.flushMsgHandler.HandleFlush(ddn.vChannelName, flushMsg.FlushMessage); err != nil {
+				logger.Warn("handle flush message failed", zap.Error(err))
+			} else {
+				logger.Info("handle flush message success")
+			}
+		case commonpb.MsgType_ManualFlush:
+			manualFlushMsg := msg.(*adaptor.ManualFlushMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", manualFlushMsg.ManualFlushMessage.TimeTick()),
+				zap.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
+			)
+			logger.Info("receive manual flush message")
+			if err := ddn.flushMsgHandler.HandleManualFlush(ddn.vChannelName, manualFlushMsg.ManualFlushMessage); err != nil {
+				logger.Warn("handle manual flush message failed", zap.Error(err))
+			} else {
+				logger.Info("handle manual flush message success")
 			}
 		}
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -269,9 +270,9 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			Type:                 datapb.CompactionType_ClusteringCompaction,
-			BeginLogID:           100,
-			PreAllocatedSegments: &datapb.IDRange{Begin: 100, End: 200},
+			Type:                   datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:             100,
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -314,9 +315,9 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			Type:                 datapb.CompactionType_ClusteringCompaction,
-			BeginLogID:           100,
-			PreAllocatedSegments: &datapb.IDRange{Begin: 0, End: 0},
+			Type:                   datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:             100,
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 0, End: 0},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -372,7 +373,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		PartitionID:   2,
 		State:         commonpb.SegmentState_Growing,
 		StartPosition: &msgpb.MsgPosition{},
-	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
+	}, func(_ *datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() })
 
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -634,8 +635,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            100,
@@ -645,8 +646,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            101,
@@ -656,8 +657,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            102,
@@ -667,8 +668,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            103,
@@ -678,8 +679,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
@@ -754,8 +755,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            100,
@@ -765,8 +766,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            101,
@@ -776,8 +777,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
@@ -840,8 +841,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            100,
@@ -851,8 +852,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            101,
@@ -862,8 +863,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushing,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
@@ -926,8 +927,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            100,
@@ -937,8 +938,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            101,
@@ -948,8 +949,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushing,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            102,
@@ -959,8 +960,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
@@ -1017,8 +1018,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            100,
@@ -1028,8 +1029,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushed,
 			Level:         datapb.SegmentLevel_L0,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		cache.AddSegment(&datapb.SegmentInfo{
 			ID:            101,
@@ -1039,8 +1040,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Flushing,
 			Level:         datapb.SegmentLevel_L1,
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
@@ -1097,8 +1098,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 				},
 			},
 			Vchan: &datapb.VchannelInfo{},
-		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
 		})
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -477,7 +477,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.SetupTest()
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-
 		writer := NewSegmentDeltaWriter(100, 10, 1)
 		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
@@ -494,15 +493,15 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
-	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs1 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
-	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs2 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
-	bfs3 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs3 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs3.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
 
 	predicted := []int64{100, 101, 102}
-	segmentBFs := map[int64]*metacache.BloomFilterSet{
+	segmentBFs := map[int64]*pkoracle.BloomFilterSet{
 		100: bfs1,
 		101: bfs2,
 		102: bfs3,

@@ -19,6 +19,7 @@ package job
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -102,6 +103,14 @@ func (job *LoadCollectionJob) PreExecute() error {
 		)
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
+	}
+
+	if !reflect.DeepEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
 	}
 
 	return nil
@@ -191,6 +200,7 @@ func (job *LoadCollectionJob) Execute() error {
 			Status:        querypb.LoadStatus_Loading,
 			FieldIndexID:  req.GetFieldIndexID(),
 			LoadType:      querypb.LoadType_LoadCollection,
+			LoadFields:    req.GetLoadFields(),
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -288,6 +298,14 @@ func (job *LoadPartitionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	}
 
+	if !reflect.DeepEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
+	}
+
 	return nil
 }
 
@@ -371,6 +389,7 @@ func (job *LoadPartitionJob) Execute() error {
 				Status:        querypb.LoadStatus_Loading,
 				FieldIndexID:  req.GetFieldIndexID(),
 				LoadType:      querypb.LoadType_LoadPartition,
+				LoadFields:    req.GetLoadFields(),
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,

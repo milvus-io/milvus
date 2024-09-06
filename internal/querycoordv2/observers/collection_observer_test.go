@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -55,12 +56,13 @@ type CollectionObserverSuite struct {
 	nodes         []int64
 
 	// Mocks
-	idAllocator func() (int64, error)
-	etcd        *clientv3.Client
-	kv          kv.MetaKv
-	store       metastore.QueryCoordCatalog
-	broker      *meta.MockBroker
-	cluster     *session.MockCluster
+	idAllocator  func() (int64, error)
+	etcd         *clientv3.Client
+	kv           kv.MetaKv
+	store        metastore.QueryCoordCatalog
+	broker       *meta.MockBroker
+	cluster      *session.MockCluster
+	proxyManager *proxyutil.MockProxyClientManager
 
 	// Dependencies
 	dist              *meta.DistributionManager
@@ -162,6 +164,9 @@ func (suite *CollectionObserverSuite) SetupSuite() {
 		103: 2,
 	}
 	suite.nodes = []int64{1, 2, 3}
+
+	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
+	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *CollectionObserverSuite) SetupTest() {
@@ -209,6 +214,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.targetMgr,
 		suite.targetObserver,
 		suite.checkerController,
+		suite.proxyManager,
 	)
 
 	for _, collection := range suite.collections {

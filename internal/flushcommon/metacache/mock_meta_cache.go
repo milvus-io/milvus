@@ -6,6 +6,8 @@ import (
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
+	pkoracle "github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -511,7 +513,7 @@ func (_c *MockMetaCache_Schema_Call) RunAndReturn(run func() *schemapb.Collectio
 }
 
 // UpdateSegmentView provides a mock function with given fields: partitionID, newSegments, newSegmentsBF, allSegments
-func (_m *MockMetaCache) UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, allSegments map[int64]struct{}) {
+func (_m *MockMetaCache) UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{}) {
 	_m.Called(partitionID, newSegments, newSegmentsBF, allSegments)
 }
 
@@ -523,15 +525,15 @@ type MockMetaCache_UpdateSegmentView_Call struct {
 // UpdateSegmentView is a helper method to define mock.On call
 //   - partitionID int64
 //   - newSegments []*datapb.SyncSegmentInfo
-//   - newSegmentsBF []*BloomFilterSet
+//   - newSegmentsBF []*pkoracle.BloomFilterSet
 //   - allSegments map[int64]struct{}
 func (_e *MockMetaCache_Expecter) UpdateSegmentView(partitionID interface{}, newSegments interface{}, newSegmentsBF interface{}, allSegments interface{}) *MockMetaCache_UpdateSegmentView_Call {
 	return &MockMetaCache_UpdateSegmentView_Call{Call: _e.mock.On("UpdateSegmentView", partitionID, newSegments, newSegmentsBF, allSegments)}
 }
 
-func (_c *MockMetaCache_UpdateSegmentView_Call) Run(run func(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, allSegments map[int64]struct{})) *MockMetaCache_UpdateSegmentView_Call {
+func (_c *MockMetaCache_UpdateSegmentView_Call) Run(run func(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{})) *MockMetaCache_UpdateSegmentView_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]*datapb.SyncSegmentInfo), args[2].([]*BloomFilterSet), args[3].(map[int64]struct{}))
+		run(args[0].(int64), args[1].([]*datapb.SyncSegmentInfo), args[2].([]*pkoracle.BloomFilterSet), args[3].(map[int64]struct{}))
 	})
 	return _c
 }
@@ -541,7 +543,7 @@ func (_c *MockMetaCache_UpdateSegmentView_Call) Return() *MockMetaCache_UpdateSe
 	return _c
 }
 
-func (_c *MockMetaCache_UpdateSegmentView_Call) RunAndReturn(run func(int64, []*datapb.SyncSegmentInfo, []*BloomFilterSet, map[int64]struct{})) *MockMetaCache_UpdateSegmentView_Call {
+func (_c *MockMetaCache_UpdateSegmentView_Call) RunAndReturn(run func(int64, []*datapb.SyncSegmentInfo, []*pkoracle.BloomFilterSet, map[int64]struct{})) *MockMetaCache_UpdateSegmentView_Call {
 	_c.Call.Return(run)
 	return _c
 }

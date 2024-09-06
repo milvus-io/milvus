@@ -22,7 +22,10 @@
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
-                 const MmapChunkDescriptorPtr& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled,
+                 bool mmap_rss_not_need) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -53,18 +56,54 @@ ChunkCache::Read(const std::string& filepath,
 
     // release lock and perform download and decode
     // other thread request same path shall get the future.
-    auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-    auto column = Mmap(field_data->GetFieldData(), descriptor);
-
-    // set promise value to notify the future
-    lck.lock();
+    std::unique_ptr<DataCodec> field_data;
+    std::shared_ptr<ColumnBase> column;
+    bool allocate_success = false;
+    ErrorCode err_code = Success;
+    std::string err_msg = "";
+    try {
+        field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
+        column = Mmap(
+            field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
+        if (mmap_enabled && mmap_rss_not_need) {
+            auto ok = madvise(reinterpret_cast<void*>(
+                                  const_cast<char*>(column->MmappedData())),
+                              column->ByteSize(),
+                              ReadAheadPolicy_Map["dontneed"]);
+            if (ok != 0) {
+                LOG_WARN(
+                    "failed to madvise to the data file {}, addr {}, size {}, "
+                    "err: "
+                    "{}",
+                    filepath,
+                    static_cast<const void*>(column->MmappedData()),
+                    column->ByteSize(),
+                    strerror(errno));
+            }
+        }
+        allocate_success = true;
+    } catch (const SegcoreError& e) {
+        err_code = e.get_error_code();
+        err_msg = fmt::format("failed to read for chunkCache, seg_core_err:{}",
+                              e.what());
+    }
+    std::unique_lock mmap_lck(mutex_);
     it = columns_.find(filepath);
     if (it != columns_.end()) {
         // check pair exists then set value
         it->second.first.set_value(column);
+        if (allocate_success) {
+            AssertInfo(column, "unexpected null column, file={}", filepath);
+        }
+    } else {
+        PanicInfo(UnexpectedError,
+                  "Wrong code, the thread to download for cache should get the "
+                  "target entry");
     }
-    lck.unlock();
-    AssertInfo(column, "unexpected null column, file={}", filepath);
+    if (err_code != Success) {
+        columns_.erase(filepath);
+        throw SegcoreError(err_code, err_msg);
+    }
     return column;
 }
 
@@ -91,7 +130,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
         LOG_WARN(
             "failed to madvise to the data file {}, addr {}, size {}, err: {}",
             filepath,
-            column->MmappedData(),
+            static_cast<const void*>(column->MmappedData()),
             column->ByteSize(),
             strerror(errno));
     }
@@ -99,7 +138,9 @@ ChunkCache::Prefetch(const std::string& filepath) {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const FieldDataPtr& field_data,
-                 const MmapChunkDescriptorPtr& descriptor) {
+                 const MmapChunkDescriptorPtr& descriptor,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled) {
     auto dim = field_data->get_dim();
     auto data_type = field_data->get_data_type();
 
@@ -114,20 +155,30 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
             indices.push_back(offset);
             offset += field_data->DataSize(i);
         }
-        auto sparse_column = std::make_shared<SparseFloatColumn>(
-            data_size, dim, data_type, mcm_, descriptor);
+        std::shared_ptr<SparseFloatColumn> sparse_column;
+        if (mmap_enabled) {
+            sparse_column = std::make_shared<SparseFloatColumn>(
+                data_size, dim, data_type, mcm_, descriptor);
+        } else {
+            sparse_column = std::make_shared<SparseFloatColumn>(field_meta);
+        }
         sparse_column->Seal(std::move(indices));
         column = std::move(sparse_column);
     } else if (IsVariableDataType(data_type)) {
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
-        column = std::make_shared<Column>(data_size,
-                                          dim,
-                                          data_type,
-                                          mcm_,
-                                          descriptor,
-                                          field_data->IsNullable());
+        if (mmap_enabled) {
+            column = std::make_shared<Column>(data_size,
+                                              dim,
+                                              data_type,
+                                              mcm_,
+                                              descriptor,
+                                              field_data->IsNullable());
+        } else {
+            column = std::make_shared<Column>(field_data->get_num_rows(),
+                                              field_meta);
+        }
     }
     column->AppendBatch(field_data);
     return column;

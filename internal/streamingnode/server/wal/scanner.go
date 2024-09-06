@@ -17,7 +17,7 @@ var ErrUpstreamClosed = errors.New("upstream closed")
 // ReadOption is the option for reading records from the wal.
 type ReadOption struct {
 	DeliverPolicy  options.DeliverPolicy
-	MessageFilter  MessageFilter
+	MessageFilter  []options.DeliverFilter
 	MesasgeHandler MessageHandler // message handler for message processing.
 	// If the message handler is nil (no redundant operation need to apply),
 	// the default message handler will be used, and the receiver will be returned from Chan.
@@ -45,17 +45,25 @@ type Scanner interface {
 	Close() error
 }
 
+type HandleParam struct {
+	Ctx          context.Context
+	Upstream     <-chan message.ImmutableMessage
+	Message      message.ImmutableMessage
+	TimeTickChan <-chan struct{}
+}
+
+type HandleResult struct {
+	Incoming        message.ImmutableMessage // Not nil if upstream return new message.
+	MessageHandled  bool                     // True if Message is handled successfully.
+	TimeTickUpdated bool                     // True if TimeTickChan is triggered.
+	Error           error                    // Error is context is canceled.
+}
+
 // MessageHandler is used to handle message read from log.
 // TODO: should be removed in future after msgstream is removed.
 type MessageHandler interface {
 	// Handle is the callback for handling message.
-	// The message will be passed to the handler for processing.
-	// Handle operation can be blocked, but should listen to the context.Done() and upstream.
-	// If the context is canceled, the handler should return immediately with ctx.Err.
-	// If the upstream is closed, the handler should return immediately with ErrUpstreamClosed.
-	// If the upstream recv a message, the handler should return the incoming message.
-	// If the handler handle the message successfully, it should return the ok=true.
-	Handle(ctx context.Context, upstream <-chan message.ImmutableMessage, msg message.ImmutableMessage) (incoming message.ImmutableMessage, ok bool, err error)
+	Handle(param HandleParam) HandleResult
 
 	// Close is called after all messages are handled or handling is interrupted.
 	Close()

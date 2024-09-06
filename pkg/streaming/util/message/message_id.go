@@ -49,4 +49,7 @@ type MessageID interface {
 
 	// Marshal marshal the message id.
 	Marshal() string
+
+	// Convert into string for logging.
+	String() string
 }

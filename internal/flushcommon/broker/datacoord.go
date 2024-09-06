@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -62,30 +64,48 @@ func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.Dat
 	return nil
 }
 
-func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64s("segmentIDs", segmentIDs),
-	)
+func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*datapb.SegmentInfo, error) {
+	getSegmentInfo := func(ids []int64) (*datapb.GetSegmentInfoResponse, error) {
+		ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
 
-	infoResp, err := dc.client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithSourceID(dc.serverID),
-		),
-		SegmentIDs:       segmentIDs,
-		IncludeUnHealthy: true,
-	})
-	if err := merr.CheckRPCCall(infoResp, err); err != nil {
-		log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	err = binlog.DecompressMultiBinLogs(infoResp.GetInfos())
-	if err != nil {
-		log.Warn("Fail to DecompressMultiBinLogs", zap.Error(err))
-		return nil, err
+		infoResp, err := dc.client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
+				commonpbutil.WithSourceID(dc.serverID),
+			),
+			SegmentIDs:       ids,
+			IncludeUnHealthy: true,
+		})
+		if err := merr.CheckRPCCall(infoResp, err); err != nil {
+			log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Int64s("segments", ids), zap.Error(err))
+			return nil, err
+		}
+
+		err = binlog.DecompressMultiBinLogs(infoResp.GetInfos())
+		if err != nil {
+			log.Warn("Fail to DecompressMultiBinLogs", zap.Int64s("segments", ids), zap.Error(err))
+			return nil, err
+		}
+		return infoResp, nil
 	}
 
-	return infoResp.Infos, nil
+	ret := make([]*datapb.SegmentInfo, 0, len(ids))
+	batchSize := 1000
+	startIdx := 0
+	for startIdx < len(ids) {
+		endIdx := int(math.Min(float64(startIdx+batchSize), float64(len(ids))))
+
+		resp, err := getSegmentInfo(ids[startIdx:endIdx])
+		if err != nil {
+			log.Warn("Fail to get SegmentInfo", zap.Int("total segment num", len(ids)), zap.Int("returned num", startIdx))
+			return nil, err
+		}
+		ret = append(ret, resp.GetInfos()...)
+		startIdx += batchSize
+	}
+
+	return ret, nil
 }
 
 func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error {

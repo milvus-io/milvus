@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -151,7 +152,7 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 func (m *partitionSegmentManagers) Get(collectionID int64, partitionID int64) (*partitionSegmentManager, error) {
 	pm, ok := m.managers.Get(partitionID)
 	if !ok {
-		return nil, errors.Errorf("partition %d in collection %d not found in segment assignment service", partitionID, collectionID)
+		return nil, status.NewUnrecoverableError("partition %d in collection %d not found in segment assignment service", partitionID, collectionID)
 	}
 	return pm, nil
 }
@@ -206,6 +207,34 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 		return nil
 	}
 	return pm.CollectAllCanBeSealedAndClear()
+}
+
+// SealAllSegmentsAndFenceUntil seals all segments and fence assign until timetick.
+func (m *partitionSegmentManagers) SealAllSegmentsAndFenceUntil(collectionID int64, timetick uint64) ([]*segmentAllocManager, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionInfo, ok := m.collectionInfos[collectionID]
+	if !ok {
+		m.logger.Warn("collection not exists when Flush in segment assignment service", zap.Int64("collectionID", collectionID))
+		return nil, errors.New("collection not found")
+	}
+
+	sealedSegments := make([]*segmentAllocManager, 0)
+	// collect all partitions
+	for _, partition := range collectionInfo.Partitions {
+		// Seal all segments and fence assign to the partition manager.
+		pm, ok := m.managers.Get(partition.PartitionId)
+		if !ok {
+			m.logger.Warn("partition not found when Flush in segment assignment service, it's may be a bug in system",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partition.PartitionId))
+			return nil, errors.New("partition not found")
+		}
+		newSealedSegments := pm.SealAllSegmentsAndFenceUntil(timetick)
+		sealedSegments = append(sealedSegments, newSealedSegments...)
+	}
+	return sealedSegments, nil
 }
 
 // Range ranges the partition managers.

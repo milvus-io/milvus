@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -31,13 +32,13 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 			NodeID:         1,
 			State:          datapb.CompactionTaskState_executing,
 			InputSegments:  []int64{200, 201},
-			ResultSegments: []int64{100},
+			ResultSegments: []int64{100, 200},
 		},
 		// plan: plan,
 		meta: s.mockMeta,
 	}
-	alloc := NewNMockAllocator(s.T())
-	alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
@@ -66,12 +67,12 @@ func (s *CompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 				State:          datapb.CompactionTaskState_executing,
 				NodeID:         1,
 				InputSegments:  []int64{200, 201},
-				ResultSegments: []int64{100},
+				ResultSegments: []int64{100, 200},
 			},
 			meta: s.mockMeta,
 		}
-		alloc := NewNMockAllocator(s.T())
-		alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocN(int64(1)).Return(19530, 99999, nil)
 		task.allocator = alloc
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)

@@ -92,3 +92,15 @@ func (b *listDeleteBuffer[T]) TryDiscard(ts uint64) {
 		b.list = b.list[nextHead:]
 	}
 }
+
+func (b *listDeleteBuffer[T]) Size() (entryNum, memorySize int64) {
+	b.mut.RLock()
+	defer b.mut.RUnlock()
+
+	for _, block := range b.list {
+		blockNum, blockSize := block.Size()
+		entryNum += blockNum
+		memorySize += blockSize
+	}
+	return entryNum, memorySize
+}

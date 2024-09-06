@@ -18,16 +18,18 @@ package datacoord
 
 import (
 	"context"
-	"sync/atomic"
+	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -88,72 +90,28 @@ func newMemoryMeta() (*meta, error) {
 	return newMeta(context.TODO(), catalog, nil)
 }
 
-var _ allocator = (*MockAllocator)(nil)
-
-type MockAllocator struct {
-	cnt int64
+func newMockAllocator(t *testing.T) *allocator.MockAllocator {
+	counter := atomic.NewInt64(0)
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockAllocator.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
+		return counter.Inc(), nil
+	}).Maybe()
+	mockAllocator.EXPECT().AllocTimestamp(mock.Anything).RunAndReturn(func(ctx context.Context) (uint64, error) {
+		return uint64(counter.Inc()), nil
+	}).Maybe()
+	mockAllocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		v := counter.Add(i)
+		return v, v + i, nil
+	}).Maybe()
+	return mockAllocator
 }
 
-func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
-	val := atomic.AddInt64(&m.cnt, 1)
-	return Timestamp(val), nil
-}
-
-func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
-	val := atomic.AddInt64(&m.cnt, 1)
-	return val, nil
-}
-
-func (m *MockAllocator) allocN(n int64) (UniqueID, UniqueID, error) {
-	val := atomic.AddInt64(&m.cnt, n)
-	return val, val + n, nil
-}
-
-type MockAllocator0 struct{}
-
-func (m *MockAllocator0) allocTimestamp(ctx context.Context) (Timestamp, error) {
-	return Timestamp(0), nil
-}
-
-func (m *MockAllocator0) allocID(ctx context.Context) (UniqueID, error) {
-	return 0, nil
-}
-
-func (m *MockAllocator0) allocN(n int64) (UniqueID, UniqueID, error) {
-	return 0, n, nil
-}
-
-var _ allocator = (*FailsAllocator)(nil)
-
-// FailsAllocator allocator that fails
-type FailsAllocator struct {
-	allocTsSucceed bool
-	allocIDSucceed bool
-}
-
-func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
-	if a.allocTsSucceed {
-		return 0, nil
-	}
-	return 0, errors.New("always fail")
-}
-
-func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
-	if a.allocIDSucceed {
-		return 0, nil
-	}
-	return 0, errors.New("always fail")
-}
-
-func (a *FailsAllocator) allocN(_ int64) (UniqueID, UniqueID, error) {
-	if a.allocIDSucceed {
-		return 0, 0, nil
-	}
-	return 0, 0, errors.New("always fail")
-}
-
-func newMockAllocator() *MockAllocator {
-	return &MockAllocator{}
+func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
+	mock0Allocator := allocator.NewMockAllocator(t)
+	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(0, nil).Maybe()
+	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(0, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(0, 0, nil).Maybe()
+	return mock0Allocator
 }
 
 func newTestSchema() *schemapb.CollectionSchema {
@@ -345,7 +303,7 @@ func (c *mockDataNodeClient) Stop() error {
 
 type mockRootCoordClient struct {
 	state commonpb.StateCode
-	cnt   int64
+	cnt   atomic.Int64
 }
 
 func (m *mockRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
@@ -519,7 +477,7 @@ func (m *mockRootCoordClient) AllocTimestamp(ctx context.Context, req *rootcoord
 		return &rootcoordpb.AllocTimestampResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
 	}
 
-	val := atomic.AddInt64(&m.cnt, int64(req.Count))
+	val := m.cnt.Add(int64(req.Count))
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
 	return &rootcoordpb.AllocTimestampResponse{
@@ -533,7 +491,7 @@ func (m *mockRootCoordClient) AllocID(ctx context.Context, req *rootcoordpb.Allo
 	if m.state != commonpb.StateCode_Healthy {
 		return &rootcoordpb.AllocIDResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
 	}
-	val := atomic.AddInt64(&m.cnt, int64(req.Count))
+	val := m.cnt.Add(int64(req.Count))
 	return &rootcoordpb.AllocIDResponse{
 		Status: merr.Success(),
 		ID:     val,
@@ -622,6 +580,14 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
+}
+
+func (m *mockRootCoordClient) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 type mockCompactionTrigger struct {

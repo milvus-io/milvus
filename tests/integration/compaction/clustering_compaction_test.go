@@ -45,6 +45,15 @@ type ClusteringCompactionSuite struct {
 	integration.MiniClusterSuite
 }
 
+func (s *ClusteringCompactionSuite) SetupSuite() {
+	paramtable.Init()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexTaskSchedulerInterval.Key, "100")
+
+	s.Require().NoError(s.SetupEmbedEtcd())
+}
+
 func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,6 +70,9 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	// 2000 rows for each segment, about 1MB.
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key, strconv.Itoa(1))
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key)
+
+	paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(500*1024))
+	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
 
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, strconv.Itoa(8))
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key)

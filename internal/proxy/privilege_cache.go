@@ -41,12 +41,14 @@ func getPriCache() *PrivilegeCache {
 		priCacheInitOnce.Do(func() {
 			priCacheMut.Lock()
 			defer priCacheMut.Unlock()
-			c = &PrivilegeCache{
+			priCache = &PrivilegeCache{
 				version: ver.Inc(),
 				values:  typeutil.ConcurrentMap[string, bool]{},
 			}
-			priCache = c
 		})
+		priCacheMut.RLock()
+		defer priCacheMut.RUnlock()
+		c = priCache
 	}
 
 	return c

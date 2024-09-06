@@ -26,30 +26,30 @@ func generateTestSchema() *schemapb.CollectionSchema {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
 		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64},
-		{FieldID: 10, Name: "bool", DataType: schemapb.DataType_Bool},
-		{FieldID: 11, Name: "int8", DataType: schemapb.DataType_Int8},
-		{FieldID: 12, Name: "int16", DataType: schemapb.DataType_Int16},
-		{FieldID: 13, Name: "int64", DataType: schemapb.DataType_Int64},
-		{FieldID: 14, Name: "float", DataType: schemapb.DataType_Float},
-		{FieldID: 15, Name: "double", DataType: schemapb.DataType_Double},
-		{FieldID: 16, Name: "varchar", DataType: schemapb.DataType_VarChar},
-		{FieldID: 17, Name: "string", DataType: schemapb.DataType_String},
-		{FieldID: 18, Name: "array", DataType: schemapb.DataType_Array},
-		{FieldID: 19, Name: "string", DataType: schemapb.DataType_JSON},
-		{FieldID: 101, Name: "int32", DataType: schemapb.DataType_Int32},
-		{FieldID: 102, Name: "floatVector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+		{FieldID: 100, Name: "bool", DataType: schemapb.DataType_Bool},
+		{FieldID: 101, Name: "int8", DataType: schemapb.DataType_Int8},
+		{FieldID: 102, Name: "int16", DataType: schemapb.DataType_Int16},
+		{FieldID: 103, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 104, Name: "float", DataType: schemapb.DataType_Float},
+		{FieldID: 105, Name: "double", DataType: schemapb.DataType_Double},
+		{FieldID: 106, Name: "varchar", DataType: schemapb.DataType_VarChar},
+		{FieldID: 107, Name: "string", DataType: schemapb.DataType_String},
+		{FieldID: 108, Name: "array", DataType: schemapb.DataType_Array},
+		{FieldID: 109, Name: "json", DataType: schemapb.DataType_JSON},
+		{FieldID: 110, Name: "int32", DataType: schemapb.DataType_Int32},
+		{FieldID: 111, Name: "floatVector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "8"},
 		}},
-		{FieldID: 103, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+		{FieldID: 112, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "8"},
 		}},
-		{FieldID: 104, Name: "float16Vector", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{
+		{FieldID: 113, Name: "float16Vector", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "8"},
 		}},
-		{FieldID: 105, Name: "bf16Vector", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{
+		{FieldID: 114, Name: "bf16Vector", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "8"},
 		}},
-		{FieldID: 106, Name: "sparseFloatVector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{
+		{FieldID: 115, Name: "sparseFloatVector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "28433"},
 		}},
 	}}
@@ -128,34 +128,34 @@ func generateTestData(collID, partID, segID int64, num int) ([]*Blob, error) {
 		common.RowIDField:     &storage.Int64FieldData{Data: field0},
 		common.TimeStampField: &storage.Int64FieldData{Data: field1},
 
-		10:  &storage.BoolFieldData{Data: field10},
-		11:  &storage.Int8FieldData{Data: field11},
-		12:  &storage.Int16FieldData{Data: field12},
-		13:  &storage.Int64FieldData{Data: field13},
-		14:  &storage.FloatFieldData{Data: field14},
-		15:  &storage.DoubleFieldData{Data: field15},
-		16:  &storage.StringFieldData{Data: field16},
-		17:  &storage.StringFieldData{Data: field17},
-		18:  &storage.ArrayFieldData{Data: field18},
-		19:  &storage.JSONFieldData{Data: field19},
-		101: &storage.Int32FieldData{Data: field101},
-		102: &storage.FloatVectorFieldData{
+		100: &storage.BoolFieldData{Data: field10},
+		101: &storage.Int8FieldData{Data: field11},
+		102: &storage.Int16FieldData{Data: field12},
+		103: &storage.Int64FieldData{Data: field13},
+		104: &storage.FloatFieldData{Data: field14},
+		105: &storage.DoubleFieldData{Data: field15},
+		106: &storage.StringFieldData{Data: field16},
+		107: &storage.StringFieldData{Data: field17},
+		108: &storage.ArrayFieldData{Data: field18},
+		109: &storage.JSONFieldData{Data: field19},
+		110: &storage.Int32FieldData{Data: field101},
+		111: &storage.FloatVectorFieldData{
 			Data: field102,
 			Dim:  8,
 		},
-		103: &storage.BinaryVectorFieldData{
+		112: &storage.BinaryVectorFieldData{
 			Data: field103,
 			Dim:  8,
 		},
-		104: &storage.Float16VectorFieldData{
+		113: &storage.Float16VectorFieldData{
 			Data: field104,
 			Dim:  8,
 		},
-		105: &storage.BFloat16VectorFieldData{
+		114: &storage.BFloat16VectorFieldData{
 			Data: field105,
 			Dim:  8,
 		},
-		106: &storage.SparseFloatVectorFieldData{
+		115: &storage.SparseFloatVectorFieldData{
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim:      28433,
 				Contents: field106,

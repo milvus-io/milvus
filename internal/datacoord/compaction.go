@@ -31,6 +31,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -79,9 +81,9 @@ type compactionPlanHandler struct {
 	executingTasks map[int64]CompactionTask // planID -> task
 
 	meta             CompactionMeta
-	allocator        allocator
+	allocator        allocator.Allocator
 	chManager        ChannelManager
-	sessions         SessionManager
+	sessions         session.DataNodeManager
 	cluster          Cluster
 	analyzeScheduler *taskScheduler
 	handler          Handler
@@ -100,7 +102,7 @@ func (c *compactionPlanHandler) getCompactionInfo(triggerID int64) *compactionIn
 
 func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	ret := &compactionInfo{}
-	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt int
+	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats int
 	mergeInfos := make(map[int64]*milvuspb.CompactionMergeInfo)
 
 	for _, task := range tasks {
@@ -126,12 +128,14 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 			cleanedCnt++
 		case datapb.CompactionTaskState_meta_saved:
 			metaSavedCnt++
+		case datapb.CompactionTaskState_statistic:
+			stats++
 		default:
 		}
 		mergeInfos[task.GetPlanID()] = getCompactionMergeInfo(task)
 	}
 
-	ret.executingCnt = executingCnt + pipeliningCnt + analyzingCnt + indexingCnt + metaSavedCnt
+	ret.executingCnt = executingCnt + pipeliningCnt + analyzingCnt + indexingCnt + metaSavedCnt + stats
 	ret.completedCnt = completedCnt
 	ret.timeoutCnt = timeoutCnt
 	ret.failedCnt = failedCnt
@@ -176,7 +180,7 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 	return cnt
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler, handler Handler,
+func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, cm ChannelManager, meta CompactionMeta, allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		queueTasks:       make(map[int64]CompactionTask),
@@ -359,6 +363,7 @@ func (c *compactionPlanHandler) loopCheck() {
 	log.Info("compactionPlanHandler start loop check", zap.Any("check result interval", interval))
 	defer c.stopWg.Done()
 	checkResultTicker := time.NewTicker(interval)
+	defer checkResultTicker.Stop()
 	for {
 		select {
 		case <-c.stopCh:

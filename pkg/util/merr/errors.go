@@ -110,6 +110,7 @@ var (
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)
 	ErrIndexNotSupported = newMilvusError("index type not supported", 701, false)
 	ErrIndexDuplicate    = newMilvusError("index duplicates", 702, false)
+	ErrTaskDuplicate     = newMilvusError("task duplicates", 703, false)
 
 	// Database related
 	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false)
@@ -167,6 +168,7 @@ var (
 	ErrInvalidInsertData         = newMilvusError("fail to deal the insert data", 1804, false)
 	ErrInvalidSearchResult       = newMilvusError("fail to parse search result", 1805, false)
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
+	ErrHTTPRateLimit             = newMilvusError("request is rejected by limiter", 1807, true)
 
 	// replicate related
 	ErrDenyReplicateMessage = newMilvusError("deny to use the replicate message in the normal instance", 1900, false)

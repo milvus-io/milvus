@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -410,6 +409,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("segmentID", segment.GetSegmentID()),
 		zap.String("level", segment.GetLevel().String()),
 		zap.Int64("currentNodeID", node.GetNodeID()),
+		zap.Bool("isSorted", segment.GetIsSorted()),
 	)
 
 	log.Info("received load segments request",
@@ -790,7 +790,11 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if req.GetReq().GetIsAdvanced() {
 		result, err2 = segments.ReduceAdvancedSearchResults(ctx, toReduceResults, req.Req.GetNq())
 	} else {
-		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, segments.NewReduceInfo(req.Req.GetNq(),
+			req.Req.GetTopk(),
+			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
+			req.Req.GetExtraSearchParam().GetGroupSize(),
+			req.Req.GetMetricType()))
 	}
 
 	if err2 != nil {
@@ -805,8 +809,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
-	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
-	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
@@ -953,7 +955,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
-	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	relatedDataSize := lo.Reduce(toMergeResults, func(acc int64, result *internalpb.RetrieveResults, _ int) int64 {
 		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
@@ -1016,7 +1017,6 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 
-	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	return nil
 }
@@ -1384,8 +1384,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 	defer node.lifetime.Done()
 
-	log.Info("QueryNode received worker delete request")
-	log.Debug("Worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
+	log.Debug("QueryNode received worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
 
 	filters := []segments.SegmentFilter{
 		segments.WithID(req.GetSegmentId()),
