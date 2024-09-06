@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import List, Dict
 
+from pymilvus import DataType
+
 """ Define param names"""
 
 
@@ -53,6 +55,10 @@ class ExprBase:
         return f"({self.expr})"
 
     def __repr__(self):
+        return self.expr
+
+    @property
+    def value(self):
         return self.expr
 
 
@@ -345,6 +351,10 @@ class DefaultScalarIndexParams:
         return {field: IndexPrams()}
 
     @staticmethod
+    def list_default(fields: List[str]) -> Dict[str, IndexPrams]:
+        return {n: IndexPrams() for n in fields}
+
+    @staticmethod
     def Trie(field: str):
         return {field: IndexPrams(index_type=IndexName.Trie)}
 
@@ -355,6 +365,10 @@ class DefaultScalarIndexParams:
     @staticmethod
     def INVERTED(field: str):
         return {field: IndexPrams(index_type=IndexName.INVERTED)}
+
+    @staticmethod
+    def list_inverted(fields: List[str]) -> Dict[str, IndexPrams]:
+        return {n: IndexPrams(index_type=IndexName.INVERTED) for n in fields}
 
     @staticmethod
     def BITMAP(field: str):

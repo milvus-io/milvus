@@ -132,10 +132,10 @@ cd ${ROOT}/tests/python_client
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
   timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                     --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
+                                     --html=${CI_LOG_PATH}/report.html  --self-contained-html --dist loadgroup ${@:-}
 else
   pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                     --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
+                                     --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
 fi
 
 # # Run concurrent test with 5 processes
