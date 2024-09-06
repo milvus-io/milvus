@@ -179,7 +179,7 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 func (w *MultiSegmentWriter) appendEmptySegment() error {
 	writer, err := w.getWriter()
 	if err != nil {
-		return nil
+		return err
 	}
 
 	w.res = append(w.res, &datapb.CompactionSegment{
