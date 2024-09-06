@@ -657,3 +657,11 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, float64(256*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
 	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
 }
+
+func TestFallbackParam(t *testing.T) {
+	Init()
+	params := Get()
+	params.Save("common.chanNamePrefix.cluster", "foo")
+
+	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+}
