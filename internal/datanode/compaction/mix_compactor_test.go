@@ -221,6 +221,7 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.task.currentTs = currTs
 	s.task.plan.CollectionTtl = int64(collTTL)
 	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil)
+	s.mockAlloc.EXPECT().AllocOne().Return(19531, nil)
 
 	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 	s.Require().NoError(err)
@@ -264,7 +265,7 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 	s.Require().NoError(err)
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			if test.expectedRes > 0 {
+			if test.leftNumRows > 0 {
 				s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(77777, 99999, nil).Once()
 			}
 			s.mockAlloc.EXPECT().AllocOne().Return(888888, nil).Maybe()
