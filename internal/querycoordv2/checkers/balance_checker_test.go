@@ -220,9 +220,7 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 		return 1
 	})
 	replicasToBalance := suite.checker.replicasToBalance()
-	suite.Empty(replicasToBalance)
-	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
-	suite.Empty(segPlans)
+	suite.Len(replicasToBalance, 1)
 }
 
 func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {

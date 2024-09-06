@@ -119,11 +119,6 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return nil
 	}
 
-	// scheduler is handling segment task, skip
-	if b.scheduler.GetSegmentTaskNum() != 0 {
-		return nil
-	}
-
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
 	hasUnbalancedCollection := false

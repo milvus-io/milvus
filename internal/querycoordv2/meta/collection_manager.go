@@ -23,13 +23,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -169,6 +172,16 @@ func (m *CollectionManager) Recover(broker Broker) error {
 			continue
 		}
 
+		err := m.upgradeLoadFields(collection, broker)
+		if err != nil {
+			if errors.Is(err, merr.ErrCollectionNotFound) {
+				log.Warn("collection not found, skip upgrade logic and wait for release")
+			} else {
+				log.Warn("upgrade load field failed", zap.Error(err))
+				return err
+			}
+		}
+
 		m.collections[collection.CollectionID] = &Collection{
 			CollectionLoadInfo: collection,
 		}
@@ -204,6 +217,36 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		log.Warn("upgrade recover failed", zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (m *CollectionManager) upgradeLoadFields(collection *querypb.CollectionLoadInfo, broker Broker) error {
+	// only fill load fields when value is nil
+	if collection.LoadFields != nil {
+		return nil
+	}
+
+	// invoke describe collection to get collection schema
+	resp, err := broker.DescribeCollection(context.Background(), collection.CollectionID)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return err
+	}
+
+	// fill all field id as legacy default behavior
+	collection.LoadFields = lo.FilterMap(resp.GetSchema().GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
+		// load fields list excludes system fields
+		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
+	})
+
+	// put updated meta back to store
+	err = m.putCollection(true, &Collection{
+		CollectionLoadInfo: collection,
+		LoadPercentage:     100,
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
