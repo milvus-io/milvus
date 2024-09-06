@@ -3128,6 +3128,10 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 			},
 		},
 	}
+	sparseVecField := &schemapb.FieldSchema{
+		Name:     "sparse",
+		DataType: schemapb.DataType_SparseFloatVector,
+	}
 	partitionKeyField := &schemapb.FieldSchema{
 		Name:           "partition_key",
 		DataType:       schemapb.DataType_Int64,
@@ -3236,6 +3240,38 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
+
+		// test schema with function
+		//	 invalid function
+		schema.Functions = []*schemapb.FunctionSchema{
+			{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"invalid name"}},
+		}
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		//	 infer output
+		schema.Functions = []*schemapb.FunctionSchema{
+			{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{varCharField.Name}, OutputFieldNames: []string{sparseVecField.Name}},
+		}
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		//   normal case
+		schema.Fields = append(schema.Fields, sparseVecField)
+		schema.Functions = []*schemapb.FunctionSchema{
+			{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{varCharField.Name}, OutputFieldNames: []string{sparseVecField.Name}},
+		}
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
 	})
 
 	t.Run("Execute", func(t *testing.T) {

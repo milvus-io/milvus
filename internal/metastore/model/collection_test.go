@@ -12,14 +12,16 @@ import (
 )
 
 var (
-	colID      int64 = 1
-	colName          = "c"
-	fieldID    int64 = 101
-	fieldName        = "field110"
-	partID     int64 = 20
-	partName         = "testPart"
-	tenantID         = "tenant-1"
-	typeParams       = []*commonpb.KeyValuePair{
+	colID        int64 = 1
+	colName            = "c"
+	fieldID      int64 = 101
+	fieldName          = "field110"
+	partID       int64 = 20
+	partName           = "testPart"
+	tenantID           = "tenant-1"
+	functionID   int64 = 1
+	functionName       = "test-bm25"
+	typeParams         = []*commonpb.KeyValuePair{
 		{
 			Key:   "field110-k1",
 			Value: "field110-v1",

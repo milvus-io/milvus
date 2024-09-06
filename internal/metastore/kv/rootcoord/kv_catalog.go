@@ -60,6 +60,14 @@ func BuildFieldKey(collectionID typeutil.UniqueID, fieldID int64) string {
 	return fmt.Sprintf("%s/%d", BuildFieldPrefix(collectionID), fieldID)
 }
 
+func BuildFunctionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FunctionMetaPrefix, collectionID)
+}
+
+func BuildFunctionKey(collectionID typeutil.UniqueID, functionID int64) string {
+	return fmt.Sprintf("%s/%d", BuildFunctionPrefix(collectionID), functionID)
+}
+
 func BuildAliasKey210(alias string) string {
 	return fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix210, alias)
 }
@@ -166,7 +174,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 
 	kvs := map[string]string{}
 
-	// save partition info to newly path.
+	// save partition info to new path.
 	for _, partition := range coll.Partitions {
 		k := BuildPartitionKey(coll.CollectionID, partition.PartitionID)
 		partitionInfo := model.MarshalPartitionModel(partition)
@@ -178,12 +186,22 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	}
 
 	// no default aliases will be created.
-
-	// save fields info to newly path.
+	// save fields info to new path.
 	for _, field := range coll.Fields {
 		k := BuildFieldKey(coll.CollectionID, field.FieldID)
 		fieldInfo := model.MarshalFieldModel(field)
 		v, err := proto.Marshal(fieldInfo)
+		if err != nil {
+			return err
+		}
+		kvs[k] = string(v)
+	}
+
+	// save functions info to new path.
+	for _, function := range coll.Functions {
+		k := BuildFunctionKey(coll.CollectionID, function.ID)
+		functionInfo := model.MarshalFunctionModel(function)
+		v, err := proto.Marshal(functionInfo)
 		if err != nil {
 			return err
 		}
@@ -358,6 +376,24 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	return fields, nil
 }
 
+func (kc *Catalog) listFunctions(collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
+	prefix := BuildFunctionPrefix(collectionID)
+	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	if err != nil {
+		return nil, err
+	}
+	functions := make([]*model.Function, 0, len(values))
+	for _, v := range values {
+		functionSchema := &schemapb.FunctionSchema{}
+		err := proto.Unmarshal([]byte(v), functionSchema)
+		if err != nil {
+			return nil, err
+		}
+		functions = append(functions, model.UnmarshalFunctionModel(functionSchema))
+	}
+	return functions, nil
+}
+
 func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
 	ts typeutil.Timestamp,
 ) (*model.Collection, error) {
@@ -379,6 +415,11 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	}
 	collection.Fields = fields
 
+	functions, err := kc.listFunctions(collection.CollectionID, ts)
+	if err != nil {
+		return nil, err
+	}
+	collection.Functions = functions
 	return collection, nil
 }
 
@@ -440,6 +481,9 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	}
 	for _, field := range collectionInfo.Fields {
 		delMetakeysSnap = append(delMetakeysSnap, BuildFieldKey(collectionInfo.CollectionID, field.FieldID))
+	}
+	for _, function := range collectionInfo.Functions {
+		delMetakeysSnap = append(delMetakeysSnap, BuildFunctionKey(collectionInfo.CollectionID, function.ID))
 	}
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))

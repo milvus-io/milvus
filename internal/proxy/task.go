@@ -301,6 +301,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.schema.AutoID = false
 
+	if err := validateAndFillFunction(t.schema); err != nil {
+		return err
+	}
+
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
@@ -632,6 +636,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			Description: "",
 			AutoID:      false,
 			Fields:      make([]*schemapb.FieldSchema, 0),
+			Functions:   make([]*schemapb.FunctionSchema, 0),
 		},
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
@@ -697,6 +702,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 				Nullable:        field.Nullable,
 			})
 		}
+	}
+
+	for _, function := range result.Schema.Functions {
+		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 	}
 	return nil
 }

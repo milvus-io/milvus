@@ -323,7 +323,6 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 			if target.errCode == merr.errCode {
 				log.Info("mark error as input error", zap.Error(err))
 				WithErrorType(InputError)(&merr)
-				log.Info("test--", zap.String("type", merr.errType.String()))
 				return merr
 			}
 		}

@@ -42,6 +42,8 @@ const (
 	// StartOfUserFieldID represents the starting ID of the user-defined field
 	StartOfUserFieldID = 100
 
+	// StartOfUserFunctionID represents the starting ID of the user-defined function
+	StartOfUserFunctionID = 100
 	// RowIDField is the ID of the RowID field reserved by the system
 	RowIDField = 0
 
