@@ -2358,6 +2358,8 @@ type queryNodeConfig struct {
 	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
 	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
+	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
+
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
@@ -2863,6 +2865,16 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.EnableDisk.Init(base.mgr)
+
+	p.IndexOffsetCacheEnabled = ParamItem{
+		Key:          "queryNode.indexOffsetCacheEnabled",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+		Doc: "enable index offset cache for some scalar indexes, now is just for bitmap index," +
+			" enable this param can improve performance for retrieving raw data from index",
+		Export: true,
+	}
+	p.IndexOffsetCacheEnabled.Init(base.mgr)
 
 	p.DiskCapacityLimit = ParamItem{
 		Key:     "LOCAL_STORAGE_SIZE",
