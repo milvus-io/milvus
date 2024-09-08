@@ -278,10 +278,14 @@ func (stm *statsTaskMeta) CanCleanedTasks() []int64 {
 }
 
 func (stm *statsTaskMeta) GetAllTasks() map[int64]*indexpb.StatsTask {
+	tasks := make(map[int64]*indexpb.StatsTask)
+
 	stm.RLock()
 	defer stm.RUnlock()
-
-	return stm.tasks
+	for k, v := range stm.tasks {
+		tasks[k] = proto.Clone(v).(*indexpb.StatsTask)
+	}
+	return tasks
 }
 
 func (stm *statsTaskMeta) GetStatsTaskBySegmentID(segmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {
