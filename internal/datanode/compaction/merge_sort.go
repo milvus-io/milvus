@@ -63,7 +63,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return nil, err
 	}
 
-	//SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
+	// SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
 	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
 	for i, s := range binlogs {
 		var binlogBatchCount int

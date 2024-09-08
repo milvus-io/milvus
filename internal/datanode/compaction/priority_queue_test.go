@@ -119,7 +119,6 @@ func (s *PriorityQueueSuite) PriorityQueueMergeSort() {
 			heap.Push(&pq, next)
 		}
 	}
-
 }
 
 func TestNewPriorityQueueSuite(t *testing.T) {
