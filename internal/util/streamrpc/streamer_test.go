@@ -18,6 +18,9 @@ package streamrpc
 
 import (
 	"context"
+	"io"
+	"math"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -36,7 +39,7 @@ func (s *ResultCacheServerSuite) TestSend() {
 
 	client := NewLocalQueryClient(ctx)
 	srv := client.CreateServer()
-	cacheSrv := NewResultCacheServer(srv, 1024)
+	cacheSrv := NewResultCacheServer(srv, 1024, math.MaxInt)
 
 	err := cacheSrv.Send(&internalpb.RetrieveResults{
 		Ids: &schemapb.IDs{
@@ -63,6 +66,90 @@ func (s *ResultCacheServerSuite) TestSend() {
 	s.Equal(6, len(msg.GetIds().GetIntId().GetData()))
 }
 
+func generateIntIds(num int) *schemapb.IDs {
+	data := make([]int64, num)
+	for i := 0; i < num; i++ {
+		data[i] = int64(i)
+	}
+
+	return &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: data}},
+	}
+}
+
+func generateStrIds(num int) *schemapb.IDs {
+	data := make([]string, num)
+	for i := 0; i < num; i++ {
+		data[i] = strconv.FormatInt(int64(i), 10)
+	}
+
+	return &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: data}},
+	}
+}
+
+func (s *ResultCacheServerSuite) TestSplit() {
+	s.Run("split int64 message", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := NewLocalQueryClient(ctx)
+		srv := client.CreateServer()
+		cacheSrv := NewResultCacheServer(srv, 1024, 1024)
+
+		err := cacheSrv.Send(&internalpb.RetrieveResults{
+			Ids: generateIntIds(1024),
+		})
+		s.NoError(err)
+		srv.FinishSend(nil)
+
+		rev := 0
+		for {
+			result, err := client.Recv()
+			if err != nil {
+				s.Equal(err, io.EOF)
+				break
+			}
+			cnt := len(result.Ids.GetIntId().GetData())
+			rev += cnt
+			s.LessOrEqual(4*cnt, 1024)
+		}
+		s.Equal(1024, rev)
+	})
+
+	s.Run("split string message", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		client := NewLocalQueryClient(ctx)
+		srv := client.CreateServer()
+		cacheSrv := NewResultCacheServer(srv, 1024, 1024)
+
+		err := cacheSrv.Send(&internalpb.RetrieveResults{
+			Ids: generateStrIds(2048),
+		})
+		s.NoError(err)
+		srv.FinishSend(nil)
+
+		rev := 0
+		for {
+			result, err := client.Recv()
+			if err != nil {
+				s.Equal(err, io.EOF)
+				break
+			}
+
+			rev += len(result.Ids.GetStrId().GetData())
+			size := 0
+			for _, str := range result.Ids.GetStrId().GetData() {
+				size += len(str)
+			}
+			s.LessOrEqual(size, 1024)
+		}
+		s.Equal(rev, 2048)
+	})
+}
+
 func (s *ResultCacheServerSuite) TestMerge() {
 	s.Nil(mergeCostAggregation(nil, nil))
 
@@ -70,12 +157,12 @@ func (s *ResultCacheServerSuite) TestMerge() {
 	s.Equal(cost, mergeCostAggregation(nil, cost))
 	s.Equal(cost, mergeCostAggregation(cost, nil))
 
-	a := &internalpb.CostAggregation{ResponseTime: 1, ServiceTime: 1, TotalNQ: 1, TotalRelatedDataSize: 1}
+	a := &internalpb.CostAggregation{ResponseTime: 1, ServiceTime: 1, TotalNQ: 2, TotalRelatedDataSize: 1}
 	b := &internalpb.CostAggregation{ResponseTime: 2, ServiceTime: 2, TotalNQ: 2, TotalRelatedDataSize: 2}
 	c := mergeCostAggregation(a, b)
 	s.Equal(int64(3), c.ResponseTime)
 	s.Equal(int64(3), c.ServiceTime)
-	s.Equal(int64(3), c.TotalNQ)
+	s.Equal(int64(2), c.TotalNQ)
 	s.Equal(int64(3), c.TotalRelatedDataSize)
 }
 

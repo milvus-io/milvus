@@ -2409,6 +2409,7 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
+	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
 
 	// worker
@@ -3094,10 +3095,19 @@ user-task-polling:
 		Key:          "queryNode.queryStreamBatchSize",
 		Version:      "2.4.1",
 		DefaultValue: "4194304",
-		Doc:          "return batch size of stream query",
+		Doc:          "return min batch size of stream query",
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.QueryStreamMaxBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamMaxBatchSize",
+		Version:      "2.4.10",
+		DefaultValue: "16777216",
+		Doc:          "return max batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamMaxBatchSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "queryNode.bloomFilterApplyParallelFactor",
