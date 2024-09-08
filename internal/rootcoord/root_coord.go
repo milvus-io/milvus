@@ -2235,19 +2235,31 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
-	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
-		Role: &milvuspb.RoleEntity{Name: in.RoleName},
-	})
-	if len(grantEntities) != 0 {
-		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		ctxLog.Warn(errMsg, zap.Any("grants", grantEntities), zap.Error(err))
-		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
+	if !in.ForceDrop {
+		grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+			Role: &milvuspb.RoleEntity{Name: in.RoleName},
+		})
+		if len(grantEntities) != 0 {
+			errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
+			ctxLog.Warn(errMsg, zap.Any("grants", grantEntities), zap.Error(err))
+			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
+		}
 	}
 	redoTask := newBaseRedoTask(c.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("drop role meta data", func(ctx context.Context) ([]nestedStep, error) {
 		err := c.meta.DropRole(util.DefaultTenant, in.RoleName)
 		if err != nil {
 			ctxLog.Warn("drop role mata data failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("drop the privilege list of this role", func(ctx context.Context) ([]nestedStep, error) {
+		if !in.ForceDrop {
+			return nil, nil
+		}
+		err := c.meta.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName})
+		if err != nil {
+			ctxLog.Warn("drop the privilege list failed for the role", zap.Error(err))
 		}
 		return nil, err
 	}))
@@ -2261,7 +2273,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		}
 		return nil, err
 	}))
-	err = redoTask.Execute(ctx)
+	err := redoTask.Execute(ctx)
 	if err != nil {
 		errMsg := "fail to execute task when dropping the role"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2498,7 +2510,7 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 			return nil
 		}
 	}
-	return fmt.Errorf("not found the privilege name[%s]", entity.Privilege.Name)
+	return fmt.Errorf("not found the privilege name[%s] in object[%s]", entity.Privilege.Name, object)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke

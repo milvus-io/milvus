@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -102,6 +103,14 @@ func (job *LoadCollectionJob) PreExecute() error {
 		)
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
+	}
+
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
 	}
 
 	return nil
@@ -287,6 +296,14 @@ func (job *LoadPartitionJob) PreExecute() error {
 		msg := "collection with different replica number existed, release this collection first before changing its replica number"
 		log.Warn(msg)
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
+	}
+
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
+			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
+			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
+		)
+		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
 	}
 
 	return nil

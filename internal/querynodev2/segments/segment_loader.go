@@ -1662,7 +1662,18 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 	// get size of delete data
 	for _, fieldBinlog := range loadInfo.Deltalogs {
-		segmentMemorySize += uint64(float64(getBinlogDataMemorySize(fieldBinlog)) * multiplyFactor.deltaDataExpansionFactor)
+		// MemorySize of filedBinlog is the actual size in memory, so the expansionFactor
+		//   should be 1, in most cases.
+		expansionFactor := float64(1)
+		memSize := getBinlogDataMemorySize(fieldBinlog)
+
+		// Note: If MemorySize == DiskSize, it means the segment comes from Milvus 2.3,
+		//   MemorySize is actually compressed DiskSize of deltalog, so we'll fallback to use
+		//   deltaExpansionFactor to compromise the compression ratio.
+		if memSize == getBinlogDataDiskSize(fieldBinlog) {
+			expansionFactor = multiplyFactor.deltaDataExpansionFactor
+		}
+		segmentMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 	return &ResourceUsage{
 		MemorySize:     segmentMemorySize + indexMemorySize,

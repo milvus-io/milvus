@@ -1666,9 +1666,10 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 		},
 	})
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: collectionID,
-		Channel:      channel,
+		ID:                 1,
+		CollectionID:       collectionID,
+		Channel:            channel,
+		UnServiceableError: merr.ErrSegmentLack,
 	})
 	task, err := NewChannelTask(context.Background(),
 		10*time.Second,
@@ -1763,6 +1764,7 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 			2: {NodeID: 2},
 			3: {NodeID: 2},
 		},
+		UnServiceableError: merr.ErrSegmentLack,
 	})
 
 	task, err := NewChannelTask(context.Background(),

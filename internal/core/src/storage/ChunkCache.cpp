@@ -24,7 +24,8 @@ std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
                  const MmapChunkDescriptorPtr& descriptor,
                  const FieldMeta& field_meta,
-                 bool mmap_enabled) {
+                 bool mmap_enabled,
+                 const bool mmap_rss_not_need) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -64,6 +65,22 @@ ChunkCache::Read(const std::string& filepath,
         field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
         column = Mmap(
             field_data->GetFieldData(), descriptor, field_meta, mmap_enabled);
+        if (mmap_enabled && mmap_rss_not_need) {
+            auto ok = madvise(reinterpret_cast<void*>(
+                                  const_cast<char*>(column->MmappedData())),
+                              column->ByteSize(),
+                              ReadAheadPolicy_Map["dontneed"]);
+            if (ok != 0) {
+                LOG_WARN(
+                    "failed to madvise to the data file {}, addr {}, size {}, "
+                    "err: "
+                    "{}",
+                    filepath,
+                    static_cast<const void*>(column->MmappedData()),
+                    column->ByteSize(),
+                    strerror(errno));
+            }
+        }
         allocate_success = true;
     } catch (const SegcoreError& e) {
         err_code = e.get_error_code();
@@ -113,7 +130,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
         LOG_WARN(
             "failed to madvise to the data file {}, addr {}, size {}, err: {}",
             filepath,
-            column->MmappedData(),
+            static_cast<const void*>(column->MmappedData()),
             column->ByteSize(),
             strerror(errno));
     }

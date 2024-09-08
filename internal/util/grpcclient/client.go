@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -250,7 +249,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		return err
 	}
 
-	opts := tracer.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	var conn *grpc.ClientConn
@@ -271,12 +269,10 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
-				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
-				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
@@ -298,6 +294,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
 			grpc.WithDisableRetry(),
+			grpc.WithStatsHandler(tracer.GetDynamicOtelGrpcClientStatsHandler()),
 		)
 	} else {
 		conn, err = grpc.DialContext(
@@ -311,12 +308,10 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
-				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
-				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
 			)),
@@ -338,6 +333,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
 			grpc.WithDisableRetry(),
+			grpc.WithStatsHandler(tracer.GetDynamicOtelGrpcClientStatsHandler()),
 		)
 	}
 

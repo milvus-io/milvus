@@ -26,14 +26,18 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -494,6 +498,17 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		}
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: common.RowIDField},
+					{FieldID: common.TimeStampField},
+					{FieldID: 100, Name: "pk"},
+					{FieldID: 101, Name: "vector"},
+				},
+			},
+		}, nil).Maybe()
 	}
 
 	// do recovery
@@ -506,6 +521,131 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 		newColl := mgr.GetCollection(collection)
 		suite.Equal(suite.loadTypes[i], newColl.GetLoadType())
 	}
+}
+
+func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
+	suite.releaseAll()
+	mgr := suite.mgr
+
+	// put old version of collections and partitions
+	for i, collection := range suite.collections {
+		mgr.PutCollection(&Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  collection,
+				ReplicaNumber: suite.replicaNumber[i],
+				Status:        querypb.LoadStatus_Loaded,
+				LoadType:      suite.loadTypes[i],
+				LoadFields:    nil, // use nil Load fields, mocking old load info
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		})
+		for j, partition := range suite.partitions[collection] {
+			mgr.PutPartition(&Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID: collection,
+					PartitionID:  partition,
+					Status:       querypb.LoadStatus_Loaded,
+				},
+				LoadPercentage: suite.parLoadPercent[collection][j],
+				CreatedAt:      time.Now(),
+			})
+		}
+	}
+
+	// set expectations
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: common.RowIDField},
+					{FieldID: common.TimeStampField},
+					{FieldID: 100, Name: "pk"},
+					{FieldID: 101, Name: "vector"},
+				},
+			},
+		}, nil)
+	}
+
+	// do recovery
+	suite.clearMemory()
+	err := mgr.Recover(suite.broker)
+	suite.NoError(err)
+	suite.checkLoadResult()
+
+	for _, collection := range suite.collections {
+		newColl := mgr.GetCollection(collection)
+		suite.ElementsMatch([]int64{100, 101}, newColl.GetLoadFields())
+	}
+}
+
+func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
+	suite.Run("normal_error", func() {
+		suite.releaseAll()
+		mgr := suite.mgr
+
+		mgr.PutCollection(&Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  100,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				LoadType:      querypb.LoadType_LoadCollection,
+				LoadFields:    nil, // use nil Load fields, mocking old load info
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		})
+		mgr.PutPartition(&Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: 100,
+				PartitionID:  1000,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		})
+
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		// do recovery
+		suite.clearMemory()
+		err := mgr.Recover(suite.broker)
+		suite.Error(err)
+	})
+
+	suite.Run("normal_error", func() {
+		suite.releaseAll()
+		mgr := suite.mgr
+
+		mgr.PutCollection(&Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  100,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				LoadType:      querypb.LoadType_LoadCollection,
+				LoadFields:    nil, // use nil Load fields, mocking old load info
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		})
+		mgr.PutPartition(&Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: 100,
+				PartitionID:  1000,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		})
+
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(100)),
+		}, nil).Once()
+		// do recovery
+		suite.clearMemory()
+		err := mgr.Recover(suite.broker)
+		suite.NoError(err)
+	})
 }
 
 func (suite *CollectionManagerSuite) loadAll() {
@@ -523,6 +663,7 @@ func (suite *CollectionManagerSuite) loadAll() {
 				ReplicaNumber: suite.replicaNumber[i],
 				Status:        status,
 				LoadType:      suite.loadTypes[i],
+				LoadFields:    []int64{100, 101},
 			},
 			LoadPercentage: suite.colLoadPercent[i],
 			CreatedAt:      time.Now(),

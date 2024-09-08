@@ -941,3 +941,13 @@ func getStatsLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 	return metautil.BuildDeltaLogPath(rootPath, 10, 100, segmentID, 10000)
 }
+
+func TestCheckDelay(t *testing.T) {
+	handler := &compactionPlanHandler{}
+	t1 := &mixCompactionTask{CompactionTask: &datapb.CompactionTask{StartTime: time.Now().Add(-100 * time.Minute).Unix()}}
+	handler.checkDelay(t1)
+	t2 := &l0CompactionTask{CompactionTask: &datapb.CompactionTask{StartTime: time.Now().Add(-100 * time.Minute).Unix()}}
+	handler.checkDelay(t2)
+	t3 := &clusteringCompactionTask{CompactionTask: &datapb.CompactionTask{StartTime: time.Now().Add(-100 * time.Minute).Unix()}}
+	handler.checkDelay(t3)
+}

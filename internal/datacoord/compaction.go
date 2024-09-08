@@ -41,6 +41,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
+	datapb.CompactionType_MixCompaction:          30 * time.Minute,
+	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
+	datapb.CompactionType_ClusteringCompaction:   60 * time.Minute,
+}
+
 //go:generate mockery --name=compactionPlanContext --structname=MockCompactionPlanContext --output=./  --filename=mock_compaction_plan_context.go --with-expecter --inpackage
 type compactionPlanContext interface {
 	start()
@@ -652,6 +658,7 @@ func (c *compactionPlanHandler) checkCompaction() error {
 	var finishedTasks []CompactionTask
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
+		c.checkDelay(t)
 		finished := t.Process()
 		if finished {
 			finishedTasks = append(finishedTasks, t)
@@ -726,6 +733,23 @@ func (c *compactionPlanHandler) getTasksByState(state datapb.CompactionTaskState
 		}
 	}
 	return tasks
+}
+
+func (c *compactionPlanHandler) checkDelay(t CompactionTask) {
+	log := log.Ctx(context.TODO()).WithRateGroup("compactionPlanHandler.checkDelay", 1.0, 60.0)
+	maxExecDuration := maxCompactionTaskExecutionDuration[t.GetType()]
+	startTime := time.Unix(t.GetStartTime(), 0)
+	execDuration := time.Since(startTime)
+	if execDuration >= maxExecDuration {
+		log.RatedWarn(60, "compaction task is delay",
+			zap.Int64("planID", t.GetPlanID()),
+			zap.String("type", t.GetType().String()),
+			zap.String("state", t.GetState().String()),
+			zap.String("vchannel", t.GetChannel()),
+			zap.Int64("nodeID", t.GetNodeID()),
+			zap.Time("startTime", startTime),
+			zap.Duration("execDuration", execDuration))
+	}
 }
 
 var (

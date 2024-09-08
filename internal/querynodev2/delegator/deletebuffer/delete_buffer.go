@@ -28,6 +28,7 @@ var errBufferFull = errors.New("buffer full")
 type timed interface {
 	Timestamp() uint64
 	Size() int64
+	EntryNum() int64
 }
 
 // DeleteBuffer is the interface for delete buffer.
@@ -36,6 +37,8 @@ type DeleteBuffer[T timed] interface {
 	ListAfter(uint64) []T
 	SafeTs() uint64
 	TryDiscard(uint64)
+	// Size returns current size information of delete buffer: entryNum and memory
+	Size() (entryNum, memorySize int64)
 }
 
 func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBuffer[T] {
@@ -68,8 +71,7 @@ func (c *doubleCacheBuffer[T]) Put(entry T) {
 
 	err := c.head.Put(entry)
 	if errors.Is(err, errBufferFull) {
-		c.evict(entry.Timestamp())
-		c.head.Put(entry)
+		c.evict(entry.Timestamp(), entry)
 	}
 }
 
@@ -87,26 +89,59 @@ func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) []T {
 	return result
 }
 
+func (c *doubleCacheBuffer[T]) Size() (entryNum int64, memorySize int64) {
+	c.mut.RLock()
+	defer c.mut.RUnlock()
+
+	if c.head != nil {
+		blockNum, blockSize := c.head.Size()
+		entryNum += blockNum
+		memorySize += blockSize
+	}
+
+	if c.tail != nil {
+		blockNum, blockSize := c.tail.Size()
+		entryNum += blockNum
+		memorySize += blockSize
+	}
+
+	return entryNum, memorySize
+}
+
 // evict sets head as tail and evicts tail.
-func (c *doubleCacheBuffer[T]) evict(newTs uint64) {
+func (c *doubleCacheBuffer[T]) evict(newTs uint64, entry T) {
 	c.tail = c.head
-	c.head = newCacheBlock[T](newTs, c.maxSize/2)
+	c.head = &cacheBlock[T]{
+		headTs:   newTs,
+		maxSize:  c.maxSize / 2,
+		size:     entry.Size(),
+		entryNum: entry.EntryNum(),
+		data:     []T{entry},
+	}
 	c.ts = c.tail.headTs
 }
 
 func newCacheBlock[T timed](ts uint64, maxSize int64, elements ...T) *cacheBlock[T] {
+	var entryNum, memorySize int64
+	for _, element := range elements {
+		entryNum += element.EntryNum()
+		memorySize += element.Size()
+	}
 	return &cacheBlock[T]{
-		headTs:  ts,
-		maxSize: maxSize,
-		data:    elements,
+		headTs:   ts,
+		maxSize:  maxSize,
+		data:     elements,
+		entryNum: entryNum,
+		size:     memorySize,
 	}
 }
 
 type cacheBlock[T timed] struct {
-	mut     sync.RWMutex
-	headTs  uint64
-	size    int64
-	maxSize int64
+	mut      sync.RWMutex
+	headTs   uint64
+	entryNum int64
+	size     int64
+	maxSize  int64
 
 	data []T
 }
@@ -123,6 +158,7 @@ func (c *cacheBlock[T]) Put(entry T) error {
 
 	c.data = append(c.data, entry)
 	c.size += entry.Size()
+	c.entryNum += entry.EntryNum()
 	return nil
 }
 
@@ -138,4 +174,8 @@ func (c *cacheBlock[T]) ListAfter(ts uint64) []T {
 		return nil
 	}
 	return c.data[idx:]
+}
+
+func (c *cacheBlock[T]) Size() (entryNum, memorySize int64) {
+	return c.entryNum, c.size
 }

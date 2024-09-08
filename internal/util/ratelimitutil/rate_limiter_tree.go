@@ -156,6 +156,8 @@ func (rln *RateLimiterNode) GetID() int64 {
 	return rln.id
 }
 
+const clearInvalidNodeInterval = 1 * time.Minute
+
 // RateLimiterTree is implemented based on RateLimiterNode to operate multilevel rate limiters
 //
 // it contains the following four levels generally:
@@ -167,11 +169,13 @@ func (rln *RateLimiterNode) GetID() int64 {
 type RateLimiterTree struct {
 	root *RateLimiterNode
 	mu   sync.RWMutex
+
+	lastClearTime time.Time
 }
 
 // NewRateLimiterTree returns a new RateLimiterTree.
 func NewRateLimiterTree(root *RateLimiterNode) *RateLimiterTree {
-	return &RateLimiterTree{root: root}
+	return &RateLimiterTree{root: root, lastClearTime: time.Now()}
 }
 
 // GetRootLimiters get root limiters
@@ -182,6 +186,13 @@ func (m *RateLimiterTree) GetRootLimiters() *RateLimiterNode {
 func (m *RateLimiterTree) ClearInvalidLimiterNode(req *proxypb.LimiterNode) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if time.Since(m.lastClearTime) < clearInvalidNodeInterval {
+		return
+	}
+	defer func() {
+		m.lastClearTime = time.Now()
+	}()
 
 	reqDBLimits := req.GetChildren()
 	removeDBLimits := make([]int64, 0)
