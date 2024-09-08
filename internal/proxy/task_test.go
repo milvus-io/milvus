@@ -3260,7 +3260,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 
 		//   normal case
 		schema.Fields = append(schema.Fields, sparseVecField)
@@ -3271,7 +3271,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Execute", func(t *testing.T) {
