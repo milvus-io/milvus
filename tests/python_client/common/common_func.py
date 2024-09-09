@@ -22,6 +22,11 @@ from customize.milvus_operator import MilvusOperator
 import pickle
 import spacy
 from collections import Counter
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import bm25s
+import Stemmer
 fake = Faker()
 """" Methods of processing data """
 
@@ -66,23 +71,119 @@ param_info = ParamInfo()
 
 
 def analyze_documents(texts):
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        print("Downloading language model for the spaCy POS tagger")
-        from spacy.cli import download
-        download("en_core_web_sm")
-        nlp = spacy.load("en_core_web_sm")
-    freq = Counter()
-    t0 = time.time()
-    for text in texts:
+    # Create a stemmer
+    # stemmer = Stemmer.Stemmer("english")
 
-        doc = nlp(text.lower())
-        tokens = [token.text for token in doc if not token.is_stop and not token.is_punct]
-        freq.update(tokens)
+    # Start timing
+    t0 = time.time()
+
+    # Tokenize the corpus
+    tokenized = bm25s.tokenize(texts, stopwords="en")
+    # log.info(f"Tokenized: {tokenized}")
+    # Create a frequency counter
+    freq = Counter()
+
+    # Count the frequency of each token
+    for doc_ids in tokenized.ids:
+        freq.update(doc_ids)
+    # Create a reverse vocabulary mapping
+    id_to_word = {id: word for word, id in tokenized.vocab.items()}
+
+    # Convert token ids back to words
+    word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
+
+    # End timing
     tt = time.time() - t0
-    log.info(f"Analyze document cost time: {tt}")
-    return freq
+    print(f"Analyze document cost time: {tt}")
+
+    return word_freq
+
+
+def generate_text_match_expr(query_dict):
+    """
+    Generate a TextMatch expression with multiple logical operators and field names.
+
+    :param query_dict: A dictionary representing the query structure
+    :return: A string representing the TextMatch expression
+    """
+
+    def process_node(node):
+        if isinstance(node, dict) and 'field' in node and 'value' in node:
+            return f"TextMatch({node['field']}, '{node['value']}')"
+        elif isinstance(node, dict) and 'not' in node:
+            return f"not {process_node(node['not'])}"
+        elif isinstance(node, list):
+            return ' '.join(process_node(item) for item in node)
+        elif isinstance(node, str):
+            return node
+        else:
+            raise ValueError(f"Invalid node type: {type(node)}")
+
+    return f"({process_node(query_dict)})"
+
+
+def generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=3, p_not=0.2):
+    """
+    Generate a random query expression from a dictionary of field frequencies.
+
+    :param freq_dict: A dictionary where keys are field names and values are word frequency dictionaries
+    :param min_freq: Minimum frequency for a word to be included in the query (default: 1)
+    :param max_terms: Maximum number of terms in the query (default: 3)
+    :param p_not: Probability of using NOT for any term (default: 0.2)
+    :return: A tuple of (query list, query expression string)
+    example:
+    freq_dict = {
+    "title": {"The": 3, "Lord": 2, "Rings": 2, "Harry": 1, "Potter": 1},
+    "author": {"Tolkien": 2, "Rowling": 1, "Orwell": 1},
+    "description": {"adventure": 4, "fantasy": 3, "magic": 1, "dystopian": 2}
+    }
+    print("Random queries from frequency dictionary:")
+    for _ in range(5):
+        query_list, expr = generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=4, p_not=0.2)
+        print(f"Query: {query_list}")
+        print(f"Expression: {expr}")
+        print()
+
+    """
+
+    def random_term(field, words):
+        term = {"field": field, "value": random.choice(words)}
+        if random.random() < p_not:
+            return {"not": term}
+        return term
+
+    # Filter words based on min_freq
+    filtered_dict = {
+        field: [word for word, freq in words.items() if freq >= min_freq]
+        for field, words in freq_dict.items()
+    }
+
+    # Remove empty fields
+    filtered_dict = {k: v for k, v in filtered_dict.items() if v}
+
+    if not filtered_dict:
+        return [], ""
+
+    # Randomly select fields and terms
+    query = []
+    for _ in range(min(max_terms, sum(len(words) for words in filtered_dict.values()))):
+        if not filtered_dict:
+            break
+        field = random.choice(list(filtered_dict.keys()))
+        if filtered_dict[field]:
+            term = random_term(field, filtered_dict[field])
+            query.append(term)
+            # Insert random AND/OR between terms
+            if query and _ < max_terms - 1:
+                query.append(random.choice(["and", "or"]))
+            # Remove the used word to avoid repetition
+            used_word = term['value'] if isinstance(term, dict) and 'value' in term else term['not']['value']
+            filtered_dict[field].remove(used_word)
+            if not filtered_dict[field]:
+                del filtered_dict[field]
+
+    return query, generate_text_match_expr(query)
+
 
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
