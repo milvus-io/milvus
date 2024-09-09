@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use log::info;
+use log::{info, warn};
 use std::collections::HashMap;
 use tantivy::tokenizer::{TextAnalyzer, TokenizerManager};
 
@@ -19,16 +19,34 @@ pub(crate) fn create_tokenizer(params: &HashMap<String, String>) -> Option<TextA
     match params.get("tokenizer") {
         Some(tokenizer_name) => match tokenizer_name.as_str() {
             "default" => {
-                return Some(default_tokenizer());
+                Some(default_tokenizer())
             }
-            "jieba" => return Some(jieba_tokenizer()),
-            _ => {
-                return None;
+            "jieba" => {
+                Some(jieba_tokenizer())
+            }
+            s => {
+                warn!("unsupported tokenizer: {}", s);
+                None
             }
         },
         None => {
             info!("no tokenizer is specific, use default tokenizer");
-            return Some(default_tokenizer());
+            Some(default_tokenizer())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use crate::tokenizer::create_tokenizer;
+
+    #[test]
+    fn test_create_tokenizer() {
+        let mut params : HashMap<String, String> = HashMap::new();
+        params.insert("tokenizer".parse().unwrap(), "jieba".parse().unwrap());
+
+        let tokenizer = create_tokenizer(&params);
+        assert!(tokenizer.is_some());
     }
 }

@@ -16,7 +16,7 @@ struct Tokenizer {
         m.from(params);
         ptr_ = tantivy_create_tokenizer(m.get_pointer());
         if (ptr_ == nullptr) {
-            throw "invalid tokenizer parameters";
+            throw std::invalid_argument("invalid tokenizer parameters");
         }
     }
 

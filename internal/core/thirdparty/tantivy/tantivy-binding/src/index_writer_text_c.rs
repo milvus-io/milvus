@@ -35,10 +35,10 @@ pub extern "C" fn tantivy_create_text_writer(
                 overall_memory_budget_in_bytes,
                 in_ram,
             );
-            return create_binding(wrapper);
+            create_binding(wrapper)
         }
         None => {
-            return std::ptr::null_mut();
+            std::ptr::null_mut()
         }
     }
 }

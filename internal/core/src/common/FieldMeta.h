@@ -24,6 +24,11 @@
 #include "common/Types.h"
 
 namespace milvus {
+using TypeParams = std::map<std::string, std::string>;
+using TokenizerParams = std::map<std::string, std::string>;
+
+TokenizerParams
+ParseTokenizerParams(const TypeParams& params);
 
 class FieldMeta {
  public:
@@ -117,7 +122,7 @@ class FieldMeta {
     bool
     enable_match() const;
 
-    std::map<std::string, std::string>
+    TokenizerParams
     get_tokenizer_params() const;
 
     std::optional<knowhere::MetricType>

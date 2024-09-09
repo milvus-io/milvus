@@ -12,6 +12,7 @@
 #include "segcore/tokenizer_c.h"
 
 #include <common/FieldMeta.h>
+#include <common/protobuf_utils.h>
 #include <pb/schema.pb.h>
 
 #include "common/EasyAssert.h"
@@ -50,9 +51,9 @@ validate_text_schema(const uint8_t* field_schema, uint64_t length) {
         auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();
         AssertInfo(schema->ParseFromArray(field_schema, length),
                    "failed to create field schema");
-        auto field_meta = milvus::FieldMeta::ParseFrom(*schema);
 
-        milvus::tantivy::Tokenizer _(field_meta.get_tokenizer_params());
+        auto type_params = milvus::RepeatedKeyValToMap(schema->type_params());
+        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

@@ -18,6 +18,24 @@
 #include "Consts.h"
 
 namespace milvus {
+TokenizerParams
+ParseTokenizerParams(const TypeParams& params) {
+    auto iter = params.find("analyzer_params");
+    if (iter == params.end()) {
+        return {};
+    }
+    nlohmann::json j = nlohmann::json::parse(iter->second);
+    std::map<std::string, std::string> ret;
+    for (const auto& [k, v] : j.items()) {
+        try {
+            ret[k] = v.get<std::string>();
+        } catch (std::exception& e) {
+            ret[k] = v.dump();
+        }
+    }
+    return ret;
+}
+
 bool
 FieldMeta::enable_match() const {
     if (!IsStringDataType(type_)) {
@@ -29,20 +47,11 @@ FieldMeta::enable_match() const {
     return string_info_->enable_match;
 }
 
-std::map<std::string, std::string>
+TokenizerParams
 FieldMeta::get_tokenizer_params() const {
     Assert(enable_match());
     auto params = string_info_->params;
-    auto iter = params.find("analyzer_params");
-    if (iter == params.end()) {
-        return {};
-    }
-    nlohmann::json j = nlohmann::json::parse(iter->second);
-    std::map<std::string, std::string> ret;
-    for (const auto& [k, v] : j.items()) {
-        ret[k] = v.dump();
-    }
-    return ret;
+    return ParseTokenizerParams(params);
 }
 
 FieldMeta
