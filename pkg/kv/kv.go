@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+
 )
 
 // CompareFailedError is a helper type for checking MetaKv CompareAndSwap series func error type
