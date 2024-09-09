@@ -38,3 +38,7 @@ class IndexErrorMessage(ExceptionsMessage):
     VectorMetricTypeExist = "metric type not set for vector index"
     CheckBitmapIndex = "bitmap index are only supported on bool, int, string and array field"
     CheckBitmapOnPK = "create bitmap index on primary key not supported"
+
+
+class QueryErrorMessage(ExceptionsMessage):
+    ParseExpressionFailed = "failed to create query plan: cannot parse expression: "
