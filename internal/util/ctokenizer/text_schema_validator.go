@@ -6,13 +6,15 @@ package ctokenizer
 #include "segcore/tokenizer_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"google.golang.org/protobuf/proto"
 )
 
 func ValidateTextSchema(fieldSchema *schemapb.FieldSchema) error {

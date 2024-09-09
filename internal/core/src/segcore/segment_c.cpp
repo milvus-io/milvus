@@ -13,8 +13,9 @@
 
 #include <memory>
 #include <limits>
-#include <pb/cgo_msg.pb.h>
-#include <pb/index_cgo_msg.pb.h>
+
+#include "pb/cgo_msg.pb.h"
+#include "pb/index_cgo_msg.pb.h"
 
 #include "common/FieldData.h"
 #include "common/LoadInfo.h"

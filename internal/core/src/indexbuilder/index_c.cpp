@@ -24,7 +24,7 @@
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 
-#include <index/TextMatchIndex.h>
+#include "index/TextMatchIndex.h"
 
 #include "indexbuilder/IndexFactory.h"
 #include "common/type_c.h"

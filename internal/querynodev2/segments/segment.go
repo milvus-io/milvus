@@ -1179,7 +1179,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 }
 
 func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {
-	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()))
+	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()), zap.Any("text logs", textLogs))
 
 	f, err := schemaHelper.GetFieldFromID(textLogs.GetFieldID())
 	if err != nil {
@@ -1325,6 +1325,8 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 
 func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error {
 	var status C.CStatus
+	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
+
 	GetDynamicPool().Submit(func() (any, error) {
 		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID))
 		return nil, nil
@@ -1334,7 +1336,7 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 		return err
 	}
 
-	log.Ctx(ctx).Info("CreateTextIndex done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
+	log.Ctx(ctx).Info("create text index for segment done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
 	return nil
 }

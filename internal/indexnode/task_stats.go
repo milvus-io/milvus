@@ -634,7 +634,10 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			BuildID: buildID,
 			Files:   lo.Keys(uploaded),
 		}
-		log.Info("field enable match, create text index done", zap.Int64("field id", field.GetFieldID()))
+		log.Info("field enable match, create text index done",
+			zap.Int64("field id", field.GetFieldID()),
+			zap.Strings("files", lo.Keys(uploaded)),
+		)
 	}
 
 	totalElapse := st.tr.RecordSpan()

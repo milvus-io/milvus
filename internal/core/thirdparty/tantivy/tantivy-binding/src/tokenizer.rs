@@ -2,6 +2,7 @@ use lazy_static::lazy_static;
 use log::{info, warn};
 use std::collections::HashMap;
 use tantivy::tokenizer::{TextAnalyzer, TokenizerManager};
+use crate::log::init_log;
 
 lazy_static! {
     static ref DEFAULT_TOKENIZER_MANAGER: TokenizerManager = TokenizerManager::default();
@@ -16,6 +17,8 @@ fn jieba_tokenizer() -> TextAnalyzer {
 }
 
 pub(crate) fn create_tokenizer(params: &HashMap<String, String>) -> Option<TextAnalyzer> {
+    init_log();
+
     match params.get("tokenizer") {
         Some(tokenizer_name) => match tokenizer_name.as_str() {
             "default" => {

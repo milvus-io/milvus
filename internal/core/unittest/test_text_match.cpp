@@ -76,6 +76,21 @@ TEST(ParseJson, Naive) {
     }
 }
 
+TEST(ParseTokenizerParams, NoAnalyzerParams) {
+    TypeParams params{{"k", "v"}};
+    auto p = ParseTokenizerParams(params);
+    ASSERT_EQ(0, p.size());
+}
+
+TEST(ParseTokenizerParams, Default) {
+    TypeParams params{{"analyzer_params", R"({"tokenizer": "default"})"}};
+    auto p = ParseTokenizerParams(params);
+    ASSERT_EQ(1, p.size());
+    auto iter = p.find("tokenizer");
+    ASSERT_NE(p.end(), iter);
+    ASSERT_EQ("default", iter->second);
+}
+
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),

@@ -256,11 +256,9 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        create_reader();
         tantivy_finish_index(writer_);
         writer_ = nullptr;
         finished_ = true;
-        reload();
     }
 
     inline void
