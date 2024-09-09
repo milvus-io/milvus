@@ -285,9 +285,9 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
                        "mmap directory path is empty");
             auto filepath =
                 std::filesystem::path(load_index_info->mmap_dir_path) /
+                "index_files" / std::to_string(load_index_info->index_id) /
                 std::to_string(load_index_info->segment_id) /
-                std::to_string(load_index_info->field_id) /
-                std::to_string(load_index_info->index_id);
+                std::to_string(load_index_info->field_id);
 
             config[kMmapFilepath] = filepath.string();
         }

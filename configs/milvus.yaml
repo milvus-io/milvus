@@ -974,8 +974,8 @@ quotaAndLimits:
       diskQuotaPerPartition: -1 # MB, (0, +inf), default no limit
     l0SegmentsRowCountProtection:
       enabled: false # switch to enable l0 segment row count quota
-      lowWaterLevel: 32768 # l0 segment row count quota, low water level
-      highWaterLevel: 65536 # l0 segment row count quota, low water level
+      lowWaterLevel: 30000000 # l0 segment row count quota, low water level
+      highWaterLevel: 50000000 # l0 segment row count quota, high water level
     deleteBufferRowCountProtection:
       enabled: false # switch to enable delete buffer row count quota
       lowWaterLevel: 32768 # delete buffer row count quota, low water level

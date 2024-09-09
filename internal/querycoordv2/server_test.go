@@ -439,6 +439,7 @@ func (suite *ServerSuite) loadAll() {
 				CollectionID:   collection,
 				ReplicaNumber:  suite.replicaNumber[collection],
 				ResourceGroups: []string{meta.DefaultResourceGroupName},
+				LoadFields:     []int64{100, 101},
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.NoError(err)
@@ -449,6 +450,7 @@ func (suite *ServerSuite) loadAll() {
 				PartitionIDs:   suite.partitions[collection],
 				ReplicaNumber:  suite.replicaNumber[collection],
 				ResourceGroups: []string{meta.DefaultResourceGroupName},
+				LoadFields:     []int64{100, 101},
 			}
 			resp, err := suite.server.LoadPartitions(ctx, req)
 			suite.NoError(err)

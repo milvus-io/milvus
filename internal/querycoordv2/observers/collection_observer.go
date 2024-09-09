@@ -180,7 +180,7 @@ func (ob *CollectionObserver) observeTimeout() {
 					zap.Duration("loadTime", time.Since(collection.CreatedAt)))
 				ob.meta.CollectionManager.RemoveCollection(collection.GetCollectionID())
 				ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
-				ob.targetMgr.RemoveCollection(collection.GetCollectionID())
+				ob.targetObserver.ReleaseCollection(collection.GetCollectionID())
 				ob.loadTasks.Remove(traceID)
 			}
 		case querypb.LoadType_LoadPartition:
@@ -214,7 +214,7 @@ func (ob *CollectionObserver) observeTimeout() {
 					zap.Int64s("partitionIDs", task.PartitionIDs))
 				for _, partition := range partitions {
 					ob.meta.CollectionManager.RemovePartition(partition.CollectionID, partition.GetPartitionID())
-					ob.targetMgr.RemovePartition(partition.GetCollectionID(), partition.GetPartitionID())
+					ob.targetObserver.ReleasePartition(partition.GetCollectionID(), partition.GetPartitionID())
 				}
 
 				// all partition timeout, remove collection
@@ -223,7 +223,7 @@ func (ob *CollectionObserver) observeTimeout() {
 
 					ob.meta.CollectionManager.RemoveCollection(task.CollectionID)
 					ob.meta.ReplicaManager.RemoveCollection(task.CollectionID)
-					ob.targetMgr.RemoveCollection(task.CollectionID)
+					ob.targetObserver.ReleaseCollection(task.CollectionID)
 				}
 			}
 		}

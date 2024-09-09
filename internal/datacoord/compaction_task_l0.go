@@ -164,6 +164,11 @@ func (t *l0CompactionTask) processCompleted() bool {
 
 func (t *l0CompactionTask) processTimeout() bool {
 	t.resetSegmentCompacting()
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
+	if err != nil {
+		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+		return false
+	}
 	return true
 }
 
@@ -178,6 +183,12 @@ func (t *l0CompactionTask) processFailed() bool {
 	}
 
 	t.resetSegmentCompacting()
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
+	if err != nil {
+		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+		return false
+	}
+
 	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
 	return true
 }

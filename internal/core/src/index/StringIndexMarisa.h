@@ -120,6 +120,9 @@ class StringIndexMarisa : public StringIndex {
     std::vector<size_t>
     prefix_match(const std::string_view prefix);
 
+    bool
+    in_lexicographic_order();
+
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;

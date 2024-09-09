@@ -298,13 +298,10 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
-	opts := tracer.GetInterceptorOpts()
-
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			accesslog.UnaryAccessLogInterceptor,
-			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.DatabaseInterceptor(),
 			proxy.UnaryServerHookInterceptor(),
@@ -325,6 +322,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {

@@ -520,7 +520,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
 void
 SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
-    auto filepath = std::filesystem::path(data.mmap_dir_path) /
+    auto filepath = std::filesystem::path(data.mmap_dir_path) / "raw_data" /
                     std::to_string(get_segment_id()) /
                     std::to_string(field_id.get());
     auto dir = filepath.parent_path();

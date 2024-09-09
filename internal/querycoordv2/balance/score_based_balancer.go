@@ -99,14 +99,24 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 				return
 			}
 
+			from := int64(-1)
+			fromScore := int64(0)
+			if sourceNode != nil {
+				from = sourceNode.nodeID
+				fromScore = int64(sourceNode.getPriority())
+			}
+
 			plan := SegmentAssignPlan{
-				From:    -1,
-				To:      targetNode.nodeID,
-				Segment: s,
+				From:         from,
+				To:           targetNode.nodeID,
+				Segment:      s,
+				FromScore:    fromScore,
+				ToScore:      int64(targetNode.getPriority()),
+				SegmentScore: int64(priorityChange),
 			}
 			plans = append(plans, plan)
 
-			// update the targetNode's score
+			// update the sourceNode and targetNode's score
 			if sourceNode != nil {
 				sourceNode.setPriority(sourceNode.getPriority() - priorityChange)
 			}
