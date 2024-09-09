@@ -425,6 +425,7 @@ queryNode:
     requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
     maxRetryTimes: 1 # max retry times for lazy load, 1 by default
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
+  indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   grouping:
     enabled: true
     maxNQ: 1000

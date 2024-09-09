@@ -769,7 +769,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		return nil
 	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
-	//catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+	// catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)

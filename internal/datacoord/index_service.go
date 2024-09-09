@@ -183,6 +183,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Any("TypeParams", req.GetTypeParams()),
 		zap.Any("IndexParams", req.GetIndexParams()),
+		zap.Any("UserIndexParams", req.GetUserIndexParams()),
 	)
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -343,7 +344,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 		// update index params
 		newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
-		log.Info("alter index user index params",
+		log.Info("alter index index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newIndexParams),
 		)

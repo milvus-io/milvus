@@ -108,6 +108,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if groupByFieldName != "" {
 		fields := schema.GetFields()
 		for _, field := range fields {
+			if field.GetNullable() {
+				return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("groupBy field(%s) not support nullable == true", groupByFieldName))
+			}
 			if field.Name == groupByFieldName {
 				groupByFieldId = field.FieldID
 				break
@@ -307,13 +310,15 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair) (*rankParams, erro
 }
 
 func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest {
+	searchParams := make([]*commonpb.KeyValuePair, len(req.GetRankParams()))
+	copy(searchParams, req.GetRankParams())
 	ret := &milvuspb.SearchRequest{
 		Base:                  req.GetBase(),
 		DbName:                req.GetDbName(),
 		CollectionName:        req.GetCollectionName(),
 		PartitionNames:        req.GetPartitionNames(),
 		OutputFields:          req.GetOutputFields(),
-		SearchParams:          req.GetRankParams(),
+		SearchParams:          searchParams,
 		TravelTimestamp:       req.GetTravelTimestamp(),
 		GuaranteeTimestamp:    req.GetGuaranteeTimestamp(),
 		Nq:                    0,

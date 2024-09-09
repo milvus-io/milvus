@@ -437,6 +437,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 		for {
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
+				binlogReader.Close()
 				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 			}
 			if eventReader == nil {

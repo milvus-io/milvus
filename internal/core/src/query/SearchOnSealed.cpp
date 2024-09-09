@@ -42,7 +42,10 @@ SearchOnSealedIndex(const Schema& schema,
     // Keep the field_indexing smart pointer, until all reference by raw dropped.
     auto field_indexing = record.get_field_indexing(field_id);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
-               "Metric type of field index isn't the same with search info");
+               "Metric type of field index isn't the same with search info,"
+               "field index: {}, search info: {}",
+               field_indexing->metric_type_,
+               search_info.metric_type_);
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);

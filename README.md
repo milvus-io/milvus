@@ -76,7 +76,7 @@ Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
 go: >= 1.21
 cmake: >= 3.26.4
-gcc: 7.5
+gcc: 9.5
 python: > 3.8 and  <= 3.11
 ```
 
@@ -174,7 +174,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-399-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-401-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -217,6 +217,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/Heisenberg-Y"><img src="https://avatars.githubusercontent.com/u/35055583?v=4" width="30px" /></a>
 <a href="https://github.com/HesterG"><img src="https://avatars.githubusercontent.com/u/17645053?v=4" width="30px" /></a>
 <a href="https://github.com/HuangHua"><img src="https://avatars.githubusercontent.com/u/2274405?v=4" width="30px" /></a>
+<a href="https://github.com/Ice-YcY"><img src="https://avatars.githubusercontent.com/u/85332705?v=4" width="30px" /></a>
 <a href="https://github.com/JackLCL"><img src="https://avatars.githubusercontent.com/u/53512883?v=4" width="30px" /></a>
 <a href="https://github.com/Jacksonxhx"><img src="https://avatars.githubusercontent.com/u/139523303?v=4" width="30px" /></a>
 <a href="https://github.com/JadeFlute0127"><img src="https://avatars.githubusercontent.com/u/35321989?v=4" width="30px" /></a>
@@ -566,6 +567,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/zhagnlu"><img src="https://avatars.githubusercontent.com/u/11935707?v=4" width="30px" /></a>
 <a href="https://github.com/zhang787jun"><img src="https://avatars.githubusercontent.com/u/51014996?v=4" width="30px" /></a>
 <a href="https://github.com/zhanshuyou"><img src="https://avatars.githubusercontent.com/u/7420640?v=4" width="30px" /></a>
+<a href="https://github.com/zhanxu33"><img src="https://avatars.githubusercontent.com/u/16716445?v=4" width="30px" /></a>
 <a href="https://github.com/zhengbuqian"><img src="https://avatars.githubusercontent.com/u/12147173?v=4" width="30px" /></a>
 <a href="https://github.com/zhenwu-cn"><img src="https://avatars.githubusercontent.com/u/2993941?v=4" width="30px" /></a>
 <a href="https://github.com/zhikunyao"><img src="https://avatars.githubusercontent.com/u/129478994?v=4" width="30px" /></a>

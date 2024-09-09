@@ -71,7 +71,7 @@ class ThreadSafeVector {
 
     int64_t
     size() const {
-        std::lock_guard lck(mutex_);
+        std::shared_lock lck(mutex_);
         return size_;
     }
 
