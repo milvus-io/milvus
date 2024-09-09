@@ -531,7 +531,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 func (t *searchTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
+	log := log.Ctx(ctx).WithLazy(zap.Int64("nq", t.SearchRequest.GetNq()))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")

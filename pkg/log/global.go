@@ -106,6 +106,12 @@ func With(fields ...zap.Field) *MLogger {
 	}
 }
 
+func WithLazy(fields ...zap.Field) *MLogger {
+	return &MLogger{
+		Logger: L().WithLazy(fields...).WithOptions(zap.AddCallerSkip(-1)),
+	}
+}
+
 // SetLevel alters the logging level.
 func SetLevel(l zapcore.Level) {
 	_globalP.Load().(*ZapProperties).Level.SetLevel(l)

@@ -1033,7 +1033,7 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 // GetShards update cache if withCache == false
 func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error) {
 	method := "GetShards"
-	log := log.Ctx(ctx).With(
+	log := log.Ctx(ctx).WithLazy(
 		zap.String("collectionName", collectionName),
 		zap.Int64("collectionID", collectionID))
 

@@ -2970,14 +2970,14 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
+	log := log.Ctx(ctx).WithLazy( // TODO: it might cause some cpu consumption
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames),
-		zap.Any("dsl", request.Dsl),
-		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
-		zap.Any("OutputFields", request.OutputFields),
+		zap.Strings("partitions", request.PartitionNames),
+		zap.String("dsl", request.Dsl),
+		zap.Int("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Strings("OutputFields", request.OutputFields),
 		zap.Any("search_params", request.SearchParams),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),

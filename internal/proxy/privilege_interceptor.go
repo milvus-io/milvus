@@ -154,7 +154,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
-	log = log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
+	log = log.WithLazy(zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
 		zap.String("db_name", dbName),
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),

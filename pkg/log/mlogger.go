@@ -37,6 +37,13 @@ func (l *MLogger) With(fields ...zap.Field) *MLogger {
 	return nl
 }
 
+func (l *MLogger) WithLazy(fields ...zap.Field) *MLogger {
+	nl := &MLogger{
+		Logger: l.Logger.WithLazy(fields...),
+	}
+	return nl
+}
+
 // WithRateGroup uses named RateLimiter for this logger.
 func (l *MLogger) WithRateGroup(groupName string, creditPerSecond, maxBalance float64) *MLogger {
 	rl := utils.NewRateLimiter(creditPerSecond, maxBalance)

@@ -12,6 +12,7 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/expr-lang/expr v1.15.7
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
+	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.17.7
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240822040249-4bbc8f623cbb
 	github.com/nats-io/nats-server/v2 v2.10.12
@@ -105,7 +106,6 @@ require (
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
-	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/linkedin/goavro/v2 v2.11.1 // indirect
