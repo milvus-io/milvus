@@ -4162,7 +4162,7 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"res len {len(res)} res {res}")
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_text_match_cn_normal(self):
+    def test_query_text_match_zh_normal(self):
         """
         target: test query iterator normal
         method: 1. query iterator
