@@ -408,7 +408,7 @@ queryNode:
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
     warmup: disable
   mmap:
-    vectorField: false # Enable mmap for loading vector data
+    vectorField: true # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
