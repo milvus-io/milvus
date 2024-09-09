@@ -96,7 +96,9 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	if skipDupCnt > 0 {
+		log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	}
 	return ret, nil
 }
 
@@ -204,7 +206,9 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			zap.Int64("filteredCount", filteredCount),
 			zap.Int64("groupBound", groupBound))
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", filteredCount))
+	if filteredCount > 0 {
+		log.Info("skip duplicated search result", zap.Int64("count", filteredCount))
+	}
 	return ret, nil
 }
 

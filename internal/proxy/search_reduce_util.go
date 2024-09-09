@@ -315,7 +315,9 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Ctx(ctx).Debug("skip duplicated search result when doing group by", zap.Int64("count", skipDupCnt))
+	if skipDupCnt > 0 {
+		log.Ctx(ctx).Info("skip duplicated search result when doing group by", zap.Int64("count", skipDupCnt))
+	}
 
 	if float64(skipDupCnt) >= float64(totalResCount)*0.3 {
 		log.Warn("GroupBy reduce skipped too many results, "+
@@ -448,10 +450,8 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-
 	if skipDupCnt > 0 {
-		log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
+		log.Ctx(ctx).Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	}
 
 	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query

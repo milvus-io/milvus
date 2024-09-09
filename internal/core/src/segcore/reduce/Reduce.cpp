@@ -281,7 +281,7 @@ ReduceHelper::ReduceResultData() {
         }
     }
     if (filtered_count > 0) {
-        LOG_DEBUG("skip duplicated search result, count = {}", filtered_count);
+        LOG_INFO("skip duplicated search result, count = {}", filtered_count);
     }
 }
 
