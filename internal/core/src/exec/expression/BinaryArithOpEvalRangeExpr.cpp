@@ -807,7 +807,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl() {
-    if (is_index_mode_) {
+    if (is_index_mode_ && IndexHasRawData<T>()) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>();
