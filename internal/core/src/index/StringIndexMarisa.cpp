@@ -374,7 +374,6 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                     }
                     ids.push_back(agent.key().id());
                 }
-                break;
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
@@ -385,6 +384,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                     }
                 };
             }
+            break;
         }
         case OpType::LessEqual: {
             if (in_lexico_order) {
@@ -396,7 +396,6 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                     }
                     ids.push_back(agent.key().id());
                 }
-                break;
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
@@ -407,6 +406,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                     }
                 };
             }
+            break;
         }
         default:
             PanicInfo(
