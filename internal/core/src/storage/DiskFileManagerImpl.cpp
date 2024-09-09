@@ -315,7 +315,7 @@ DiskFileManagerImpl::CacheTextLogToDisk(
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
-            GetLocalTextIndexPrefix() +
+            GetLocalTextIndexPrefix() + "/" +
             prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager->CreateFile(local_index_file_name);
         auto file =
@@ -689,14 +689,25 @@ std::string
 DiskFileManagerImpl::GetLocalTextIndexPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenTextIndexPathPrefix(
-        local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
+    return GenTextIndexPathPrefix(local_chunk_manager,
+                                  index_meta_.build_id,
+                                  index_meta_.index_version,
+                                  field_meta_.segment_id,
+                                  field_meta_.field_id);
 }
 
 std::string
 DiskFileManagerImpl::GetIndexIdentifier() {
     return GenIndexPathIdentifier(index_meta_.build_id,
                                   index_meta_.index_version);
+}
+
+std::string
+DiskFileManagerImpl::GetTextIndexIdentifier() {
+    return std::to_string(index_meta_.build_id) + "/" +
+           std::to_string(index_meta_.index_version) + "/" +
+           std::to_string(field_meta_.segment_id) +
+           std::to_string(field_meta_.field_id);
 }
 
 std::string

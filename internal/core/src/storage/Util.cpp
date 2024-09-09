@@ -484,6 +484,16 @@ GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
 }
 
 std::string
+GenTextIndexPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t segment_id,
+                           int64_t field_id) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) +
+           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
+           "/";
+}
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version) {
@@ -494,9 +504,12 @@ GenIndexPathPrefix(ChunkManagerPtr cm,
 std::string
 GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
-                       int64_t index_version) {
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id) {
     return cm->GetRootPath() + "/" + std::string(TEXT_LOG_ROOT_PATH) + "/" +
-           GenIndexPathIdentifier(build_id, index_version);
+           GenTextIndexPathIdentifier(
+               build_id, index_version, segment_id, field_id);
 }
 
 std::string

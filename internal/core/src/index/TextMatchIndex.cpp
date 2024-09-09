@@ -57,7 +57,7 @@ TextMatchIndex::TextMatchIndex(
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    auto prefix = disk_file_manager_->GetIndexIdentifier();
+    auto prefix = disk_file_manager_->GetTextIndexIdentifier();
     path_ = std::string(TMP_TEXT_LOG_PREFIX) + prefix;
 
     boost::filesystem::create_directories(path_);
@@ -118,6 +118,8 @@ TextMatchIndex::Load(const Config& config) {
                "index file paths is empty when load text log index");
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
     disk_file_manager_->CacheTextLogToDisk(index_files.value());
+    AssertInfo(
+        tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 
