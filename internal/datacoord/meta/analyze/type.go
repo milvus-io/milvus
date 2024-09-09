@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -11,7 +12,7 @@ type AnalyzeMeta interface {
 	DropAnalyzeTask(taskID int64) error
 	UpdateAnalyzeVersion(taskID int64) error
 	BuildingAnalyzeTask(taskID, nodeID int64) error
-	FinishAnalyzeTask(taskID int64, result *indexpb.AnalyzeResult) error
+	FinishAnalyzeTask(taskID int64, result *workerpb.AnalyzeResult) error
 	GetAllTasks() map[int64]*indexpb.AnalyzeTask
 	CheckCleanAnalyzeTask(taskID typeutil.UniqueID) (bool, *indexpb.AnalyzeTask)
 }

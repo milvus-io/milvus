@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -143,7 +144,7 @@ func (m *analyzeMeta) BuildingAnalyzeTask(taskID, nodeID int64) error {
 	return m.saveTask(cloneT)
 }
 
-func (m *analyzeMeta) FinishAnalyzeTask(taskID int64, result *indexpb.AnalyzeResult) error {
+func (m *analyzeMeta) FinishAnalyzeTask(taskID int64, result *workerpb.AnalyzeResult) error {
 	m.Lock()
 	defer m.Unlock()
 

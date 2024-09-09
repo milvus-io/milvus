@@ -33,6 +33,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -1149,7 +1150,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1166,7 +1167,7 @@ func TestMeta_FinishTask(t *testing.T) {
 		m.catalog = &datacoord.Catalog{
 			MetaKv: metakv,
 		}
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},
@@ -1177,7 +1178,7 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.FinishTask(&indexpb.IndexTaskInfo{
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
 			IndexFileKeys:  []string{"file1", "file2"},

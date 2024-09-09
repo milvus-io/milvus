@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -51,7 +52,7 @@ type IndexMeta interface {
 	GetIndexJob(buildID typeutil.UniqueID) (*model.SegmentIndex, bool)
 	IsIndexExist(collID, indexID typeutil.UniqueID) bool
 	UpdateVersion(buildID typeutil.UniqueID) error
-	FinishTask(taskInfo *indexpb.IndexTaskInfo) error
+	FinishTask(taskInfo *workerpb.IndexTaskInfo) error
 	DeleteTask(buildID int64) error
 	BuildIndex(buildID, nodeID typeutil.UniqueID) error
 	GetAllSegIndexes() map[int64]*model.SegmentIndex
