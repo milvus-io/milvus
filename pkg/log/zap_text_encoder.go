@@ -42,7 +42,6 @@ import (
 	"unicode/utf8"
 
 	jsoniter "github.com/json-iterator/go"
-
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
