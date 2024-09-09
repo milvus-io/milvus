@@ -174,6 +174,10 @@ func TestValidateFieldName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"True",
+		"array_contains",
+		"json_contains_any",
+		"ARRAY_LENGTH",
 	}
 
 	for _, name := range invalidNames {
