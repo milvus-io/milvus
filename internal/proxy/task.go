@@ -301,7 +301,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.schema.AutoID = false
 
-	if err := validateAndFillFunction(t.schema); err != nil {
+	if err := validateFunction(t.schema); err != nil {
 		return err
 	}
 
@@ -686,20 +686,21 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
 			t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-				FieldID:         field.FieldID,
-				Name:            field.Name,
-				IsPrimaryKey:    field.IsPrimaryKey,
-				AutoID:          field.AutoID,
-				Description:     field.Description,
-				DataType:        field.DataType,
-				TypeParams:      field.TypeParams,
-				IndexParams:     field.IndexParams,
-				IsDynamic:       field.IsDynamic,
-				IsPartitionKey:  field.IsPartitionKey,
-				IsClusteringKey: field.IsClusteringKey,
-				DefaultValue:    field.DefaultValue,
-				ElementType:     field.ElementType,
-				Nullable:        field.Nullable,
+				FieldID:          field.FieldID,
+				Name:             field.Name,
+				IsPrimaryKey:     field.IsPrimaryKey,
+				AutoID:           field.AutoID,
+				Description:      field.Description,
+				DataType:         field.DataType,
+				TypeParams:       field.TypeParams,
+				IndexParams:      field.IndexParams,
+				IsDynamic:        field.IsDynamic,
+				IsPartitionKey:   field.IsPartitionKey,
+				IsClusteringKey:  field.IsClusteringKey,
+				DefaultValue:     field.DefaultValue,
+				ElementType:      field.ElementType,
+				Nullable:         field.Nullable,
+				IsFunctionOutput: field.IsFunctionOutput,
 			})
 		}
 	}

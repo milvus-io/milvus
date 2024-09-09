@@ -610,7 +610,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func validateAndFillFunction(coll *schemapb.CollectionSchema) error {
+func validateFunction(coll *schemapb.CollectionSchema) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -631,21 +631,16 @@ func validateAndFillFunction(coll *schemapb.CollectionSchema) error {
 		}
 
 		outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
-		missingFields := []int{}
 		for i, name := range function.GetOutputFieldNames() {
 			outputField, ok := nameMap[name]
 			if !ok {
-				outputFields[i] = &schemapb.FieldSchema{
-					Name: name,
-				}
-				missingFields = append(missingFields, i)
-				continue
+				return fmt.Errorf("function ouput field not found %s", function.InputFieldNames)
 			}
 			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
 		}
 
-		err = checkAndFillFunctionOutputField(function, coll, outputFields, missingFields)
+		err = checkFunctionOutputField(function, outputFields)
 		if err != nil {
 			return err
 		}
@@ -653,21 +648,11 @@ func validateAndFillFunction(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func fillBm25Field(field *schemapb.FieldSchema) {
-	field.DataType = schemapb.DataType_SparseFloatVector
-	field.Description = "Auto create bm25 field"
-	field.IsFunctionOutput = true
-}
-
-func checkAndFillFunctionOutputField(function *schemapb.FunctionSchema, coll *schemapb.CollectionSchema, fields []*schemapb.FieldSchema, missings []int) error {
+func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 {
 			return fmt.Errorf("bm25 only need 1 output field, but now %d", len(fields))
-		}
-		for _, idx := range missings {
-			fillBm25Field(fields[idx])
-			coll.Fields = append(coll.Fields, fields[idx])
 		}
 
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
