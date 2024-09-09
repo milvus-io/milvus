@@ -30,6 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -384,6 +385,21 @@ func (mr *MilvusRoles) Run() {
 		streaming.Init()
 		defer streaming.Release()
 	}
+
+	enableComponents := []bool{
+		mr.EnableRootCoord,
+		mr.EnableProxy,
+		mr.EnableQueryCoord,
+		mr.EnableQueryNode,
+		mr.EnableDataCoord,
+		mr.EnableDataNode,
+		mr.EnableIndexCoord,
+		mr.EnableIndexNode,
+	}
+	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
+		return v
+	})
+	healthz.SetComponentNum(len(enableComponents))
 
 	expr.Init()
 	expr.Register("param", paramtable.Get())
