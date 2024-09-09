@@ -641,6 +641,7 @@ func validateAndFillFunction(coll *schemapb.CollectionSchema) error {
 				missingFields = append(missingFields, i)
 				continue
 			}
+			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
 		}
 
@@ -655,6 +656,7 @@ func validateAndFillFunction(coll *schemapb.CollectionSchema) error {
 func fillBm25Field(field *schemapb.FieldSchema) {
 	field.DataType = schemapb.DataType_SparseFloatVector
 	field.Description = "Auto create bm25 field"
+	field.IsFunctionOutput = true
 }
 
 func checkAndFillFunctionOutputField(function *schemapb.FunctionSchema, coll *schemapb.CollectionSchema, fields []*schemapb.FieldSchema, missings []int) error {
@@ -836,13 +838,19 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 
 // fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
 func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	if len(columns) != len(schema.GetFields()) {
-		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
-			len(columns), len(schema.GetFields()))
-	}
 	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
+
+	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
+		if !field.GetIsFunctionOutput() {
+			expectColumnNum++
+		}
+	}
+
+	if len(columns) != expectColumnNum {
+		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
+			expectColumnNum, len(columns))
 	}
 
 	for _, fieldData := range columns {
@@ -1293,15 +1301,16 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 				// autoGenField
 				continue
 			}
+
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
