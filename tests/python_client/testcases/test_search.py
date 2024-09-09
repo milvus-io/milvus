@@ -12915,6 +12915,20 @@ class TestSearchTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         df = df.astype(str)
         log.info(f"dataframe\n{df}")
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        overview_word_freq = cf.analyze_documents(df["overview"].tolist())
+        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
+        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
+        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "overview": overview_word_freq,
+            "genres": genres_word_freq,
+            "producer": producer_word_freq,
+            "cast": cast_word_freq
+        }
+        log.info(f"wf_map {wf_map}")
         data = []
         for i in range(len(df)):
             d = {
@@ -12934,20 +12948,6 @@ class TestSearchTextMatch(TestcaseBase):
             collection_w.flush()
         collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
         collection_w.load()
-        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
-        title_word_freq = cf.analyze_documents(df["title"].tolist())
-        overview_word_freq = cf.analyze_documents(df["overview"].tolist())
-        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
-        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
-        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
-        wf_map = {
-            "title": title_word_freq,
-            "overview": overview_word_freq,
-            "genres": genres_word_freq,
-            "producer": producer_word_freq,
-            "cast": cast_word_freq
-        }
-        log.info(f"wf_map {wf_map}")
         text_fields = ["title", "overview", "genres", "producer", "cast"]
         # query single field for one word
         for field in text_fields:

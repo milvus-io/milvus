@@ -23,6 +23,7 @@ import pytest
 import random
 import numpy as np
 import pandas as pd
+import ast
 pd.set_option("expand_frame_repr", False)
 
 
@@ -4072,7 +4073,7 @@ class TestQueryTextMatch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_text_match_normal(self):
+    def test_query_text_match_en_normal(self):
         """
         target: test query iterator normal
         method: 1. query iterator
@@ -4144,6 +4145,107 @@ class TestQueryTextMatch(TestcaseBase):
                 output_fields=["id", field]
             )
             log.info(f"res len {len(res)} res {res}")
+
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_words = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_words.append(word)
+            string_of_top_10_words = " ".join(top_10_words)
+            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_cn_normal(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "jieba",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="query", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="positive_passages", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="negative_passages", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        splits = {'train': 'data/train-00000-of-00001-2de2e5d80d19e26f.parquet',
+                  'dev': 'data/dev-00000-of-00001-5193587e68da35e5.parquet',
+                  'testB': 'data/testB-00000-of-00001-187086ece8b04c47.parquet'}
+        df = pd.read_parquet("hf://datasets/Cohere/miracl-zh-queries-22-12/" + splits["train"])
+        log.info(f"dataframe\n{df}")
+        log.info(f"describe: {collection_w.describe()}")
+
+        def convert_passages_to_str(df):
+            def concat_texts(passages):
+                # Extract 'text' values and join them
+                return ' '.join(passage['text'] for passage in passages)
+
+            # Convert 'positive_passages' column
+            df['positive_passages'] = df['positive_passages'].apply(concat_texts)
+
+            # Convert 'negative_passages' column
+            df['negative_passages'] = df['negative_passages'].apply(concat_texts)
+
+            return df
+        df = convert_passages_to_str(df)
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "query": str(df["query"][i]),
+                "positive_passages": str(df["positive_passages"][i]),
+                "negative_passages": str(df["negative_passages"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.load()
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        query_word_freq = cf.analyze_documents(df["query"].tolist(), language="zh")
+        positive_passages_word_freq = cf.analyze_documents(df["positive_passages"].tolist(), language="zh")
+        negative_passages_word_freq = cf.analyze_documents(df["negative_passages"].tolist(), language="zh")
+        wf_map = {
+            "query": query_word_freq,
+            "positive_passages": positive_passages_word_freq,
+            "negative_passages": negative_passages_word_freq,
+        }
+        text_fields = ["query", "positive_passages", "negative_passages"]
+        # query single field for one word
+        for field in text_fields:
+            token = list(wf_map[field].keys())[0]
+            expr = f"TextMatch({field}, '{token}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+            for r in res:
+                log.info(f"r {r}")
+                assert token in r[field]
 
         # query single field for multi-word
         for field in text_fields:

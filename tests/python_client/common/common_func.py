@@ -26,6 +26,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 import bm25s
+import jieba
 import Stemmer
 fake = Faker()
 """" Methods of processing data """
@@ -70,15 +71,26 @@ class ParamInfo:
 param_info = ParamInfo()
 
 
-def analyze_documents(texts):
+
+def analyze_documents(texts, language="en"):
     # Create a stemmer
     # stemmer = Stemmer.Stemmer("english")
-
+    stopwords = "en"
+    if language in ["en", "english"]:
+        stopwords= "en"
+    if language in ["zh", "cn", "chinese"]:
+        stopword = " "
+        new_texts = []
+        for doc in texts:
+            seg_list = jieba.cut(doc)
+            new_texts.append(" ".join(seg_list))
+        texts = new_texts
+        stopwords = [stopword]
     # Start timing
     t0 = time.time()
 
     # Tokenize the corpus
-    tokenized = bm25s.tokenize(texts, stopwords="en")
+    tokenized = bm25s.tokenize(texts, stopwords=stopwords)
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
