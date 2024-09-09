@@ -340,7 +340,6 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
 			log.Warn("proxy can't create creds", zap.Error(err))
-			log.Warn("proxy can't create creds", zap.Error(err))
 			errChan <- err
 			return
 		}
