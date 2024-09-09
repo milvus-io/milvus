@@ -279,6 +279,8 @@ func (it *indexBuildTask) setResult(info *workerpb.IndexTaskInfo) {
 }
 
 func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
 	resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.GetTaskID()},
@@ -315,6 +317,8 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeC
 }
 
 func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.GetTaskID()},

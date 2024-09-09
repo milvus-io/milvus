@@ -230,6 +230,8 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 }
 
 func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
 		TaskIDs:   []int64{st.GetTaskID()},
@@ -264,6 +266,8 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 }
 
 func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
 		TaskIDs:   []int64{st.GetTaskID()},
