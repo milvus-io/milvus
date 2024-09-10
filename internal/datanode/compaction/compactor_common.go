@@ -214,7 +214,7 @@ func uploadStatsBlobs(ctx context.Context, collectionID, partitionID, segmentID,
 		},
 	}
 	if err := io.Upload(ctx, kvs); err != nil {
-		log.Warn("failed to upload insert log", zap.Error(err))
+		log.Warn("failed to upload stats log", zap.Error(err))
 		return nil, err
 	}
 
@@ -228,4 +228,46 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 		}
 		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
 	}
+}
+
+func bmSerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) ([]*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25 stats log serializeWrite")
+	defer span.End()
+
+	stats, err := writer.GetBm25Stats()
+	if err != nil {
+		return nil, err
+	}
+
+	logID, _, err := allocator.Alloc(uint32(len(stats)))
+	if err != nil {
+		return nil, err
+	}
+
+	kvs := make(map[string][]byte)
+	binlogs := []*datapb.FieldBinlog{}
+	for fieldID, blob := range stats {
+		key, _ := binlog.BuildLogPath(storage.BM25Binlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), fieldID, logID)
+		kvs[key] = blob.GetValue()
+		fieldLog := &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogSize:    int64(len(blob.GetValue())),
+					MemorySize: int64(len(blob.GetValue())),
+					LogPath:    key,
+					EntriesNum: writer.GetRowNum(),
+				},
+			},
+		}
+
+		binlogs = append(binlogs, fieldLog)
+	}
+
+	if err := io.Upload(ctx, kvs); err != nil {
+		log.Warn("failed to upload bm25 log", zap.Error(err))
+		return nil, err
+	}
+
+	return binlogs, nil
 }

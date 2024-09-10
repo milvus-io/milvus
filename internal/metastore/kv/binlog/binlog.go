@@ -63,6 +63,10 @@ func CompressCompactionBinlogs(binlogs []*datapb.CompactionSegment) error {
 		if err != nil {
 			return err
 		}
+		err = CompressFieldBinlogs(binlog.GetBm25Logs())
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

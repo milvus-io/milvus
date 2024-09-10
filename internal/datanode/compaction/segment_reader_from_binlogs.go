@@ -21,9 +21,11 @@ type SegmentDeserializeReader struct {
 	PKFieldID     int64
 	binlogPaths   [][]string
 	binlogPathPos int
+
+	bm25FieldIDs []int64
 }
 
-func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, binlogIO binlogIO.BinlogIO, PKFieldID int64) *SegmentDeserializeReader {
+func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, binlogIO binlogIO.BinlogIO, PKFieldID int64, bm25FieldIDs []int64) *SegmentDeserializeReader {
 	return &SegmentDeserializeReader{
 		ctx:           ctx,
 		binlogIO:      binlogIO,
@@ -32,6 +34,7 @@ func NewSegmentDeserializeReader(ctx context.Context, binlogPaths [][]string, bi
 		PKFieldID:     PKFieldID,
 		binlogPaths:   binlogPaths,
 		binlogPathPos: 0,
+		bm25FieldIDs:  bm25FieldIDs,
 	}
 }
 
@@ -49,7 +52,7 @@ func (r *SegmentDeserializeReader) initDeserializeReader() error {
 		return &storage.Blob{Key: r.binlogPaths[r.binlogPathPos][i], Value: v}
 	})
 
-	r.reader, err = storage.NewBinlogDeserializeReader(blobs, r.PKFieldID)
+	r.reader, err = storage.NewBinlogDeserializeReader(blobs, r.PKFieldID, r.bm25FieldIDs)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return err
