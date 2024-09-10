@@ -377,3 +377,8 @@ class DefaultScalarIndexParams:
     @staticmethod
     def list_bitmap(fields: List[str]) -> Dict[str, IndexPrams]:
         return {n: IndexPrams(index_type=IndexName.BITMAP) for n in fields}
+
+
+class AlterIndexParams:
+    IndexOffsetCache = {'indexoffsetcache.enabled': True}
+    IndexMmap = {'mmap.enabled': True}
