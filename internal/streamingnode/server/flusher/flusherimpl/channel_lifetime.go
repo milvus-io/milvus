@@ -18,6 +18,7 @@ package flusherimpl
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
@@ -80,6 +81,11 @@ func (c *channelLifetime) Run() error {
 		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
+	}
+	// The channel has been dropped, skip to recover it.
+	if len(resp.GetInfo().GetSeekPosition().GetMsgID()) == 0 && resp.GetInfo().GetSeekPosition().GetTimestamp() == math.MaxUint64 {
+		log.Info("channel has been dropped, skip to create flusher for vchannel", zap.String("vchannel", c.vchannel))
+		return nil
 	}
 
 	// Convert common.MessageID to message.messageID.
