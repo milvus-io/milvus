@@ -634,7 +634,7 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		for i, name := range function.GetOutputFieldNames() {
 			outputField, ok := nameMap[name]
 			if !ok {
-				return fmt.Errorf("function ouput field not found %s", function.InputFieldNames)
+				return fmt.Errorf("function output field not found %s", function.InputFieldNames)
 			}
 			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
