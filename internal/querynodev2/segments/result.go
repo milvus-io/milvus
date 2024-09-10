@@ -127,10 +127,6 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceAdvancedSearchResults")
 	defer sp.End()
 
-	if len(results) == 1 {
-		return results[0], nil
-	}
-
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)
 	searchResults := &internalpb.SearchResults{
