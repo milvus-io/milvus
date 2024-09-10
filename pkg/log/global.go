@@ -102,12 +102,6 @@ func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 // Fields added to the child don't affect the parent, and vice versa.
 func With(fields ...zap.Field) *MLogger {
 	return &MLogger{
-		Logger: L().With(fields...).WithOptions(zap.AddCallerSkip(-1)),
-	}
-}
-
-func WithLazy(fields ...zap.Field) *MLogger {
-	return &MLogger{
 		Logger: L().WithLazy(fields...).WithOptions(zap.AddCallerSkip(-1)),
 	}
 }

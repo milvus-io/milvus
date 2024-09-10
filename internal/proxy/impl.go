@@ -2970,7 +2970,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	log := log.Ctx(ctx).WithLazy( // TODO: it might cause some cpu consumption
+	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),

@@ -48,6 +48,35 @@ func BenchmarkZapWithLazy(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		WithLazy(zap.Any("payload", payload))
+		L().WithLazy(zap.Any("payload", payload))
+	}
+}
+
+// The following two benchmarks are validations if `WithLazy` has the same performance as `With` in the worst case.
+func BenchmarkWithLazyLog(b *testing.B) {
+	payload := make([]foo, 10)
+	for i := 0; i < len(payload); i++ {
+		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		log := L().WithLazy(zap.Any("payload", payload))
+		log.Info("test")
+		log.Warn("test")
+	}
+}
+
+func BenchmarkWithLog(b *testing.B) {
+	payload := make([]foo, 10)
+	for i := 0; i < len(payload); i++ {
+		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		log := L().With(zap.Any("payload", payload))
+		log.Info("test")
+		log.Warn("test")
 	}
 }
