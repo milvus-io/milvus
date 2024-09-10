@@ -43,6 +43,7 @@ services:
     security_opt:
     - seccomp:unconfined
     environment:
+      MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     volumes:
