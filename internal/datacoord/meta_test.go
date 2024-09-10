@@ -604,7 +604,7 @@ func TestMeta_Basic(t *testing.T) {
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
 		meta := createMeta(&datacoord.Catalog{}, withIndexMeta(createIndexMeta(&datacoord.Catalog{})))
-		ret := meta.GetCollectionIndexFilesSize()
+		ret := meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(0), ret)
 
 		meta.collections = map[UniqueID]*collectionInfo{
@@ -613,7 +613,7 @@ func TestMeta_Basic(t *testing.T) {
 				DatabaseName: "db",
 			},
 		}
-		ret = meta.GetCollectionIndexFilesSize()
+		ret = meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(11), ret)
 	})
 
