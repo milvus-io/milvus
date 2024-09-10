@@ -182,7 +182,7 @@ func newCompositeBinlogRecordReader(blobs []*Blob) (*compositeBinlogRecordReader
 	}, nil
 }
 
-func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*DeserializeReader[*Value], error) {
+func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID, BM25FiledID []UniqueID) (*DeserializeReader[*Value], error) {
 	reader, err := newCompositeBinlogRecordReader(blobs)
 	if err != nil {
 		return nil, err
@@ -209,6 +209,17 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 					} else {
 						return merr.WrapErrServiceInternal(fmt.Sprintf("unexpected type %s", dt))
 					}
+				}
+			}
+
+			if len(BM25FiledID) != 0 {
+				value.BM25Row = make(map[int64][]byte)
+				for _, bm25FieldID := range BM25FiledID {
+					v, ok := m[bm25FieldID]
+					if !ok {
+						return merr.WrapErrServiceInternal(fmt.Sprintf("BM25 Field not found %d", bm25FieldID))
+					}
+					value.BM25Row[bm25FieldID] = v.([]byte)
 				}
 			}
 

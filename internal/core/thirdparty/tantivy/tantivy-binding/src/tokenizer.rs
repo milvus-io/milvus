@@ -33,7 +33,6 @@ pub(crate) fn create_tokenizer(params: &HashMap<String, String>) -> Option<TextA
             }
         },
         None => {
-            info!("no tokenizer is specific, use default tokenizer");
             Some(default_tokenizer())
         }
     }

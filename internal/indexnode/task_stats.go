@@ -155,7 +155,9 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 
 func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	numRows := st.req.GetNumRows()
-	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID())
+
+	bm25FieldIds := compaction.GetBM25FieldIDs(st.req.GetSchema())
+	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
@@ -174,7 +176,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	uploadTimeCost := time.Duration(0)
 	sortTimeCost := time.Duration(0)
 
-	values, err := st.downloadData(ctx, numRows, writer.GetPkID())
+	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIds)
 	if err != nil {
 		log.Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
@@ -255,6 +257,20 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 
 	st.logIDOffset += binlogNums
 
+	var bm25StatsLogs []*datapb.FieldBinlog
+	if len(bm25FieldIds) > 0 {
+		binlogNums, bm25StatsLogs, err = bm25SerializerWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
+		if err != nil {
+			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
+			return nil, err
+		}
+		st.logIDOffset += binlogNums
+
+		if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
+			return nil, err
+		}
+	}
+
 	totalElapse := st.tr.RecordSpan()
 
 	insertLogs := lo.Values(allBinlogs)
@@ -273,7 +289,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs)
+		int64(len(values)), insertLogs, statsLogs, bm25StatsLogs)
 
 	log.Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
@@ -340,13 +356,14 @@ func (st *statsTask) Reset() {
 	st.node = nil
 }
 
-func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID int64) ([]*storage.Value, error) {
+func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID int64, bm25FieldIds []int64) ([]*storage.Value, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64s("bm25Fields", bm25FieldIds),
 	)
 
 	deletePKs, err := st.loadDeltalogs(ctx, st.deltaLogs)
@@ -388,7 +405,7 @@ func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID 
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		iter, err := storage.NewBinlogDeserializeReader(blobs, PKFieldID)
+		iter, err := storage.NewBinlogDeserializeReader(blobs, PKFieldID, bm25FieldIds)
 		if err != nil {
 			log.Warn("downloadData wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
@@ -562,6 +579,44 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 	}
 
 	return binlogNum, statFieldLog, nil
+}
+
+func bm25SerializerWrite(ctx context.Context, io io.BinlogIO, startID int64, writer *compaction.SegmentWriter, finalRowCount int64) (int64, []*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25log serializeWrite")
+	defer span.End()
+	stats, err := writer.GetBm25Stats()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	kvs := make(map[string][]byte)
+	binlogs := []*datapb.FieldBinlog{}
+	cnt := int64(0)
+	for fieldID, blob := range stats {
+		key, _ := binlog.BuildLogPath(storage.BM25Binlog, writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), fieldID, startID+cnt)
+		kvs[key] = blob.GetValue()
+		fieldLog := &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogSize:    int64(len(blob.GetValue())),
+					MemorySize: int64(len(blob.GetValue())),
+					LogPath:    key,
+					EntriesNum: writer.GetRowNum(),
+				},
+			},
+		}
+
+		binlogs = append(binlogs, fieldLog)
+		cnt++
+	}
+
+	if err := io.Upload(ctx, kvs); err != nil {
+		log.Warn("failed to upload bm25 log", zap.Error(err))
+		return 0, nil, err
+	}
+
+	return cnt, binlogs, nil
 }
 
 func buildTextLogPrefix(rootPath string, collID, partID, segID, fieldID, version int64) string {
