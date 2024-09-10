@@ -2043,10 +2043,13 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                 index->AddText(impl->Reverse_Lookup(i), i);
             }
         }
-
-        // release the index writer and create index reader.
-        index->Finish();
     }
+
+    // create index reader.
+    index->CreateReader();
+    // release index writer.
+    index->Finish();
+
     index->Reload();
 
     index->RegisterTokenizer("milvus_tokenizer",

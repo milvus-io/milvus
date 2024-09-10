@@ -411,7 +411,9 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     } else {
         wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
     }
+    wrapper_->create_reader();
     finish();
+    wrapper_->reload();
 }
 
 template <typename T>

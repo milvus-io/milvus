@@ -121,7 +121,12 @@ struct TantivyIndexWrapper {
     // create reader.
     void
     create_reader() {
-        reader_ = tantivy_create_reader_from_writer(writer_);
+        if (writer_ != nullptr) {
+            reader_ = tantivy_create_reader_from_writer(writer_);
+        } else if (!path_.empty()) {
+            assert(tantivy_index_exist(path_.c_str()));
+            reader_ = tantivy_load_index(path_.c_str());
+        }
     }
 
     ~TantivyIndexWrapper() {
