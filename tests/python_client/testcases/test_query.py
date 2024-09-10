@@ -4399,7 +4399,8 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             top_5_words = []
             expr_list = []
-            for word, count in wf_map[field].most_common(5):
+            wf_counter= Counter(wf_map[field])
+            for word, count in wf_counter.most_common(5):
                 tmp = f"TextMatch({field}, '{word}')"
                 expr_list.append(tmp)
 
