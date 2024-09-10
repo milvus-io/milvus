@@ -100,9 +100,11 @@ kafka:
         memory: 512Mi
 log:
   level: debug
-indexCoord:
-  scheduler:
-    interval: 100
+extraConfigFiles:
+  user.yaml: |+
+    indexCoord:
+      scheduler:
+        interval: 100
 metrics:
   serviceMonitor:
     enabled: true

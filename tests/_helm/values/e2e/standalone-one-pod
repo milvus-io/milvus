@@ -32,9 +32,11 @@ image:
 indexCoordinator:
   gc:
     interval: 1
-indexCoord:
-  scheduler:
-    interval: 100
+extraConfigFiles:
+  user.yaml: |+
+    indexCoord:
+      scheduler:
+        interval: 100
 indexNode:
   disk:
     enabled: true
