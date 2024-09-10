@@ -323,12 +323,22 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
+			// both inbound and outbound
+			WithTargetMethods(
+				milvuspb.MilvusService_Search_FullMethodName,
+				milvuspb.MilvusService_HybridSearch_FullMethodName,
+				milvuspb.MilvusService_Query_FullMethodName,
+			).
+			// inbound only
+			WithInboundRecord(milvuspb.MilvusService_Insert_FullMethodName,
+				milvuspb.MilvusService_Delete_FullMethodName,
+				milvuspb.MilvusService_Upsert_FullMethodName)),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {
 		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
-			log.Warn("proxy can't create creds", zap.Error(err))
 			log.Warn("proxy can't create creds", zap.Error(err))
 			errChan <- err
 			return

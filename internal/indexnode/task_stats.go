@@ -381,6 +381,7 @@ func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID 
 					break
 				} else {
 					log.Warn("downloadData wrong, failed to iter through data", zap.Error(err))
+					iter.Close()
 					return nil, err
 				}
 			}
@@ -399,6 +400,7 @@ func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID 
 			values = append(values, iter.Value())
 			remainingRowCount++
 		}
+		iter.Close()
 	}
 
 	log.Info("download data success",

@@ -7,6 +7,12 @@ misc:
   - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
       - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
       - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
+  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+      - 'status-success=go-sdk'
+      - 'status-success=milvus-sdk-go '
+  - branch: &BRANCH
+      - &MASTER_BRANCH base=master
+      - &2X_BRANCH base~=^2(\.\d+){1,2}$
 
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
@@ -40,13 +46,11 @@ pull_request_rules:
         add:
           - dco-passed
 
-  - name: Test passed for code changed-master 
+  - name: Test passed for code changed on master 
     conditions:
-      - or:
-          - base=sql_beta
-          - base=master
-          - base~=^2(\.\d+){1,2}$
+      - *MASTER_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - or: *WHEN_GO_SDK_STATUS_SUCCESS
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -60,9 +64,9 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-  - name: Test passed for code changed -2.*.*
+  - name: Test passed for code changed on 2.* branch
     conditions:
-      - base~=^2(\.\d+){2}$
+      - *2X_BRANCH
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=UT for Cpp'
@@ -376,6 +380,18 @@ pull_request_rules:
       comment:
         message: |
           @{{author}} E2e jenkins job failed, comment `/run-cpu-e2e` can trigger the job again.
+
+  - name: Add comment when go-sdk check failed
+    conditions:
+      - or:
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){1,2}$
+      - 'check-failure=go-sdk'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
 
   - name: Add comment when code checker or ut failed -master
     conditions:

@@ -21,6 +21,8 @@ from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
 import pickle
 fake = Faker()
+
+from common.common_params import Expr
 """" Methods of processing data """
 
 
@@ -1293,6 +1295,11 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             if nb is None:
                 return [np.float32(random.random()) for _ in range(max_capacity)]
             return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.DOUBLE:
+            if nb is None:
+                return [np.float64(random.random()) for _ in range(max_capacity)]
+            return [[np.float64(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+
         if element_type == DataType.VARCHAR:
             max_length = field.params['max_length']
             max_length = min(20, max_length - 1)
@@ -1332,6 +1339,24 @@ def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = 
             data.append(default_value)
         elif field.auto_id is False:
             data.append(gen_data_by_collection_field(field, nb, start_id * nb))
+    return data
+
+
+def gen_field_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}) -> dict:
+    """
+    generate default value according to the collection fields,
+    which can replace the value of the specified field
+
+    return: <dict>
+        <field name>: <value list>
+    """
+    data = {}
+    for field in schema.fields:
+        default_value = default_values.get(field.name, None)
+        if default_value is not None:
+            data[field.name] = default_value
+        elif field.auto_id is False:
+            data[field.name] = gen_data_by_collection_field(field, nb, start_id * nb)
     return data
 
 
@@ -1744,6 +1769,48 @@ def gen_integer_overflow_expressions():
         "int8 in  [-129, 1] || int16 in [32769] || int32 in [2147483650, 0]"
     ]
     return expressions
+
+
+def gen_modulo_expression(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            (Expr.EQ(Expr.MOD(field, 10).subset, 1).value, field),
+            (Expr.LT(Expr.MOD(field, 17).subset, 9).value, field),
+            (Expr.LE(Expr.MOD(field, 100).subset, 50).value, field),
+            (Expr.GT(Expr.MOD(field, 50).subset, 40).value, field),
+            (Expr.GE(Expr.MOD(field, 29).subset, 15).value, field),
+            (Expr.NE(Expr.MOD(field, 29).subset, 10).value, field),
+        ])
+    return exprs
+
+
+def gen_varchar_expression(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            (Expr.like(field, "a%").value, field, r'^a.*'),
+            (Expr.LIKE(field, "%b").value, field, r'.*b$'),
+            (Expr.AND(Expr.like(field, "%b").subset, Expr.LIKE(field, "z%").subset).value, field, r'^z.*b$'),
+            (Expr.And(Expr.like(field, "i%").subset, Expr.LIKE(field, "%j").subset).value, field, r'^i.*j$'),
+            (Expr.OR(Expr.like(field, "%h%").subset, Expr.LIKE(field, "%jo").subset).value, field, fr'(?:h.*|.*jo$)'),
+            (Expr.Or(Expr.like(field, "ip%").subset, Expr.LIKE(field, "%yu%").subset).value, field, fr'(?:^ip.*|.*yu)'),
+        ])
+    return exprs
+
+
+def gen_number_operation(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            (Expr.LT(Expr.ADD(field, 23), 100).value, field),
+            (Expr.LT(Expr.ADD(-23, field), 121).value, field),
+            (Expr.LE(Expr.SUB(field, 123), 99).value, field),
+            (Expr.GT(Expr.MUL(field, 2), 88).value, field),
+            (Expr.GT(Expr.MUL(3, field), 137).value, field),
+            (Expr.GE(Expr.DIV(field, 30), 20).value, field),
+        ])
+    return exprs
 
 
 def l2(x, y):

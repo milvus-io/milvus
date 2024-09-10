@@ -19,7 +19,6 @@ package job
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -105,7 +105,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
 	}
 
-	if !reflect.DeepEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
 		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
@@ -298,7 +298,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	}
 
-	if !reflect.DeepEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
 		log.Warn("collection with different load field list exists, release this collection first before chaning its replica number",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),

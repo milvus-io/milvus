@@ -76,7 +76,11 @@ func NewReader(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep)
+		nullkey, err := GetCSVNullKey(options)
+		if err != nil {
+			return nil, err
+		}
+		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep, nullkey)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }
