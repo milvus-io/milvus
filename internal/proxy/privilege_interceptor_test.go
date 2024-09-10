@@ -417,6 +417,42 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateAliasRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropAliasRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeAliasRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateDatabaseRequest{})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropDatabaseRequest{})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListDatabasesRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateCollectionRequest{})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropCollectionRequest{})
+		assert.Error(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ShowCollectionsRequest{})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.RenameCollectionRequest{
+			OldName: "coll1",
+			NewName: "newName",
+		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("grant ReadWrite to all collection", func(t *testing.T) {

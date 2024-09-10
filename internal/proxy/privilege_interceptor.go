@@ -252,7 +252,7 @@ func collMatch(requestObj, policyObj string) bool {
 	_, coll1 := funcutil.SplitObjectName(requestObj[strings.Index(requestObj, "-")+1:])
 	_, coll2 := funcutil.SplitObjectName(policyObj[strings.Index(policyObj, "-")+1:])
 
-	return coll2 == util.AnyWord || coll1 == coll2
+	return coll1 == util.AnyWord || coll2 == util.AnyWord || coll1 == coll2
 }
 
 func PrivilegeGroupContains(args ...interface{}) (interface{}, error) {
