@@ -1329,6 +1329,10 @@ class TestCollectionSearch(TestcaseBase):
     def scalar_index(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=[0, 0.5, 1])
+    def null_data_percent(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -1336,7 +1340,7 @@ class TestCollectionSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_search_normal(self, nq, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type):
+    def test_search_normal(self, nq, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type, null_data_percent):
         """
         target: test search normal case
         method: create connection, collection, insert and search
@@ -1346,7 +1350,8 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush,
                                          enable_dynamic_field=enable_dynamic_field,
-                                         vector_data_type=vector_data_type)[0:5]
+                                         vector_data_type=vector_data_type,
+                                         nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
         # 2. generate search data
         vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
         # 3. search after insert

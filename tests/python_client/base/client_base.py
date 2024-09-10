@@ -242,7 +242,7 @@ class TestcaseBase(Base):
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
                                 enable_dynamic_field=False, with_json=True, random_primary_key=False,
                                 multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
-                                **kwargs):
+                                nullable_fields={}, default_value_fields={}, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -250,6 +250,8 @@ class TestcaseBase(Base):
                 3. insert specified (binary/non-binary, default/all data type) data
                    into each partition if any
                 4. not load if specifying is_index as True
+                5. enable insert null data: nullable_fields = {"nullable_fields_name": null data percent}
+                6. enable insert default value: default_value_fields = {"default_fields_name": default value}
         expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
@@ -258,6 +260,12 @@ class TestcaseBase(Base):
         collection_name = cf.gen_unique_str(prefix)
         if name is not None:
             collection_name = name
+        if not isinstance(nullable_fields, dict):
+            log.error("nullable_fields should a dict like {'nullable_fields_name': null data percent}")
+            assert False
+        if not isinstance(default_value_fields, dict):
+            log.error("default_value_fields should a dict like {'default_fields_name': default value}")
+            assert False
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
@@ -267,21 +275,29 @@ class TestcaseBase(Base):
                                                           enable_dynamic_field=enable_dynamic_field,
                                                           with_json=with_json, multiple_dim_array=multiple_dim_array,
                                                           is_partition_key=is_partition_key,
-                                                          vector_data_type=vector_data_type)
+                                                          vector_data_type=vector_data_type,
+                                                          nullable_fields=nullable_fields,
+                                                          default_value_fields=default_value_fields)
         if is_binary:
             default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
-                                                                     primary_field=primary_field)
+                                                                     primary_field=primary_field,
+                                                                     nullable_fields=nullable_fields,
+                                                                     default_value_fields=default_value_fields)
         if vector_data_type == ct.sparse_vector:
             default_schema = cf.gen_default_sparse_schema(auto_id=auto_id, primary_field=primary_field,
                                                           enable_dynamic_field=enable_dynamic_field,
                                                           with_json=with_json,
-                                                          multiple_dim_array=multiple_dim_array)
+                                                          multiple_dim_array=multiple_dim_array,
+                                                          nullable_fields=nullable_fields,
+                                                          default_value_fields=default_value_fields)
         if is_all_data_type:
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
                                                                    primary_field=primary_field,
                                                                    enable_dynamic_field=enable_dynamic_field,
                                                                    with_json=with_json,
-                                                                   multiple_dim_array=multiple_dim_array)
+                                                                   multiple_dim_array=multiple_dim_array,
+                                                                   nullable_fields=nullable_fields,
+                                                                   default_value_fields=default_value_fields)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
@@ -294,7 +310,8 @@ class TestcaseBase(Base):
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id,
                                dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json,
                                random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
-                               primary_field=primary_field, vector_data_type=vector_data_type)
+                               primary_field=primary_field, vector_data_type=vector_data_type,
+                               nullable_fields=nullable_fields)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
