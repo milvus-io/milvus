@@ -24,14 +24,14 @@ import (
 )
 
 type foo struct {
-	key   string
-	value string
+	Key   string
+	Value string
 }
 
 func BenchmarkZapReflect(b *testing.B) {
 	payload := make([]foo, 10)
 	for i := 0; i < len(payload); i++ {
-		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+		payload[i] = foo{Key: fmt.Sprintf("key%d", i), Value: fmt.Sprintf("value%d", i)}
 	}
 	b.ResetTimer()
 
@@ -43,7 +43,7 @@ func BenchmarkZapReflect(b *testing.B) {
 func BenchmarkZapWithLazy(b *testing.B) {
 	payload := make([]foo, 10)
 	for i := 0; i < len(payload); i++ {
-		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+		payload[i] = foo{Key: fmt.Sprintf("key%d", i), Value: fmt.Sprintf("value%d", i)}
 	}
 	b.ResetTimer()
 
@@ -56,7 +56,7 @@ func BenchmarkZapWithLazy(b *testing.B) {
 func BenchmarkWithLazyLog(b *testing.B) {
 	payload := make([]foo, 10)
 	for i := 0; i < len(payload); i++ {
-		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+		payload[i] = foo{Key: fmt.Sprintf("key%d", i), Value: fmt.Sprintf("value%d", i)}
 	}
 	b.ResetTimer()
 
@@ -70,7 +70,7 @@ func BenchmarkWithLazyLog(b *testing.B) {
 func BenchmarkWithLog(b *testing.B) {
 	payload := make([]foo, 10)
 	for i := 0; i < len(payload); i++ {
-		payload[i] = foo{key: fmt.Sprintf("key%d", i), value: fmt.Sprintf("value%d", i)}
+		payload[i] = foo{Key: fmt.Sprintf("key%d", i), Value: fmt.Sprintf("value%d", i)}
 	}
 	b.ResetTimer()
 
