@@ -392,4 +392,13 @@ SegmentInternalInterface::LoadStringSkipIndex(
     skip_index_.LoadString(field_id, chunk_id, var_column);
 }
 
+index::TextMatchIndex*
+SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
+    std::shared_lock lock(mutex_);
+    auto iter = text_indexes_.find(field_id);
+    AssertInfo(iter != text_indexes_.end(),
+               "failed to get text index, text index not found");
+    return iter->second.get();
+}
+
 }  // namespace milvus::segcore

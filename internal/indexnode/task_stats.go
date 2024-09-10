@@ -27,19 +27,22 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	_ "github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -290,6 +293,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetTaskVersion(),
+		st.req.GetTaskID(),
 		lo.Values(allBinlogs))
 	if err != nil {
 		log.Warn("stats wrong, failed to create text index", zap.Error(err))
@@ -548,12 +552,23 @@ func buildTextLogPrefix(rootPath string, collID, partID, segID, fieldID, version
 	return fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d", rootPath, common.TextIndexPath, collID, partID, segID, fieldID, version)
 }
 
+func ParseStorageConfig(s *indexpb.StorageConfig) (*indexcgopb.StorageConfig, error) {
+	bs, err := proto.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	res := &indexcgopb.StorageConfig{}
+	err = proto.Unmarshal(bs, res)
+	return res, err
+}
+
 func (st *statsTask) createTextIndex(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	collectionID int64,
 	partitionID int64,
 	segmentID int64,
 	version int64,
+	buildID int64,
 	insertBinlogs []*datapb.FieldBinlog,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	log := log.Ctx(ctx).With(
@@ -564,22 +579,67 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	fieldStatsLogs := make(map[int64]*datapb.TextIndexStats)
-	for _, field := range st.req.GetSchema().GetFields() {
-		if field.GetDataType() == schemapb.DataType_VarChar {
-			for _, binlog := range insertBinlogs {
-				if binlog.GetFieldID() == field.GetFieldID() {
-					// do text index
-					_ = buildTextLogPrefix(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, field.GetFieldID(), version)
-					fieldStatsLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-						Version: version,
-						Files:   nil,
-					}
-					log.Info("TODO: call CGO CreateTextIndex", zap.Int64("fieldID", field.GetFieldID()))
-					break
-				}
+	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
+		return binlog.GetFieldID()
+	})
+
+	getInsertFiles := func(fieldID int64) ([]string, error) {
+		binlogs, ok := fieldBinlogs[fieldID]
+		if !ok {
+			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+		}
+		result := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			for _, file := range binlog.GetBinlogs() {
+				result = append(result, metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
 			}
 		}
+		return result, nil
+	}
+
+	newStorageConfig, err := ParseStorageConfig(storageConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	fieldStatsLogs := make(map[int64]*datapb.TextIndexStats)
+	for _, field := range st.req.GetSchema().GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if !h.EnableMatch() {
+			continue
+		}
+		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
+		// create text index and upload the text index files.
+		files, err := getInsertFiles(field.GetFieldID())
+		if err != nil {
+			return nil, err
+		}
+
+		buildIndexParams := &indexcgopb.BuildIndexInfo{
+			BuildID:       buildID,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			SegmentID:     segmentID,
+			IndexVersion:  version,
+			InsertFiles:   files,
+			FieldSchema:   field,
+			StorageConfig: newStorageConfig,
+		}
+
+		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
+		if err != nil {
+			return nil, err
+		}
+		fieldStatsLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+			FieldID: field.GetFieldID(),
+			Version: version,
+			BuildID: buildID,
+			Files:   lo.Keys(uploaded),
+		}
+		log.Info("field enable match, create text index done",
+			zap.Int64("field id", field.GetFieldID()),
+			zap.Strings("files", lo.Keys(uploaded)),
+		)
 	}
 
 	totalElapse := st.tr.RecordSpan()

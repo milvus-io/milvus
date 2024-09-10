@@ -118,6 +118,11 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
+LoadTextIndex(CSegmentInterface c_segment,
+              const uint8_t* serialized_load_text_index_info,
+              const uint64_t len);
+
+CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t field_id,
                        int64_t num_rows,
@@ -155,6 +160,9 @@ Delete(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
+
+CStatus
+CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
 
 #ifdef __cplusplus
 }

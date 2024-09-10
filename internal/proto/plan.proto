@@ -18,6 +18,7 @@ enum OpType {
   Range = 10;       // for case 1 < a < b
   In = 11;          // TODO:: used for term expr
   NotIn = 12;
+  TextMatch = 13;   // text match
 };
 
 enum ArithOpType {

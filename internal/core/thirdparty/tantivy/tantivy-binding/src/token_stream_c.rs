@@ -1,4 +1,4 @@
-use std::ffi::{c_char};
+use std::ffi::c_char;
 
 use libc::c_void;
 use tantivy::tokenizer::{BoxTokenStream, TextAnalyzer};

@@ -439,6 +439,7 @@ message TextIndexStats {
   repeated string files = 3;
   int64 log_size = 4;
   int64 memory_size = 5;
+  int64 buildID = 6;
 }
 
 message Binlog {

@@ -32,6 +32,9 @@ free_tokenizer(CTokenizer tokenizer);
 CTokenStream
 create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len);
 
+CStatus
+validate_text_schema(const uint8_t* field_schema, uint64_t length);
+
 #ifdef __cplusplus
 }
 #endif

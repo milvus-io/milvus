@@ -18,6 +18,10 @@ func (h *kvPairsHelper[K, V]) Get(k K) (V, error) {
 	return v, nil
 }
 
+func (h *kvPairsHelper[K, V]) GetAll() map[K]V {
+	return h.kvPairs
+}
+
 func NewKvPairs(pairs []*commonpb.KeyValuePair) *kvPairsHelper[string, string] {
 	helper := &kvPairsHelper[string, string]{
 		kvPairs: make(map[string]string),

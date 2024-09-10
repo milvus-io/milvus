@@ -46,6 +46,7 @@ const char NUM_CLUSTERS[] = "num_clusters";
 const char KMEANS_CLUSTER[] = "KMEANS";
 const char VEC_OPT_FIELDS[] = "opt_fields";
 const char PAGE_RETAIN_ORDER[] = "page_retain_order";
+const char TEXT_LOG_ROOT_PATH[] = "text_log";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";

@@ -84,6 +84,7 @@ type component interface {
 
 const (
 	TmpInvertedIndexPrefix = "/tmp/milvus/inverted-index/"
+	TmpTextLogPrefix       = "/tmp/milvus/text-log/"
 )
 
 func cleanLocalDir(path string) {
@@ -209,6 +210,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync
 		cleanLocalDir(mmapDir)
 	}
 	cleanLocalDir(TmpInvertedIndexPrefix)
+	cleanLocalDir(TmpTextLogPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
@@ -239,6 +241,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync
 	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
 	cleanLocalDir(indexDataLocalPath)
 	cleanLocalDir(TmpInvertedIndexPrefix)
+	cleanLocalDir(TmpTextLogPrefix)
 
 	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
