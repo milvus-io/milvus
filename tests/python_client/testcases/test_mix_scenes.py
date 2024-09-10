@@ -659,7 +659,7 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
 
         # enable offset cache
         for index_name in self.bitmap_support_dtype_names:
-            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.IndexOffsetCache)
+            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.index_offset_cache())
 
         # load collection
         self.collection_wrap.load()
@@ -825,7 +825,7 @@ class TestBitmapIndexMmap(TestCaseClassBase):
 
         # enable offset cache
         for index_name in self.bitmap_support_dtype_names:
-            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.IndexMmap)
+            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.index_mmap())
 
         # load collection
         self.collection_wrap.load()

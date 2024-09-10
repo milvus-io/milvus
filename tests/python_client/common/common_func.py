@@ -2462,3 +2462,20 @@ def set_collection_schema(fields: list, field_params: dict = {}, **kwargs):
     """
     field_schemas = [set_field_schema(field=field, params=field_params.get(field, {})) for field in fields]
     return ApiCollectionSchemaWrapper().init_collection_schema(fields=field_schemas, **kwargs)[0]
+
+
+def check_key_exist(source: dict, target: dict):
+    global flag
+    flag = True
+
+    def check_keys(_source, _target):
+        global flag
+        for key, value in _source.items():
+            if key in _target and isinstance(value, dict):
+                check_keys(_source[key], _target[key])
+            elif key not in _target:
+                log.error("[check_key_exist] Key: '{0}' not in target: {1}".format(key, _target))
+                flag = False
+
+    check_keys(source, target)
+    return flag
