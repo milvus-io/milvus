@@ -111,6 +111,12 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 			return nil
 		}
 
+		// due to StatsTaskPrefix has the same prefix with SegmentPrefix, so skip it.
+		// when the WalkWithPrefix is refactored, this patch can be removed.
+		if strings.Contains(string(value), StatsTaskPrefix) {
+			return nil
+		}
+
 		segmentInfo := &datapb.SegmentInfo{}
 		err := proto.Unmarshal(value, segmentInfo)
 		if err != nil {

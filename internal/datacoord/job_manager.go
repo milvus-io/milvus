@@ -54,9 +54,11 @@ func newJobManager(ctx context.Context,
 }
 
 func (jm *statsJobManager) Start() {
-	jm.loopWg.Add(2)
-	go jm.triggerStatsTaskLoop()
-	go jm.cleanupStatsTasksLoop()
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		jm.loopWg.Add(2)
+		go jm.triggerStatsTaskLoop()
+		go jm.cleanupStatsTasksLoop()
+	}
 }
 
 func (jm *statsJobManager) Stop() {
