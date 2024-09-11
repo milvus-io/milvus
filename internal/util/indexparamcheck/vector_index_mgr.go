@@ -165,9 +165,8 @@ func (mgr *VecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType sche
 		return mgr.IsFlat16Support(indexType)
 	} else if dataType == schemapb.DataType_SparseFloatVector {
 		return mgr.IsSparseFloat32Support(indexType)
-	} else {
-		return false
 	}
+	return false
 }
 
 func (mgr *VecIndexMgrImpl) IsFlatVecIndex(indexType IndexType) bool {

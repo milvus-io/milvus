@@ -1,12 +1,12 @@
 package indexparamcheck
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 

@@ -117,7 +117,8 @@ class VectorIndex : public IndexBase {
 
     virtual bool
     IsMmapSupported() const {
-        return  knowhere::IndexFactory::Instance().FeatureCheck(index_type_, knowhere::feature::MMAP);
+        return knowhere::IndexFactory::Instance().FeatureCheck(
+            index_type_, knowhere::feature::MMAP);
     }
 
     knowhere::Json

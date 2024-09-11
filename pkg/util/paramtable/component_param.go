@@ -69,18 +69,18 @@ type ComponentParam struct {
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
-	RootCoordCfg  rootCoordConfig
-	ProxyCfg      proxyConfig
-	QueryCoordCfg queryCoordConfig
-	QueryNodeCfg  queryNodeConfig
-	DataCoordCfg  dataCoordConfig
-	DataNodeCfg   dataNodeConfig
-	IndexNodeCfg  indexNodeConfig
+	RootCoordCfg      rootCoordConfig
+	ProxyCfg          proxyConfig
+	QueryCoordCfg     queryCoordConfig
+	QueryNodeCfg      queryNodeConfig
+	DataCoordCfg      dataCoordConfig
+	DataNodeCfg       dataNodeConfig
+	IndexNodeCfg      indexNodeConfig
 	IndexEngineConfig indexEngineConfig
-	HTTPCfg       httpConfig
-	LogCfg        logConfig
-	RoleCfg       roleConfig
-	StreamingCfg  streamingConfig
+	HTTPCfg           httpConfig
+	LogCfg            logConfig
+	RoleCfg           roleConfig
+	StreamingCfg      streamingConfig
 
 	RootCoordGrpcServerCfg     GrpcServerConfig
 	ProxyGrpcServerCfg         GrpcServerConfig

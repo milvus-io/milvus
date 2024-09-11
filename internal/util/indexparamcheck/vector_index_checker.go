@@ -33,7 +33,7 @@ func HandleCStatus(status *C.CStatus) error {
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	return fmt.Errorf("%s", string(errorMsg))
+	return fmt.Errorf("%s", errorMsg)
 }
 
 func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[string]string) error {
@@ -79,7 +79,7 @@ func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, params map[strin
 
 func (c vecIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if !typeutil.IsVectorType(field.GetDataType()) {
-		return fmt.Errorf("index %s only support vector data type", indexType)
+		return fmt.Errorf("index %s only supports vector data type", indexType)
 	}
 	if !GetVecIndexMgrInstance().IsDataTypeSupport(indexType, field.GetDataType()) {
 		return fmt.Errorf("index %s do not support data type: %s", indexType, schemapb.DataType_name[int32(field.GetDataType())])

@@ -20,10 +20,8 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/spf13/cast"
-	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -62,6 +60,13 @@ func Init(opts ...Option) (*Manager, error) {
 
 var formattedKeys = typeutil.NewConcurrentMap[string, string]()
 
+func lowerKey(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return strings.ToLower(key)
+}
+
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
@@ -75,40 +80,42 @@ func formatKey(key string) string {
 	return result
 }
 
-func parseConfig(prefix string, m map[string]interface{}, result map[string]string) {
-	for k, v := range m {
-		fullKey := k
-		if prefix != "" {
-			fullKey = prefix + "." + k
-		}
+func flattenNode(node *yaml.Node, parentKey string, result map[string]string) {
+	// The content of the node should contain key-value pairs in a MappingNode
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			keyNode := node.Content[i]
+			valueNode := node.Content[i+1]
 
-		switch val := v.(type) {
-		case map[string]interface{}:
-			parseConfig(fullKey, val, result)
-		case []interface{}:
-			str := ""
-			for i, item := range val {
-				itemStr, err := cast.ToStringE(item)
-				if err != nil {
-					log.Warn("cast to string failed", zap.Any("item", item))
-					continue
-				}
-				if i == 0 {
-					str = itemStr
-				} else {
-					str = str + "," + itemStr
-				}
+			key := keyNode.Value
+			// Construct the full key with parent hierarchy
+			fullKey := key
+			if parentKey != "" {
+				fullKey = parentKey + "." + key
 			}
-			result[strings.ToLower(fullKey)] = str
-			result[formatKey(fullKey)] = str
-		default:
-			str, err := cast.ToStringE(val)
-			if err != nil {
-				log.Warn("cast to string failed", zap.Any("val", val))
-				continue
+
+			switch valueNode.Kind {
+			case yaml.ScalarNode:
+				// Scalar value, store it as a string
+				result[lowerKey(fullKey)] = valueNode.Value
+				result[formatKey(fullKey)] = valueNode.Value
+			case yaml.MappingNode:
+				// Nested map, process recursively
+				flattenNode(valueNode, fullKey, result)
+			case yaml.SequenceNode:
+				// List (sequence), process elements
+				var listStr string
+				for j, item := range valueNode.Content {
+					if j > 0 {
+						listStr += ","
+					}
+					if item.Kind == yaml.ScalarNode {
+						listStr += item.Value
+					}
+				}
+				result[lowerKey(fullKey)] = listStr
+				result[formatKey(fullKey)] = listStr
 			}
-			result[strings.ToLower(fullKey)] = str
-			result[formatKey(fullKey)] = str
 		}
 	}
 }

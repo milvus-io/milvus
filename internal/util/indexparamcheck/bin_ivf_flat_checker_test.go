@@ -1,6 +1,7 @@
 package indexparamcheck
 
 import (
+	"github.com/milvus-io/milvus/pkg/common"
 	"strconv"
 	"testing"
 
@@ -115,8 +116,9 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 		{p7, false},
 	}
 
-	c, _ := GetIndexCheckerMgrInstance().GetChecker("BINIVFFLAT")
+	c, _ := GetIndexCheckerMgrInstance().GetChecker("BIN_IVF_FLAT")
 	for _, test := range cases {
+		test.params[common.IndexTypeKey] = "BIN_IVF_FLAT"
 		err := c.CheckTrain(schemapb.DataType_BinaryVector, test.params)
 		if test.errIsNil {
 			assert.NoError(t, err)
@@ -185,10 +187,10 @@ func Test_binIVFFlatChecker_CheckValidDataType(t *testing.T) {
 		},
 	}
 
-	c, _ := GetIndexCheckerMgrInstance().GetChecker("BINIVFFLAT")
+	c, _ := GetIndexCheckerMgrInstance().GetChecker("BIN_IVF_FLAT")
 	for _, test := range cases {
 		fieldSchema := &schemapb.FieldSchema{DataType: test.dType}
-		err := c.CheckValidDataType("BINIVFFLAT", fieldSchema)
+		err := c.CheckValidDataType("BIN_IVF_FLAT", fieldSchema)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

@@ -18,14 +18,16 @@ extern "C" {
 #include "common/type_c.h"
 
 CStatus
-ValidateIndexParams(const char* index_type, enum CDataType data_type, const uint8_t* index_params, const uint64_t length);
+ValidateIndexParams(const char* index_type,
+                    enum CDataType data_type,
+                    const uint8_t* index_params,
+                    const uint64_t length);
 
 int
 GetIndexListSize();
 
 void
 GetIndexFeatures(void* index_key_list, uint64_t* index_feature_list);
-
 
 #ifdef __cplusplus
 }
