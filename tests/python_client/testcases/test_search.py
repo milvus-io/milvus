@@ -10976,8 +10976,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         weights = [1]
         vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
-        log.debug("binbin")
-        log.debug(vectors)
         # 4. get hybrid search req list
         for i in range(len(vector_name_list)):
             search_param = {
