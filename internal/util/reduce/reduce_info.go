@@ -90,3 +90,30 @@ func (r *ResultInfo) GetIsAdvance() bool {
 func (r *ResultInfo) SetMetricType(metricType string) {
 	r.metricType = metricType
 }
+
+type IReduceType int32
+
+const (
+	IReduceNoOrder IReduceType = iota
+	IReduceInOrder
+	IReduceInOrderForBest
+)
+
+func ShouldStopWhenDrained(reduceType IReduceType) bool {
+	return reduceType == IReduceInOrder || reduceType == IReduceInOrderForBest
+}
+
+func ToReduceType(val int32) IReduceType {
+	switch val {
+	case 1:
+		return IReduceInOrder
+	case 2:
+		return IReduceInOrderForBest
+	default:
+		return IReduceNoOrder
+	}
+}
+
+func ShouldUseInputLimit(reduceType IReduceType) bool {
+	return reduceType == IReduceNoOrder || reduceType == IReduceInOrder
+}

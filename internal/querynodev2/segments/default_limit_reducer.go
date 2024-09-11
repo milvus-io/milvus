@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 )
 
 type defaultLimitReducer struct {
@@ -15,24 +16,24 @@ type defaultLimitReducer struct {
 }
 
 type mergeParam struct {
-	limit            int64
-	outputFieldsId   []int64
-	schema           *schemapb.CollectionSchema
-	mergeStopForBest bool
+	limit          int64
+	outputFieldsId []int64
+	schema         *schemapb.CollectionSchema
+	reduceType     reduce.IReduceType
 }
 
-func NewMergeParam(limit int64, outputFieldsId []int64, schema *schemapb.CollectionSchema, reduceStopForBest bool) *mergeParam {
+func NewMergeParam(limit int64, outputFieldsId []int64, schema *schemapb.CollectionSchema, reduceType reduce.IReduceType) *mergeParam {
 	return &mergeParam{
-		limit:            limit,
-		outputFieldsId:   outputFieldsId,
-		schema:           schema,
-		mergeStopForBest: reduceStopForBest,
+		limit:          limit,
+		outputFieldsId: outputFieldsId,
+		schema:         schema,
+		reduceType:     reduceType,
 	}
 }
 
 func (r *defaultLimitReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	reduceParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(),
-		r.schema, r.req.GetReq().GetReduceStopForBest())
+		r.schema, reduce.ToReduceType(r.req.GetReq().GetReduceType()))
 	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, reduceParam)
 }
 
@@ -50,7 +51,7 @@ type defaultLimitReducerSegcore struct {
 }
 
 func (r *defaultLimitReducerSegcore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, segments []Segment, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	mergeParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema, r.req.GetReq().GetReduceStopForBest())
+	mergeParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema, reduce.ToReduceType(r.req.GetReq().GetReduceType()))
 	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, mergeParam, segments, plan, r.manager)
 }
 
