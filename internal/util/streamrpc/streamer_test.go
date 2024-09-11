@@ -101,6 +101,10 @@ func (s *ResultCacheServerSuite) TestSplit() {
 			Ids: generateIntIds(1024),
 		})
 		s.NoError(err)
+
+		err = cacheSrv.Flush()
+		s.NoError(err)
+
 		srv.FinishSend(nil)
 
 		rev := 0
@@ -129,6 +133,10 @@ func (s *ResultCacheServerSuite) TestSplit() {
 			Ids: generateStrIds(2048),
 		})
 		s.NoError(err)
+
+		err = cacheSrv.Flush()
+		s.NoError(err)
+
 		srv.FinishSend(nil)
 
 		rev := 0

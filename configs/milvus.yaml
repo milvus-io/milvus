@@ -458,7 +458,7 @@ queryNode:
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
-  queryStreamMaxBatchSize: 16777216 # return max batch size of stream query
+  queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool

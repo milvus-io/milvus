@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type QueryStreamServer interface {
@@ -154,7 +155,8 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 	results := make([]*internalpb.RetrieveResults, len(newpks))
 	for i, pks := range newpks {
 		results[i] = &internalpb.RetrieveResults{
-			Ids: pks,
+			Status: merr.Status(nil),
+			Ids:    pks,
 		}
 	}
 	results[len(results)-1].AllRetrieveCount = result.AllRetrieveCount
@@ -181,6 +183,11 @@ func (s *ResultCacheServer) Send(result *internalpb.RetrieveResults) error {
 		}
 	} else if s.cache.IsFull() && s.cache.size > s.maxMsgSize {
 		results := s.splitMsgToMaxSize(s.cache.Flush())
+		if proto.Size(results[len(results)-1]) < s.cache.cap {
+			s.cache.Put(results[len(results)-1])
+			results = results[:len(results)-1]
+		}
+
 		for _, result := range results {
 			if err := s.srv.Send(result); err != nil {
 				return err

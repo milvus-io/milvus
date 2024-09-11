@@ -3103,7 +3103,7 @@ user-task-polling:
 	p.QueryStreamMaxBatchSize = ParamItem{
 		Key:          "queryNode.queryStreamMaxBatchSize",
 		Version:      "2.4.10",
-		DefaultValue: "16777216",
+		DefaultValue: "134217728",
 		Doc:          "return max batch size of stream query",
 		Export:       true,
 	}
