@@ -35,13 +35,13 @@ package log
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"math"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
@@ -102,7 +102,7 @@ type textEncoder struct {
 
 	// for encoding generic values by reflection
 	reflectBuf *buffer.Buffer
-	reflectEnc *json.Encoder
+	reflectEnc *jsoniter.Encoder
 }
 
 func NewTextEncoder(encoderConfig *zapcore.EncoderConfig, spaced bool, disableErrorVerbose bool) zapcore.Encoder {
@@ -196,7 +196,7 @@ func (enc *textEncoder) AddInt64(key string, val int64) {
 func (enc *textEncoder) resetReflectBuf() {
 	if enc.reflectBuf == nil {
 		enc.reflectBuf = _pool.Get()
-		enc.reflectEnc = json.NewEncoder(enc.reflectBuf)
+		enc.reflectEnc = jsoniter.NewEncoder(enc.reflectBuf)
 	} else {
 		enc.reflectBuf.Reset()
 	}
