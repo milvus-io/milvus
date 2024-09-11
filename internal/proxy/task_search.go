@@ -506,9 +506,6 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		return nil, nil, 0, parseErr
 	}
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
-	if !t.schema.IsFieldLoaded(annField.GetFieldID()) {
-		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("ann field %s not loaded", annField.GetName())
-	}
 	if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, errors.New("not support search_group_by operation based on binary vector column")
 	}
