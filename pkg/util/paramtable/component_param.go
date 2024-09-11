@@ -3871,7 +3871,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.IndexTaskSchedulerInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
-		DefaultValue: "100",
+		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
 
@@ -4065,7 +4065,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.taskCheckInterval",
 		Version:      "2.5.0",
 		Doc:          "task check interval seconds",
-		DefaultValue: "1",
+		DefaultValue: "60",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
