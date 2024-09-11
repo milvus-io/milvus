@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -123,6 +124,10 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	if err != nil {
 		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
+	}
+	// plan ok with schema, check ann field
+	if !schema.IsFieldLoaded(vectorField.GetFieldID()) {
+		return nil, merr.WrapErrParameterInvalidMsg("ann field \"%s\" not loaded", vectorFieldName)
 	}
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType
