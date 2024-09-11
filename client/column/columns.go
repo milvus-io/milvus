@@ -71,9 +71,6 @@ func IDColumns(schema *entity.Schema, ids *schemapb.IDs, begin, end int) (Column
 	if pkField == nil {
 		return nil, errors.New("PK Field not found")
 	}
-	if ids == nil {
-		return nil, errors.New("nil Ids from response")
-	}
 	switch pkField.DataType {
 	case entity.FieldTypeInt64:
 		data := ids.GetIntId().GetData()
