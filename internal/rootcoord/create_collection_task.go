@@ -259,7 +259,7 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 	return validateFieldDataType(schema)
 }
 
-func (t *createCollectionTask) assignFieldID(schema *schemapb.CollectionSchema) error {
+func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
 	for idx, field := range schema.GetFields() {
 		field.FieldID = int64(idx + StartOfUserFieldID)
@@ -328,7 +328,7 @@ func (t *createCollectionTask) prepareSchema() error {
 	}
 	t.appendDynamicField(&schema)
 
-	if err := t.assignFieldID(&schema); err != nil {
+	if err := t.assignFieldAndFunctionID(&schema); err != nil {
 		return err
 	}
 

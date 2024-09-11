@@ -2170,7 +2170,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 }
 
-func Test_createIndexTask_getIndexedField(t *testing.T) {
+func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 	collectionName := "test"
 	fieldName := "test"
 
@@ -2224,9 +2224,9 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 		}), nil)
 
 		globalMetaCache = cache
-		field, err := cit.getIndexedField(context.Background())
+		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.NoError(t, err)
-		assert.Equal(t, fieldName, field.GetName())
+		assert.Equal(t, fieldName, cit.fieldSchema.GetName())
 	})
 
 	t.Run("schema not found", func(t *testing.T) {
@@ -2237,7 +2237,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(nil, errors.New("mock"))
 		globalMetaCache = cache
-		_, err := cit.getIndexedField(context.Background())
+		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -2256,7 +2256,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			},
 		}), nil)
 		globalMetaCache = cache
-		_, err := cit.getIndexedField(context.Background())
+		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.Error(t, err)
 	})
 }
@@ -3251,16 +3251,6 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
-
-		//	 infer output
-		schema.Functions = []*schemapb.FunctionSchema{
-			{Name: "test", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{varCharField.Name}, OutputFieldNames: []string{sparseVecField.Name}},
-		}
-		marshaledSchema, err = proto.Marshal(schema)
-		assert.NoError(t, err)
-		task.Schema = marshaledSchema
-		err = task.PreExecute(ctx)
-		assert.NoError(t, err)
 
 		//   normal case
 		schema.Fields = append(schema.Fields, sparseVecField)

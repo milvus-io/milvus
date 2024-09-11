@@ -614,8 +614,15 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
+	usedOutputField := typeutil.NewSet[string]()
+	usedFunctionName := typeutil.NewSet[string]()
 	// validate function
 	for _, function := range coll.GetFunctions() {
+		if usedFunctionName.Contain(function.GetName()) {
+			return fmt.Errorf("duplicate function name %s", function.GetName())
+		}
+
+		usedFunctionName.Insert(function.GetName())
 		inputFields := []*schemapb.FieldSchema{}
 		for _, name := range function.GetInputFieldNames() {
 			inputField, ok := nameMap[name]
@@ -638,10 +645,17 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			}
 			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
+			if usedOutputField.Contain(name) {
+				return fmt.Errorf("duplicate function output %s", name)
+			}
+			usedOutputField.Insert(name)
 		}
 
-		err = checkFunctionOutputField(function, outputFields)
-		if err != nil {
+		if err := checkFunctionOutputField(function, outputFields); err != nil {
+			return err
+		}
+
+		if err := checkFunctionParams(function); err != nil {
 			return err
 		}
 	}
@@ -658,8 +672,16 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
 			return fmt.Errorf("bm25 only need sparse embedding output field, but now %s", fields[0].DataType.String())
 		}
+
+		if fields[0].GetIsPrimaryKey() {
+			return fmt.Errorf("bm25 output field can't be primary key")
+		}
+
+		if fields[0].GetIsPartitionKey() || fields[0].GetIsClusteringKey() {
+			return fmt.Errorf("bm25 output field can't be partition key or cluster key field")
+		}
 	default:
-		return fmt.Errorf("check output field for unknown function")
+		return fmt.Errorf("check output field for unknown function type")
 	}
 	return nil
 }
@@ -673,7 +695,54 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 		}
 
 	default:
-		return fmt.Errorf("check input field with unknown function")
+		return fmt.Errorf("check input field with unknown function type")
+	}
+	return nil
+}
+
+func checkFunctionParams(function *schemapb.FunctionSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		for _, kv := range function.GetParams() {
+			switch kv.GetKey() {
+			case "bm25_k1":
+				k1, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_k1 value, %w", err)
+				}
+
+				if k1 < 0 || k1 > 3 {
+					return fmt.Errorf("bm25_k1 must in [0,3] but now %f", k1)
+				}
+
+			case "bm25_b":
+				b, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_b value, %w", err)
+				}
+
+				if b < 0 || b > 1 {
+					return fmt.Errorf("bm25_b must in [0,1] but now %f", b)
+				}
+
+			case "bm25_avgdl":
+				avgdl, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_avgdl value, %w", err)
+				}
+
+				if avgdl <= 0 {
+					return fmt.Errorf("bm25_avgdl must large than zero but now %f", avgdl)
+				}
+
+			case "analyzer_params":
+				// TODO ADD tokenizer check
+			default:
+				return fmt.Errorf("invalid function params, key: %s, value:%s", kv.GetKey(), kv.GetValue())
+			}
+		}
+	default:
+		return fmt.Errorf("check function params with unknown function type")
 	}
 	return nil
 }

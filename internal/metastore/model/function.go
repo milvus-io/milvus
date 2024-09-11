@@ -8,8 +8,10 @@ import (
 )
 
 type Function struct {
-	Name string
-	ID   int64
+	Name        string
+	ID          int64
+	Description string
+
 	Type schemapb.FunctionType
 
 	InputFieldIDs   []int64
@@ -23,9 +25,10 @@ type Function struct {
 
 func (f *Function) Clone() *Function {
 	return &Function{
-		Name: f.Name,
-		Type: f.Type,
-		ID:   f.ID,
+		Name:        f.Name,
+		ID:          f.ID,
+		Description: f.Description,
+		Type:        f.Type,
 
 		InputFieldIDs:   f.InputFieldIDs,
 		InputFieldNames: f.InputFieldNames,
@@ -39,6 +42,7 @@ func (f *Function) Clone() *Function {
 func (f *Function) Equal(other Function) bool {
 	return f.Name == other.Name &&
 		f.Type == other.Type &&
+		f.Description == other.Description &&
 		slices.Equal(f.InputFieldNames, other.InputFieldNames) &&
 		slices.Equal(f.InputFieldIDs, other.InputFieldIDs) &&
 		slices.Equal(f.OutputFieldNames, other.OutputFieldNames) &&
@@ -61,8 +65,9 @@ func MarshalFunctionModel(function *Function) *schemapb.FunctionSchema {
 
 	return &schemapb.FunctionSchema{
 		Name:             function.Name,
-		Type:             function.Type,
 		Id:               function.ID,
+		Description:      function.Description,
+		Type:             function.Type,
 		InputFieldIds:    function.InputFieldIDs,
 		InputFieldNames:  function.InputFieldNames,
 		OutputFieldIds:   function.OutputFieldIDs,
@@ -76,9 +81,10 @@ func UnmarshalFunctionModel(schema *schemapb.FunctionSchema) *Function {
 		return nil
 	}
 	return &Function{
-		Name: schema.GetName(),
-		ID:   schema.GetId(),
-		Type: schema.GetType(),
+		Name:        schema.GetName(),
+		ID:          schema.GetId(),
+		Description: schema.GetDescription(),
+		Type:        schema.GetType(),
 
 		InputFieldIDs:   schema.GetInputFieldIds(),
 		InputFieldNames: schema.GetInputFieldNames(),
