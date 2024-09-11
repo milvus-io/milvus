@@ -13169,6 +13169,7 @@ class TestBM25Search(TestcaseBase):
             outputs=["overview_sparse"],
             params={"bm25_k1": 1.2,
                     "bm25_b": 0.75,
+                    "bm25_avgdl": 100,
                     "analyzer_params": {
                         "tokenizer": "default",
                     },
@@ -13208,7 +13209,7 @@ class TestBM25Search(TestcaseBase):
         index = {
             "index_type": "SPARSE_INVERTED_INDEX",
             "metric_type": "BM25",
-            'params': {"bm25_k1": 1.2, "bm25_b": 0.75},
+            'params': {"bm25_k1": 1.2, "bm25_b": 0.75, "bm25_avgdl": 100},
         }
         t0 = time.time()
         log.info("create index for bm25 sparse")

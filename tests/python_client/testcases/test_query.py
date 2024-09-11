@@ -24,6 +24,7 @@ import pytest
 import random
 import numpy as np
 import pandas as pd
+from faker import Faker
 import ast
 pd.set_option("expand_frame_repr", False)
 
@@ -4163,6 +4164,99 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"res len {len(res)} res {res}")
 
 
+    def test_query_text_match_custom_analyzeer(self):
+        analyzer_params = {
+            "tokenizer": "standard",  # just like es
+            "alpha_num_only": True,
+            "ascii_folding": True,
+            "lower_case": True,
+            "max_token_length": 40,
+            "split_compound_words": ["dampf", "schiff", "fahrt", "brot", "backen", "automat"],
+            "stemmer": "English",
+            "stop": {
+                "language": "English",
+                "words": ["an", "the"],
+            },
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        df = pd.read_parquet("hf://datasets/Cohere/movies/movies.parquet")
+        log.info(f"dataframe\n{df}")
+        df = df.astype(str)
+        log.info(f"dataframe\n{df}")
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "title": str(df["title"][i]),
+                "overview": str(df["overview"][i]),
+                "genres": str(df["genres"][i]),
+                "producer": str(df["producer"][i]),
+                "cast": str(df["cast"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.load()
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        overview_word_freq = cf.analyze_documents(df["overview"].tolist())
+        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
+        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
+        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "overview": overview_word_freq,
+            "genres": genres_word_freq,
+            "producer": producer_word_freq,
+            "cast": cast_word_freq
+        }
+        text_fields = ["title", "overview", "genres", "producer", "cast"]
+        # query single field for one word
+        for field in text_fields:
+            expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_words = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_words.append(word)
+            string_of_top_10_words = " ".join(top_10_words)
+            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_vs_like(self):
         """
@@ -4313,8 +4407,8 @@ class TestQueryTextMatch(TestcaseBase):
             data.append(
                 {
                     "id": doc['_id'],
-                    "title": doc['title'],
-                    "text": doc['text'],
+                    "title": doc['title'].lower(),
+                    "text": doc['text'].lower(),
                     "emb": cf.gen_vectors(1, dim)[0]
                 }
             )
@@ -4324,8 +4418,9 @@ class TestQueryTextMatch(TestcaseBase):
                 # collection_w.flush()
                 cnt += len(data)
                 data = []
-            if cnt >= 10*batch_size:
+            if cnt >= 100*batch_size:
                 break
+        log.info(f"count {cnt}")
         df = pd.DataFrame(docs[:5*batch_size])
         collection_w.flush()
         collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
@@ -4350,6 +4445,7 @@ class TestQueryTextMatch(TestcaseBase):
             )
             tt = time.time() - t0
             log.info(f"text match query cost {tt} res len {len(res)} res {res}")
+            text_match_tt = tt
             log.info(f"expr: {like_match_expr}")
             t0 = time.time()
             res, _ = collection_w.query(
@@ -4358,32 +4454,34 @@ class TestQueryTextMatch(TestcaseBase):
             )
             tt = time.time() - t0
             log.info(f"like match query cost {tt} res len {len(res)} res {res}")
+            like_match_tt = tt
+            log.info(f"text match cost {text_match_tt}, like match cost {like_match_tt}")
 
-        # query single field for multi-word
-        for field in text_fields:
-            # match top 10 most common words
-            top_10_words = []
-            for word, count in wf_map[field].most_common(10):
-                top_10_words.append(word)
-            string_of_top_10_words = " ".join(top_10_words)
-            text_match_expr = f"TextMatch({field}, '{string_of_top_10_words}')"
-            like_match_expr = " or ".join([f"{field} like '%{word}%'" for word in top_10_words])
-            log.info(f"expr {text_match_expr}")
-            t0 = time.time()
-            res, _ = collection_w.query(
-                expr=text_match_expr,
-                output_fields=["id", field]
-            )
-            tt = time.time() - t0
-            log.info(f"text match query cost {tt} res len {len(res)} res {res}")
-            log.info(f"expr {like_match_expr}")
-            t0 = time.time()
-            res, _ = collection_w.query(
-                expr=like_match_expr,
-                output_fields=["id", field]
-            )
-            tt = time.time() - t0
-            log.info(f"like match query cost {tt} res len {len(res)} res {res}")
+        # # query single field for multi-word
+        # for field in text_fields:
+        #     # match top 10 most common words
+        #     top_10_words = []
+        #     for word, count in wf_map[field].most_common()[:-11:-1]:
+        #         top_10_words.append(word)
+        #     string_of_top_10_words = " ".join(top_10_words)
+        #     text_match_expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+        #     like_match_expr = " or ".join([f"{field} like '%{word}%'" for word in top_10_words])
+        #     log.info(f"expr {text_match_expr}")
+        #     t0 = time.time()
+        #     res, _ = collection_w.query(
+        #         expr=text_match_expr,
+        #         output_fields=["id", field]
+        #     )
+        #     tt = time.time() - t0
+        #     log.info(f"text match query cost {tt} res len {len(res)} res {res}")
+        #     log.info(f"expr {like_match_expr}")
+        #     t0 = time.time()
+        #     res, _ = collection_w.query(
+        #         expr=like_match_expr,
+        #         output_fields=["id", field]
+        #     )
+        #     tt = time.time() - t0
+        #     log.info(f"like match query cost {tt} res len {len(res)} res {res}")
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_zh_normal(self):
@@ -4636,3 +4734,237 @@ class TestQueryTextMatch(TestcaseBase):
             )
             log.info(f"res len {len(res)} res {res}")
 
+
+class TestQueryTextMatchNegative(TestcaseBase):
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_with_unsupported_tokenizer(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "Unsupported",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+        error = {ct.err_code: 2000,
+                 ct.err_msg: "invalid tokenizer parameters"}
+        self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items=error
+                                  )
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_with_some_empty_string(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        df = pd.read_parquet("hf://datasets/Cohere/movies/movies.parquet")
+        log.info(f"dataframe\n{df}")
+        df = df.astype(str)
+        log.info(f"dataframe\n{df}")
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "title": str(df["title"][i]),
+                "overview": str(df["overview"][i]),
+                "genres": str(df["genres"][i]),
+                "producer": str(df["producer"][i]),
+                "cast": str(df["cast"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            if i % 5 == 0:
+                d = {
+                    "id": i,
+                    "title": "   ",
+                    "overview": "   ",
+                    "genres": " ",
+                    "producer": " ",
+                    "cast": " ",
+                    "emb": cf.gen_vectors(1, dim)[0]
+                }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.load()
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        overview_word_freq = cf.analyze_documents(df["overview"].tolist())
+        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
+        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
+        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "overview": overview_word_freq,
+            "genres": genres_word_freq,
+            "producer": producer_word_freq,
+            "cast": cast_word_freq
+        }
+        text_fields = ["title", "overview", "genres", "producer", "cast"]
+        # query single field for one word
+        for field in text_fields:
+            expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_words = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_words.append(word)
+            string_of_top_10_words = " ".join(top_10_words)
+            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_with_multi_lang(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        fake_en = Faker('en_US')
+        fake_zh = Faker('zh_CN')
+        fake_de = Faker('de_DE')
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        df = pd.read_parquet("hf://datasets/Cohere/movies/movies.parquet")
+        log.info(f"dataframe\n{df}")
+        df = df.astype(str)
+        log.info(f"dataframe\n{df}")
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "title": str(df["title"][i]),
+                "overview": str(df["overview"][i]),
+                "genres": str(df["genres"][i]),
+                "producer": str(df["producer"][i]),
+                "cast": str(df["cast"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            if i % 5 == 0:
+                d = {
+                    "id": i,
+                    "title": fake_en.text(),
+                    "overview": fake_zh.text(),
+                    "genres": fake_de.text(),
+                    "producer": " ",
+                    "cast": " ",
+                    "emb": cf.gen_vectors(1, dim)[0]
+                }
+                log.info(f"data {d}")
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.load()
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        overview_word_freq = cf.analyze_documents(df["overview"].tolist())
+        genres_word_freq = cf.analyze_documents(df["genres"].tolist())
+        producer_word_freq = cf.analyze_documents(df["producer"].tolist())
+        cast_word_freq = cf.analyze_documents(df["cast"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "overview": overview_word_freq,
+            "genres": genres_word_freq,
+            "producer": producer_word_freq,
+            "cast": cast_word_freq
+        }
+        text_fields = ["title", "overview", "genres", "producer", "cast"]
+        # query single field for one word
+        for field in text_fields:
+            expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_words = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_words.append(word)
+            string_of_top_10_words = " ".join(top_10_words)
+            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
