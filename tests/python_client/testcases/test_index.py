@@ -7,6 +7,7 @@ import copy
 
 from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
+from base.collection_wrapper import ApiCollectionWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -2726,24 +2727,31 @@ class TestBitmapIndex(TestcaseBase):
         assert sum(counts) == nb, f"`{collection_name}` Segment row count:{sum(counts)} != insert:{nb}"
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_bitmap_offset_cache_enable(self, request):
+    @pytest.mark.parametrize("extra_params, name", [(AlterIndexParams.index_offset_cache(), 'offset_cache_true'),
+                                                    (AlterIndexParams.index_offset_cache(False), 'offset_cache_false'),
+                                                    (AlterIndexParams.index_mmap(), 'mmap_true'),
+                                                    (AlterIndexParams.index_mmap(False), 'mmap_false')])
+    def test_bitmap_alter_index(self, request, extra_params, name):
         """
         target:
-            1. alter index `{indexoffsetcache.enabled: true}` and rebuild index again
+            1. alter index and rebuild index again
+                - `{indexoffsetcache.enabled: <bool>}`
+                - `{mmap.enabled: <bool>}`
         method:
             1. create a collection with scalar fields
             2. build BITMAP index on scalar fields
-            3. altering index `indexoffsetcache` enable
+            3. altering index `indexoffsetcache`/ `mmap`
             4. insert some data and flush
             5. rebuild indexes with the same params again
-            6. load collection
+            6. check altering index
+            7. load collection
         expected:
             1. alter index not failed
             2. rebuild index not failed
             3. load not failed
         """
         # init params
-        collection_name, primary_field, nb = f"{request.function.__name__}", "int64_pk", 3000
+        collection_name, primary_field, nb = f"{request.function.__name__}_{name}", "int64_pk", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(
@@ -2762,9 +2770,9 @@ class TestBitmapIndex(TestcaseBase):
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
 
-        # enable offset cache
+        # enable offset cache / mmap
         for index_name in self.get_bitmap_support_dtype_names:
-            self.collection_wrap.alter_index(index_name=index_name, extra_params=AlterIndexParams.IndexOffsetCache)
+            self.collection_wrap.alter_index(index_name=index_name, extra_params=extra_params)
 
         # prepare data (> 1024 triggering index building)
         self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb),
@@ -2780,6 +2788,12 @@ class TestBitmapIndex(TestcaseBase):
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
+
+        # check alter index
+        scalar_indexes = [{i.field_name: i.params} for i in self.collection_wrap.indexes if
+                          i.field_name in self.get_bitmap_support_dtype_names]
+        msg = f"Scalar indexes: {scalar_indexes}, expected all to contain {extra_params}"
+        assert len([i for i in scalar_indexes for v in i.values() if not cf.check_key_exist(extra_params, v)]) == 0, msg
 
         # load collection
         self.collection_wrap.load()
@@ -2862,6 +2876,72 @@ class TestBitmapIndex(TestcaseBase):
             self.collection_wrap.create_index(
                 field_name=scalar_field, index_name=scalar_field,
                 index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit})
+
+        # load collection
+        self.collection_wrap.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("config, name", [({"bitmap_cardinality_limit": 1000}, 1000), ({}, None)])
+    def test_bitmap_cardinality_limit_low_data(self, request, config, name):
+        """
+        target:
+            1. check auto index setting `bitmap_cardinality_limit` and insert low cardinality data
+        method:
+            1. create a collection with scalar fields
+            2. insert some data and flush
+            3. build vector index
+            4. build scalar index with `bitmap_cardinality_limit`
+        expected:
+            1. alter index not failed
+            2. rebuild index not failed
+            3. load not failed
+
+        Notice:
+            This parameter setting does not automatically check whether the result meets expectations,
+            but is only used to verify that the index is successfully built.
+        """
+        # init params
+        collection_name, primary_field, nb = f"{request.function.__name__}_{name}", "int64_pk", 3000
+
+        # create a collection with fields that can build `BITMAP` index
+        self.collection_wrap.init_collection(
+            name=collection_name,
+            schema=cf.set_collection_schema(
+                fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.get_bitmap_support_dtype_names],
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            )
+        )
+
+        # prepare data (> 1024 triggering index building)
+        low_cardinality = [random.randint(-128, 127) for _ in range(nb)]
+        self.collection_wrap.insert(
+            data=cf.gen_values(
+                self.collection_wrap.schema, nb=nb,
+                default_values={
+                    # set all INT values
+                    **{k.name: low_cardinality for k in
+                       [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]},
+                    # set VARCHAR value
+                    DataType.VARCHAR.name: [str(i) for i in low_cardinality],
+                    # set all ARRAY + INT values
+                    **{f"{DataType.ARRAY.name}_{k.name}": [[i] for i in low_cardinality] for k in
+                       [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]},
+                    # set ARRAY + VARCHAR values
+                    f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}": [[str(i)] for i in low_cardinality],
+                }),
+            check_task=CheckTasks.check_insert_result)
+
+        # flush collection, segment sealed
+        self.collection_wrap.flush()
+
+        # build vector index
+        self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT_VECTOR.name))
+
+        # build scalar index
+        for scalar_field in self.get_bitmap_support_dtype_names:
+            self.collection_wrap.create_index(
+                field_name=scalar_field, index_name=scalar_field,
+                index_params={"index_type": IndexName.AUTOINDEX, **config})
 
         # load collection
         self.collection_wrap.load()

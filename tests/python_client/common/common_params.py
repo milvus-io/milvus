@@ -380,5 +380,11 @@ class DefaultScalarIndexParams:
 
 
 class AlterIndexParams:
-    IndexOffsetCache = {'indexoffsetcache.enabled': True}
-    IndexMmap = {'mmap.enabled': True}
+
+    @staticmethod
+    def index_offset_cache(enable: bool = True):
+        return {'indexoffsetcache.enabled': enable}
+
+    @staticmethod
+    def index_mmap(enable: bool = True):
+        return {'mmap.enabled': enable}
