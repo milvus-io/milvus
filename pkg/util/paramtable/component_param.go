@@ -2384,6 +2384,9 @@ type queryNodeConfig struct {
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
+	// level zero
+	LevelZeroForwardPolicy ParamItem `refreshable:"true"`
+
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate ParamItem `refreshable:"true"`
@@ -2981,6 +2984,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "1048576", // 1MB
 	}
 	p.DeleteBufferBlockSize.Init(base.mgr)
+
+	p.LevelZeroForwardPolicy = ParamItem{
+		Key:          "queryNode.levelZeroForwardPolicy",
+		Version:      "2.4.12",
+		Doc:          "delegator level zero deletion forward policy, possible option[\"FilterByBF\", \"RemoteLoad\"]",
+		DefaultValue: "FilterByBF",
+		Export:       true,
+	}
+	p.LevelZeroForwardPolicy.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
