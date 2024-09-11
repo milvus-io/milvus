@@ -131,31 +131,42 @@ func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
 }
 
 func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string]string) error {
+	if !cit.fieldSchema.GetIsFunctionOutput() {
+		return nil
+	}
+
 	switch cit.functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		for _, kv := range cit.functionSchema.GetParams() {
 			switch kv.GetKey() {
 			case "bm25_k1":
-				if _, ok := indexParamsMap["bm25_k1"]; ok {
+				if _, ok := indexParamsMap["bm25_k1"]; !ok {
 					indexParamsMap["bm25_k1"] = kv.GetValue()
 				}
 			case "bm25_b":
-				if _, ok := indexParamsMap["bm25_b"]; ok {
+				if _, ok := indexParamsMap["bm25_b"]; !ok {
 					indexParamsMap["bm25_b"] = kv.GetValue()
 				}
 			case "bm25_avgdl":
-				if _, ok := indexParamsMap["bm25_avgdl"]; ok {
+				if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
 					indexParamsMap["bm25_avgdl"] = kv.GetValue()
 				}
 			}
 		}
+		// set default avgdl
+		if _, ok := indexParamsMap["bm25_k1"]; !ok {
+			indexParamsMap["bm25_k1"] = "1.2"
+		}
+
+		if _, ok := indexParamsMap["bm25_b"]; !ok {
+			indexParamsMap["bm25_b"] = "0.75"
+		}
+
+		if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
+			indexParamsMap["bm25_avgdl"] = "100"
+		}
 	default:
 		return fmt.Errorf("parse unknown type function params to index")
-	}
-
-	// set default avgdl
-	if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
-		indexParamsMap["bm25_avgdl"] = "100"
 	}
 
 	return nil
@@ -406,8 +417,8 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 	if field.IsFunctionOutput {
 		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
 		if err != nil {
-			log.Error("create index failed, cannot find function of function ouput field", zap.Error(err))
-			return fmt.Errorf("create index failed, cannot find function of function ouput field: %s", cit.req.GetFieldName())
+			log.Error("create index failed, cannot find function of function output field", zap.Error(err))
+			return fmt.Errorf("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
 		}
 		cit.functionSchema = function
 	}
