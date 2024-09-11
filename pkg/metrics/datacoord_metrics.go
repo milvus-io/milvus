@@ -73,8 +73,8 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataCoordL0DeleteEntriesNum = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
+	DataCoordL0DeleteEntriesNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "l0_delete_entries_num",
