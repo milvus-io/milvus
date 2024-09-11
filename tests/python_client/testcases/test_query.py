@@ -9,7 +9,7 @@ from base.client_base import TestcaseBase
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
-    Collection
+    Collection, utility
 )
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
 import threading
@@ -4255,6 +4255,86 @@ class TestQueryTextMatch(TestcaseBase):
             )
             log.info(f"res len {len(res)} res {res}")
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_with_addition_inverted_index(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        fake_en = Faker('en_US')
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="word", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="sentence", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="paragraph", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        data = []
+        data_size = 10000
+        for i in range(data_size):
+            d = {
+                "id": i,
+                "word": fake_en.word(),
+                "sentence": fake_en.sentence(),
+                "paragraph": fake_en.paragraph(),
+                "text": fake_en.text(),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, data_size, batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < data_size else data[i: data_size])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.create_index("word", {"index_type": "INVERTED"})
+        res = utility.list_indexes(
+            collection_name=collection_w.name
+        )
+        log.info(f"index {res}")
+        collection_w.load()
+        df = pd.DataFrame(data)
+        word_word_freq = cf.analyze_documents(df["word"].tolist())
+        sentence_word_freq = cf.analyze_documents(df["sentence"].tolist())
+        paragraph_word_freq = cf.analyze_documents(df["paragraph"].tolist())
+        text_word_freq = cf.analyze_documents(df["text"].tolist())
+        wf_map = {
+            "word": word_word_freq,
+            "sentence": sentence_word_freq,
+            "paragraph": paragraph_word_freq,
+            "text": text_word_freq,
+        }
+        text_fields = ["word", "sentence", "paragraph", "text"]
+        # query single field for one word
+        for field in text_fields:
+            word = list(wf_map[field].keys())[0]
+            expr = f"TextMatch({field}, '{word}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+            if field == "word":
+                expr = f"{field} == '{word}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(
+                    expr=expr,
+                    output_fields=["id", field]
+                )
+                log.info(f"res len {len(res)} res {res}")
+
 
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4372,6 +4452,195 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"like match query cost {tt} res len {len(res)}")
 
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_text_match_vs_like_use_random_dataset(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 32
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=65535, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        data_size = 500000
+        docs = []
+        fake_en = Faker('en_US')
+        for i in range(data_size):
+            docs.append(
+                {
+                    "_id": str(i),
+                    "title": fake_en.text().lower(),
+                    "text": fake_en.text().lower()
+                }
+            )
+        batch_size = 5000
+        cnt = 0
+        data = []
+        for doc in docs:
+            data.append(
+                {
+                    "id": doc['_id'],
+                    "title": doc['title'],
+                    "text": doc['text'],
+                    "emb": cf.gen_vectors(1, dim)[0]
+                }
+            )
+            if len(data) >= batch_size:
+                collection_w.insert(data)
+                log.info(f"batch insert finished")
+                # collection_w.flush()
+                cnt += len(data)
+                data = []
+            if cnt >= 100*batch_size:
+                break
+        log.info(f"count {cnt}")
+        df = pd.DataFrame(docs)
+        collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        t0 = time.time()
+        collection_w.load()
+        tt = time.time() - t0
+        log.info(f"load cost {tt}")
+        time.sleep(10)
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        text_word_freq = cf.analyze_documents(df["text"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "text": text_word_freq,
+        }
+        text_fields = ["title", "text"]
+        # query single field for one word
+        for field in text_fields:
+            text_match_expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            like_match_expr = f"{field} like '%{list(wf_map[field].keys())[0]}%'"
+            log.info(f"expr: {text_match_expr}")
+            t0 = time.time()
+            res, _ = collection_w.query(
+                expr=text_match_expr,
+                output_fields=["id", field]
+            )
+            tt = time.time() - t0
+            log.info(f"text match query cost {tt} res len {len(res)} res {res}")
+            text_match_tt = tt
+            log.info(f"expr: {like_match_expr}")
+            t0 = time.time()
+            res, _ = collection_w.query(
+                expr=like_match_expr,
+                output_fields=["id", field]
+            )
+            tt = time.time() - t0
+            log.info(f"like match query cost {tt} res len {len(res)} res {res}")
+            like_match_tt = tt
+            log.info(f"text match cost {text_match_tt}, like match cost {like_match_tt}")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_text_match_vs_like_use_hotpotqa_dataset(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 32
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=65535, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        dataset_name = "hotpotqa"
+        docs = load_dataset("Cohere/beir-embed-english-v3", f"{dataset_name}-corpus", split="train")
+        # docs = [
+        #     {
+        #         "_id":
+        #     }
+        #     for i in range()
+        # ]
+        batch_size = 5000
+        cnt = 0
+        data = []
+        for doc in docs:
+            data.append(
+                {
+                    "id": doc['_id'],
+                    "title": doc['title'].lower(),
+                    "text": doc['text'].lower(),
+                    "emb": cf.gen_vectors(1, dim)[0]
+                }
+            )
+            if len(data) >= batch_size:
+                collection_w.insert(data)
+                log.info(f"batch insert finished")
+                # collection_w.flush()
+                cnt += len(data)
+                data = []
+            if cnt >= 100*batch_size:
+                break
+        log.info(f"count {cnt}")
+        df = pd.DataFrame(docs[:5*batch_size])
+        collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        t0 = time.time()
+        collection_w.load()
+        tt = time.time() - t0
+        log.info(f"load cost {tt}")
+        time.sleep(10)
+        # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
+        title_word_freq = cf.analyze_documents(df["title"].tolist())
+        text_word_freq = cf.analyze_documents(df["text"].tolist())
+        wf_map = {
+            "title": title_word_freq,
+            "text": text_word_freq,
+        }
+        text_fields = ["title", "text"]
+        # query single field for one word
+        for field in text_fields:
+            text_match_expr = f"TextMatch({field}, '{list(wf_map[field].keys())[0]}')"
+            like_match_expr = f"{field} like '%{list(wf_map[field].keys())[0]}%'"
+            log.info(f"expr: {text_match_expr}")
+            t0 = time.time()
+            res, _ = collection_w.query(
+                expr=text_match_expr,
+                output_fields=["id", field]
+            )
+            tt = time.time() - t0
+            log.info(f"text match query cost {tt} res len {len(res)} res {res}")
+            text_match_tt = tt
+            log.info(f"expr: {like_match_expr}")
+            t0 = time.time()
+            res, _ = collection_w.query(
+                expr=like_match_expr,
+                output_fields=["id", field]
+            )
+            tt = time.time() - t0
+            log.info(f"like match query cost {tt} res len {len(res)} res {res}")
+            like_match_tt = tt
+            log.info(f"text match cost {text_match_tt}, like match cost {like_match_tt}")
+
 
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4424,7 +4693,11 @@ class TestQueryTextMatch(TestcaseBase):
         df = pd.DataFrame(docs[:5*batch_size])
         collection_w.flush()
         collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        t0 = time.time()
         collection_w.load()
+        tt = time.time() - t0
+        log.info(f"load cost {tt}")
+        time.sleep(10)
         # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
         title_word_freq = cf.analyze_documents(df["title"].tolist())
         text_word_freq = cf.analyze_documents(df["text"].tolist())
@@ -4767,6 +5040,86 @@ class TestQueryTextMatchNegative(TestcaseBase):
                                   check_items=error
                                   )
 
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_with_addition_inverted_index(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        fake_en = Faker('en_US')
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="word", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="sentence", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="paragraph", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        data = []
+        data_size = 10000
+        for i in range(data_size):
+            d = {
+                "id": i,
+                "word": fake_en.word(),
+                "sentence": fake_en.sentence(),
+                "paragraph": fake_en.paragraph(),
+                "text": fake_en.text(),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        for i in range(0, data_size, batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < data_size else data[i: data_size])
+            collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.create_index("word", {"index_type": "INVERTED"})
+        collection_w.load()
+        df = pd.DataFrame(data)
+        word_word_freq = cf.analyze_documents(df["word"].tolist())
+        sentence_word_freq = cf.analyze_documents(df["sentence"].tolist())
+        paragraph_word_freq = cf.analyze_documents(df["paragraph"].tolist())
+        text_word_freq = cf.analyze_documents(df["text"].tolist())
+        wf_map = {
+            "word": word_word_freq,
+            "sentence": sentence_word_freq,
+            "paragraph": paragraph_word_freq,
+            "text": text_word_freq,
+        }
+        text_fields = ["word", "sentence", "paragraph", "text"]
+        # query single field for one word
+        for field in text_fields:
+            word = list(wf_map[field].keys())[0]
+            expr = f"TextMatch({field}, '{word}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(
+                expr=expr,
+                output_fields=["id", field]
+            )
+            log.info(f"res len {len(res)} res {res}")
+            if field == "word":
+                expr = f"{field} == '{word}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(
+                    expr=expr,
+                    output_fields=["id", field]
+                )
+                log.info(f"res len {len(res)} res {res}")
+
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_with_some_empty_string(self):
         """
@@ -4825,7 +5178,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         for i in range(0, len(df), batch_size):
             collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
             collection_w.flush()
-        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        collection_w.create_index("emb", {"index_type": "FLAT", "metric_type": "L2"})
         collection_w.load()
         # analyze the croup and get the tf-idf, then base on it to crate expr and ground truth
         title_word_freq = cf.analyze_documents(df["title"].tolist())

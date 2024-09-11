@@ -33,6 +33,7 @@ class DataField:
     fp16_vec_field = "float16_vec_field"
     int_field = "int_scalar"
     string_field = "string_scalar"
+    text_field = "text_scalar"
     bool_field = "bool_scalar"
     float_field = "float_scalar"
     double_field = "double_scalar"
@@ -531,6 +532,8 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             data = [np.int64(random.randint(-999999, 9999999)) for _ in range(rows)]
         elif data_field == DataField.string_field:
             data = [gen_unique_str(str(i)) for i in range(start, rows + start)]
+        elif data_field == DataField.text_field:
+            data = [fake.text() for i in range(start, rows + start)]
         elif data_field == DataField.bool_field:
             data = [random.choice([True, False]) for i in range(start, rows + start)]
         elif data_field == DataField.json_field:
@@ -553,6 +556,8 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             data = pd.Series(
                     [np.array([gen_unique_str(str(i)) for _ in range(array_length)], dtype=np.dtype("str"))
                      for i in range(start, rows + start)])
+        else:
+            raise Exception("unsupported field name")
     return data
 
 
