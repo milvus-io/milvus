@@ -3,7 +3,7 @@ from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTE
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
 from pymilvus import (
     connections, list_collections,
-    FieldSchema, CollectionSchema, DataType,
+    FieldSchema, CollectionSchema, DataType, Function, FunctionType,
     Collection
 )
 from common.constants import *
@@ -13129,3 +13129,99 @@ class TestSearchTextMatch(TestcaseBase):
                 output_fields=text_fields
             )
             log.info(f"res len {len(res)} res {res}")
+
+
+class TestBM25Search(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test query iterator
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_bm25_search_normal(self):
+        """
+        target: test query iterator normal
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        prefix = "test_bm25_search_normal"
+        analyzer_params = {
+            "tokenizer": "default",
+        }
+        dim = 128
+        default_fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="genres", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="producer", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="cast", dtype=DataType.VARCHAR, max_length=65535, enable_match=True, analyzer_params=analyzer_params),
+            FieldSchema(name="overview_sparse", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        ]
+        bm25_function = Function(
+            name="bm25",
+            function_type=FunctionType.BM25,
+            inputs=["overview"],
+            outputs=["overview_sparse"],
+            params={"bm25_k1": 1.2,
+                    "bm25_b": 0.75,
+                    "analyzer_params": {
+                        "tokenizer": "default",
+                    },
+                    },
+        )
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
+        default_schema.add_function(bm25_function)
+        print(f"\nCreate collection for movie dataset...")
+
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
+        df = pd.read_parquet("hf://datasets/Cohere/movies/movies.parquet")
+        log.info(f"dataframe\n{df}")
+        df = df.astype(str)
+        log.info(f"dataframe\n{df}")
+        data = []
+        for i in range(len(df)):
+            d = {
+                "id": i,
+                "title": str(df["title"][i]),
+                "overview": str(df["overview"][i]),
+                "genres": str(df["genres"][i]),
+                "producer": str(df["producer"][i]),
+                "cast": str(df["cast"][i]),
+                "emb": cf.gen_vectors(1, dim)[0]
+            }
+            data.append(d)
+        log.info(f"data\n{data[:10]}")
+        batch_size = 5000
+        t0 = time.time()
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i: i + batch_size] if i + batch_size < len(df) else data[i: len(df)])
+            collection_w.flush()
+        tt = time.time() - t0
+        log.info(f"insert cost {tt}")
+
+        collection_w.create_index("emb", {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}})
+        index = {
+            "index_type": "SPARSE_INVERTED_INDEX",
+            "metric_type": "BM25",
+            'params': {"bm25_k1": 1.2, "bm25_b": 0.75},
+        }
+        t0 = time.time()
+        log.info("create index for bm25 sparse")
+        collection_w.create_index("overview_sparse", index)
+        tt = time.time() -t0
+        log.info(f"create index cost {tt}")
+        collection_w.load()
+        search_params = {
+            "metric_type": "BM25",
+            "params": {},
+        }
+        texts_to_search = df["overview"].tolist()[:10]
+        res, _ = collection_w.search(texts_to_search, "overview_sparse", search_params, limit=3, output_fields=["overview", "id"],
+                                     consistency_level="Strong")
+        log.info(f"res: {res}")
+

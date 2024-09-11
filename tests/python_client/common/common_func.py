@@ -90,7 +90,7 @@ def analyze_documents(texts, language="en"):
     t0 = time.time()
 
     # Tokenize the corpus
-    tokenized = bm25s.tokenize(texts, stopwords=stopwords)
+    tokenized = bm25s.tokenize(texts, lower=False, stopwords=stopwords)
     # log.info(f"Tokenized: {tokenized}")
     # Create a frequency counter
     freq = Counter()
