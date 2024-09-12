@@ -213,9 +213,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 	id, err = globalMetaCache.GetCollectionID(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
@@ -225,9 +226,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection2",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection2",
 	})
 
 	// test to get from cache, this should trigger root request
@@ -239,9 +241,10 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -298,9 +301,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
@@ -310,9 +314,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection2",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection2",
 	})
 
 	// test to get from cache, this should trigger root request
@@ -324,9 +329,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -349,18 +355,20 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 
 	rootCoord.Error = true
 	// should be cached with no error
 	assert.NoError(t, err)
 	assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{},
-		Name:   "collection1",
+		AutoID:    true,
+		Fields:    []*schemapb.FieldSchema{},
+		Functions: []*schemapb.FunctionSchema{},
+		Name:      "collection1",
 	})
 }
 
@@ -422,9 +430,10 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 			assert.NoError(t, err)
 			assert.Equal(t, schema.CollectionSchema, &schemapb.CollectionSchema{
-				AutoID: true,
-				Fields: []*schemapb.FieldSchema{},
-				Name:   "collection1",
+				AutoID:    true,
+				Fields:    []*schemapb.FieldSchema{},
+				Functions: []*schemapb.FunctionSchema{},
+				Name:      "collection1",
 			})
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -1071,6 +1080,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					dynamicField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
@@ -1091,6 +1101,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					dynamicField,
 					clusteringKeyField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
@@ -1111,6 +1122,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					dynamicField,
 					clusteringKeyField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       []string{"pk", "part_key", "vector", "clustering_key"},
 			skipDynamicField: false,
@@ -1130,6 +1142,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					dynamicField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       []string{"pk", "part_key", "vector"},
 			skipDynamicField: true,
@@ -1149,6 +1162,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					dynamicField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       []string{"part_key", "vector"},
 			skipDynamicField: true,
@@ -1167,6 +1181,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					dynamicField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       []string{"pk", "vector"},
 			skipDynamicField: true,
@@ -1185,6 +1200,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					dynamicField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields:       []string{"pk", "part_key"},
 			skipDynamicField: true,
@@ -1203,6 +1219,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 					vectorField,
 					clusteringKeyField,
 				},
+				Functions: []*schemapb.FunctionSchema{},
 			},
 			loadFields: []string{"pk", "part_key", "vector"},
 			expectErr:  true,

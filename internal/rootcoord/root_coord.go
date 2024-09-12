@@ -1124,6 +1124,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		Description:        collInfo.Description,
 		AutoID:             collInfo.AutoID,
 		Fields:             model.MarshalFieldModels(collInfo.Fields),
+		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
 	}
 	resp.CollectionID = collInfo.CollectionID

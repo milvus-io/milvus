@@ -719,6 +719,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 			Description:        coll.Schema.Description,
 			AutoID:             coll.Schema.AutoID,
 			Fields:             make([]*schemapb.FieldSchema, 0),
+			Functions:          make([]*schemapb.FunctionSchema, 0),
 			EnableDynamicField: coll.Schema.EnableDynamicField,
 		},
 		CollectionID:         coll.CollectionID,
@@ -735,6 +736,8 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 			resp.Schema.Fields = append(resp.Schema.Fields, field)
 		}
 	}
+
+	resp.Schema.Functions = append(resp.Schema.Functions, coll.Schema.Functions...)
 	return resp, nil
 }
 
