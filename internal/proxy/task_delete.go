@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -166,8 +167,8 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		EndTs:   dt.EndTs(),
 	}
 
-	for _, msg := range result {
-		if msg != nil {
+	for _, msgs := range result {
+		for _, msg := range msgs {
 			msgPack.Msgs = append(msgPack.Msgs, msg)
 		}
 	}
@@ -202,75 +203,80 @@ func repackDeleteMsgByHash(
 	collectionName string,
 	partitionID int64,
 	partitionName string,
-) (map[uint32]*msgstream.DeleteMsg, int64, error) {
+) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
+	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
 	// repack delete msg by dmChannel
-	result := make(map[uint32]*msgstream.DeleteMsg)
+	result := make(map[uint32][]*msgstream.DeleteMsg)
+	lastMessageSize := map[uint32]int{}
+
 	numRows := int64(0)
+	numMessage := 0
+	st := time.Now()
+
+	createMessage := func(key uint32, vchannel string) *msgstream.DeleteMsg {
+		numMessage++
+		lastMessageSize[key] = 0
+		return &msgstream.DeleteMsg{
+			BaseMsg: msgstream.BaseMsg{
+				Ctx: ctx,
+			},
+			DeleteRequest: &msgpb.DeleteRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+					// msgid of delete msg must be set later
+					// or it will be seen as duplicated msg in mq
+					commonpbutil.WithTimeStamp(ts),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				CollectionID:   collectionID,
+				PartitionID:    partitionID,
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				PrimaryKeys:    &schemapb.IDs{},
+				ShardName:      vchannel,
+			},
+		}
+	}
+
 	for index, key := range hashValues {
 		vchannel := vChannels[key]
-		_, ok := result[key]
+		msgs, ok := result[key]
 		if !ok {
-			deleteMsg, err := newDeleteMsg(
-				ctx,
-				idAllocator,
-				ts,
-				collectionID,
-				collectionName,
-				partitionID,
-				partitionName,
-			)
-			if err != nil {
-				return nil, 0, err
-			}
-			deleteMsg.ShardName = vchannel
-			result[key] = deleteMsg
+			result[key] = make([]*msgstream.DeleteMsg, 1)
+			msgs = result[key]
+			result[key][0] = createMessage(key, vchannel)
 		}
-		curMsg := result[key]
+		curMsg := msgs[len(msgs)-1]
+		size, id := typeutil.GetId(primaryKeys, index)
+		if lastMessageSize[key]+16+size > maxSize {
+			curMsg = createMessage(key, vchannel)
+			result[key] = append(result[key], curMsg)
+		}
 		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
 		curMsg.Timestamps = append(curMsg.Timestamps, ts)
 
-		typeutil.AppendIDs(curMsg.PrimaryKeys, primaryKeys, index)
+		typeutil.AppendID(curMsg.PrimaryKeys, id)
+		lastMessageSize[key] += 16 + size
 		curMsg.NumRows++
 		numRows++
 	}
-	return result, numRows, nil
-}
 
-func newDeleteMsg(
-	ctx context.Context,
-	idAllocator allocator.Interface,
-	ts uint64,
-	collectionID int64,
-	collectionName string,
-	partitionID int64,
-	partitionName string,
-) (*msgstream.DeleteMsg, error) {
-	msgid, err := idAllocator.AllocOne()
+	// alloc messageID
+	start, _, err := idAllocator.Alloc(uint32(numMessage))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
+		return nil, 0, err
 	}
-	sliceRequest := &msgpb.DeleteRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-			// msgid of delete msg must be set
-			// or it will be seen as duplicated msg in mq
-			commonpbutil.WithMsgID(msgid),
-			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:   collectionID,
-		PartitionID:    partitionID,
-		CollectionName: collectionName,
-		PartitionName:  partitionName,
-		PrimaryKeys:    &schemapb.IDs{},
+
+	cnt := int64(0)
+	for _, msgs := range result {
+		for _, msg := range msgs {
+			msg.Base.MsgID = start + cnt
+			cnt++
+		}
 	}
-	return &msgstream.DeleteMsg{
-		BaseMsg: msgstream.BaseMsg{
-			Ctx: ctx,
-		},
-		DeleteRequest: sliceRequest,
-	}, nil
+	log.Info("test-- end repack", zap.Duration("cost", time.Since(st)), zap.Int("num", numMessage), zap.Any("result", result))
+	return result, numRows, nil
 }
 
 type deleteRunner struct {
