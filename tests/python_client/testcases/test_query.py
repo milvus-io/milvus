@@ -4457,7 +4457,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection")
 
-        print(f"\nCreate collection for movie dataset...")
+        print(f"\nCreate collection for dataset...")
 
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
         data_size = 50000
