@@ -454,7 +454,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	if indexType == indexparamcheck.IndexHybrid {
 		_, exist := indexParams[common.BitmapCardinalityLimitKey]
 		if !exist {
-			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()
+			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().AutoIndexConfig.BitmapCardinalityLimit.GetValue()
 		}
 	}
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
