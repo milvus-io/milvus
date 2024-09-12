@@ -541,7 +541,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			return err
@@ -615,16 +615,16 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
 	infos []*querypb.SegmentLoadInfo,
-	deltaPositions []*msgpb.MsgPosition,
+	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
-	entries []SegmentEntry,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+	deltaPositions := req.GetDeltaPositions()
 
 	sd.deleteMut.RLock()
 	defer sd.deleteMut.RUnlock()
@@ -655,29 +655,13 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteScope = querypb.DataScope_Streaming
 		}
 
-		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-		deleteData := &storage.DeleteData{}
-		deleteData.AppendBatch(deletedPks, deletedTss)
-		if deleteData.RowCount > 0 {
-			log.Info("forward L0 delete to worker...",
-				zap.Int64("deleteRowNum", deleteData.RowCount),
-			)
-			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-				CollectionId: info.GetCollectionID(),
-				PartitionId:  info.GetPartitionID(),
-				SegmentId:    info.GetSegmentID(),
-				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-				Timestamps:   deleteData.Tss,
-				Scope:        deleteScope,
-			})
-			if err != nil {
-				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-				return err
-			}
+		// forward l0 deletion
+		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
+		if err != nil {
+			return err
 		}
 
-		deleteData = &storage.DeleteData{}
+		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
