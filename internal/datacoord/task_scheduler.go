@@ -89,7 +89,7 @@ func newTaskScheduler(
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
 	}
-	ts.reloadFromKV()
+	ts.reloadFromMeta()
 	return ts
 }
 
@@ -104,7 +104,7 @@ func (s *taskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *taskScheduler) reloadFromKV() {
+func (s *taskScheduler) reloadFromMeta() {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range s.meta.indexMeta.getSegmentIndexes(segment.ID) {
@@ -145,6 +145,27 @@ func (s *taskScheduler) reloadFromKV() {
 			}
 		}
 	}
+
+	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
+	for taskID, t := range allStatsTasks {
+		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
+			s.tasks[taskID] = &statsTask{
+				taskID:          taskID,
+				segmentID:       t.GetSegmentID(),
+				targetSegmentID: t.GetTargetSegmentID(),
+				nodeID:          t.NodeID,
+				taskInfo: &workerpb.StatsResult{
+					TaskID:     taskID,
+					State:      t.GetState(),
+					FailReason: t.GetFailReason(),
+				},
+				queueTime:  time.Now(),
+				startTime:  time.Now(),
+				endTime:    time.Now(),
+				subJobType: t.GetSubJobType(),
+			}
+		}
+	}
 }
 
 // notify is an unblocked notify function
@@ -169,6 +190,7 @@ func (s *taskScheduler) enqueue(task Task) {
 }
 
 func (s *taskScheduler) AbortTask(taskID int64) {
+	log.Info("task scheduler receive abort task request", zap.Int64("taskID", taskID))
 	s.RLock()
 	task, ok := s.tasks[taskID]
 	s.RUnlock()
@@ -291,13 +313,12 @@ func (s *taskScheduler) collectTaskMetrics() {
 			maxTaskRunningTime := make(map[string]int64)
 
 			collectMetricsFunc := func(taskID int64) {
-				s.taskLock.Lock(taskID)
-				defer s.taskLock.Unlock(taskID)
-
 				task := s.getTask(taskID)
 				if task == nil {
 					return
 				}
+				s.taskLock.Lock(taskID)
+				defer s.taskLock.Unlock(taskID)
 
 				state := task.GetState()
 				switch state {

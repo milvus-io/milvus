@@ -379,6 +379,7 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Re
 			zap.Int64("partitionID", statsRequest.GetPartitionID()),
 			zap.Int64("segmentID", statsRequest.GetSegmentID()),
 			zap.Int64("targetSegmentID", statsRequest.GetTargetSegmentID()),
+			zap.String("subJobType", statsRequest.GetSubJobType().String()),
 			zap.Int64("startLogID", statsRequest.GetStartLogID()),
 			zap.Int64("endLogID", statsRequest.GetEndLogID()),
 		)
@@ -512,7 +513,6 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 					Channel:       info.insertChannel,
 					InsertLogs:    info.insertLogs,
 					StatsLogs:     info.statsLogs,
-					DeltaLogs:     nil,
 					TextStatsLogs: info.textStatsLogs,
 					NumRows:       info.numRows,
 				})

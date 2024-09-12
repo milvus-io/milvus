@@ -123,13 +123,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return nil, err
 		}
 
-		v, err = segmentReaders[smallest.Index].Next()
+		iv, err := segmentReaders[smallest.Index].Next()
 		if err != nil && err != sio.EOF {
 			return nil, err
 		}
 		if err == nil {
 			next := &PQItem{
-				Value: v,
+				Value: iv,
 				Index: smallest.Index,
 			}
 			heap.Push(&pq, next)

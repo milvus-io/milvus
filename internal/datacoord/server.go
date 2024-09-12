@@ -129,8 +129,6 @@ type Server struct {
 	metricsCacheManager   *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
-	statsCh         chan UniqueID
-	buildIndexCh    chan UniqueID
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
 
@@ -154,6 +152,7 @@ type Server struct {
 	indexEngineVersionManager IndexEngineVersionManager
 
 	taskScheduler *taskScheduler
+	jobManager    *statsJobManager
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -206,8 +205,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
-		statsCh:                make(chan UniqueID, 1024),
-		buildIndexCh:           make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
@@ -381,6 +378,9 @@ func (s *Server) initDataCoord() error {
 	s.initTaskScheduler(storageCli)
 	log.Info("init task scheduler done")
 
+	s.initJobManager()
+	log.Info("init statsJobManager done")
+
 	s.initCompaction()
 	log.Info("init compaction done")
 
@@ -395,7 +395,7 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.statsCh)
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
@@ -675,6 +675,12 @@ func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	}
 }
 
+func (s *Server) initJobManager() {
+	if s.jobManager == nil {
+		s.jobManager = newJobManager(s.ctx, s.meta, s.taskScheduler, s.allocator)
+	}
+}
+
 func (s *Server) initIndexNodeManager() {
 	if s.indexNodeManager == nil {
 		s.indexNodeManager = session.NewNodeManager(s.ctx, s.indexNodeCreator)
@@ -733,9 +739,9 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) startTaskScheduler() {
 	s.taskScheduler.Start()
+	s.jobManager.Start()
 
 	s.startIndexService(s.serverLoopCtx)
-	s.startStatsTasksCheckLoop(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
@@ -989,7 +995,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	select {
-	case s.statsCh <- segmentID:
+	case getStatsTaskChSingleton() <- segmentID:
 	default:
 	}
 
@@ -1064,6 +1070,9 @@ func (s *Server) Stop() error {
 
 	s.stopCompaction()
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
+
+	s.jobManager.Stop()
+	logutil.Logger(s.ctx).Info("datacoord statsJobManager stopped")
 
 	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")

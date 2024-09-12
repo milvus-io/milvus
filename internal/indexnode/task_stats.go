@@ -153,23 +153,13 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (st *statsTask) Execute(ctx context.Context) error {
-	// sort segment and check need to do text index.
-	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-Execute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
-	defer span.End()
-	log := log.Ctx(ctx).With(
-		zap.String("clusterID", st.req.GetClusterID()),
-		zap.Int64("taskID", st.req.GetTaskID()),
-		zap.Int64("collectionID", st.req.GetCollectionID()),
-		zap.Int64("partitionID", st.req.GetPartitionID()),
-		zap.Int64("segmentID", st.req.GetSegmentID()),
-	)
-
+func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	numRows := st.req.GetNumRows()
 	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID())
 	if err != nil {
-		log.Warn("sort segment wrong, unable to init segment writer", zap.Error(err))
-		return err
+		log.Warn("sort segment wrong, unable to init segment writer",
+			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+		return nil, err
 	}
 
 	var (
@@ -186,8 +176,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 
 	values, err := st.downloadData(ctx, numRows, writer.GetPkID())
 	if err != nil {
-		log.Warn("download data failed", zap.Error(err))
-		return err
+		log.Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+		return nil, err
 	}
 
 	sortStart := time.Now()
@@ -199,8 +189,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 	for _, v := range values {
 		err := writer.Write(v)
 		if err != nil {
-			log.Warn("write value wrong, failed to writer row", zap.Error(err))
-			return err
+			log.Warn("write value wrong, failed to writer row", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+			return nil, err
 		}
 		unFlushedRowCount++
 
@@ -208,15 +198,15 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
-				log.Warn("stats wrong, failed to serialize writer", zap.Error(err))
-				return err
+				log.Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+				return nil, err
 			}
 			serWriteTimeCost += time.Since(serWriteStart)
 
 			uploadStart := time.Now()
 			if err := st.binlogIO.Upload(ctx, kvs); err != nil {
-				log.Warn("stats wrong, failed to upload kvs", zap.Error(err))
-				return err
+				log.Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+				return nil, err
 			}
 			uploadTimeCost += time.Since(uploadStart)
 
@@ -226,10 +216,10 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			unFlushedRowCount = 0
 			st.logIDOffset += binlogNum
 			if st.req.GetStartLogID()+st.logIDOffset >= st.req.GetEndLogID() {
-				log.Warn("binlog files too much, log is not enough",
+				log.Warn("binlog files too much, log is not enough", zap.Int64("taskID", st.req.GetTaskID()),
 					zap.Int64("binlog num", binlogNum), zap.Int64("startLogID", st.req.GetStartLogID()),
 					zap.Int64("endLogID", st.req.GetEndLogID()), zap.Int64("logIDOffset", st.logIDOffset))
-				return fmt.Errorf("binlog files too much, log is not enough")
+				return nil, fmt.Errorf("binlog files too much, log is not enough")
 			}
 		}
 	}
@@ -238,15 +228,15 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		serWriteStart := time.Now()
 		binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 		if err != nil {
-			log.Warn("stats wrong, failed to serialize writer", zap.Error(err))
-			return err
+			log.Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+			return nil, err
 		}
 		serWriteTimeCost += time.Since(serWriteStart)
 		st.logIDOffset += binlogNum
 
 		uploadStart := time.Now()
 		if err := st.binlogIO.Upload(ctx, kvs); err != nil {
-			return err
+			return nil, err
 		}
 		uploadTimeCost += time.Since(uploadStart)
 
@@ -257,9 +247,9 @@ func (st *statsTask) Execute(ctx context.Context) error {
 	serWriteStart := time.Now()
 	binlogNums, sPath, err := statSerializeWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 	if err != nil {
-		log.Warn("stats wrong, failed to serialize write segment stats",
+		log.Warn("stats wrong, failed to serialize write segment stats", zap.Int64("taskID", st.req.GetTaskID()),
 			zap.Int64("remaining row count", numRows), zap.Error(err))
-		return err
+		return nil, err
 	}
 	serWriteTimeCost += time.Since(serWriteStart)
 
@@ -269,15 +259,29 @@ func (st *statsTask) Execute(ctx context.Context) error {
 
 	insertLogs := lo.Values(allBinlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
-		return err
+		return nil, err
 	}
 
 	statsLogs := []*datapb.FieldBinlog{sPath}
 	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
-		return err
+		return nil, err
 	}
 
+	st.node.storePKSortStatsResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		int64(len(values)), insertLogs, statsLogs)
+
 	log.Info("sort segment end",
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.String("subTaskType", st.req.GetSubJobType().String()),
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Int64("old rows", numRows),
 		zap.Int("valid rows", len(values)),
@@ -286,27 +290,39 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		zap.Duration("sort elapse", sortTimeCost),
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))
+	return insertLogs, nil
+}
 
-	textIndexStatsLogs, err := st.createTextIndex(ctx,
-		st.req.GetStorageConfig(),
-		st.req.GetCollectionID(),
-		st.req.GetPartitionID(),
-		st.req.GetTargetSegmentID(),
-		st.req.GetTaskVersion(),
-		st.req.GetTaskID(),
-		lo.Values(allBinlogs))
-	if err != nil {
-		log.Warn("stats wrong, failed to create text index", zap.Error(err))
-		return err
+func (st *statsTask) Execute(ctx context.Context) error {
+	// sort segment and check need to do text index.
+	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-Execute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
+	defer span.End()
+
+	insertLogs := st.req.GetInsertLogs()
+	var err error
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		insertLogs, err = st.sortSegment(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
-	st.node.storeStatsResult(st.req.GetClusterID(),
-		st.req.GetTaskID(),
-		st.req.GetCollectionID(),
-		st.req.GetPartitionID(),
-		st.req.GetTargetSegmentID(),
-		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs, textIndexStatsLogs)
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_TextIndexJob {
+		err = st.createTextIndex(ctx,
+			st.req.GetStorageConfig(),
+			st.req.GetCollectionID(),
+			st.req.GetPartitionID(),
+			st.req.GetTargetSegmentID(),
+			st.req.GetTaskVersion(),
+			st.req.GetTaskID(),
+			insertLogs)
+		if err != nil {
+			log.Warn("stats wrong, failed to create text index", zap.Error(err))
+			return err
+		}
+	}
+
+	// TODO： support bm25
 
 	return nil
 }
@@ -568,9 +584,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	partitionID int64,
 	segmentID int64,
 	version int64,
-	buildID int64,
+	taskID int64,
 	insertBinlogs []*datapb.FieldBinlog,
-) (map[int64]*datapb.TextIndexStats, error) {
+) error {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -599,10 +615,10 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	newStorageConfig, err := ParseStorageConfig(storageConfig)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	fieldStatsLogs := make(map[int64]*datapb.TextIndexStats)
+	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
@@ -612,11 +628,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		// create text index and upload the text index files.
 		files, err := getInsertFiles(field.GetFieldID())
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:       buildID,
+			BuildID:       taskID,
 			CollectionID:  collectionID,
 			PartitionID:   partitionID,
 			SegmentID:     segmentID,
@@ -628,12 +644,12 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		fieldStatsLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 			FieldID: field.GetFieldID(),
 			Version: version,
-			BuildID: buildID,
+			BuildID: taskID,
 			Files:   lo.Keys(uploaded),
 		}
 		log.Info("field enable match, create text index done",
@@ -644,8 +660,16 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	totalElapse := st.tr.RecordSpan()
 
+	st.node.storeStatsTextIndexResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		textIndexLogs)
+
 	log.Info("create text index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))
-	return fieldStatsLogs, nil
+	return nil
 }
