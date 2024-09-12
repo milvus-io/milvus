@@ -366,6 +366,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		partitions...,
 	)
 
+	ex.setMetricTypeForMetaInfo(loadMeta, indexInfo)
+
 	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
 		msg := "channel does not exist in next target, skip it"
@@ -738,4 +740,5 @@ func (ex *Executor) setMetricTypeForMetaInfo(metaInfo *querypb.LoadMetaInfo, ind
 			}
 		}
 	}
+	log.Warn("metric type not found in index info, set it to default", zap.Any("indexInfos", indexInfos), zap.Any("metaInfo", metaInfo))
 }
