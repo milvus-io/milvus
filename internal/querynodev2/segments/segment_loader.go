@@ -49,10 +49,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -86,6 +88,24 @@ type Loader interface {
 		segment Segment,
 		loadInfo *querypb.SegmentLoadInfo,
 	) error
+}
+
+type ResourceEstimate struct {
+	MaxMemoryCost   uint64
+	MaxDiskCost     uint64
+	FinalMemoryCost uint64
+	FinalDiskCost   uint64
+	HasRawData      bool
+}
+
+func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
+	return ResourceEstimate{
+		MaxMemoryCost:   uint64(estimate.max_memory_cost * util.GB),
+		MaxDiskCost:     uint64(estimate.max_disk_cost * util.GB),
+		FinalMemoryCost: uint64(estimate.final_memory_cost * util.GB),
+		FinalDiskCost:   uint64(estimate.final_disk_cost * util.GB),
+		HasRawData:      bool(estimate.has_raw_data),
+	}
 }
 
 type requestResourceResult struct {
@@ -1283,6 +1303,9 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
+	calculateDataSizeCount := 0
+	ctx := context.Background()
+
 	for _, fieldBinlog := range loadInfo.BinlogPaths {
 		fieldID := fieldBinlog.FieldID
 		var mmapEnabled bool
@@ -1293,47 +1316,86 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			return nil, err
 		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		shouldCalculateDataSize := false
 
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-			mmapEnabled = isIndexMmapEnable(fieldSchema, fieldIndexInfo)
-			neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
+			var estimateResult ResourceEstimate
+			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
+				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
+				return nil
+			})
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
+				return nil, errors.Wrapf(err, "failed to estimate resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
-			indexMemorySize += neededMemSize
-			if mmapEnabled {
-				segmentDiskSize += neededMemSize + neededDiskSize
-			} else {
-				segmentDiskSize += neededDiskSize
-			}
-			if !hasRawData(fieldIndexInfo) {
-				dataMmapEnable := isDataMmapEnable(fieldSchema)
-				segmentMemorySize += binlogSize
-				if dataMmapEnable {
-					segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
-				} else {
-					segmentMemorySize += binlogSize
-				}
+
+			// indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, fieldIndexInfo.IndexParams)
+			// if err != nil {
+			// 	return nil, errors.Wrapf(err, "index type not exist in index params, collection %d, segment %d, indexBuildID %d",
+			// 		loadInfo.GetCollectionID(),
+			// 		loadInfo.GetSegmentID(),
+			// 		fieldIndexInfo.GetBuildID())
+			// }
+			//
+			// mmapEnabled = isIndexMmapEnable(fieldSchema, fieldIndexInfo)
+			// neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
+			// if err != nil {
+			// 	return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
+			// 		loadInfo.GetCollectionID(),
+			// 		loadInfo.GetSegmentID(),
+			// 		fieldIndexInfo.GetBuildID())
+			// }
+			//
+			// if NoEffectWhenMMap(indexType) {
+			// 	indexMemorySize += neededMemSize
+			// 	segmentDiskSize += neededDiskSize
+			// } else {
+			// 	if mmapEnabled {
+			// 		segmentDiskSize += neededDiskSize
+			// 	} else {
+			// 		indexMemorySize += neededMemSize
+			// 	}
+			// }
+			indexMemorySize += estimateResult.MaxMemoryCost
+			segmentDiskSize += estimateResult.MaxDiskCost
+			if !estimateResult.HasRawData {
+				shouldCalculateDataSize = true
 			}
 		} else {
+			shouldCalculateDataSize = true
+		}
+
+		if shouldCalculateDataSize {
+			calculateDataSizeCount += 1
 			mmapEnabled = isDataMmapEnable(fieldSchema)
 
-			segmentMemorySize += binlogSize
-			if mmapEnabled {
-				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
-			} else {
-				if multiplyFactor.enableTempSegmentIndex {
+			if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
+				segmentMemorySize += binlogSize
+				if multiplyFactor.enableTempSegmentIndex && SupportInterimIndexDataType(fieldSchema.GetDataType()) {
 					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 				}
+				if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
+					segmentMemorySize += binlogSize
+				}
+			} else {
+				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
 			}
 		}
+
 		if mmapEnabled {
 			mmapFieldCount++
 		}
 	}
+
+	// common part for the load data, including the download buffer and channel buffer
+	// 1. batch download buffer size, 10 thread, the max file size is 16MB
+	commonDownloadDataBufferSize := 10 * 16 * 1024 * 1024 // 10 * 16MB
+	// 2. max channel cnt is 5, max channel capacity is 16, the max file size is 16MB
+	commonChannelDataBufferSize := min(calculateDataSizeCount, 5) * 16 * 16 * 1024 * 1024
+	segmentMemorySize += uint64(commonDownloadDataBufferSize + commonChannelDataBufferSize)
 
 	// get size of stats data
 	for _, fieldBinlog := range loadInfo.Statslogs {
@@ -1341,7 +1403,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	}
 
 	// binlog & statslog use general load factor
-	segmentMemorySize = uint64(float64(segmentMemorySize) * multiplyFactor.memoryUsageFactor)
+	// TODO fubang delete it?
+	// segmentMemorySize = uint64(float64(segmentMemorySize) * multiplyFactor.memoryUsageFactor)
 
 	// get size of delete data
 	for _, fieldBinlog := range loadInfo.Deltalogs {
@@ -1363,6 +1426,25 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		DiskSize:       segmentDiskSize,
 		MmapFieldCount: mmapFieldCount,
 	}, nil
+}
+
+func DoubleMemoryDataType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_String ||
+		dataType == schemapb.DataType_VarChar ||
+		dataType == schemapb.DataType_JSON
+}
+
+func DoubleMemorySystemField(fieldID int64) bool {
+	return fieldID == common.TimeStampField
+}
+
+func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_FloatVector ||
+		dataType == schemapb.DataType_SparseFloatVector
+}
+
+func NoEffectWhenMMap(indexType string) bool {
+	return indexType == indexparamcheck.IndexSTLSORT || indexType == indexparamcheck.IndexINVERTED
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {

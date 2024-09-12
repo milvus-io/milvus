@@ -897,10 +897,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	log.Info("start loading field data for field")
 
 	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
+	defer deleteFieldDataInfo(loadFieldDataInfo)
 
 	err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
 	if err != nil {
@@ -1074,41 +1074,17 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", indexInfo.GetFieldID()),
-		zap.Int64("indexID", indexInfo.GetIndexID()),
-	)
-
-	old := s.GetIndex(indexInfo.GetFieldID())
-	// the index loaded
-	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
-		log.Warn("index already loaded")
-		return nil
-	}
-
-	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.ID(), indexInfo.GetFieldID()))
-	defer sp.End()
-
-	tr := timerecord.NewTimeRecorder("loadIndex")
+func GetCLoadInfoWithFunc(ctx context.Context,
+	fieldSchema *schemapb.FieldSchema,
+	s *querypb.SegmentLoadInfo,
+	indexInfo *querypb.FieldIndexInfo,
+	f func(c *LoadIndexInfo) error) error {
 	// 1.
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	if err != nil {
 		return err
 	}
 	defer deleteLoadIndexInfo(loadIndexInfo)
-
-	schema, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
-	if err != nil {
-		return err
-	}
-	fieldSchema, err := schema.GetFieldFromID(indexInfo.GetFieldID())
-	if err != nil {
-		return err
-	}
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	// as Knowhere reports error if encounter an unknown param, we need to delete it
@@ -1133,9 +1109,9 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
 
 	indexInfoProto := &cgopb.LoadIndexInfo{
-		CollectionID:       s.Collection(),
-		PartitionID:        s.Partition(),
-		SegmentID:          s.ID(),
+		CollectionID:       s.GetCollectionID(),
+		PartitionID:        s.GetPartitionID(),
+		SegmentID:          s.GetSegmentID(),
 		Field:              fieldSchema,
 		EnableMmap:         enableMmap,
 		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
@@ -1148,44 +1124,89 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
 	}
 
-	newLoadIndexInfoSpan := tr.RecordSpan()
-
 	// 2.
-	if err := loadIndexInfo.finish(ctx, indexInfoProto); err != nil {
-		if loadIndexInfo.cleanLocalData(ctx) != nil {
-			log.Warn("failed to clean cached data on disk after append index failed",
-				zap.Int64("buildID", indexInfo.BuildID),
-				zap.Int64("index version", indexInfo.IndexVersion))
-		}
+	if err := loadIndexInfo.appendLoadIndexInfo(ctx, indexInfoProto); err != nil {
+		log.Warn("fail to append load index info", zap.Error(err))
 		return err
 	}
-	if s.Type() != SegmentTypeSealed {
-		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
-	appendLoadIndexInfoSpan := tr.RecordSpan()
+	return f(loadIndexInfo)
+}
 
-	// 3.
-	err = s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
-	if err != nil {
-		return err
-	}
-	updateIndexInfoSpan := tr.RecordSpan()
-	if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.GetFieldID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
+	)
+
+	old := s.GetIndex(indexInfo.GetFieldID())
+	// the index loaded
+	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
+		log.Warn("index already loaded")
 		return nil
 	}
 
-	// 4.
-	mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-	s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), mmapChunkCache)
-	warmupChunkCacheSpan := tr.RecordSpan()
-	log.Info("Finish loading index",
-		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
-		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
-		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
-	)
-	return nil
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.ID(), indexInfo.GetFieldID()))
+	defer sp.End()
+
+	tr := timerecord.NewTimeRecorder("loadIndex")
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
+	if err != nil {
+		return err
+	}
+	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	err = GetCLoadInfoWithFunc(ctx, fieldSchema,
+		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
+			newLoadIndexInfoSpan := tr.RecordSpan()
+
+			if err := loadIndexInfo.loadIndex(ctx); err != nil {
+				if loadIndexInfo.cleanLocalData(ctx) != nil {
+					log.Warn("failed to clean cached data on disk after append index failed",
+						zap.Int64("buildID", indexInfo.BuildID),
+						zap.Int64("index version", indexInfo.IndexVersion))
+				}
+				return err
+			}
+			if s.Type() != SegmentTypeSealed {
+				errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+				return errors.New(errMsg)
+			}
+			appendLoadIndexInfoSpan := tr.RecordSpan()
+
+			// 3.
+			err := s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
+			if err != nil {
+				return err
+			}
+			updateIndexInfoSpan := tr.RecordSpan()
+			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+				return nil
+			}
+
+			// 4.
+			mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
+			s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), mmapChunkCache)
+			warmupChunkCacheSpan := tr.RecordSpan()
+			log.Info("Finish loading index",
+				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
+				zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
+				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
+				zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
+			)
+			return nil
+		})
+
+	if err != nil {
+		log.Warn("load index failed", zap.Error(err))
+	}
+	return err
 }
 
 func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {

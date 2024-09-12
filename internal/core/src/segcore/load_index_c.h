@@ -17,6 +17,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "common/resource_c.h"
 #include "common/binary_set_c.h"
 #include "common/type_c.h"
 #include "segcore/collection_c.h"
@@ -25,6 +26,12 @@ typedef void* CLoadIndexInfo;
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version);
+
+//bool
+//IndexHasRawData(CLoadIndexInfo c_load_index_info, int index_engine_version);
+
+LoadResourceRequest
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
