@@ -672,6 +672,76 @@ TEST_P(IndexTest, GetVector) {
     }
 }
 
+// This ut runs for sparse only. And will not use the default xb_sparse_dataset.
+TEST_P(IndexTest, GetVector_EmptySparseVector) {
+    if (index_type != knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX &&
+        index_type != knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        return;
+    }
+    NB = 3;
+
+    std::vector<knowhere::sparse::SparseRow<float>> vec;
+    vec.reserve(NB);
+    vec.emplace_back(2);
+    vec[0].set_at(0, 1, 1.0);
+    vec[0].set_at(1, 2, 2.0);
+    // row1 is an explicit empty row
+    vec.emplace_back(0);
+    // row2 is an implicit empty row(provided dim has a value of 0)
+    vec.emplace_back(1);
+    vec[2].set_at(0, 1, 0);
+
+    auto dataset = knowhere::GenDataSet(NB, 3, vec.data());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = vec_field_data_type;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    index::IndexBasePtr index;
+
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager);
+    index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    // use custom dataset instead of xb_dataset
+    ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
+    milvus::index::IndexBasePtr new_index;
+    milvus::index::VectorIndex* vec_index = nullptr;
+
+    auto binary_set = index->Upload();
+    index.reset();
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
+    }
+    new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    load_conf = generate_load_conf(index_type, metric_type, 0);
+    load_conf["index_files"] = index_files;
+
+    vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    auto ids_ds = GenRandomIds(NB);
+    auto sparse_rows = vec_index->GetSparseVector(ids_ds);
+    for (size_t i = 0; i < NB; ++i) {
+        auto id = ids_ds->GetIds()[i];
+        auto& row = sparse_rows[i];
+        ASSERT_EQ(row.size(), vec[id].size());
+        for (size_t j = 0; j < row.size(); ++j) {
+            ASSERT_EQ(row[j].id, vec[id][j].id);
+            ASSERT_EQ(row[j].val, vec[id][j].val);
+        }
+    }
+}
+
 #ifdef BUILD_DISK_ANN
 TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     int64_t NB = 1000;
