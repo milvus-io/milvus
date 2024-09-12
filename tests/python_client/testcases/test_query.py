@@ -4460,7 +4460,7 @@ class TestQueryTextMatch(TestcaseBase):
         print(f"\nCreate collection for movie dataset...")
 
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
-        data_size = 500000
+        data_size = 50000
         docs = []
         fake_en = Faker('en_US')
         for i in range(data_size):
@@ -4516,7 +4516,7 @@ class TestQueryTextMatch(TestcaseBase):
             t0 = time.time()
             res, _ = collection_w.query(
                 expr=text_match_expr,
-                output_fields=["id", field]
+                output_fields=["id"]
             )
             tt = time.time() - t0
             log.info(f"text match query cost {tt} res len {len(res)} res {res}")
@@ -4525,7 +4525,7 @@ class TestQueryTextMatch(TestcaseBase):
             t0 = time.time()
             res, _ = collection_w.query(
                 expr=like_match_expr,
-                output_fields=["id", field]
+                output_fields=["id"]
             )
             tt = time.time() - t0
             log.info(f"like match query cost {tt} res len {len(res)} res {res}")

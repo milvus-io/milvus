@@ -110,6 +110,10 @@ def analyze_documents(texts, language="en"):
 
     return word_freq
 
+def get_text_match_ground_truth(query, tokenized):
+    pass
+
+
 
 def generate_text_match_expr(query_dict):
     """
