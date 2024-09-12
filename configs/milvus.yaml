@@ -830,6 +830,7 @@ quotaAndLimits:
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
     maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
+    maxGroupSize: 10 # maximum size for one single group when doing search group by
   ddl:
     enabled: false # Whether DDL request throttling is enabled.
     # Maximum number of collection-related DDL requests per second.

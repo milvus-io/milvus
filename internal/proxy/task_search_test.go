@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -2411,6 +2412,31 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		assert.NotNil(t, info)
 		assert.NoError(t, err)
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+	})
+
+	t.Run("check max group size", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: "128",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema, false)
+		assert.Nil(t, info)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
+
+		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
+		info, _, err = parseSearchInfo(normalParam, schema, false)
+		assert.NotNil(t, info)
+		assert.NoError(t, err)
 	})
 }
 
