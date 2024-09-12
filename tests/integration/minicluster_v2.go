@@ -433,18 +433,20 @@ func (cluster *MiniClusterV2) Stop() error {
 	if cluster.clientConn != nil {
 		cluster.clientConn.Close()
 	}
-	cluster.RootCoord.Stop()
-	log.Info("mini cluster rootCoord stopped")
-	cluster.DataCoord.Stop()
-	log.Info("mini cluster dataCoord stopped")
-	cluster.QueryCoord.Stop()
-	log.Info("mini cluster queryCoord stopped")
-	cluster.Proxy.Stop()
-	log.Info("mini cluster proxy stopped")
 
 	cluster.StopAllDataNodes()
 	cluster.StopAllStreamingNodes()
 	cluster.StopAllQueryNodes()
+
+	cluster.QueryCoord.Stop()
+	log.Info("mini cluster queryCoord stopped")
+	cluster.DataCoord.Stop()
+	log.Info("mini cluster dataCoord stopped")
+	cluster.RootCoord.Stop()
+	log.Info("mini cluster rootCoord stopped")
+
+	cluster.Proxy.Stop()
+	log.Info("mini cluster proxy stopped")
 
 	if streamingutil.IsStreamingServiceEnabled() {
 		streaming.Release()
