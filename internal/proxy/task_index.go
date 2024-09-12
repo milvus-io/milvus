@@ -136,24 +136,11 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 	}
 
 	switch cit.functionSchema.GetType() {
+	case schemapb.FunctionType_Unknown:
+		return fmt.Errorf("unknown function type encountered")
+
 	case schemapb.FunctionType_BM25:
-		for _, kv := range cit.functionSchema.GetParams() {
-			switch kv.GetKey() {
-			case "bm25_k1":
-				if _, ok := indexParamsMap["bm25_k1"]; !ok {
-					indexParamsMap["bm25_k1"] = kv.GetValue()
-				}
-			case "bm25_b":
-				if _, ok := indexParamsMap["bm25_b"]; !ok {
-					indexParamsMap["bm25_b"] = kv.GetValue()
-				}
-			case "bm25_avgdl":
-				if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
-					indexParamsMap["bm25_avgdl"] = kv.GetValue()
-				}
-			}
-		}
-		// set default avgdl
+		// set default BM25 params if not provided in index params
 		if _, ok := indexParamsMap["bm25_k1"]; !ok {
 			indexParamsMap["bm25_k1"] = "1.2"
 		}
@@ -165,8 +152,15 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 		if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
 			indexParamsMap["bm25_avgdl"] = "100"
 		}
+
+		if metricType, ok := indexParamsMap["metric_type"]; !ok {
+			indexParamsMap["metric_type"] = "BM25"
+		} else if metricType != "BM25" {
+			return fmt.Errorf("index metric type of BM25 function output field must be BM25, got %s", metricType)
+		}
+
 	default:
-		return fmt.Errorf("parse unknown type function params to index")
+		return nil
 	}
 
 	return nil
@@ -190,11 +184,6 @@ func (cit *createIndexTask) parseIndexParams() error {
 		} else {
 			indexParamsMap[kv.Key] = kv.Value
 		}
-	}
-
-	// fill index param for bm25 function
-	if err := cit.parseFunctionParamsToIndex(indexParamsMap); err != nil {
-		return err
 	}
 
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
@@ -340,6 +329,11 @@ func (cit *createIndexTask) parseIndexParams() error {
 					return err
 				}
 			}
+		}
+
+		// fill index param for Functions
+		if err := cit.parseFunctionParamsToIndex(indexParamsMap); err != nil {
+			return err
 		}
 
 		indexType, exist := indexParamsMap[common.IndexTypeKey]
