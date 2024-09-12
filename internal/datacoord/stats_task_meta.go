@@ -323,8 +323,6 @@ func (stm *statsTaskMeta) MarkTaskCanRecycle(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.CanRecycle = true
-	// set job state to failed
-	cloneT.State = indexpb.JobState_JobStateFailed
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
 		log.Warn("mark stats task can recycle failed",

@@ -5,10 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -79,7 +80,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			return
 		case <-ticker.C:
 			jm.triggerSortStatsTask()
-			jm.triggerTextIndexStatsTask()
+			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
@@ -133,18 +134,6 @@ func (jm *statsJobManager) createSortStatsTaskForSegment(segment *SegmentInfo) {
 	}
 }
 
-func (jm *statsJobManager) enableMatch(field *schemapb.FieldSchema) bool {
-	if field.GetDataType() != schemapb.DataType_VarChar {
-		return false
-	}
-	for _, pair := range field.GetTypeParams() {
-		if pair.Key == "match" && pair.Value == "true" {
-			return true
-		}
-	}
-	return false
-}
-
 func (jm *statsJobManager) enableBM25() bool {
 	return false
 }
@@ -171,15 +160,17 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-func (jm *statsJobManager) triggerTextIndexStatsTask() {
+func (jm *statsJobManager) triggerTextStatsTask() {
 	collections := jm.mt.GetCollections()
 	for _, collection := range collections {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
-			if jm.enableMatch(field) {
-				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
+			h := typeutil.CreateFieldSchemaHelper(field)
+			if !h.EnableMatch() {
+				continue
 			}
+			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
 		segments := jm.mt.SelectSegments(WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return needDoTextIndex(seg, needTriggerFieldIDs)
@@ -277,6 +268,9 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 	}
 	if err = jm.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
+			log.Info("stats task already exists", zap.Int64("taskID", taskID),
+				zap.Int64("collectionID", originSegment.GetCollectionID()),
+				zap.Int64("segmentID", originSegment.GetID()))
 			return nil
 		}
 		return err
@@ -286,7 +280,10 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 }
 
 func (jm *statsJobManager) GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState {
-	return jm.mt.statsTaskMeta.GetStatsTaskStateBySegmentID(originSegmentID, subJobType)
+	state := jm.mt.statsTaskMeta.GetStatsTaskStateBySegmentID(originSegmentID, subJobType)
+	log.Info("statsJobManager get stats task state", zap.Int64("segmentID", originSegmentID),
+		zap.String("subJobType", subJobType.String()), zap.String("state", state.String()))
+	return state
 }
 
 func (jm *statsJobManager) DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error {
@@ -295,5 +292,11 @@ func (jm *statsJobManager) DropStatsTask(originSegmentID int64, subJobType index
 		return nil
 	}
 	jm.scheduler.AbortTask(task.GetTaskID())
-	return jm.mt.statsTaskMeta.MarkTaskCanRecycle(task.GetTaskID())
+	if err := jm.mt.statsTaskMeta.MarkTaskCanRecycle(task.GetTaskID()); err != nil {
+		return err
+	}
+
+	log.Info("statsJobManager drop stats task success", zap.Int64("segmentID", originSegmentID),
+		zap.Int64("taskID", task.GetTaskID()), zap.String("subJobType", subJobType.String()))
+	return nil
 }

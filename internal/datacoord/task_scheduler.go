@@ -190,6 +190,7 @@ func (s *taskScheduler) enqueue(task Task) {
 }
 
 func (s *taskScheduler) AbortTask(taskID int64) {
+	log.Info("task scheduler receive abort task request", zap.Int64("taskID", taskID))
 	s.RLock()
 	task, ok := s.tasks[taskID]
 	s.RUnlock()
