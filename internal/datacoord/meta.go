@@ -447,11 +447,19 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	metrics.DataCoordNumStoredRows.Reset()
 	for collectionID, statesRows := range collectionRowsNum {
-		for state, rows := range statesRows {
-			coll, ok := m.collections[collectionID]
-			if ok {
+		coll, ok := m.collections[collectionID]
+		if ok {
+			for state, rows := range statesRows {
 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
 			}
+		}
+	}
+
+	metrics.DataCoordL0DeleteEntriesNum.Reset()
+	for collectionID, entriesNum := range collectionL0RowCounts {
+		coll, ok := m.collections[collectionID]
+		if ok {
+			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(entriesNum))
 		}
 	}
 
