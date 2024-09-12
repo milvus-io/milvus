@@ -54,7 +54,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 							DataType: schemapb.DataType_VarChar,
 							TypeParams: []*commonpb.KeyValuePair{
 								{
-									Key: "match", Value: "true",
+									Key: "enable_match", Value: "true",
 								},
 							},
 						},
