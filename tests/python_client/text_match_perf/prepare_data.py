@@ -44,40 +44,40 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", bucket_na
     # create dataset
     # clean all parquet
     files = glob.glob("./train*.parquet")
-    # for file in files:
-    #     try:
-    #         os.remove(file)
-    #     except Exception as e:
-    #         logger.info(f"delete file failed with error {e}")
-    # batch_size = 100000
-    # epoch = data_size // batch_size
-    # fake_en = Faker('en_US')
-    # for e in range(epoch):
-    #     data = [{
-    #             "id": i,
-    #             "word": fake_en.word(),
-    #             "sentence": fake_en.sentence(),
-    #             "paragraph": fake_en.paragraph(),
-    #             "text": fake_en.text(),
-    #             "emb": [random.random() for _ in range(dim)]
-    #         } for i in range(e*batch_size, (e+1)*batch_size)
-    #     ]
-    #     df = pd.DataFrame(data)
-    #     df.to_parquet(f"./train-{e}.parquet")
-    #     logger.info(f"progress: {e+1}/{epoch}")
+    for file in files:
+        try:
+            os.remove(file)
+        except Exception as e:
+            logger.info(f"delete file failed with error {e}")
+    batch_size = 100000
+    epoch = data_size // batch_size
+    fake_en = Faker('en_US')
+    for e in range(epoch):
+        data = [{
+                "id": i,
+                "word": fake_en.word(),
+                "sentence": fake_en.sentence(),
+                "paragraph": fake_en.paragraph(),
+                "text": fake_en.text(),
+                "emb": [random.random() for _ in range(dim)]
+            } for i in range(e*batch_size, (e+1)*batch_size)
+        ]
+        df = pd.DataFrame(data)
+        df.to_parquet(f"./train-{e}.parquet")
+        logger.info(f"progress: {e+1}/{epoch}")
     batch_files = glob.glob("./train*.parquet")
-    # logger.info(f"files {batch_files}")
-    # # copy file to minio
-    # client = Minio(
-    #         f"{minio_host}:9000",
-    #         access_key="minioadmin",
-    #         secret_key="minioadmin",
-    #         secure=False,
-    #     )
-    # for file in batch_files:
-    #     f_name = file.split("/")[-1]
-    #     client.fput_object(f"{bucket_name}", f_name, file)
-    #     logger.info(f"upload file {file}")
+    logger.info(f"files {batch_files}")
+    # copy file to minio
+    client = Minio(
+            f"{minio_host}:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            secure=False,
+        )
+    for file in batch_files:
+        f_name = file.split("/")[-1]
+        client.fput_object(f"{bucket_name}", f_name, file)
+        logger.info(f"upload file {file}")
     batch_files = [file.split("/")[-1] for file in batch_files]
     task_ids = []
     for files in batch_files:

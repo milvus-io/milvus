@@ -63,7 +63,7 @@ def _(environment, **kw):
 
 class MilvusUser(HttpUser):
     host = "http://10.104.18.39:19530"
-    filter = ""
+    filter = "TextMatch(word, 'worker')"
     gt = []
     recall_list = []
     ts_list = []
@@ -73,7 +73,7 @@ class MilvusUser(HttpUser):
     @task
     def query(self):
         with self.client.post("/v2/vectordb/entities/query",
-                              json={"collectionName": "test_restful_perf",
+                              json={"collectionName": "test_text_match_perf",
                                     "outputFields": ["id"],
                                     "filter": self.filter,
                                     "limit": 1000
@@ -83,6 +83,7 @@ class MilvusUser(HttpUser):
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 0:
                 resp.failure(f"query failed with error {resp.text}")
+                print(resp.text)
             else:
                 pass
 
