@@ -26,6 +26,7 @@
 #include "exec/Task.h"
 #include "segcore/SegmentInterface.h"
 #include "query/groupby/SearchGroupByOperator.h"
+#include "common/Tracer.h"
 namespace milvus::query {
 
 namespace impl {
@@ -279,6 +280,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     std::vector<int64_t> cache_offsets;
     if (node.filter_plannode_.has_value()) {
+        tracer::AutoSpan _("Execute Filter", tracer::GetRootSpan());
         ExecuteExprNode(node.filter_plannode_.value(),
                         segment,
                         active_count,
@@ -304,6 +306,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     retrieve_result.total_data_cnt_ = bitset_holder.size();
+    tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
     auto results_pair = segment->find_first(node.limit_, bitset_holder);
     retrieve_result.result_offsets_ = std::move(results_pair.first);
     retrieve_result.has_more_result = results_pair.second;

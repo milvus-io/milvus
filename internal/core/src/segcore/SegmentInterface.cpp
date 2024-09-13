@@ -97,7 +97,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int64_t limit_size,
                                    bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("Retrieve", trace_ctx, false);
+    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
@@ -144,7 +144,7 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids) const {
-    tracer::AutoSpan span("FillTargetEntry", trace_ctx, false);
+    tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
@@ -240,7 +240,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const int64_t* offsets,
                                    int64_t size) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("RetrieveByOffsets", trace_ctx, false);
+    tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
     return results;

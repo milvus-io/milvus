@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"io"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -45,7 +46,9 @@ func CreateConsumer(
 	}
 
 	// TODO: configurable or auto adjust grpc.MaxCallRecvMsgSize
-	streamClient, err := handlerClient.Consume(ctx, grpc.MaxCallRecvMsgSize(8388608))
+	// The messages are always managed by milvus cluster, so the size of message shouldn't be controlled here
+	// to avoid infinitely blocks.
+	streamClient, err := handlerClient.Consume(ctx, grpc.MaxCallRecvMsgSize(math.MaxInt32))
 	if err != nil {
 		return nil, err
 	}

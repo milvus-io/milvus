@@ -101,7 +101,9 @@ func (s *LBPolicySuite) SetupTest() {
 	s.lbBalancer.EXPECT().Start(context.Background()).Maybe()
 	s.lbPolicy = NewLBPolicyImpl(s.mgr)
 	s.lbPolicy.Start(context.Background())
-	s.lbPolicy.balancer = s.lbBalancer
+	s.lbPolicy.getBalancer = func() LBBalancer {
+		return s.lbBalancer
+	}
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
 	s.NoError(err)
@@ -163,7 +165,7 @@ func (s *LBPolicySuite) loadCollection() {
 func (s *LBPolicySuite) TestSelectNode() {
 	ctx := context.Background()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(5, nil)
-	targetNode, err := s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -178,7 +180,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(3, nil)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -192,7 +194,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// test select node always fails, expected failure
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -206,7 +208,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// test all nodes has been excluded, expected failure
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -222,7 +224,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	s.qc.ExpectedCalls = nil
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -419,17 +421,17 @@ func (s *LBPolicySuite) TestUpdateCostMetrics() {
 
 func (s *LBPolicySuite) TestNewLBPolicy() {
 	policy := NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.LookAsideBalancer")
 	policy.Close()
 
 	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "round_robin")
 	policy = NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.RoundRobinBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.RoundRobinBalancer")
 	policy.Close()
 
 	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "look_aside")
 	policy = NewLBPolicyImpl(s.mgr)
-	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*proxy.LookAsideBalancer")
 	policy.Close()
 }
 
