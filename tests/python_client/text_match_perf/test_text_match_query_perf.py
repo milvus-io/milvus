@@ -63,7 +63,8 @@ def _(environment, **kw):
 
 class MilvusUser(HttpUser):
     host = "http://10.104.18.39:19530"
-    filter = "TextMatch(word, 'worker')"
+    # filter = "TextMatch(sentence, 'reveal')"
+    filter = "sentence like '%reveal%'"
     gt = []
     recall_list = []
     ts_list = []
@@ -74,7 +75,7 @@ class MilvusUser(HttpUser):
     def query(self):
         with self.client.post("/v2/vectordb/entities/query",
                               json={"collectionName": "test_text_match_perf",
-                                    "outputFields": ["id"],
+                                    "outputFields": ["id", "sentence"],
                                     "filter": self.filter,
                                     "limit": 1000
                                     },
@@ -86,6 +87,7 @@ class MilvusUser(HttpUser):
                 print(resp.text)
             else:
                 pass
+                # print(resp.text)
 
 
 class StagesShape(LoadTestShape):

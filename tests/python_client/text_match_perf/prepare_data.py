@@ -39,7 +39,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", bucket_na
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
     logger.info(schema)
     collection = Collection(name=collection_name, schema=schema)
-    index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
+    index_params = {"metric_type": "L2", "index_type": "FLAT"}
     logger.info(f"collection {collection_name} created")
     # create dataset
     # clean all parquet
@@ -113,7 +113,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", bucket_na
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
-    parser.add_argument("--host", type=str, default="10.104.1.10")
+    parser.add_argument("--host", type=str, default="10.104.9.218")
     parser.add_argument("--minio_host", type=str, default="10.104.23.30")
     parser.add_argument("--bucket_name", type=str, default="text-match-test-v12")
     parser.add_argument("--port", type=int, default=19530)
