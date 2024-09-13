@@ -16,7 +16,8 @@ func NewQueryStreamTask(ctx context.Context,
 	manager *segments.Manager,
 	req *querypb.QueryRequest,
 	srv streamrpc.QueryStreamServer,
-	streamBatchSize int,
+	minMsgSize int,
+	maxMsgSize int,
 ) *QueryStreamTask {
 	return &QueryStreamTask{
 		ctx:            ctx,
@@ -24,7 +25,8 @@ func NewQueryStreamTask(ctx context.Context,
 		segmentManager: manager,
 		req:            req,
 		srv:            srv,
-		batchSize:      streamBatchSize,
+		minMsgSize:     minMsgSize,
+		maxMsgSize:     maxMsgSize,
 		notifier:       make(chan error, 1),
 	}
 }
@@ -35,7 +37,8 @@ type QueryStreamTask struct {
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
 	srv            streamrpc.QueryStreamServer
-	batchSize      int
+	minMsgSize     int
+	maxMsgSize     int
 	notifier       chan error
 }
 
@@ -67,7 +70,7 @@ func (t *QueryStreamTask) Execute() error {
 	}
 	defer retrievePlan.Delete()
 
-	srv := streamrpc.NewResultCacheServer(t.srv, t.batchSize)
+	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
 
 	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
