@@ -165,7 +165,7 @@ func (s *LBPolicySuite) loadCollection() {
 func (s *LBPolicySuite) TestSelectNode() {
 	ctx := context.Background()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(5, nil)
-	targetNode, err := s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -180,7 +180,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(3, nil)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -194,7 +194,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// test select node always fails, expected failure
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -208,7 +208,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// test all nodes has been excluded, expected failure
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
@@ -224,7 +224,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	s.qc.ExpectedCalls = nil
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,

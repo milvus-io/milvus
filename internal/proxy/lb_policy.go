@@ -99,9 +99,9 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 }
 
 // try to select the best node from the available nodes
-func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
+func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
 	availableNodes := lo.FilterMap(workload.shardLeaders, func(node int64, _ int) (int64, bool) { return node, !excludeNodes.Contain(node) })
-	targetNode, err := lb.getBalancer().SelectNode(ctx, availableNodes, workload.nq)
+	targetNode, err := balancer.SelectNode(ctx, availableNodes, workload.nq)
 	if err != nil {
 		log := log.Ctx(ctx)
 		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
@@ -125,7 +125,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 			return -1, merr.WrapErrChannelNotAvailable("no available shard delegator found")
 		}
 
-		targetNode, err = lb.getBalancer().SelectNode(ctx, availableNodes, workload.nq)
+		targetNode, err = balancer.SelectNode(ctx, availableNodes, workload.nq)
 		if err != nil {
 			log.Warn("failed to select shard",
 				zap.Int64("collectionID", workload.collectionID),
@@ -145,7 +145,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 	var lastErr error
 	err := retry.Do(ctx, func() error {
-		targetNode, err := lb.selectNode(ctx, workload, excludeNodes)
+		balancer := lb.getBalancer()
+		targetNode, err := lb.selectNode(ctx, balancer, workload, excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
 				zap.Int64("collectionID", workload.collectionID),
@@ -158,6 +159,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			return err
 		}
+		// cancel work load which assign to the target node
+		defer balancer.CancelWorkload(targetNode, workload.nq)
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
@@ -168,8 +171,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
 
-			// cancel work load which assign to the target node
-			lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
@@ -182,12 +183,10 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
-			lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
 
-		lb.getBalancer().CancelWorkload(targetNode, workload.nq)
 		return nil
 	}, retry.Attempts(workload.retryTimes))
 
