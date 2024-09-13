@@ -358,7 +358,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
         ordering[i] = std::make_tuple(timestamps[i], pks[i]);
     }
 
-    if (insert_record_.empty_pks()) {
+    if (!insert_record_.empty_pks()) {
         auto end = std::remove_if(
             ordering.begin(),
             ordering.end(),
