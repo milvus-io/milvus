@@ -571,7 +571,7 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 	return rows, nil
 }
 
-func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([][]string, error) {
+func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *storage.InsertData, nullkey string) ([][]string, error) {
 	rowNum := insertData.GetRowNum()
 	csvData := make([][]string, 0, rowNum+1)
 
@@ -593,6 +593,11 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
 			if field.GetAutoID() {
+				continue
+			}
+			// deal with null value
+			if field.GetNullable() && value.GetRow(i) == nil {
+				data = append(data, nullkey)
 				continue
 			}
 			switch dataType {

@@ -46,6 +46,7 @@ const char NUM_CLUSTERS[] = "num_clusters";
 const char KMEANS_CLUSTER[] = "KMEANS";
 const char VEC_OPT_FIELDS[] = "opt_fields";
 const char PAGE_RETAIN_ORDER[] = "page_retain_order";
+const char TEXT_LOG_ROOT_PATH[] = "text_log";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
@@ -69,6 +70,8 @@ const int64_t DEFAULT_MAX_OUTPUT_SIZE = 67108864;  // bytes, 64MB
 
 const int64_t DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS = 10000;
 
-const int64_t DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND = 500;
+const int64_t DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND = 500;
+
+const int64_t DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT = 100;
 
 const size_t MARISA_NULL_KEY_ID = -1;

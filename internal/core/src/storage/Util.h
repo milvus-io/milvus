@@ -77,7 +77,20 @@ std::string
 GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
 
 std::string
+GenTextIndexPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t segment_id,
+                           int64_t field_id);
+
+std::string
 GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+
+std::string
+GenTextIndexPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,

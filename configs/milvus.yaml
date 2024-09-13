@@ -425,6 +425,7 @@ queryNode:
     requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
     maxRetryTimes: 1 # max retry times for lazy load, 1 by default
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
+  indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   grouping:
     enabled: true
     maxNQ: 1000
@@ -452,6 +453,7 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
+  levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -766,7 +768,6 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  bitmapIndexCardinalityBound: 500
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -980,8 +981,8 @@ quotaAndLimits:
       diskQuotaPerPartition: -1 # MB, (0, +inf), default no limit
     l0SegmentsRowCountProtection:
       enabled: false # switch to enable l0 segment row count quota
-      lowWaterLevel: 32768 # l0 segment row count quota, low water level
-      highWaterLevel: 65536 # l0 segment row count quota, low water level
+      lowWaterLevel: 30000000 # l0 segment row count quota, low water level
+      highWaterLevel: 50000000 # l0 segment row count quota, high water level
     deleteBufferRowCountProtection:
       enabled: false # switch to enable delete buffer row count quota
       lowWaterLevel: 32768 # delete buffer row count quota, low water level

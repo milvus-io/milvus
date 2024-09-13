@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -609,6 +610,143 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateFunction(coll *schemapb.CollectionSchema) error {
+	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+		return field.GetName(), field
+	})
+	usedOutputField := typeutil.NewSet[string]()
+	usedFunctionName := typeutil.NewSet[string]()
+	// validate function
+	for _, function := range coll.GetFunctions() {
+		if usedFunctionName.Contain(function.GetName()) {
+			return fmt.Errorf("duplicate function name %s", function.GetName())
+		}
+
+		usedFunctionName.Insert(function.GetName())
+		inputFields := []*schemapb.FieldSchema{}
+		for _, name := range function.GetInputFieldNames() {
+			inputField, ok := nameMap[name]
+			if !ok {
+				return fmt.Errorf("function input field not found %s", function.InputFieldNames)
+			}
+			inputFields = append(inputFields, inputField)
+		}
+
+		err := checkFunctionInputField(function, inputFields)
+		if err != nil {
+			return err
+		}
+
+		outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
+		for i, name := range function.GetOutputFieldNames() {
+			outputField, ok := nameMap[name]
+			if !ok {
+				return fmt.Errorf("function output field not found %s", function.InputFieldNames)
+			}
+			outputField.IsFunctionOutput = true
+			outputFields[i] = outputField
+			if usedOutputField.Contain(name) {
+				return fmt.Errorf("duplicate function output %s", name)
+			}
+			usedOutputField.Insert(name)
+		}
+
+		if err := checkFunctionOutputField(function, outputFields); err != nil {
+			return err
+		}
+
+		if err := checkFunctionParams(function); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(fields) != 1 {
+			return fmt.Errorf("bm25 only need 1 output field, but now %d", len(fields))
+		}
+
+		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
+			return fmt.Errorf("bm25 only need sparse embedding output field, but now %s", fields[0].DataType.String())
+		}
+
+		if fields[0].GetIsPrimaryKey() {
+			return fmt.Errorf("bm25 output field can't be primary key")
+		}
+
+		if fields[0].GetIsPartitionKey() || fields[0].GetIsClusteringKey() {
+			return fmt.Errorf("bm25 output field can't be partition key or cluster key field")
+		}
+	default:
+		return fmt.Errorf("check output field for unknown function type")
+	}
+	return nil
+}
+
+func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
+			return fmt.Errorf("only one VARCHAR input field is allowed for a BM25 Function, got %d field with type %s",
+				len(fields), fields[0].DataType.String())
+		}
+
+	default:
+		return fmt.Errorf("check input field with unknown function type")
+	}
+	return nil
+}
+
+func checkFunctionParams(function *schemapb.FunctionSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		for _, kv := range function.GetParams() {
+			switch kv.GetKey() {
+			case "bm25_k1":
+				k1, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_k1 value, %w", err)
+				}
+
+				if k1 < 0 || k1 > 3 {
+					return fmt.Errorf("bm25_k1 must in [0,3] but now %f", k1)
+				}
+
+			case "bm25_b":
+				b, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_b value, %w", err)
+				}
+
+				if b < 0 || b > 1 {
+					return fmt.Errorf("bm25_b must in [0,1] but now %f", b)
+				}
+
+			case "bm25_avgdl":
+				avgdl, err := strconv.ParseFloat(kv.GetValue(), 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse bm25_avgdl value, %w", err)
+				}
+
+				if avgdl <= 0 {
+					return fmt.Errorf("bm25_avgdl must large than zero but now %f", avgdl)
+				}
+
+			case "analyzer_params":
+				// TODO ADD tokenizer check
+			default:
+				return fmt.Errorf("invalid function params, key: %s, value:%s", kv.GetKey(), kv.GetValue())
+			}
+		}
+	default:
+		return fmt.Errorf("check function params with unknown function type")
+	}
+	return nil
+}
+
 // validateMultipleVectorFields check if schema has multiple vector fields.
 func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	vecExist := false
@@ -754,13 +892,19 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 
 // fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
 func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	if len(columns) != len(schema.GetFields()) {
-		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
-			len(columns), len(schema.GetFields()))
-	}
 	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
+
+	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
+		if !field.GetIsFunctionOutput() {
+			expectColumnNum++
+		}
+	}
+
+	if len(columns) != expectColumnNum {
+		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
+			expectColumnNum, len(columns))
 	}
 
 	for _, fieldData := range columns {
@@ -1211,15 +1355,16 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
 				// autoGenField
 				continue
 			}
+
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())

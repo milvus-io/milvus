@@ -4,6 +4,12 @@ metrics:
 log:
   level: debug
 
+extraConfigFiles:
+  user.yaml: |+
+    indexCoord:
+      scheduler:
+        interval: 100
+
 affinity:
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:

@@ -2704,6 +2704,40 @@ class TestQueryString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_bitmap_alter_offset_cache_param(self):
+        """
+        target: test bitmap index with enable offset cache.
+        expected: verify create index and load successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=default_int_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="test_vec")
+        collection_w.create_index("varchar", index_name="bitmap_offset_cache", index_params={"index_type": "BITMAP"})
+        time.sleep(1)
+        collection_w.load()
+        expression = 'varchar like "0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len = len(result)
+        collection_w.release()
+        collection_w.alter_index("bitmap_offset_cache",  {'indexoffsetcache.enabled': True})
+        collection_w.create_index("varchar", index_name="bitmap_offset_cache", index_params={"index_type": "BITMAP"})
+        collection_w.load()
+        expression = 'varchar like "0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_new = len(result)
+        assert res_len_new == res_len
+        collection_w.release()
+        collection_w.alter_index("bitmap_offset_cache",  {'indexoffsetcache.enabled': False})
+        collection_w.create_index("varchar", index_name="bitmap_offset_cache", index_params={"index_type": "BITMAP"})
+        collection_w.load()
+        expression = 'varchar like "0%"'
+        result , _ = collection_w.query(expression, output_fields=['varchar'])
+        res_len_new = len(result)
+        assert res_len_new == res_len
+        collection_w.release()
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_prefixes_auto_index(self):
         """
         target: test query with prefix string expression and indexed with auto index
@@ -2736,7 +2770,7 @@ class TestQueryString(TestcaseBase):
                                                              primary_field=default_int_field_name)[0:2]
 
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
-        collection_w.create_index("varchar", index_name="bitmap_auto_index")
+        collection_w.create_index("varchar", index_name="bitmap_auto_index", index_params={"index_type": "BITMAP"})
         time.sleep(1)
         collection_w.load()
         expression = 'varchar like "0%"'
@@ -2782,7 +2816,7 @@ class TestQueryString(TestcaseBase):
                                                              primary_field=default_int_field_name)[0:2]
 
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
-        collection_w.create_index("varchar", index_name="bitmap_auto_index")
+        collection_w.create_index("varchar", index_name="bitmap_auto_index",  index_params={"index_type": "BITMAP"})
         time.sleep(1)
         collection_w.load()
         expression = 'varchar like "%0%"'

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -42,7 +43,14 @@ var _ typeutil.ResultWithID = &internalpb.RetrieveResults{}
 
 var _ typeutil.ResultWithID = &segcorepb.RetrieveResults{}
 
-func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *ReduceInfo) (*internalpb.SearchResults, error) {
+func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
+	if info.GetIsAdvance() {
+		return ReduceAdvancedSearchResults(ctx, results)
+	}
+	return ReduceSearchResults(ctx, results, info)
+}
+
+func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && result.GetSlicedBlob() != nil
 	})
@@ -60,8 +68,8 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 			channelsMvcc[ch] = ts
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
-		if info.metricType == "" {
-			info.metricType = r.MetricType
+		if info.GetMetricType() == "" {
+			info.SetMetricType(r.MetricType)
 		}
 	}
 	log := log.Ctx(ctx)
@@ -86,7 +94,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		log.Warn("shard leader reduce errors", zap.Error(err))
 		return nil, err
 	}
-	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.nq, info.topK, info.metricType)
+	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.GetNq(), info.GetTopK(), info.GetMetricType())
 	if err != nil {
 		log.Warn("shard leader encode search result errors", zap.Error(err))
 		return nil, err
@@ -115,67 +123,24 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	return searchResults, nil
 }
 
-func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64) (*internalpb.SearchResults, error) {
+func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceAdvancedSearchResults")
 	defer sp.End()
 
-	if len(results) == 1 {
-		return results[0], nil
-	}
-
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)
 	searchResults := &internalpb.SearchResults{
 		IsAdvanced: true,
 	}
 
-	for _, result := range results {
-		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
-		for ch, ts := range result.GetChannelsMvcc() {
-			channelsMvcc[ch] = ts
-		}
-		if !result.GetIsAdvanced() {
-			continue
-		}
-		// we just append here, no need to split subResult and reduce
-		// defer this reduce to proxy
-		searchResults.SubResults = append(searchResults.SubResults, result.GetSubResults()...)
-		searchResults.NumQueries = result.GetNumQueries()
-	}
-	searchResults.ChannelsMvcc = channelsMvcc
-	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
-	})
-	searchResults.CostAggregation = mergeRequestCost(requestCosts)
-	if searchResults.CostAggregation == nil {
-		searchResults.CostAggregation = &internalpb.CostAggregation{}
-	}
-	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
-	return searchResults, nil
-}
-
-func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
-	searchResults := &internalpb.SearchResults{
-		IsAdvanced: true,
-	}
-
-	channelsMvcc := make(map[string]uint64)
-	relatedDataSize := int64(0)
 	for index, result := range results {
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
+		searchResults.NumQueries = result.GetNumQueries()
 		// we just append here, no need to split subResult and reduce
-		// defer this reduce to proxy
+		// defer this reduction to proxy
 		subResult := &internalpb.SubSearchResults{
 			MetricType:     result.GetMetricType(),
 			NumQueries:     result.GetNumQueries(),
@@ -185,7 +150,6 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 			SlicedOffset:   result.GetSlicedOffset(),
 			ReqIndex:       int64(index),
 		}
-		searchResults.NumQueries = result.GetNumQueries()
 		searchResults.SubResults = append(searchResults.SubResults, subResult)
 	}
 	searchResults.ChannelsMvcc = channelsMvcc

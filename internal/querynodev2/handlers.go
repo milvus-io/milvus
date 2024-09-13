@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -384,16 +385,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		req.GetSegmentIDs(),
 	))
 
-	var resp *internalpb.SearchResults
-	if req.GetReq().GetIsAdvanced() {
-		resp, err = segments.ReduceAdvancedSearchResults(ctx, results, req.Req.GetNq())
-	} else {
-		resp, err = segments.ReduceSearchResults(ctx, results, segments.NewReduceInfo(req.Req.GetNq(),
-			req.Req.GetTopk(),
-			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
-			req.Req.GetExtraSearchParam().GetGroupSize(),
-			req.Req.GetMetricType()))
-	}
+	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
+		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
+			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
+			WithGroupSize(req.GetReq().GetGroupByFieldId()).WithAdvance(req.GetReq().GetIsAdvanced()))
 	if err != nil {
 		return nil, err
 	}

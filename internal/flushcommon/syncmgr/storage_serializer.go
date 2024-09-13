@@ -155,10 +155,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 		WithTimeRange(pack.tsFrom, pack.tsTo).
 		WithMetaCache(s.metacache).
 		WithMetaWriter(s.metaWriter).
-		WithFailureCallback(func(err error) {
-			// TODO could change to unsub channel in the future
-			panic(err)
-		})
+		WithFailureCallback(pack.errHandler)
 }
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {

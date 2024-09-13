@@ -48,14 +48,13 @@ const (
 	DefaultSessionTTL        = 30 // s
 	DefaultSessionRetryTimes = 30
 
-	DefaultMaxDegree                   = 56
-	DefaultSearchListSize              = 100
-	DefaultPQCodeBudgetGBRatio         = 0.125
-	DefaultBuildNumThreadsRatio        = 1.0
-	DefaultSearchCacheBudgetGBRatio    = 0.10
-	DefaultLoadNumThreadRatio          = 8.0
-	DefaultBeamWidthRatio              = 4.0
-	DefaultBitmapIndexCardinalityBound = 500
+	DefaultMaxDegree                = 56
+	DefaultSearchListSize           = 100
+	DefaultPQCodeBudgetGBRatio      = 0.125
+	DefaultBuildNumThreadsRatio     = 1.0
+	DefaultSearchCacheBudgetGBRatio = 0.10
+	DefaultLoadNumThreadRatio       = 8.0
+	DefaultBeamWidthRatio           = 4.0
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -229,7 +228,6 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
-	BitmapIndexCardinalityBound         ParamItem `refreshable:"false"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -501,14 +499,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
-
-	p.BitmapIndexCardinalityBound = ParamItem{
-		Key:          "common.bitmapIndexCardinalityBound",
-		Version:      "2.5.0",
-		DefaultValue: strconv.Itoa(DefaultBitmapIndexCardinalityBound),
-		Export:       true,
-	}
-	p.BitmapIndexCardinalityBound.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -2358,6 +2348,8 @@ type queryNodeConfig struct {
 	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
 	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
+	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
+
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
@@ -2381,6 +2373,9 @@ type queryNodeConfig struct {
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
+
+	// level zero
+	LevelZeroForwardPolicy ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -2864,6 +2859,16 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.EnableDisk.Init(base.mgr)
 
+	p.IndexOffsetCacheEnabled = ParamItem{
+		Key:          "queryNode.indexOffsetCacheEnabled",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+		Doc: "enable index offset cache for some scalar indexes, now is just for bitmap index," +
+			" enable this param can improve performance for retrieving raw data from index",
+		Export: true,
+	}
+	p.IndexOffsetCacheEnabled.Init(base.mgr)
+
 	p.DiskCapacityLimit = ParamItem{
 		Key:     "LOCAL_STORAGE_SIZE",
 		Version: "2.2.0",
@@ -2969,6 +2974,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "1048576", // 1MB
 	}
 	p.DeleteBufferBlockSize.Init(base.mgr)
+
+	p.LevelZeroForwardPolicy = ParamItem{
+		Key:          "queryNode.levelZeroForwardPolicy",
+		Version:      "2.4.12",
+		Doc:          "delegator level zero deletion forward policy, possible option[\"FilterByBF\", \"RemoteLoad\"]",
+		DefaultValue: "FilterByBF",
+		Export:       true,
+	}
+	p.LevelZeroForwardPolicy.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
@@ -3859,7 +3873,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.IndexTaskSchedulerInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
-		DefaultValue: "100",
+		DefaultValue: "1000",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
 
@@ -4053,7 +4067,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.taskCheckInterval",
 		Version:      "2.5.0",
 		Doc:          "task check interval seconds",
-		DefaultValue: "1",
+		DefaultValue: "60",
 		PanicIfEmpty: false,
 		Export:       false,
 	}

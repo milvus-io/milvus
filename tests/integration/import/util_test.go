@@ -207,10 +207,12 @@ func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionS
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
 
-	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData)
+	sep := ','
+	nullkey := ""
+
+	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData, nullkey)
 	assert.NoError(t, err)
 
-	sep := ','
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(t, err)
 

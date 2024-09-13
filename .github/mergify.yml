@@ -7,14 +7,20 @@ misc:
   - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
       - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
       - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
+  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+      - 'status-success=go-sdk'
+      - 'status-success=milvus-sdk-go '
+  - branch: &BRANCHES
+      #  In this pull request, the changes are based on the master branch
+      - &MASTER_BRANCH base=master
+      #  In this pull request, the changes are based on the 2.x(or 2.x.x) branch
+      - &2X_BRANCH base~=^2(\.\d+){1,2}$
 
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - -status-success=DCO
     actions:
       label:
@@ -28,10 +34,8 @@ pull_request_rules:
 
   - name: Add dco-passed label when DCO check passed
     conditions:
-      - or:
-          - base=master
-          - base~=^2(\.\d+){1,2}$
-          - base=sql_beta
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - status-success=DCO
     actions:
       label:
@@ -40,13 +44,11 @@ pull_request_rules:
         add:
           - dco-passed
 
-  - name: Test passed for code changed-master 
+  - name: Test passed for code changed on master 
     conditions:
-      - or:
-          - base=sql_beta
-          - base=master
-          - base~=^2(\.\d+){1,2}$
+      - *MASTER_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - or: *WHEN_GO_SDK_STATUS_SUCCESS
       - 'status-success=UT for Cpp'
       - 'status-success=UT for Go'
       - 'status-success=Integration Test'
@@ -60,9 +62,9 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-  - name: Test passed for code changed -2.*.*
+  - name: Test passed for code changed on 2.* branch
     conditions:
-      - base~=^2(\.\d+){2}$
+      - *2X_BRANCH
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=UT for Cpp'
@@ -80,10 +82,8 @@ pull_request_rules:
 
   - name: Test passed for tests changed
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - -files~=^(?!tests\/python_client).+
       - 'status-success=cpu-e2e'
     actions:
@@ -93,10 +93,8 @@ pull_request_rules:
 
   - name: Test passed for docs changed only
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - -files~=^(?!.*\.(md)).*$
     actions:
       label:
@@ -105,10 +103,8 @@ pull_request_rules:
 
   - name: Test passed for non go or c++ code changed
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'status-success=cpu-e2e'
       - *no_source_code_files
     actions:
@@ -118,10 +114,8 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed-master
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
@@ -137,8 +131,8 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed -2.2.*
     conditions:
+      - *2X_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - base~=^2\.2\.\d+$
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       # - 'status-success=Code Checker MacOS 12'
       - -files~=^(?!internal\/.*_test\.go).*$
@@ -149,10 +143,8 @@ pull_request_rules:
 
   - name: Test passed for mergify changed
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
       label:
@@ -161,10 +153,8 @@ pull_request_rules:
 
   - name: Test passed for title skip e2e
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - title~=\[skip e2e\]
       - label=kind/enhancement
       - *no_source_code_files
@@ -175,10 +165,8 @@ pull_request_rules:
 
   - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - and:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
@@ -206,10 +194,8 @@ pull_request_rules:
   - name: Dismiss block label if related issue be added into PR
     conditions:
       - and:
-          - or:
-              - base=master
-              - base=sql_beta
-              - base~=^2(\.\d+){1,2}$
+          # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+          - or: *BRANCHES
           - or:
               - body~=\#[0-9]{1,6}(\s+|$)
               - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
@@ -220,7 +206,7 @@ pull_request_rules:
 
   - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
     conditions:
-      - base~=^2(\.\d+){1,2}$
+      - *2X_BRANCH
       - and:
           - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -236,7 +222,7 @@ pull_request_rules:
 
   - name: Dismiss block label if related pr be added into PR
     conditions:
-      - base~=^2(\.\d+){1,2}$
+      - *2X_BRANCH
       - or:
           - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -248,10 +234,8 @@ pull_request_rules:
 
   - name: Dismiss block label if automated create PR
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - title~=\[automated\]
     actions:
       label:
@@ -261,10 +245,8 @@ pull_request_rules:
 
   - name: Test passed for skip e2e-master
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
@@ -281,8 +263,8 @@ pull_request_rules:
 
   - name: Test passed for skip e2e - 2.2.*
     conditions:
+      - *2X_BRANCH
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - base~=^2\.2\.\d+$
       - title~=\[skip e2e\]
       # - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=UT for Cpp'
@@ -297,10 +279,8 @@ pull_request_rules:
 
   - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=Update Knowhere Commit'
       - label=ci-passed
     actions:
@@ -311,11 +291,9 @@ pull_request_rules:
 
   - name: Remove ci-passed label when status for code checker or ut is not success-master
     conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - label!=manual-pass
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
       - *source_code_files
       - or:
           - *failed_on_ubuntu_20
@@ -352,11 +330,9 @@ pull_request_rules:
 
   - name: Remove ci-passed label when  status for jenkins job is not success
     conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - label!=manual-pass
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
       - -title~=\[skip e2e\]
       - files~=^(?!(.*_test\.go|.*\.md)).*$
       - 'status-success!=cpu-e2e'
@@ -367,22 +343,28 @@ pull_request_rules:
 
   - name: Add comment when jenkins job failed
     conditions:
-      - or:
-          - base=master
-          - base=sql_beta
-          - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'check-failure=cpu-e2e'
     actions:
       comment:
         message: |
           @{{author}} E2e jenkins job failed, comment `/run-cpu-e2e` can trigger the job again.
 
+  - name: Add comment when go-sdk check failed
+    conditions:
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
+      - 'check-failure=go-sdk'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
+
   - name: Add comment when code checker or ut failed -master
     conditions:
-      - or:
-          - base=master
-          - base~=^2(\.\d+){1,2}$
-          - base=sql_beta
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - or:
           # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
           - 'check-failure=Build and test AMD64 Ubuntu 20.04'
@@ -393,7 +375,7 @@ pull_request_rules:
 
   - name: Add comment when code checker or ut failed -2.2.*
     conditions:
-      - base~=^2\.2\.\d+$
+      - *2X_BRANCH
       - or:
           # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
           - 'check-failure=Build and test AMD64 Ubuntu 20.04'
@@ -404,9 +386,8 @@ pull_request_rules:
 
   - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - or:
         - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
         - body=^$
@@ -449,9 +430,8 @@ pull_request_rules:
 
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
@@ -462,9 +442,8 @@ pull_request_rules:
 
   - name: Label bug fix PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^fix:'
     actions:
       label:
@@ -473,9 +452,8 @@ pull_request_rules:
 
   - name: Label feature PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^feat:'
     actions:
       label:
@@ -484,9 +462,8 @@ pull_request_rules:
 
   - name: Label enhancement PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^enhance:'
     actions:
       label:
@@ -495,9 +472,8 @@ pull_request_rules:
 
   - name: Label test PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^test:'
     actions:
       label:
@@ -506,9 +482,8 @@ pull_request_rules:
 
   - name: Label doc PRs
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){1,2}$
+      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
+      - or: *BRANCHES
       - 'title~=^doc:'
     actions:
       label:

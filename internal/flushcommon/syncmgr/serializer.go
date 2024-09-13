@@ -55,6 +55,8 @@ type SyncPack struct {
 	segmentID    int64
 	channelName  string
 	level        datapb.SegmentLevel
+	// error handler function
+	errHandler func(err error)
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
@@ -121,5 +123,10 @@ func (p *SyncPack) WithBatchSize(batchSize int64) *SyncPack {
 
 func (p *SyncPack) WithLevel(level datapb.SegmentLevel) *SyncPack {
 	p.level = level
+	return p
+}
+
+func (p *SyncPack) WithErrorHandler(handler func(err error)) *SyncPack {
+	p.errHandler = handler
 	return p
 }

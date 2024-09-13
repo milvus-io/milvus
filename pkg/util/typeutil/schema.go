@@ -429,6 +429,21 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
+func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema) (*schemapb.FunctionSchema, error) {
+	for _, function := range helper.schema.GetFunctions() {
+		for _, id := range function.GetOutputFieldIds() {
+			if field.GetFieldID() == id {
+				return function, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("function not exist")
+}
+
+func (helper *SchemaHelper) GetCollectionName() string {
+	return helper.schema.Name
+}
+
 func IsBinaryVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_BinaryVector
 }
@@ -932,7 +947,9 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				dst = append(dst, scalarFieldData)
 				fieldID2Data[srcFieldData.FieldId] = scalarFieldData
 			}
-			dstScalar := fieldID2Data[srcFieldData.FieldId].GetScalars()
+			fieldData := fieldID2Data[srcFieldData.FieldId]
+			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			dstScalar := fieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				if dstScalar.GetBoolData() == nil {

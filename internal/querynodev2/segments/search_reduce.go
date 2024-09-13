@@ -8,39 +8,28 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ReduceInfo struct {
-	nq             int64
-	topK           int64
-	groupByFieldID int64
-	groupSize      int64
-	metricType     string
-}
-
-func NewReduceInfo(nq int64, topK int64, groupByFieldID int64, groupSize int64, metric string) *ReduceInfo {
-	return &ReduceInfo{nq, topK, groupByFieldID, groupSize, metric}
-}
-
 type SearchReduce interface {
-	ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *ReduceInfo) (*schemapb.SearchResultData, error)
+	ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error)
 }
 
 type SearchCommonReduce struct{}
 
-func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *ReduceInfo) (*schemapb.SearchResultData, error) {
+func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
 	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
 		return &schemapb.SearchResultData{
-			NumQueries: info.nq,
-			TopK:       info.topK,
+			NumQueries: info.GetNq(),
+			TopK:       info.GetTopK(),
 			FieldsData: make([]*schemapb.FieldData, 0),
 			Scores:     make([]float32, 0),
 			Ids:        &schemapb.IDs{},
@@ -48,8 +37,8 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		}, nil
 	}
 	ret := &schemapb.SearchResultData{
-		NumQueries: info.nq,
-		TopK:       info.topK,
+		NumQueries: info.GetNq(),
+		TopK:       info.GetTopK(),
 		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
 		Scores:     make([]float32, 0),
 		Ids:        &schemapb.IDs{},
@@ -59,7 +48,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	resultOffsets := make([][]int64, len(searchResultData))
 	for i := 0; i < len(searchResultData); i++ {
 		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
-		for j := int64(1); j < info.nq; j++ {
+		for j := int64(1); j < info.GetNq(); j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
@@ -68,11 +57,11 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	var skipDupCnt int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for i := int64(0); i < info.nq; i++ {
+	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
 		idSet := make(map[interface{}]struct{})
 		var j int64
-		for j = 0; j < info.topK; {
+		for j = 0; j < info.GetTopK(); {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
 			if sel == -1 {
 				break
@@ -113,15 +102,15 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 type SearchGroupByReduce struct{}
 
-func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *ReduceInfo) (*schemapb.SearchResultData, error) {
+func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
 	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
 		return &schemapb.SearchResultData{
-			NumQueries: info.nq,
-			TopK:       info.topK,
+			NumQueries: info.GetNq(),
+			TopK:       info.GetTopK(),
 			FieldsData: make([]*schemapb.FieldData, 0),
 			Scores:     make([]float32, 0),
 			Ids:        &schemapb.IDs{},
@@ -129,8 +118,8 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		}, nil
 	}
 	ret := &schemapb.SearchResultData{
-		NumQueries: info.nq,
-		TopK:       info.topK,
+		NumQueries: info.GetNq(),
+		TopK:       info.GetTopK(),
 		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
 		Scores:     make([]float32, 0),
 		Ids:        &schemapb.IDs{},
@@ -140,7 +129,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	resultOffsets := make([][]int64, len(searchResultData))
 	for i := 0; i < len(searchResultData); i++ {
 		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
-		for j := int64(1); j < info.nq; j++ {
+		for j := int64(1); j < info.GetNq(); j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
@@ -149,13 +138,13 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	var filteredCount int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	groupSize := info.groupSize
+	groupSize := info.GetGroupSize()
 	if groupSize <= 0 {
 		groupSize = 1
 	}
-	groupBound := info.topK * groupSize
+	groupBound := info.GetTopK() * groupSize
 
-	for i := int64(0); i < info.nq; i++ {
+	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
 
 		idSet := make(map[interface{}]struct{})
@@ -178,7 +167,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 				}
 
 				groupCount := groupByValueMap[groupByVal]
-				if groupCount == 0 && int64(len(groupByValueMap)) >= info.topK {
+				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
 					filteredCount++
 				} else if groupCount >= groupSize {
@@ -219,8 +208,8 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	return ret, nil
 }
 
-func InitSearchReducer(info *ReduceInfo) SearchReduce {
-	if info.groupByFieldID > 0 {
+func InitSearchReducer(info *reduce.ResultInfo) SearchReduce {
+	if info.GetGroupByFieldId() > 0 {
 		return &SearchGroupByReduce{}
 	}
 	return &SearchCommonReduce{}

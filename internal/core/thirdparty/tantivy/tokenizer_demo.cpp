@@ -23,6 +23,10 @@ main(int argc, char* argv[]) {
     {
         Map m;
         test_tokenizer(m, "football, basketball, pingpang");
+        test_tokenizer(m, "Avatar");
+        test_tokenizer(m, "Action, Adventure, Fantasy, Science Fiction");
+        test_tokenizer(m, "Ingenious Film Partners, Twentiesth Century Fox");
+        test_tokenizer(m, "Sam Worthington as Jack Sully");
     }
 
     // jieba tokenizer
@@ -33,6 +37,10 @@ main(int argc, char* argv[]) {
         test_tokenizer(m,
                        "张华考上了北京大学；李萍进了中等技术学校；我在百货公司"
                        "当售货员：我们都有光明的前途");
+        test_tokenizer(m, "青铜时代");
+        test_tokenizer(m, "黄金时代");
+        test_tokenizer(m, "时代");
+        test_tokenizer(m, "测试中文分词器的效果");
     }
 
     return 0;

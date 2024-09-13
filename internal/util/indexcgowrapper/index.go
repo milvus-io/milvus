@@ -126,6 +126,43 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	return index, nil
 }
 
+func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (map[string]int64, error) {
+	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
+			zap.String("clusterID", buildIndexInfo.GetClusterID()),
+			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
+	var cBinarySet C.CBinarySet
+	status := C.BuildTextIndex(&cBinarySet, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	if err := HandleCStatus(&status, "failed to build text index"); err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
+
+	res := make(map[string]int64)
+	indexFilePaths, err := GetBinarySetKeys(cBinarySet)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range indexFilePaths {
+		size, err := GetBinarySetSize(cBinarySet, path)
+		if err != nil {
+			return nil, err
+		}
+		res[path] = size
+	}
+
+	return res, nil
+}
+
 // TODO: this seems to be used only for test. We should mark the method
 // name with ForTest, or maybe move to test file.
 func (index *CgoIndex) Build(dataset *Dataset) error {

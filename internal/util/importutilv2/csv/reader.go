@@ -31,7 +31,7 @@ type reader struct {
 	filePath   string
 }
 
-func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int, sep rune) (*reader, error) {
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int, sep rune, nullkey string) (*reader, error) {
 	cmReader, err := cm.Reader(ctx, path)
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
@@ -53,7 +53,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read csv header, error: %v", err))
 	}
 
-	rowParser, err := NewRowParser(schema, header)
+	rowParser, err := NewRowParser(schema, header, nullkey)
 	if err != nil {
 		return nil, err
 	}

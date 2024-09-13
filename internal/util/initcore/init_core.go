@@ -186,6 +186,7 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 		disk_limit:              C.uint64_t(diskLimit),
 		fix_file_size:           C.uint64_t(mmapFileSize),
 		growing_enable_mmap:     C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+		enable_mmap:             C.bool(params.QueryNodeCfg.MmapEnabled.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")

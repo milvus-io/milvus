@@ -141,6 +141,8 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
+	errHandler func(err error)
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -191,6 +193,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		syncCheckpoint:   newCheckpointCandiates(),
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
+		errHandler:       option.errorHandler,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -613,7 +616,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithTimeRange(tsFrom, tsTo).
 		WithLevel(segmentInfo.Level()).
 		WithCheckpoint(wb.checkpoint).
-		WithBatchSize(batchSize)
+		WithBatchSize(batchSize).
+		WithErrorHandler(wb.errHandler)
 
 	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
 		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
