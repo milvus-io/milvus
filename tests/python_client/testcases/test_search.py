@@ -3804,7 +3804,8 @@ class TestCollectionSearch(TestcaseBase):
                                                               enable_dynamic_field=enable_dynamic_field)[:2]
 
         # search with output field vector
-        output_fields = [default_float_field_name, default_string_field_name, default_search_field]
+        output_fields = [default_float_field_name, default_string_field_name,
+                         default_json_field_name, default_search_field]
         original_entities = []
         if enable_dynamic_field:
             entities = []
@@ -3812,6 +3813,7 @@ class TestCollectionSearch(TestcaseBase):
                 entities.append({default_int64_field_name: vector[default_int64_field_name],
                                  default_float_field_name: vector[default_float_field_name],
                                  default_string_field_name: vector[default_string_field_name],
+                                 default_json_field_name: vector[default_json_field_name],
                                  default_search_field: vector[default_search_field]})
             original_entities.append(pd.DataFrame(entities))
         else:
@@ -3824,6 +3826,15 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "original_entities": original_entities,
                                          "output_fields": output_fields})
+        if enable_dynamic_field:
+            collection_w.search(vectors[:1], default_search_field,
+                                default_search_params, default_limit, default_search_exp,
+                                output_fields=["$meta", default_search_field],
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 1,
+                                             "limit": default_limit,
+                                             "original_entities": original_entities,
+                                             "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_vector_field_and_pk_field(self, enable_dynamic_field):
@@ -13429,6 +13440,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                      check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36213")
     def test_search_normal_none_data_partition_key(self, is_flush, enable_dynamic_field, vector_data_type, null_data_percent):
         """
         target: test search normal case with none data inserted
