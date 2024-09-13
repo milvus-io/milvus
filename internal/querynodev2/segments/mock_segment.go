@@ -290,6 +290,49 @@ func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockS
 	return _c
 }
 
+// GetBM25Stats provides a mock function with given fields:
+func (_m *MockSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
+	ret := _m.Called()
+
+	var r0 map[int64]*storage.BM25Stats
+	if rf, ok := ret.Get(0).(func() map[int64]*storage.BM25Stats); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]*storage.BM25Stats)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetBM25Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBM25Stats'
+type MockSegment_GetBM25Stats_Call struct {
+	*mock.Call
+}
+
+// GetBM25Stats is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetBM25Stats() *MockSegment_GetBM25Stats_Call {
+	return &MockSegment_GetBM25Stats_Call{Call: _e.mock.On("GetBM25Stats")}
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) Run(run func()) *MockSegment_GetBM25Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) Return(_a0 map[int64]*storage.BM25Stats) *MockSegment_GetBM25Stats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*storage.BM25Stats) *MockSegment_GetBM25Stats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetIndex provides a mock function with given fields: fieldID
 func (_m *MockSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
 	ret := _m.Called(fieldID)
@@ -1566,6 +1609,39 @@ func (_c *MockSegment_Unpin_Call) Return() *MockSegment_Unpin_Call {
 }
 
 func (_c *MockSegment_Unpin_Call) RunAndReturn(run func()) *MockSegment_Unpin_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateBM25Stats provides a mock function with given fields: stats
+func (_m *MockSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+	_m.Called(stats)
+}
+
+// MockSegment_UpdateBM25Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBM25Stats'
+type MockSegment_UpdateBM25Stats_Call struct {
+	*mock.Call
+}
+
+// UpdateBM25Stats is a helper method to define mock.On call
+//   - stats map[int64]*storage.BM25Stats
+func (_e *MockSegment_Expecter) UpdateBM25Stats(stats interface{}) *MockSegment_UpdateBM25Stats_Call {
+	return &MockSegment_UpdateBM25Stats_Call{Call: _e.mock.On("UpdateBM25Stats", stats)}
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) Run(run func(stats map[int64]*storage.BM25Stats)) *MockSegment_UpdateBM25Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[int64]*storage.BM25Stats))
+	})
+	return _c
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) Return() *MockSegment_UpdateBM25Stats_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_UpdateBM25Stats_Call) RunAndReturn(run func(map[int64]*storage.BM25Stats)) *MockSegment_UpdateBM25Stats_Call {
 	_c.Call.Return(run)
 	return _c
 }
