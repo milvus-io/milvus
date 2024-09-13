@@ -124,12 +124,29 @@ StartSpan(const std::string& name, TraceContext* parentCtx) {
     return GetTracer()->StartSpan(name, opts);
 }
 
+std::shared_ptr<trace::Span>
+StartSpan(const std::string& name, const std::shared_ptr<trace::Span>& span) {
+    trace::StartSpanOptions opts;
+    if (span != nullptr) {
+        opts.parent = span->GetContext();
+    }
+    return GetTracer()->StartSpan(name, opts);
+}
+
 thread_local std::shared_ptr<trace::Span> local_span;
 void
 SetRootSpan(std::shared_ptr<trace::Span> span) {
     if (enable_trace.load()) {
         local_span = std::move(span);
     }
+}
+
+std::shared_ptr<trace::Span>
+GetRootSpan() {
+    if (enable_trace) {
+        return local_span;
+    }
+    return nullptr;
 }
 
 void
@@ -205,6 +222,36 @@ GetSpanIDAsHexStr(const TraceContext* ctx) {
         return BytesToHexStr(ctx->spanID, opentelemetry::trace::SpanId::kSize);
     } else {
         return std::string();
+    }
+}
+
+AutoSpan::AutoSpan(const std::string& name,
+                   TraceContext* ctx,
+                   bool is_root_span)
+    : is_root_span_(is_root_span) {
+    span_ = StartSpan(name, ctx);
+    if (is_root_span) {
+        SetRootSpan(span_);
+    }
+}
+
+AutoSpan::AutoSpan(const std::string& name,
+                   const std::shared_ptr<trace::Span>& span)
+    : is_root_span_(false) {
+    span_ = StartSpan(name, span);
+}
+
+std::shared_ptr<trace::Span>
+AutoSpan::GetSpan() {
+    return span_;
+}
+
+AutoSpan::~AutoSpan() {
+    if (span_ != nullptr) {
+        span_->End();
+    }
+    if (is_root_span_) {
+        CloseRootSpan();
     }
 }
 
