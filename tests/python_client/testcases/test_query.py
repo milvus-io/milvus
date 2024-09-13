@@ -361,7 +361,7 @@ class TestQueryParams(TestcaseBase):
 
         # filter on int64 fields
         expr_list = [f'{ct.default_int64_field_name} > 8192 && {ct.default_int64_field_name} < 8194',
-                 f'{ct.default_int64_field_name} > 16384 && {ct.default_int64_field_name} < 16386']
+                     f'{ct.default_int64_field_name} > 16384 && {ct.default_int64_field_name} < 16386']
         for expr in expr_list:
             res, _ = self.collection_wrap.query(expr, output_fields=[ct.default_int64_field_name])
             assert len(res) == 1
@@ -2604,7 +2604,7 @@ class TestQueryOperation(TestcaseBase):
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         limit = 1000
         _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
-                            ct.default_search_params, limit, multi_exprs)
+                                           ct.default_search_params, limit, multi_exprs)
         assert(check_res == True)
 
 class TestQueryString(TestcaseBase):
@@ -2872,8 +2872,8 @@ class TestQueryString(TestcaseBase):
         expression = 'varchar == int64'
         collection_w.query(expression, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1100, ct.err_msg:
-                                        f"failed to create query plan: cannot parse expression: {expression}, "
-                                        f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
+                               f"failed to create query plan: cannot parse expression: {expression}, "
+                               f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 24637")
@@ -3332,7 +3332,7 @@ class TestQueryCount(TestcaseBase):
                                        "output_fields": [ct.default_count_output],
                                        "check_task": CheckTasks.check_query_results,
                                        "check_items": {exp_res: [{count: ct.default_nb}]}
-        })
+                                   })
 
         t_flush.start()
         t_count.start()
@@ -4135,3 +4135,357 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, offset=offset, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size, "count": ct.default_nb - offset, "exp_ids": exp_ids})
+
+
+class TestQueryNoneAndDefaultData(TestcaseBase):
+    """
+    test Query interface with none and default data
+    query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
+    """
+
+    @pytest.fixture(scope="function", params=[True, False])
+    def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED"])
+    def numeric_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["TRIE", "INVERTED", "BITMAP"])
+    def varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[0, 0.5, 1])
+    def null_data_percent(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_by_normal_with_none_data(self, enable_dynamic_field, null_data_percent):
+        """
+        target: test query with none data
+        method: query with term expr with nullable fields, insert data including none
+        expected: verify query result
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             enable_dynamic_field=enable_dynamic_field,
+                                                             nullable_fields={default_float_field_name: null_data_percent})[0:2]
+        pos = 5
+        if enable_dynamic_field:
+            int_values, float_values = [], []
+            for vector in vectors[0]:
+                int_values.append(vector[ct.default_int64_field_name])
+                float_values.append(vector[default_float_field_name])
+            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+        else:
+            int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+
+        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_by_expr_none_with_none_data(self, enable_dynamic_field, null_data_percent):
+        """
+        target: test query by none expr with nullable fields, insert data including none
+        method: query by expr None after inserting data including none
+        expected: verify query result
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             enable_dynamic_field=enable_dynamic_field,
+                                                             nullable_fields={default_float_field_name: null_data_percent})[0:2]
+        pos = 5
+        if enable_dynamic_field:
+            int_values, float_values = [], []
+            for vector in vectors[0]:
+                int_values.append(vector[ct.default_int64_field_name])
+                float_values.append(vector[default_float_field_name])
+            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+        else:
+            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+
+        term_expr = f''
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           limit=pos, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_by_nullable_field_with_none_data(self):
+        """
+        target: test query with nullable fields expr, insert data including none into nullable Fields
+        method: query by nullable field expr after inserting data including none
+        expected: verify query result
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True,
+                                                             nullable_fields={default_float_field_name: 0.5})[0:2]
+        pos = 5
+        int_values, float_values = [], []
+        for vector in vectors[0]:
+            int_values.append(vector[ct.default_int64_field_name])
+            float_values.append(vector[default_float_field_name])
+        res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+
+        term_expr = f'{default_float_field_name} < {pos}'
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_after_none_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index, null_data_percent):
+        """
+        target: test query after different index on scalar fields
+        method: query after different index on nullable fields
+        expected: verify query result
+        """
+        # 1. initialize with data
+        nullable_fields = {ct.default_int32_field_name: null_data_percent,
+                           ct.default_int16_field_name: null_data_percent,
+                           ct.default_int8_field_name: null_data_percent,
+                           ct.default_bool_field_name: null_data_percent,
+                           ct.default_float_field_name: null_data_percent,
+                           ct.default_double_field_name: null_data_percent,
+                           ct.default_string_field_name: null_data_percent}
+        # 2. create collection, insert default_nb
+        collection_w, vectors = self.init_collection_general(prefix, True, 1000, is_all_data_type=True, is_index=False,
+                                                             nullable_fields=nullable_fields)[0:2]
+        # 3. create index on vector field and load
+        index = "HNSW"
+        params = cf.get_index_params_params(index)
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, default_index)
+        # 4. create index on scalar field with None data
+        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        # 5. create index on scalar field with default data
+        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int32_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int16_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int8_field_name, scalar_index_params)
+        if numeric_scalar_index != "STL_SORT":
+            collection_w.create_index(ct.default_bool_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
+        collection_w.load()
+        pos = 5
+        int64_values, float_values = [], []
+        scalar_fields = vectors[0]
+        for i in range(pos):
+            int64_values.append(scalar_fields[0][i])
+            float_values.append(scalar_fields[5][i])
+        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+
+        term_expr = f'0 <= {ct.default_int64_field_name} < {pos}'
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_default_value_with_insert(self, enable_dynamic_field):
+        """
+        target: test query normal case with default value set
+        method: create connection, collection with default value set, insert and query
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
+                                                             default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:2]
+        pos = 5
+        if enable_dynamic_field:
+            int_values, float_values = [], []
+            for vector in vectors[0]:
+                int_values.append(vector[ct.default_int64_field_name])
+                float_values.append(vector[default_float_field_name])
+            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+        else:
+            int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+
+        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
+        # 2. query
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_default_value_without_insert(self, enable_dynamic_field):
+        """
+        target: test query normal case with default value set
+        method: create connection, collection with default value set, no insert and query
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        collection_w, vectors = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field,
+                                                             default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:2]
+
+        term_expr = f'{ct.default_int64_field_name} > 0'
+        # 2. query
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: []})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_after_default_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index):
+        """
+        target: test query after different index on default value data
+        method: test query after different index on default value and corresponding search params
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        default_value_fields = {ct.default_int32_field_name: np.int32(1),
+                                ct.default_int16_field_name: np.int32(2),
+                                ct.default_int8_field_name: np.int32(3),
+                                ct.default_bool_field_name: True,
+                                ct.default_float_field_name: np.float32(10.0),
+                                ct.default_double_field_name: 10.0,
+                                ct.default_string_field_name: "1"}
+        collection_w, vectors = self.init_collection_general(prefix, True, 1000, partition_num=1, is_all_data_type=True,
+                                                             is_index=False, default_value_fields=default_value_fields)[0:2]
+        # 2. create index on vector field and load
+        index = "HNSW"
+        params = cf.get_index_params_params(index)
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, default_index)
+        # 3. create index on scalar field with None data
+        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        # 4. create index on scalar field with default data
+        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int32_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int16_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_int8_field_name, scalar_index_params)
+        if numeric_scalar_index != "STL_SORT":
+            collection_w.create_index(ct.default_bool_field_name, scalar_index_params)
+        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
+        collection_w.load()
+        pos = 5
+        int64_values, float_values = [], []
+        scalar_fields = vectors[0]
+        for i in range(pos):
+            int64_values.append(scalar_fields[0][i])
+            float_values.append(scalar_fields[5][i])
+        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+
+        term_expr = f'0 <= {ct.default_int64_field_name} < {pos}'
+        # 5. query
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36003")
+    def test_query_both_default_value_non_data(self, enable_dynamic_field):
+        """
+        target: test query normal case with default value set
+        method: create connection, collection with default value set, insert and query
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
+                                                             nullable_fields={ct.default_float_field_name: 1},
+                                                             default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:2]
+        pos = 5
+        if enable_dynamic_field:
+            int_values, float_values = [], []
+            for vector in vectors[0]:
+                int_values.append(vector[ct.default_int64_field_name])
+                float_values.append(vector[default_float_field_name])
+            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+        else:
+            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+
+        term_expr = f'{ct.default_float_field_name} in [10.0]'
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           limit=pos, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.GPU)
+    def test_query_after_different_index_with_params_none_default_data(self, varchar_scalar_index, numeric_scalar_index,
+                                                                       null_data_percent):
+        """
+        target: test query after different index
+        method: test query after different index on none default data
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        collection_w, vectors = self.init_collection_general(prefix, True, 1000, partition_num=1,
+                                                             is_all_data_type=True, is_index=False,
+                                                             nullable_fields={ct.default_string_field_name: null_data_percent},
+                                                             default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:2]
+        # 2. create index on vector field and load
+        index = "HNSW"
+        params = cf.get_index_params_params(index)
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, default_index)
+        # 3. create index on scalar field with None data
+        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        # 4. create index on scalar field with default data
+        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
+        collection_w.load()
+        pos = 5
+        int64_values, float_values = [], []
+        scalar_fields = vectors[0]
+        for i in range(pos):
+            int64_values.append(scalar_fields[0][i])
+            float_values.append(scalar_fields[5][i])
+        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+
+        term_expr = f'{ct.default_int64_field_name} in {int64_values[:pos]}'
+        # 5. query
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_with_none_data(self, null_data_percent):
+        """
+        target: test query iterator normal with none data
+        method: 1. query iterator
+                2. check the result, expect pk
+        expected: query successfully
+        """
+        # 1. initialize with data
+        batch_size = 100
+        collection_w = self.init_collection_general(prefix, True, is_index=False,
+                                                    nullable_fields={ct.default_string_field_name: null_data_percent})[0]
+        collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
+        collection_w.load()
+        # 2. search iterator
+        expr = "int64 >= 0"
+        collection_w.query_iterator(batch_size, expr=expr,
+                                    check_task=CheckTasks.check_query_iterator,
+                                    check_items={"count": ct.default_nb,
+                                                 "batch_size": batch_size})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_normal_none_data_partition_key(self, enable_dynamic_field, null_data_percent):
+        """
+        target: test query normal case with none data inserted
+        method: create connection, collection with nullable fields, insert data including none, and query
+        expected: query successfully and verify query result
+        """
+        # 1. initialize with data
+        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
+                                                             nullable_fields={ct.default_float_field_name: null_data_percent},
+                                                             is_partition_key=ct.default_float_field_name)[0:2]
+        pos = 5
+        if enable_dynamic_field:
+            int_values, float_values = [], []
+            for vector in vectors[0]:
+                int_values.append(vector[ct.default_int64_field_name])
+                float_values.append(vector[default_float_field_name])
+            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)]
+        else:
+            int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+
+        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
+        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
