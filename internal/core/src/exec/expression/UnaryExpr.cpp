@@ -601,6 +601,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+        return ExecTextMatch();
+    }
+
     if (CanUseIndex<T>()) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
@@ -856,6 +860,17 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
     use_index_ = res;
     return res;
 }
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecTextMatch() {
+    using Index = index::TextMatchIndex;
+    auto query = GetValueFromProto<std::string>(expr_->val_);
+    auto func = [](Index* index, const std::string& query) -> TargetBitmap {
+        return index->MatchQuery(query);
+    };
+    auto res = ProcessTextMatchIndex(func, query);
+    return std::make_shared<ColumnVector>(std::move(res));
+};
 
 }  // namespace exec
 }  // namespace milvus

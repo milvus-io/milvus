@@ -29,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -884,6 +886,42 @@ func (suite *ResultSuite) TestSort() {
 		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{8, 9, 10}}}},
 		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{9, 10, 11}}}},
 	}, result.FieldsData[9].GetScalars().GetArrayData().GetData())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
+	results := make([]*internalpb.SearchResults, 0)
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+	mockBlob := []byte{65, 66, 67, 65, 66, 67}
+	{
+		subRes1 := &internalpb.SearchResults{
+			MetricType: metricType,
+			NumQueries: nq,
+			TopK:       topK,
+			SlicedBlob: mockBlob,
+		}
+		results = append(results, subRes1)
+	}
+	{
+		subRes2 := &internalpb.SearchResults{
+			MetricType: metricType,
+			NumQueries: nq,
+			TopK:       topK,
+			SlicedBlob: mockBlob,
+		}
+		results = append(results, subRes2)
+	}
+	reducedRes, err := ReduceSearchOnQueryNode(context.Background(), results, reduce.NewReduceSearchResultInfo(nq, topK).
+		WithMetricType(metricType).WithPkType(schemapb.DataType_Int8).WithAdvance(true))
+	suite.NoError(err)
+	suite.Equal(2, len(reducedRes.GetSubResults()))
+
+	subRes1 := reducedRes.GetSubResults()[0]
+	suite.Equal(metricType, subRes1.GetMetricType())
+	suite.Equal(nq, subRes1.GetNumQueries())
+	suite.Equal(topK, subRes1.GetTopK())
+	suite.Equal(mockBlob, subRes1.GetSlicedBlob())
 }
 
 func TestResult_MergeRequestCost(t *testing.T) {

@@ -366,11 +366,12 @@ func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *ut
 		}
 	}
 
-	// init metaCache meta
-	metaCache, err := initMetaCache(initCtx, pipelineParams.ChunkManager, info, nil, unflushedSegmentInfos, flushedSegmentInfos)
-	if err != nil {
-		return nil, err
-	}
+	// In streaming service mode, flushed segments no longer maintain a bloom filter.
+	// So, here we skip loading the bloom filter for flushed segments.
+	info.Vchan.UnflushedSegments = unflushedSegmentInfos
+	metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSet()
+	})
 
 	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input)
 }

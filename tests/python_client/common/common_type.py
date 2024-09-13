@@ -47,6 +47,7 @@ bfloat16_type = "BFLOAT16_VECTOR"
 sparse_vector = "SPARSE_FLOAT_VECTOR"
 append_vector_type = [float16_type, bfloat16_type, sparse_vector]
 all_dense_vector_types = [float_type, float16_type, bfloat16_type]
+all_vector_data_types = [float_type, float16_type, bfloat16_type, sparse_vector]
 default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
@@ -286,6 +287,7 @@ class CheckTasks:
     check_value_equal = "check_value_equal"
     check_rg_property = "check_resource_group_property"
     check_describe_collection_property = "check_describe_collection_property"
+    check_insert_result = "check_insert_result"
 
 
 class BulkLoadStates:

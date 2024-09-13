@@ -21,11 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -33,108 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
-
-func (s *Server) startStatsTasksCheckLoop(ctx context.Context) {
-	s.serverLoopWg.Add(2)
-	go s.checkStatsTaskLoop(ctx)
-	go s.cleanupStatsTasksLoop(ctx)
-}
-
-func (s *Server) checkStatsTaskLoop(ctx context.Context) {
-	log.Info("start checkStatsTaskLoop...")
-	defer s.serverLoopWg.Done()
-
-	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Warn("DataCoord context done, exit checkStatsTaskLoop...")
-			return
-		case <-ticker.C:
-			if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
-				segments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-					return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.isCompacting && !seg.GetIsImporting()
-				}))
-				for _, segment := range segments {
-					if err := CreateStatsSegmentTask(segment, s.allocator, s.meta, s.taskScheduler, s.buildIndexCh); err != nil {
-						log.Warn("create stats task for segment failed, wait for retry",
-							zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-						continue
-					}
-				}
-			}
-		case segID := <-s.statsCh:
-			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
-			segment := s.meta.GetSegment(segID)
-			if segment == nil {
-				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
-				continue
-			}
-			if err := CreateStatsSegmentTask(segment, s.allocator, s.meta, s.taskScheduler, s.buildIndexCh); err != nil {
-				log.Warn("create stats task for segment failed, wait for retry",
-					zap.Int64("segmentID", segment.ID), zap.Error(err))
-				continue
-			}
-		}
-	}
-}
-
-// cleanupStatsTasks clean up the finished/failed stats tasks
-func (s *Server) cleanupStatsTasksLoop(ctx context.Context) {
-	log.Info("start cleanupStatsTasksLoop...")
-	defer s.serverLoopWg.Done()
-
-	ticker := time.NewTicker(Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Warn("DataCoord context done, exit cleanupStatsTasksLoop...")
-			return
-		case <-ticker.C:
-			start := time.Now()
-			log.Info("start cleanupUnusedStatsTasks...", zap.Time("startAt", start))
-
-			taskIDs := s.meta.statsTaskMeta.CanCleanedTasks()
-			for _, taskID := range taskIDs {
-				if err := s.meta.statsTaskMeta.RemoveStatsTaskByTaskID(taskID); err != nil {
-					// ignore err, if remove failed, wait next GC
-					log.Warn("clean up stats task failed", zap.Int64("taskID", taskID), zap.Error(err))
-				}
-			}
-			log.Info("recycleUnusedStatsTasks done", zap.Duration("timeCost", time.Since(start)))
-		}
-	}
-}
-
-func CreateStatsSegmentTask(segment *SegmentInfo, alloc allocator.Allocator, meta *meta, ts TaskScheduler, buildIndexCh chan UniqueID) error {
-	start, _, err := alloc.AllocN(2)
-	if err != nil {
-		return err
-	}
-	t := &indexpb.StatsTask{
-		CollectionID:    segment.GetCollectionID(),
-		PartitionID:     segment.GetPartitionID(),
-		SegmentID:       segment.GetID(),
-		InsertChannel:   segment.GetInsertChannel(),
-		TaskID:          start,
-		Version:         0,
-		NodeID:          0,
-		State:           indexpb.JobState_JobStateInit,
-		FailReason:      "",
-		TargetSegmentID: start + 1,
-	}
-	if err = meta.statsTaskMeta.AddStatsTask(t); err != nil {
-		if errors.Is(err, merr.ErrTaskDuplicate) {
-			return nil
-		}
-		return err
-	}
-	ts.Submit(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), buildIndexCh))
-	return nil
-}
 
 type statsTask struct {
 	taskID          int64
@@ -149,12 +44,12 @@ type statsTask struct {
 
 	req *workerpb.CreateStatsRequest
 
-	buildIndexCh chan UniqueID
+	subJobType indexpb.StatsSubJob
 }
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID, targetSegmentID int64, buildIndexCh chan UniqueID) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob) *statsTask {
 	return &statsTask{
 		taskID:          taskID,
 		segmentID:       segmentID,
@@ -163,7 +58,7 @@ func newStatsTask(taskID int64, segmentID, targetSegmentID int64, buildIndexCh c
 			TaskID: taskID,
 			State:  indexpb.JobState_JobStateInit,
 		},
-		buildIndexCh: buildIndexCh,
+		subJobType: subJobType,
 	}
 }
 
@@ -259,7 +154,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
-	if segment.GetIsSorted() {
+	if segment.GetIsSorted() && st.subJobType == indexpb.StatsSubJob_Sort {
 		log.Info("stats task is marked as sorted, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is marked as sorted")
 		return false
@@ -298,6 +193,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		DeltaLogs:       segment.GetDeltalogs(),
 		StorageConfig:   createStorageConfig(),
 		Schema:          collInfo.Schema,
+		SubJobType:      st.subJobType,
 		TargetSegmentID: st.targetSegmentID,
 		StartLogID:      start,
 		EndLogID:        end,
@@ -334,6 +230,8 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 }
 
 func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
 		TaskIDs:   []int64{st.GetTaskID()},
@@ -368,6 +266,8 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 }
 
 func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
 		TaskIDs:   []int64{st.GetTaskID()},
@@ -385,29 +285,42 @@ func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNod
 }
 
 func (st *statsTask) SetJobInfo(meta *meta) error {
-	// first update segment
-	metricMutation, err := meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
-	if err != nil {
-		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID),
-			zap.Int64("segmentID", st.segmentID), zap.Error(err))
-		return err
+	if st.GetState() == indexpb.JobState_JobStateFinished {
+		switch st.subJobType {
+		case indexpb.StatsSubJob_Sort:
+			// first update segment, failed state cannot generate new segment
+			metricMutation, err := meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
+			if err != nil {
+				log.Warn("save sort stats result failed", zap.Int64("taskID", st.taskID),
+					zap.Int64("segmentID", st.segmentID), zap.Error(err))
+				return err
+			}
+			metricMutation.commit()
+
+			select {
+			case getBuildIndexChSingleton() <- st.taskInfo.GetSegmentID():
+			default:
+			}
+		case indexpb.StatsSubJob_TextIndexJob:
+			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
+			if err != nil {
+				log.Warn("save text index stats result failed", zap.Int64("taskID", st.taskID),
+					zap.Int64("segmentID", st.segmentID), zap.Error(err))
+				return err
+			}
+		case indexpb.StatsSubJob_BM25Job:
+			// TODO: support bm25 job
+		}
 	}
 
 	// second update the task meta
-	if err = meta.statsTaskMeta.FinishTask(st.taskID, st.taskInfo); err != nil {
+	if err := meta.statsTaskMeta.FinishTask(st.taskID, st.taskInfo); err != nil {
 		log.Warn("save stats result failed", zap.Int64("taskID", st.taskID), zap.Error(err))
 		return err
 	}
 
-	metricMutation.commit()
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
-		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()))
-
-	if st.buildIndexCh != nil {
-		select {
-		case st.buildIndexCh <- st.taskInfo.GetSegmentID():
-		default:
-		}
-	}
+		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()),
+		zap.String("subJobType", st.subJobType.String()), zap.String("state", st.taskInfo.GetState().String()))
 	return nil
 }

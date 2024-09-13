@@ -293,14 +293,15 @@ class ThreadSafeValidData {
             total += field_data->get_num_rows();
         }
         if (length_ + total > data_.size()) {
-            data_.reserve(length_ + total);
+            data_.resize(length_ + total);
         }
-        length_ += total;
+
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
             for (size_t i = 0; i < num_row; i++) {
-                data_.push_back(field_data->is_valid(i));
+                data_[length_ + i] = field_data->is_valid(i);
             }
+            length_ += num_row;
         }
     }
 
@@ -311,14 +312,10 @@ class ThreadSafeValidData {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
             if (length_ + num_rows > data_.size()) {
-                data_.reserve(length_ + num_rows);
+                data_.resize(length_ + num_rows);
             }
-
             auto src = data->valid_data().data();
-            for (size_t i = 0; i < num_rows; ++i) {
-                data_.push_back(src[i]);
-                // data_[length_ + i] = src[i];
-            }
+            std::copy_n(src, num_rows, data_.data() + length_);
             length_ += num_rows;
         }
     }

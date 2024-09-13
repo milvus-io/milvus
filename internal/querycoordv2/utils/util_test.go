@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -56,13 +57,16 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 		Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 	}
 
-	suite.setNodeAvailable(1, 2)
-	err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 		2: {
 			ID:            2,
 			InsertChannel: "test",
 		},
-	})
+	}).Maybe()
+
+	suite.setNodeAvailable(1, 2)
+	err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
 	suite.NoError(err)
 }
 
@@ -73,14 +77,16 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			Channel:  "test",
 			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 		}
-		// leader nodeID=1 not available
-		suite.setNodeAvailable(2)
-		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+		mockTargetManager := meta.NewMockTargetManager(suite.T())
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
 			},
-		})
+		}).Maybe()
+		// leader nodeID=1 not available
+		suite.setNodeAvailable(2)
+		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
 		suite.Error(err)
 		suite.nodeMgr = session.NewNodeManager()
 	})
@@ -91,14 +97,17 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			Channel:  "test",
 			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 		}
-		// leader nodeID=2 not available
-		suite.setNodeAvailable(1)
-		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+
+		mockTargetManager := meta.NewMockTargetManager(suite.T())
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
 			},
-		})
+		}).Maybe()
+		// leader nodeID=2 not available
+		suite.setNodeAvailable(1)
+		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
 		suite.Error(err)
 		suite.nodeMgr = session.NewNodeManager()
 	})
@@ -109,14 +118,16 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			Channel:  "test",
 			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 		}
-		suite.setNodeAvailable(1, 2)
-		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+		mockTargetManager := meta.NewMockTargetManager(suite.T())
+		mockTargetManager.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{
 			// target segmentID=1 not in leadView
 			1: {
 				ID:            1,
 				InsertChannel: "test",
 			},
-		})
+		}).Maybe()
+		suite.setNodeAvailable(1, 2)
+		err := CheckLeaderAvailable(suite.nodeMgr, mockTargetManager, leadview)
 		suite.Error(err)
 		suite.nodeMgr = session.NewNodeManager()
 	})

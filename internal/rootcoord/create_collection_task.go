@@ -153,7 +153,15 @@ func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
+		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
+			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetDefaultValue() != nil {
+			if fieldSchema.IsPrimaryKey {
+				msg := fmt.Sprintf("primary field not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
 			switch fieldSchema.GetDefaultValue().Data.(type) {
 			case *schemapb.ValueField_BoolData:
 				if fieldSchema.GetDataType() != schemapb.DataType_Bool {
@@ -251,10 +259,34 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 	return validateFieldDataType(schema)
 }
 
-func (t *createCollectionTask) assignFieldID(schema *schemapb.CollectionSchema) {
-	for idx := range schema.GetFields() {
-		schema.Fields[idx].FieldID = int64(idx + StartOfUserFieldID)
+func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
+	name2id := map[string]int64{}
+	for idx, field := range schema.GetFields() {
+		field.FieldID = int64(idx + StartOfUserFieldID)
+		name2id[field.GetName()] = field.GetFieldID()
 	}
+
+	for fidx, function := range schema.GetFunctions() {
+		function.InputFieldIds = make([]int64, len(function.InputFieldNames))
+		function.Id = int64(fidx) + StartOfUserFunctionID
+		for idx, name := range function.InputFieldNames {
+			fieldId, ok := name2id[name]
+			if !ok {
+				return fmt.Errorf("input field %s of function %s not found", name, function.GetName())
+			}
+			function.InputFieldIds[idx] = fieldId
+		}
+
+		function.OutputFieldIds = make([]int64, len(function.OutputFieldNames))
+		for idx, name := range function.OutputFieldNames {
+			fieldId, ok := name2id[name]
+			if !ok {
+				return fmt.Errorf("output field %s of function %s not found", name, function.GetName())
+			}
+			function.OutputFieldIds[idx] = fieldId
+		}
+	}
+	return nil
 }
 
 func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSchema) {
@@ -295,7 +327,11 @@ func (t *createCollectionTask) prepareSchema() error {
 		return err
 	}
 	t.appendDynamicField(&schema)
-	t.assignFieldID(&schema)
+
+	if err := t.assignFieldAndFunctionID(&schema); err != nil {
+		return err
+	}
+
 	t.appendSysFields(&schema)
 	t.schema = &schema
 	return nil
@@ -532,6 +568,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
+		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
 		ShardsNum:            t.Req.ShardsNum,
@@ -601,6 +638,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 				Description: collInfo.Description,
 				AutoID:      collInfo.AutoID,
 				Fields:      model.MarshalFieldModels(collInfo.Fields),
+				Functions:   model.MarshalFunctionModels(collInfo.Functions),
 			},
 		},
 	}, &nullStep{})

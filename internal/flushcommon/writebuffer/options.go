@@ -26,6 +26,7 @@ type writeBufferOption struct {
 
 	pkStatsFactory metacache.PkStatsFactory
 	metaWriter     syncmgr.MetaWriter
+	errorHandler   func(error)
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
@@ -35,13 +36,16 @@ func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 	}
 
 	return &writeBufferOption{
-		// TODO use l0 delta as default after implementation.
 		deletePolicy: deletePolicy,
 		syncPolicies: []SyncPolicy{
 			GetFullBufferPolicy(),
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
 			GetSealedSegmentsPolicy(metacache),
 			GetDroppedSegmentPolicy(metacache),
+		},
+		// default error handler, just panicking
+		errorHandler: func(err error) {
+			panic(err)
 		},
 	}
 }
@@ -73,5 +77,11 @@ func WithMetaWriter(writer syncmgr.MetaWriter) WriteBufferOption {
 func WithSyncPolicy(policy SyncPolicy) WriteBufferOption {
 	return func(opt *writeBufferOption) {
 		opt.syncPolicies = append(opt.syncPolicies, policy)
+	}
+}
+
+func WithErrorHandler(handler func(err error)) WriteBufferOption {
+	return func(opt *writeBufferOption) {
+		opt.errorHandler = handler
 	}
 }

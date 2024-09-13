@@ -769,7 +769,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		return nil
 	})
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
-	//catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+	// catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	in := mocks.NewMockIndexNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -833,7 +833,11 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
-	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)))
+	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+		withStatsTaskMeta(&statsTaskMeta{
+			ctx:     ctx,
+			catalog: catalog,
+		}))
 
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
@@ -975,9 +979,13 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 				},
 			}),
 			withIndexMeta(&indexMeta{
-				RWMutex: sync.RWMutex{},
 				ctx:     ctx,
 				catalog: catalog,
+			}),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     ctx,
+				catalog: catalog,
+				tasks:   nil,
 			}))
 
 		handler := NewNMockHandler(s.T())
@@ -1016,11 +1024,14 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		workerManager := session.NewMockWorkerManager(s.T())
 
-		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(&indexMeta{
-			RWMutex: sync.RWMutex{},
-			ctx:     ctx,
-			catalog: catalog,
-		}))
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)),
+			withIndexMeta(&indexMeta{
+				ctx:     ctx,
+				catalog: catalog,
+			}), withStatsTaskMeta(&statsTaskMeta{
+				ctx:     ctx,
+				catalog: catalog,
+			}))
 
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
@@ -1309,6 +1320,10 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 						},
 					},
 				},
+			}),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
 			}))
 
 		cm := mocks.NewChunkManager(s.T())
@@ -1545,6 +1560,10 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					},
 				},
 			},
+		},
+		statsTaskMeta: &statsTaskMeta{
+			ctx:     context.Background(),
+			catalog: catalog,
 		},
 	}
 

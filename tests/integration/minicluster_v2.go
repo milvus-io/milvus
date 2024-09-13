@@ -19,15 +19,22 @@ package integration
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"path"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
@@ -95,6 +102,7 @@ type MiniClusterV2 struct {
 	RootCoordClient  types.RootCoordClient
 	QueryCoordClient types.QueryCoordClient
 
+	MilvusClient    milvuspb.MilvusServiceClient
 	ProxyClient     types.ProxyClient
 	DataNodeClient  types.DataNodeClient
 	QueryNodeClient types.QueryNodeClient
@@ -113,7 +121,8 @@ type MiniClusterV2 struct {
 	dnid           atomic.Int64
 	streamingnodes []*streamingnode.Server
 
-	Extension *ReportChanExtension
+	clientConn *grpc.ClientConn
+	Extension  *ReportChanExtension
 }
 
 type OptionV2 func(cluster *MiniClusterV2)
@@ -380,12 +389,50 @@ func (cluster *MiniClusterV2) Start() error {
 		}
 	}
 
+	port := params.ProxyGrpcServerCfg.Port.GetAsInt()
+	cluster.clientConn, err = grpc.DialContext(cluster.ctx, fmt.Sprintf("localhost:%d", port), getGrpcDialOpt()...)
+	if err != nil {
+		return err
+	}
+
+	cluster.MilvusClient = milvuspb.NewMilvusServiceClient(cluster.clientConn)
 	log.Info("minicluster started")
 	return nil
 }
 
+func getGrpcDialOpt() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithBlock(),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                5 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  100 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: 3 * time.Second,
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(6),
+			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
+				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
+			}),
+			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
+		),
+	}
+}
+
 func (cluster *MiniClusterV2) Stop() error {
 	log.Info("mini cluster stop")
+	if cluster.clientConn != nil {
+		cluster.clientConn.Close()
+	}
 	cluster.RootCoord.Stop()
 	log.Info("mini cluster rootCoord stopped")
 	cluster.DataCoord.Stop()

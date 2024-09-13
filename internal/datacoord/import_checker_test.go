@@ -72,10 +72,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	sm := NewMockManager(s.T())
 
-	buildIndexCh := make(chan UniqueID, 1024)
 	mts := NewMockTaskScheduler(s.T())
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, sm, imeta, buildIndexCh, mts).(*importChecker)
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, sm, imeta, mts).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{

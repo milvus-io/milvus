@@ -36,6 +36,7 @@
 #include "index/IndexInfo.h"
 #include "index/SkipIndex.h"
 #include "mmap/Column.h"
+#include "index/TextMatchIndex.h"
 
 namespace milvus::segcore {
 
@@ -126,6 +127,12 @@ class SegmentInterface {
 
     virtual bool
     is_nullable(FieldId field_id) const = 0;
+
+    virtual void
+    CreateTextIndex(FieldId field_id) = 0;
+
+    virtual index::TextMatchIndex*
+    GetTextIndex(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -258,6 +265,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
+
+    index::TextMatchIndex*
+    GetTextIndex(FieldId field_id) const override;
 
  public:
     virtual void
@@ -407,6 +417,10 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
     SkipIndex skip_index_;
+
+    // text-indexes used to do match.
+    std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
+        text_indexes_;
 };
 
 }  // namespace milvus::segcore

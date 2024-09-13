@@ -1,5 +1,6 @@
 import pytest
 import sys
+from typing import Dict, List
 from pymilvus import DefaultConfig
 
 from base.database_wrapper import ApiDatabaseWrapper
@@ -15,8 +16,9 @@ from base.high_level_api_wrapper import HighLevelApiWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import IndexPrams
 
-from pymilvus import ResourceGroupInfo
+from pymilvus import ResourceGroupInfo, DataType
 
 
 class Base:
@@ -33,6 +35,7 @@ class Base:
     resource_group_list = []
     high_level_api_wrap = None
     skip_connection = False
+
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
 
@@ -42,6 +45,9 @@ class Base:
     def setup_method(self, method):
         log.info(("*" * 35) + " setup " + ("*" * 35))
         log.info("[setup_method] Start setup test case %s." % method.__name__)
+        self._setup_objects()
+
+    def _setup_objects(self):
         self.connection_wrap = ApiConnectionsWrapper()
         self.utility_wrap = ApiUtilityWrapper()
         self.collection_wrap = ApiCollectionWrapper()
@@ -55,7 +61,9 @@ class Base:
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        self._teardown_objects()
 
+    def _teardown_objects(self):
         try:
             """ Drop collection before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
@@ -78,7 +86,8 @@ class Base:
             rgs_list = self.utility_wrap.list_resource_groups()[0]
             for rg_name in self.resource_group_list:
                 if rg_name is not None and rg_name in rgs_list:
-                    rg = self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                    rg = \
+                    self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
                     if isinstance(rg, ResourceGroupInfo):
                         if rg.num_available_node > 0:
                             self.utility_wrap.transfer_node(source=rg_name,
@@ -233,7 +242,7 @@ class TestcaseBase(Base):
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
                                 enable_dynamic_field=False, with_json=True, random_primary_key=False,
                                 multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
-                                **kwargs):
+                                nullable_fields={}, default_value_fields={}, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -241,6 +250,8 @@ class TestcaseBase(Base):
                 3. insert specified (binary/non-binary, default/all data type) data
                    into each partition if any
                 4. not load if specifying is_index as True
+                5. enable insert null data: nullable_fields = {"nullable_fields_name": null data percent}
+                6. enable insert default value: default_value_fields = {"default_fields_name": default value}
         expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
@@ -249,6 +260,12 @@ class TestcaseBase(Base):
         collection_name = cf.gen_unique_str(prefix)
         if name is not None:
             collection_name = name
+        if not isinstance(nullable_fields, dict):
+            log.error("nullable_fields should a dict like {'nullable_fields_name': null data percent}")
+            assert False
+        if not isinstance(default_value_fields, dict):
+            log.error("default_value_fields should a dict like {'default_fields_name': default value}")
+            assert False
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
@@ -258,21 +275,29 @@ class TestcaseBase(Base):
                                                           enable_dynamic_field=enable_dynamic_field,
                                                           with_json=with_json, multiple_dim_array=multiple_dim_array,
                                                           is_partition_key=is_partition_key,
-                                                          vector_data_type=vector_data_type)
+                                                          vector_data_type=vector_data_type,
+                                                          nullable_fields=nullable_fields,
+                                                          default_value_fields=default_value_fields)
         if is_binary:
             default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
-                                                                     primary_field=primary_field)
+                                                                     primary_field=primary_field,
+                                                                     nullable_fields=nullable_fields,
+                                                                     default_value_fields=default_value_fields)
         if vector_data_type == ct.sparse_vector:
             default_schema = cf.gen_default_sparse_schema(auto_id=auto_id, primary_field=primary_field,
-                                                                     enable_dynamic_field=enable_dynamic_field,
-                                                                     with_json=with_json,
-                                                                     multiple_dim_array=multiple_dim_array)
+                                                          enable_dynamic_field=enable_dynamic_field,
+                                                          with_json=with_json,
+                                                          multiple_dim_array=multiple_dim_array,
+                                                          nullable_fields=nullable_fields,
+                                                          default_value_fields=default_value_fields)
         if is_all_data_type:
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
                                                                    primary_field=primary_field,
                                                                    enable_dynamic_field=enable_dynamic_field,
                                                                    with_json=with_json,
-                                                                   multiple_dim_array=multiple_dim_array)
+                                                                   multiple_dim_array=multiple_dim_array,
+                                                                   nullable_fields=nullable_fields,
+                                                                   default_value_fields=default_value_fields)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
@@ -285,7 +310,8 @@ class TestcaseBase(Base):
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id,
                                dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json,
                                random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
-                               primary_field=primary_field, vector_data_type=vector_data_type)
+                               primary_field=primary_field, vector_data_type=vector_data_type,
+                               nullable_fields=nullable_fields)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
@@ -388,10 +414,82 @@ class TestcaseBase(Base):
         self.utility_wrap.create_role()
 
         # grant privilege to the role
-        self.utility_wrap.role_grant(object=privilege_object, object_name=object_name, privilege=privilege, db_name=db_name)
+        self.utility_wrap.role_grant(object=privilege_object, object_name=object_name, privilege=privilege,
+                                     db_name=db_name)
 
         # bind the role to the user
         self.utility_wrap.role_add_user(tmp_user)
 
         return tmp_user, tmp_pwd, tmp_role
 
+    def build_multi_index(self, index_params: Dict[str, IndexPrams], collection_obj: ApiCollectionWrapper = None):
+        collection_obj = collection_obj or self.collection_wrap
+        for k, v in index_params.items():
+            collection_obj.create_index(field_name=k, index_params=v.to_dict, index_name=k)
+        log.info(f"[TestcaseBase] Build all indexes done: {list(index_params.keys())}")
+        return collection_obj
+
+    def drop_multi_index(self, index_names: List[str], collection_obj: ApiCollectionWrapper = None,
+                         check_task=None, check_items=None):
+        collection_obj = collection_obj or self.collection_wrap
+        for n in index_names:
+            collection_obj.drop_index(index_name=n, check_task=check_task, check_items=check_items)
+        log.info(f"[TestcaseBase] Drop all indexes done: {index_names}")
+        return collection_obj
+
+    def show_indexes(self, collection_obj: ApiCollectionWrapper = None):
+        collection_obj = collection_obj or self.collection_wrap
+        indexes = {n.field_name: n.params for n in self.collection_wrap.indexes}
+        log.info("[TestcaseBase] Collection: `{0}` index: {1}".format(collection_obj.name, indexes))
+        return indexes
+
+
+class TestCaseClassBase(TestcaseBase):
+    """
+    Setup objects on class
+    """
+
+    def setup_class(self):
+        log.info("[setup_class] " + " Start setup class ".center(100, "~"))
+        self._setup_objects(self)
+
+    def teardown_class(self):
+        log.info("[teardown_class]" + " Start teardown class ".center(100, "~"))
+        self._teardown_objects(self)
+
+    def setup_method(self, method):
+        log.info(" setup ".center(80, "*"))
+        log.info("[setup_method] Start setup test case %s." % method.__name__)
+
+    def teardown_method(self, method):
+        log.info(" teardown ".center(80, "*"))
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+
+    @property
+    def all_scalar_fields(self):
+        dtypes = [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.VARCHAR, DataType.BOOL,
+                  DataType.FLOAT, DataType.DOUBLE]
+        dtype_names = [f"{n.name}" for n in dtypes] + [f"ARRAY_{n.name}" for n in dtypes] + [DataType.JSON.name]
+        return dtype_names
+
+    @property
+    def all_index_scalar_fields(self):
+        return list(set(self.all_scalar_fields) - {DataType.JSON.name})
+
+    @property
+    def inverted_support_dtype_names(self):
+        return self.all_index_scalar_fields
+
+    @property
+    def inverted_not_support_dtype_names(self):
+        return [DataType.JSON.name]
+
+    @property
+    def bitmap_support_dtype_names(self):
+        dtypes = [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.BOOL, DataType.VARCHAR]
+        dtype_names = [f"{n.name}" for n in dtypes] + [f"ARRAY_{n.name}" for n in dtypes]
+        return dtype_names
+
+    @property
+    def bitmap_not_support_dtype_names(self):
+        return list(set(self.all_scalar_fields) - set(self.bitmap_support_dtype_names))

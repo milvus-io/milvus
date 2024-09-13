@@ -299,6 +299,14 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	return nil
 }
 
+func SetBitmapIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) {
+	_, exist := indexParams[common.IndexOffsetCacheEnabledKey]
+	if exist {
+		return
+	}
+	indexParams[common.IndexOffsetCacheEnabledKey] = params.QueryNodeCfg.IndexOffsetCacheEnabled.GetValue()
+}
+
 // SetDiskIndexLoadParams set disk index load params with ratio params on queryNode
 // QueryNode cal load params with ratio params ans cpu count...
 func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string, numRows int64) error {

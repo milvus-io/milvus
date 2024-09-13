@@ -19,6 +19,7 @@ package ratelimitutil
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -153,6 +154,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 func TestRateLimiterTreeClearInvalidLimiterNode(t *testing.T) {
 	root := NewRateLimiterNode(internalpb.RateScope_Cluster)
 	tree := NewRateLimiterTree(root)
+	tree.lastClearTime = time.Now().Add(-1 * clearInvalidNodeInterval * 2)
 
 	generateNodeFFunc := func(level internalpb.RateScope) func() *RateLimiterNode {
 		return func() *RateLimiterNode {

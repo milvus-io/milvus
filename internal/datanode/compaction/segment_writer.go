@@ -8,6 +8,7 @@ import (
 	"context"
 	"math"
 
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // Not concurrent safe.
@@ -47,6 +47,7 @@ type MultiSegmentWriter struct {
 	// segID -> fieldID -> binlogs
 
 	res []*datapb.CompactionSegment
+	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 }
 
 type compactionAlloactor struct {
@@ -195,9 +196,27 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 	return writer.Write(v)
 }
 
-// Could return an empty list if every insert of the segment is deleted
+func (w *MultiSegmentWriter) appendEmptySegment() error {
+	writer, err := w.getWriter()
+	if err != nil {
+		return err
+	}
+
+	w.res = append(w.res, &datapb.CompactionSegment{
+		SegmentID: writer.GetSegmentID(),
+		NumOfRows: 0,
+		Channel:   w.channel,
+	})
+	return nil
+}
+
+// DONOT return an empty list if every insert of the segment is deleted,
+// append an empty segment instead
 func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
 	if w.current == -1 {
+		if err := w.appendEmptySegment(); err != nil {
+			return nil, err
+		}
 		return w.res, nil
 	}
 

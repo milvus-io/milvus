@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -1116,6 +1117,11 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		}
 	}
 
+	// set whether enable offset cache for bitmap index
+	if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+	}
+
 	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
 		return err
 	}
@@ -1175,6 +1181,38 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
 	)
 	return nil
+}
+
+func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {
+	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()), zap.Any("text logs", textLogs))
+
+	f, err := schemaHelper.GetFieldFromID(textLogs.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	cgoProto := &indexcgopb.LoadTextIndexInfo{
+		FieldID:      textLogs.GetFieldID(),
+		Version:      textLogs.GetVersion(),
+		BuildID:      textLogs.GetBuildID(),
+		Files:        textLogs.GetFiles(),
+		Schema:       f,
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
+	}
+
+	marshaled, err := proto.Marshal(cgoProto)
+	if err != nil {
+		return err
+	}
+
+	var status C.CStatus
+	_, _ = GetLoadPool().Submit(func() (any, error) {
+		status = C.LoadTextIndex(s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		return nil, nil
+	}).Await()
+
+	return HandleCStatus(ctx, &status, "LoadTextIndex failed")
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
@@ -1286,6 +1324,24 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	}
 
 	log.Ctx(ctx).Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
+
+	return nil
+}
+
+func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error {
+	var status C.CStatus
+	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
+
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID))
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(ctx, &status, "CreateTextIndex failed"); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("create text index for segment done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
 	return nil
 }

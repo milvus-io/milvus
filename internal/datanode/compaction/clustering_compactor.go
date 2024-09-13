@@ -197,6 +197,11 @@ func (t *clusteringCompactionTask) init() error {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
 	for _, field := range t.plan.Schema.Fields {
+		// todo(wayblink): supprot null in clustring compact
+		if field.GetNullable() {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("clustering compaction can't be trigger in field(%s) which set nullable == true", field.GetName()))
+		}
+
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
 			pkField = field
 		}
@@ -458,7 +463,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
+		t.clusterBufferLocks.Lock(buffer.id)
 		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()) + buffer.bufferMemorySize.Load()
+		t.clusterBufferLocks.Unlock(buffer.id)
 	}
 	return totalBufferSize
 }

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -80,6 +81,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
+	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
 	AddExcludedSegments(excludeInfo map[int64]uint64)
@@ -331,6 +333,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
 				Username:           req.GetReq().GetUsername(),
 				IsAdvanced:         false,
+				GroupByFieldId:     subReq.GetGroupByFieldId(),
+				GroupSize:          subReq.GetGroupSize(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -349,14 +353,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					return nil, err
 				}
 
-				return segments.ReduceSearchResults(ctx,
+				return segments.ReduceSearchOnQueryNode(ctx,
 					results,
-					segments.NewReduceInfo(searchReq.Req.GetNq(),
-						searchReq.Req.GetTopk(),
-						searchReq.Req.GetExtraSearchParam().GetGroupByFieldId(),
-						searchReq.Req.GetExtraSearchParam().GetGroupSize(),
-						searchReq.Req.GetMetricType()),
-				)
+					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
+						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
+						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
+						WithGroupSize(searchReq.GetReq().GetGroupSize()))
 			})
 			futures[index] = future
 		}
@@ -375,12 +377,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 			}
 			results[i] = result
 		}
-		var ret *internalpb.SearchResults
-		ret, err = segments.MergeToAdvancedResults(ctx, results)
-		if err != nil {
-			return nil, err
-		}
-		return []*internalpb.SearchResults{ret}, nil
+		return results, nil
 	}
 	return sd.search(ctx, req, sealed, growing)
 }
@@ -586,6 +583,10 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	return results, nil
+}
+
+func (sd *shardDelegator) GetDeleteBufferSize() (entryNum int64, memorySize int64) {
+	return sd.deleteBuffer.Size()
 }
 
 type subTask[T any] struct {

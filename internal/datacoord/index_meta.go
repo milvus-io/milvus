@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -191,21 +192,21 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	}
 
 	useAutoIndex := false
-	userIndexParamsWithoutMmapKey := make([]*commonpb.KeyValuePair, 0)
+	userIndexParamsWithoutConfigableKey := make([]*commonpb.KeyValuePair, 0)
 	for _, param := range fieldIndex.UserIndexParams {
-		if param.Key == common.MmapEnabledKey {
+		if indexparams.IsConfigableIndexParam(param.Key) {
 			continue
 		}
 		if param.Key == common.IndexTypeKey && param.Value == common.AutoIndexName {
 			useAutoIndex = true
 		}
-		userIndexParamsWithoutMmapKey = append(userIndexParamsWithoutMmapKey, param)
+		userIndexParamsWithoutConfigableKey = append(userIndexParamsWithoutConfigableKey, param)
 	}
 
-	if len(userIndexParamsWithoutMmapKey) != len(req.GetUserIndexParams()) {
+	if len(userIndexParamsWithoutConfigableKey) != len(req.GetUserIndexParams()) {
 		return false
 	}
-	for _, param1 := range userIndexParamsWithoutMmapKey {
+	for _, param1 := range userIndexParamsWithoutConfigableKey {
 		exist := false
 		for i, param2 := range req.GetUserIndexParams() {
 			if param2.Key == param1.Key && param2.Value == param1.Value {

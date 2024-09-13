@@ -97,7 +97,7 @@ BitmapIndex<T>::Build(size_t n, const T* data) {
         valid_bitset.set(i);
     }
 
-    if (data_.size() < DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND) {
+    if (data_.size() < DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND) {
         for (auto it = data_.begin(); it != data_.end(); ++it) {
             bitsets_[it->first] = ConvertRoaringToBitset(it->second);
         }
@@ -330,7 +330,7 @@ BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
 template <typename T>
 void
 BitmapIndex<T>::ChooseIndexLoadMode(int64_t index_length) {
-    if (index_length <= DEFAULT_BITMAP_INDEX_CARDINALITY_BOUND) {
+    if (index_length <= DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND) {
         LOG_DEBUG("load bitmap index with bitset mode");
         build_mode_ = BitmapIndexBuildMode::BITSET;
     } else {

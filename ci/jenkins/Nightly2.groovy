@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.40.0') _
+@Library('jenkins-shared-library@v0.46.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -57,7 +57,8 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              images: '["milvus","pytest","helm"]'
+                                              images: '["milvus","pytest","helm"]',
+                                              tekton_log_timeout: '30m'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
                         pytest_image =  tekton.query_result job_name, 'pytest-image-fqdn'
@@ -103,6 +104,7 @@ pipeline {
                                               pytest_image: pytest_image,
                                               helm_image: helm_image,
                                               milvus_deployment_option: milvus_deployment_option,
+                                              tekton_log_timeout: '30m',
                                               verbose: 'false'
                                 }
                             }

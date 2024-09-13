@@ -119,8 +119,8 @@ SkipIndex::LoadString(milvus::FieldId field_id,
     auto chunkMetrics = std::make_unique<FieldChunkMetrics>();
     if (num_rows > 0) {
         auto info = ProcessStringFieldMetrics(var_column);
-        chunkMetrics->min_ = Metrics(info.min_);
-        chunkMetrics->max_ = Metrics(info.max_);
+        chunkMetrics->min_ = Metrics(std::move(info.min_));
+        chunkMetrics->max_ = Metrics(std::move(info.max_));
         chunkMetrics->null_count_ = info.null_count_;
     }
 

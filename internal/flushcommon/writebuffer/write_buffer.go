@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -140,6 +141,8 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
+	errHandler func(err error)
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -190,6 +193,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		syncCheckpoint:   newCheckpointCandiates(),
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
+		errHandler:       option.errorHandler,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -344,6 +348,11 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 
 			if syncTask.StartPosition() != nil {
 				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
+			}
+
+			if streamingutil.IsStreamingServiceEnabled() && syncTask.IsFlush() {
+				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
+				log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
 			}
 			return nil
 		}))
@@ -607,7 +616,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithTimeRange(tsFrom, tsTo).
 		WithLevel(segmentInfo.Level()).
 		WithCheckpoint(wb.checkpoint).
-		WithBatchSize(batchSize)
+		WithBatchSize(batchSize).
+		WithErrorHandler(wb.errHandler)
 
 	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
 		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed

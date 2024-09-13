@@ -664,7 +664,7 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -708,7 +708,7 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -937,7 +937,7 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -967,7 +967,7 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -997,7 +997,7 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapIndexCardinalityBound)},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 

@@ -24,6 +24,11 @@
 #include "common/Types.h"
 
 namespace milvus {
+using TypeParams = std::map<std::string, std::string>;
+using TokenizerParams = std::map<std::string, std::string>;
+
+TokenizerParams
+ParseTokenizerParams(const TypeParams& params);
 
 class FieldMeta {
  public:
@@ -49,6 +54,21 @@ class FieldMeta {
           id_(id),
           type_(type),
           string_info_(StringInfo{max_length}),
+          nullable_(nullable) {
+        Assert(IsStringDataType(type_));
+    }
+
+    FieldMeta(const FieldName& name,
+              FieldId id,
+              DataType type,
+              int64_t max_length,
+              bool nullable,
+              bool enable_match,
+              std::map<std::string, std::string>& params)
+        : name_(name),
+          id_(id),
+          type_(type),
+          string_info_(StringInfo{max_length, enable_match, std::move(params)}),
           nullable_(nullable) {
         Assert(IsStringDataType(type_));
     }
@@ -98,6 +118,12 @@ class FieldMeta {
         Assert(string_info_.has_value());
         return string_info_->max_length;
     }
+
+    bool
+    enable_match() const;
+
+    TokenizerParams
+    get_tokenizer_params() const;
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
@@ -160,6 +186,10 @@ class FieldMeta {
         }
     }
 
+ public:
+    static FieldMeta
+    ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto);
+
  private:
     struct VectorInfo {
         int64_t dim_;
@@ -167,6 +197,8 @@ class FieldMeta {
     };
     struct StringInfo {
         int64_t max_length;
+        bool enable_match;
+        std::map<std::string, std::string> params;
     };
     FieldName name_;
     FieldId id_;

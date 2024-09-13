@@ -113,3 +113,12 @@ func GetCSVSep(options Options) (rune, error) {
 	}
 	return []rune(sep)[0], nil
 }
+
+func GetCSVNullKey(options Options) (string, error) {
+	nullKey, err := funcutil.GetAttrByKeyFromRepeatedKV("nullkey", options)
+	defaultNullKey := ""
+	if err != nil || len(nullKey) == 0 {
+		return defaultNullKey, nil
+	}
+	return nullKey, nil
+}

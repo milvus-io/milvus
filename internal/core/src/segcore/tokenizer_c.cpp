@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/tokenizer_c.h"
+#include "common/FieldMeta.h"
+#include "common/protobuf_utils.h"
+#include "pb/schema.pb.h"
 #include "common/EasyAssert.h"
-
 #include "tokenizer.h"
 
 using Map = std::map<std::string, std::string>;
@@ -38,4 +40,20 @@ CTokenStream
 create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
     auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
     return impl->CreateTokenStream(std::string(text, text_len)).release();
+}
+
+CStatus
+validate_text_schema(const uint8_t* field_schema, uint64_t length) {
+    try {
+        auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();
+        AssertInfo(schema->ParseFromArray(field_schema, length),
+                   "failed to create field schema");
+
+        auto type_params = milvus::RepeatedKeyValToMap(schema->type_params());
+        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }

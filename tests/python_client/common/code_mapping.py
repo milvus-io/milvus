@@ -32,3 +32,14 @@ class PartitionErrorMessage(ExceptionsMessage):
 
 class IndexErrorMessage(ExceptionsMessage):
     WrongFieldName = "cannot create index on non-vector field: %s"
+    DropLoadedIndex = "index cannot be dropped, collection is loaded, please release it first"
+    CheckVectorIndex = "data type {0} can't build with this index {1}"
+    SparseFloatVectorMetricType = "only IP is the supported metric type for sparse index"
+    VectorMetricTypeExist = "metric type not set for vector index"
+    CheckBitmapIndex = "bitmap index are only supported on bool, int, string and array field"
+    CheckBitmapOnPK = "create bitmap index on primary key not supported"
+    CheckBitmapCardinality = "failed to check bitmap cardinality limit, should be larger than 0 and smaller than 1000"
+
+
+class QueryErrorMessage(ExceptionsMessage):
+    ParseExpressionFailed = "failed to create query plan: cannot parse expression: "

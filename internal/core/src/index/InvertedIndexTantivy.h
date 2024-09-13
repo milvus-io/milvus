@@ -173,10 +173,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     RegexQuery(const std::string& regex_pattern) override;
 
+ protected:
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
- private:
     void
     finish();
 
@@ -184,7 +184,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
- private:
+ protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
     std::string path_;

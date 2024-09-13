@@ -23,6 +23,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <boost/pointer_cast.hpp>
 
 #include "Utils.h"
 #include "Types.h"
@@ -152,9 +153,13 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id, bool mmap_enabled) {
     auto field_info = it->second;
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
+    bool mmap_rss_not_need = true;
     for (const auto& data_path : field_info.insert_files) {
-        auto column =
-            cc->Read(data_path, mmap_descriptor_, field_meta, mmap_enabled);
+        auto column = cc->Read(data_path,
+                               mmap_descriptor_,
+                               field_meta,
+                               mmap_enabled,
+                               mmap_rss_not_need);
     }
 }
 
@@ -483,7 +488,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
 void
 SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
-    auto filepath = std::filesystem::path(data.mmap_dir_path) /
+    auto filepath = std::filesystem::path(data.mmap_dir_path) / "raw_data" /
                     std::to_string(get_segment_id()) /
                     std::to_string(field_id.get());
     auto dir = filepath.parent_path();
@@ -1986,6 +1991,85 @@ SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
             return;
         }
     }
+}
+
+void
+SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
+    std::unique_lock lck(mutex_);
+
+    const auto& field_meta = schema_->operator[](field_id);
+    auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
+    std::unique_ptr<index::TextMatchIndex> index;
+    if (!cfg.GetEnableMmap()) {
+        // build text index in ram.
+        index = std::make_unique<index::TextMatchIndex>(
+            std::numeric_limits<int64_t>::max(),
+            "milvus_tokenizer",
+            field_meta.get_tokenizer_params());
+    } else {
+        // build text index using mmap.
+        index = std::make_unique<index::TextMatchIndex>(
+            cfg.GetMmapPath(),
+            "milvus_tokenizer",
+            field_meta.get_tokenizer_params());
+    }
+
+    {
+        // build
+        auto iter = fields_.find(field_id);
+        if (iter != fields_.end()) {
+            auto column =
+                std::dynamic_pointer_cast<VariableColumn<std::string>>(
+                    iter->second);
+            AssertInfo(
+                column != nullptr,
+                "failed to create text index, field is not of text type: {}",
+                field_id.get());
+            auto n = column->NumRows();
+            for (size_t i = 0; i < n; i++) {
+                index->AddText(std::string(column->RawAt(i)), i);
+            }
+        } else {  // fetch raw data from index.
+            auto field_index_iter = scalar_indexings_.find(field_id);
+            AssertInfo(field_index_iter != scalar_indexings_.end(),
+                       "failed to create text index, neither raw data nor "
+                       "index are found");
+            auto ptr = field_index_iter->second.get();
+            AssertInfo(ptr->HasRawData(),
+                       "text raw data not found, trying to create text index "
+                       "from index, but this index don't contain raw data");
+            auto impl = dynamic_cast<index::ScalarIndex<std::string>*>(ptr);
+            AssertInfo(impl != nullptr,
+                       "failed to create text index, field index cannot be "
+                       "converted to string index");
+            auto n = impl->Size();
+            for (size_t i = 0; i < n; i++) {
+                index->AddText(impl->Reverse_Lookup(i), i);
+            }
+        }
+    }
+
+    // create index reader.
+    index->CreateReader();
+    // release index writer.
+    index->Finish();
+
+    index->Reload();
+
+    index->RegisterTokenizer("milvus_tokenizer",
+                             field_meta.get_tokenizer_params());
+
+    text_indexes_[field_id] = std::move(index);
+}
+
+void
+SegmentSealedImpl::LoadTextIndex(FieldId field_id,
+                                 std::unique_ptr<index::TextMatchIndex> index) {
+    std::unique_lock lck(mutex_);
+    const auto& field_meta = schema_->operator[](field_id);
+    index->RegisterTokenizer("milvus_tokenizer",
+                             field_meta.get_tokenizer_params());
+    text_indexes_[field_id] = std::move(index);
 }
 
 }  // namespace milvus::segcore

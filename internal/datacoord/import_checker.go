@@ -50,7 +50,6 @@ type importChecker struct {
 
 	// for stats and index building
 	taskScheduler TaskScheduler
-	buildIndexCh  chan UniqueID
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -62,7 +61,6 @@ func NewImportChecker(meta *meta,
 	alloc allocator.Allocator,
 	sm Manager,
 	imeta ImportMeta,
-	buildIndexCh chan UniqueID,
 	taskScheduler TaskScheduler,
 ) ImportChecker {
 	return &importChecker{
@@ -321,7 +319,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
 		for _, segmentID := range unindexed {
 			select {
-			case c.buildIndexCh <- segmentID: // accelerate index building:
+			case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
 			default:
 			}
 		}
