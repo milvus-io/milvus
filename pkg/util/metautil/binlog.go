@@ -52,6 +52,11 @@ func BuildStatsLogPath(rootPath string, collectionID, partitionID, segmentID, fi
 	return path.Join(rootPath, common.SegmentStatslogPath, k)
 }
 
+func BuildBm25LogPath(rootPath string, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) string {
+	k := JoinIDPath(collectionID, partitionID, segmentID, fieldID, logID)
+	return path.Join(rootPath, common.SegmentBm25LogPath, k)
+}
+
 func GetSegmentIDFromStatsLogPath(logPath string) typeutil.UniqueID {
 	return getSegmentIDFromPath(logPath, 3)
 }

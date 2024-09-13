@@ -32,6 +32,7 @@ type L0WriteBufferSuite struct {
 	channelName string
 	collID      int64
 	collSchema  *schemapb.CollectionSchema
+	pkSchema    *schemapb.FieldSchema
 	syncMgr     *syncmgr.MockSyncManager
 	metacache   *metacache.MockMetaCache
 	allocator   *allocator.MockGIDAllocator
@@ -59,6 +60,13 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 				},
 			},
 		},
+	}
+
+	for _, field := range s.collSchema.Fields {
+		if field.GetIsPartitionKey() {
+			s.pkSchema = field
+			break
+		}
 	}
 	s.channelName = "by-dev-rootcoord-dml_0v0"
 }
@@ -177,14 +185,16 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet())
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
 
 		value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(s.metacache.Collection()))
@@ -192,7 +202,9 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.MetricsEqual(value, 5607)
 
 		delMsg = s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-		err = wb.BufferData([]*msgstream.InsertMsg{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		insertData, err = PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
 		s.MetricsEqual(value, 5847)
 	})
@@ -206,13 +218,16 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet())
+		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.Error(err)
 	})
 }

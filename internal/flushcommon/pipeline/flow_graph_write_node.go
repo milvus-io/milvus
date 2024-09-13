@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -79,14 +78,14 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
 
-	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertMessages, fgMsg.DeleteMessages, start, end)
+	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
 	if err != nil {
 		log.Error("failed to buffer data", zap.Error(err))
 		panic(err)
 	}
 
 	stats := lo.FilterMap(
-		lo.Keys(lo.SliceToMap(fgMsg.InsertMessages, func(msg *msgstream.InsertMsg) (int64, struct{}) { return msg.GetSegmentID(), struct{}{} })),
+		lo.Keys(lo.SliceToMap(fgMsg.InsertData, func(data *writebuffer.InsertData) (int64, struct{}) { return data.GetSegmentID(), struct{}{} })),
 		func(id int64, _ int) (*commonpb.SegmentStats, bool) {
 			segInfo, ok := wNode.metacache.GetSegmentByID(id)
 			if !ok {

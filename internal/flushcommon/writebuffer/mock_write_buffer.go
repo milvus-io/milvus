@@ -25,11 +25,11 @@ func (_m *MockWriteBuffer) EXPECT() *MockWriteBuffer_Expecter {
 }
 
 // BufferData provides a mock function with given fields: insertMsgs, deleteMsgs, startPos, endPos
-func (_m *MockWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) error {
+func (_m *MockWriteBuffer) BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) error {
 	ret := _m.Called(insertMsgs, deleteMsgs, startPos, endPos)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]*msgstream.InsertMsg, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error); ok {
+	if rf, ok := ret.Get(0).(func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error); ok {
 		r0 = rf(insertMsgs, deleteMsgs, startPos, endPos)
 	} else {
 		r0 = ret.Error(0)
@@ -44,7 +44,7 @@ type MockWriteBuffer_BufferData_Call struct {
 }
 
 // BufferData is a helper method to define mock.On call
-//   - insertMsgs []*msgstream.InsertMsg
+//   - insertMsgs []*InsertData
 //   - deleteMsgs []*msgstream.DeleteMsg
 //   - startPos *msgpb.MsgPosition
 //   - endPos *msgpb.MsgPosition
@@ -52,9 +52,9 @@ func (_e *MockWriteBuffer_Expecter) BufferData(insertMsgs interface{}, deleteMsg
 	return &MockWriteBuffer_BufferData_Call{Call: _e.mock.On("BufferData", insertMsgs, deleteMsgs, startPos, endPos)}
 }
 
-func (_c *MockWriteBuffer_BufferData_Call) Run(run func(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition)) *MockWriteBuffer_BufferData_Call {
+func (_c *MockWriteBuffer_BufferData_Call) Run(run func(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition)) *MockWriteBuffer_BufferData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*msgstream.InsertMsg), args[1].([]*msgstream.DeleteMsg), args[2].(*msgpb.MsgPosition), args[3].(*msgpb.MsgPosition))
+		run(args[0].([]*InsertData), args[1].([]*msgstream.DeleteMsg), args[2].(*msgpb.MsgPosition), args[3].(*msgpb.MsgPosition))
 	})
 	return _c
 }
@@ -64,7 +64,7 @@ func (_c *MockWriteBuffer_BufferData_Call) Return(_a0 error) *MockWriteBuffer_Bu
 	return _c
 }
 
-func (_c *MockWriteBuffer_BufferData_Call) RunAndReturn(run func([]*msgstream.InsertMsg, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error) *MockWriteBuffer_BufferData_Call {
+func (_c *MockWriteBuffer_BufferData_Call) RunAndReturn(run func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error) *MockWriteBuffer_BufferData_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -35,7 +35,7 @@ type BufferManager interface {
 	DropChannel(channel string)
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
-	BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
+	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
 	// GetCheckpoint returns checkpoint for provided channel.
 	GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error)
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
@@ -188,7 +188,7 @@ func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushT
 }
 
 // BufferData put data into channel write buffer.
-func (m *bufferManager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (m *bufferManager) BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -199,7 +199,7 @@ func (m *bufferManager) BufferData(channel string, insertMsgs []*msgstream.Inser
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
-	return buf.BufferData(insertMsgs, deleteMsgs, startPos, endPos)
+	return buf.BufferData(insertData, deleteMsgs, startPos, endPos)
 }
 
 // GetCheckpoint returns checkpoint for provided channel.

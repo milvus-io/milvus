@@ -41,6 +41,8 @@ type SyncPack struct {
 	// data
 	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
+	bm25Stats  map[int64]*storage.BM25Stats
+
 	// statistics
 	tsFrom        typeutil.Timestamp
 	tsTo          typeutil.Timestamp
@@ -68,6 +70,11 @@ func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
 
 func (p *SyncPack) WithDeleteData(deltaData *storage.DeleteData) *SyncPack {
 	p.deltaData = deltaData
+	return p
+}
+
+func (p *SyncPack) WithBM25Stats(stats map[int64]*storage.BM25Stats) *SyncPack {
+	p.bm25Stats = stats
 	return p
 }
 

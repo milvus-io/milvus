@@ -63,7 +63,7 @@ func NewSyncTask(ctx context.Context,
 		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
-		})
+		}, metacache.NewBM25StatsFactory)
 	}
 
 	var serializer syncmgr.Serializer
@@ -248,7 +248,7 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 		}
 		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSet()
-		})
+		}, metacache.NoneBm25StatsFactory)
 		metaCaches[channel] = metaCache
 	}
 	return metaCaches

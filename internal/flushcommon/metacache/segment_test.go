@@ -33,7 +33,8 @@ type SegmentSuite struct {
 
 func (s *SegmentSuite) TestBasic() {
 	bfs := pkoracle.NewBloomFilterSet()
-	segment := NewSegmentInfo(s.info, bfs)
+	stats := NewEmptySegmentBM25Stats()
+	segment := NewSegmentInfo(s.info, bfs, stats)
 	s.Equal(s.info.GetID(), segment.SegmentID())
 	s.Equal(s.info.GetPartitionID(), segment.PartitionID())
 	s.Equal(s.info.GetNumOfRows(), segment.NumOfRows())
@@ -45,7 +46,8 @@ func (s *SegmentSuite) TestBasic() {
 
 func (s *SegmentSuite) TestClone() {
 	bfs := pkoracle.NewBloomFilterSet()
-	segment := NewSegmentInfo(s.info, bfs)
+	stats := NewEmptySegmentBM25Stats()
+	segment := NewSegmentInfo(s.info, bfs, stats)
 	cloned := segment.Clone()
 	s.Equal(segment.SegmentID(), cloned.SegmentID())
 	s.Equal(segment.PartitionID(), cloned.PartitionID())

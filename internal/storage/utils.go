@@ -482,7 +482,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 // ColumnBasedInsertMsgToInsertData converts an InsertMsg msg into InsertData based
 // on provided CollectionSchema collSchema.
 //
-// This function checks whether all fields are provided in the collSchema.Fields.
+// This function checks whether all fields are provided in the collSchema.Fields and not function output.
 // If any field is missing in the msg, an error will be returned.
 //
 // This funcion also checks the length of each column. All columns shall have the same length.
@@ -499,6 +499,10 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 	length := 0
 	for _, field := range collSchema.Fields {
+		if field.GetIsFunctionOutput() {
+			continue
+		}
+
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
 			return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))

@@ -22,6 +22,7 @@ const (
 	SegmentBinlogPathPrefix            = MetaPrefix + "/binlog"
 	SegmentDeltalogPathPrefix          = MetaPrefix + "/deltalog"
 	SegmentStatslogPathPrefix          = MetaPrefix + "/statslog"
+	SegmentBM25logPathPrefix           = MetaPrefix + "/bm25log"
 	ChannelRemovePrefix                = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix            = MetaPrefix + "/channel-cp"
 	ImportJobPrefix                    = MetaPrefix + "/import-job"

@@ -93,10 +93,10 @@ func hasSpecialStatslog(segment *datapb.SegmentInfo) bool {
 }
 
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
-	binlogs, deltalogs, statslogs []*datapb.FieldBinlog,
+	binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog,
 ) (map[string]string, error) {
 	// all the FieldBinlog will only have logid
-	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs)
+	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs, bm25logs)
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +105,12 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 }
 
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
-	noBinlogsSegment, binlogs, deltalogs, statslogs := CloneSegmentWithExcludeBinlogs(segment)
+	noBinlogsSegment, binlogs, deltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
 	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
 	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
 	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs)
+	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
 	if err != nil {
 		return nil, err
 	}
@@ -125,32 +125,11 @@ func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, 
 	return kvs, nil
 }
 
-func buildBinlogKeys(segment *datapb.SegmentInfo) []string {
-	var keys []string
-	// binlog
-	for _, binlog := range segment.Binlogs {
-		key := buildFieldBinlogPath(segment.CollectionID, segment.PartitionID, segment.ID, binlog.FieldID)
-		keys = append(keys, key)
-	}
-
-	// deltalog
-	for _, deltalog := range segment.Deltalogs {
-		key := buildFieldDeltalogPath(segment.CollectionID, segment.PartitionID, segment.ID, deltalog.FieldID)
-		keys = append(keys, key)
-	}
-
-	// statslog
-	for _, statslog := range segment.Statslogs {
-		key := buildFieldStatslogPath(segment.CollectionID, segment.PartitionID, segment.ID, statslog.FieldID)
-		keys = append(keys, key)
-	}
-	return keys
-}
-
 func resetBinlogFields(segment *datapb.SegmentInfo) {
 	segment.Binlogs = nil
 	segment.Deltalogs = nil
 	segment.Statslogs = nil
+	segment.Bm25Statslogs = nil
 }
 
 func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
@@ -161,7 +140,7 @@ func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	return res
 }
 
-func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs []*datapb.FieldBinlog) (map[string]string, error) {
+func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog) (map[string]string, error) {
 	kv := make(map[string]string)
 
 	checkLogID := func(fieldBinlog *datapb.FieldBinlog) error {
@@ -215,19 +194,33 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		kv[key] = string(binlogBytes)
 	}
 
+	for _, bm25log := range bm25logs {
+		if err := checkLogID(bm25log); err != nil {
+			return nil, err
+		}
+		binlogBytes, err := proto.Marshal(bm25log)
+		if err != nil {
+			return nil, fmt.Errorf("marshal bm25log failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, bm25log.FieldID, err)
+		}
+		key := buildFieldBM25StatslogPath(collectionID, partitionID, segmentID, bm25log.FieldID)
+		kv[key] = string(binlogBytes)
+	}
+
 	return kv, nil
 }
 
-func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog) {
+func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog) {
 	clonedSegment := proto.Clone(segment).(*datapb.SegmentInfo)
 	binlogs := clonedSegment.Binlogs
 	deltalogs := clonedSegment.Deltalogs
 	statlogs := clonedSegment.Statslogs
+	bm25logs := clonedSegment.Bm25Statslogs
 
 	clonedSegment.Binlogs = nil
 	clonedSegment.Deltalogs = nil
 	clonedSegment.Statslogs = nil
-	return clonedSegment, binlogs, deltalogs, statlogs
+	clonedSegment.Bm25Statslogs = nil
+	return clonedSegment, binlogs, deltalogs, statlogs, bm25logs
 }
 
 func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
@@ -296,6 +289,10 @@ func buildFieldDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil
 // TODO: There's no need to include fieldID in the stats log path key.
 func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+}
+
+func buildFieldBM25StatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentBM25logPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
 func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
