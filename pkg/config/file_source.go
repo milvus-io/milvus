@@ -165,7 +165,7 @@ func (fs *FileSource) loadFromFile() error {
 	return fs.update(newConfig)
 }
 
-// update souce config
+// update source config
 // make sure only update changes configs
 func (fs *FileSource) update(configs map[string]string) error {
 	// make sure config not change when fire event

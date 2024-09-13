@@ -520,7 +520,7 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Key:          "mq.dispatcher.targetBufSize",
 		Version:      "2.4.4",
 		DefaultValue: "16",
-		Doc:          `the lenth of channel buffer for targe`,
+		Doc:          `the length of channel buffer for targe`,
 		Export:       true,
 	}
 	p.TargetBufSize.Init(base.mgr)
@@ -649,7 +649,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webport",
 		Version:      "2.0.0",
 		DefaultValue: "80",
-		Doc:          "Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.",
+		Doc:          "Web port of of Pulsar service. If you connect directly without proxy, should use 8080.",
 		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)
@@ -1101,6 +1101,7 @@ type MinioConfig struct {
 	Port               ParamItem `refreshable:"false"`
 	AccessKeyID        ParamItem `refreshable:"false"`
 	SecretAccessKey    ParamItem `refreshable:"false"`
+	SignatureVersion   ParamItem `refreshable:"false"`
 	UseSSL             ParamItem `refreshable:"false"`
 	SslCACert          ParamItem `refreshable:"false"`
 	BucketName         ParamItem `refreshable:"false"`
@@ -1173,6 +1174,18 @@ Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
+		Export: true,
+	}
+	p.SecretAccessKey.Init(base.mgr)
+
+	p.SignatureVersion = ParamItem{
+		Key:          "minio.signatureVersion",
+		Version:      "2.0.0",
+		DefaultValue: "v4",
+		PanicIfEmpty: false,
+		Doc: `Signature version used to sign the request string.
+default value: v4
+available values: v2, v4`,
 		Export: true,
 	}
 	p.SecretAccessKey.Init(base.mgr)
@@ -1306,8 +1319,8 @@ Leave it empty if you want to use AWS default endpoint`,
 		Key:          "minio.listObjectsMaxKeys",
 		Version:      "2.4.1",
 		DefaultValue: "0",
-		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
-0 means using oss client by default, decrease these configration if ListObjects timeout`,
+		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc,
+0 means using oss client by default, decrease these configuration if ListObjects timeout`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)

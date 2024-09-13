@@ -106,7 +106,11 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		if c.useIAM {
 			creds = credentials.NewIAM("")
 		} else {
-			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+			if c.signatureVersion == "v2" {
+				creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
+			} else {
+				creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+			}
 		}
 	}
 

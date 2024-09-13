@@ -6,6 +6,7 @@ type config struct {
 	bucketName        string
 	accessKeyID       string
 	secretAccessKeyID string
+	signatureVersion  string
 	useSSL            bool
 	sslCACert         string
 	createBucket      bool
@@ -28,6 +29,13 @@ type Option func(*config)
 func Address(addr string) Option {
 	return func(c *config) {
 		c.address = addr
+	}
+}
+
+// SignatureVersion ...
+func SignatureVersion(sv string) Option {
+	return func(c *config) {
+		c.signatureVersion = sv
 	}
 }
 
