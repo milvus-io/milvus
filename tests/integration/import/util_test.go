@@ -68,7 +68,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	pqSchema, err := pq.ConvertToArrowSchema(schema)
+	pqSchema, err := pq.ConvertToArrowSchema(schema, false)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.Co
 		return nil, err
 	}
 
-	columns, err := testutil.BuildArrayData(schema, insertData)
+	columns, err := testutil.BuildArrayData(schema, insertData, false)
 	if err != nil {
 		return nil, err
 	}
