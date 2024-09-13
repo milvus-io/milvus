@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -139,6 +140,11 @@ func (f *flusherImpl) Start() {
 				f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
 					future := GetExecPool().Submit(func() (any, error) {
 						err := lifetime.Run()
+						if errors.Is(err, errChannelLifetimeUnrecoverable) {
+							log.Warn("channel lifetime is unrecoverable, removed", zap.String("vchannel", vchannel))
+							f.channelLifetimes.Remove(vchannel)
+							return nil, nil
+						}
 						if err != nil {
 							log.Warn("build pipeline failed", zap.String("vchannel", vchannel), zap.Error(err))
 							f.notify() // Notify to trigger retry.
