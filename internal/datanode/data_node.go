@@ -362,6 +362,11 @@ func (node *DataNode) Stop() error {
 			node.channelManager.Close()
 		}
 
+		if node.flowgraphManager != nil {
+			node.flowgraphManager.ClearFlowgraphs()
+			node.flowgraphManager.Close()
+		}
+
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()
 		}
