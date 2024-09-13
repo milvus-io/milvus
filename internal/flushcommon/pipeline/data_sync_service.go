@@ -306,15 +306,15 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	// init flowgraph
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
+	nodeList := []flowgraph.Node{}
 
-	var dmStreamNode *flowgraph.InputNode
-	dmStreamNode, err = newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
+	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, dmStreamNode)
 
-	var ddNode *ddNode
-	ddNode, err = newDDNode(
+	ddNode, err := newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -327,21 +327,29 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, ddNode)
 
-	// TODO not init emNode when no filed need it.
-	emNode, err := newEmbeddingNode(channelName, info.GetSchema())
+	if len(info.GetSchema().GetFunctions()) > 0 {
+		emNode, err := newEmbeddingNode(channelName, info.GetSchema())
+		if err != nil {
+			return nil, err
+		}
+		nodeList = append(nodeList, emNode)
+	}
+
+	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, writeNode)
 
-	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
-	var ttNode *ttNode
-	ttNode, err = newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, ttNode)
 
-	if err := fg.AssembleNodes(dmStreamNode, ddNode, emNode, writeNode, ttNode); err != nil {
+	if err := fg.AssembleNodes(nodeList...); err != nil {
 		return nil, err
 	}
 	ds.fg = fg

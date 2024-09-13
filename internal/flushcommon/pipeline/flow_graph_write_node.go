@@ -11,12 +11,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type writeNode struct {
@@ -26,6 +28,8 @@ type writeNode struct {
 	wbManager   writebuffer.BufferManager
 	updater     util.StatsUpdater
 	metacache   metacache.MetaCache
+	collSchema  *schemapb.CollectionSchema
+	pkField     *schemapb.FieldSchema
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -78,6 +82,15 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
 
+	if fgMsg.InsertData == nil {
+		insertData, err := writebuffer.PrepareInsert(wNode.collSchema, wNode.pkField, fgMsg.InsertMessages)
+		if err != nil {
+			log.Error("failed to prepare data", zap.Error(err))
+			panic(err)
+		}
+		fgMsg.InsertData = insertData
+	}
+
 	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
 	if err != nil {
 		log.Error("failed to buffer data", zap.Error(err))
@@ -126,10 +139,16 @@ func newWriteNode(
 	writeBufferManager writebuffer.BufferManager,
 	updater util.StatsUpdater,
 	config *nodeConfig,
-) *writeNode {
+) (*writeNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
+
+	collSchema := config.metacache.Schema()
+	pkField, err := typeutil.GetPrimaryFieldSchema(collSchema)
+	if err != nil {
+		return nil, err
+	}
 
 	return &writeNode{
 		BaseNode:    baseNode,
@@ -137,5 +156,7 @@ func newWriteNode(
 		wbManager:   writeBufferManager,
 		updater:     updater,
 		metacache:   config.metacache,
-	}
+		collSchema:  collSchema,
+		pkField:     pkField,
+	}, nil
 }

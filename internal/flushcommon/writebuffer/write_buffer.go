@@ -138,8 +138,6 @@ type writeBufferBase struct {
 
 	metaWriter       syncmgr.MetaWriter
 	collSchema       *schemapb.CollectionSchema
-	helper           *typeutil.SchemaHelper
-	pkField          *schemapb.FieldSchema
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
@@ -181,21 +179,11 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	if err != nil {
 		return nil, err
 	}
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return nil, err
-	}
-	pkField, err := helper.GetPrimaryKeyField()
-	if err != nil {
-		return nil, err
-	}
 
 	wb := &writeBufferBase{
 		channelName:      channel,
 		collectionID:     metacache.Collection(),
 		collSchema:       schema,
-		helper:           helper,
-		pkField:          pkField,
 		estSizePerRecord: estSize,
 		syncMgr:          syncMgr,
 		metaWriter:       option.metaWriter,
