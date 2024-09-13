@@ -879,7 +879,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 				FailReason: "",
 			},
 		}
-		scheduler.Submit(t)
+		scheduler.enqueue(t)
 	})
 
 	for {
@@ -1678,7 +1678,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					FailReason: "",
 				},
 			}
-			scheduler.Submit(t)
+			scheduler.enqueue(t)
 			waitTaskDoneFunc(scheduler)
 			resetMetaFunc()
 		}
@@ -1701,7 +1701,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler.Submit(t)
+		scheduler.enqueue(t)
 		waitTaskDoneFunc(scheduler)
 		resetMetaFunc()
 	})
@@ -1726,7 +1726,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					FailReason: "",
 				},
 			}
-			scheduler.Submit(t)
+			scheduler.enqueue(t)
 			waitTaskDoneFunc(scheduler)
 			resetMetaFunc()
 		}
@@ -1756,7 +1756,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					FailReason: "",
 				},
 			}
-			scheduler.Submit(t)
+			scheduler.enqueue(t)
 			waitTaskDoneFunc(scheduler)
 			resetMetaFunc()
 		}
@@ -1779,7 +1779,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler.Submit(t)
+		scheduler.enqueue(t)
 		waitTaskDoneFunc(scheduler)
 		resetMetaFunc()
 	})
@@ -1800,7 +1800,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler.Submit(t)
+		scheduler.enqueue(t)
 		waitTaskDoneFunc(scheduler)
 		resetMetaFunc()
 	})
@@ -1839,7 +1839,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.Submit(t)
+		scheduler_isolation.enqueue(t)
 		waitTaskDoneFunc(scheduler_isolation)
 		resetMetaFunc()
 	})
@@ -1862,7 +1862,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.Submit(t)
+		scheduler_isolation.enqueue(t)
 		waitTaskDoneFunc(scheduler_isolation)
 		resetMetaFunc()
 	})
@@ -1885,7 +1885,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				FailReason: "",
 			},
 		}
-		scheduler_isolation.Submit(t)
+		scheduler_isolation.enqueue(t)
 		waitTaskDoneFunc(scheduler_isolation)
 		resetMetaFunc()
 	})

@@ -17,7 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type StatsTaskManager interface {
+type StatsJobManager interface {
 	Start()
 	Stop()
 	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
@@ -25,7 +25,7 @@ type StatsTaskManager interface {
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
 
-var _ StatsTaskManager = (*statsJobManager)(nil)
+var _ StatsJobManager = (*statsJobManager)(nil)
 
 type statsJobManager struct {
 	ctx    context.Context

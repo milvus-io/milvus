@@ -122,6 +122,14 @@ func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	}
 }
 
+func UpdateStatsSegmentIDs(segmentIDs []UniqueID) UpdateAction {
+	return func(t ImportTask) {
+		if task, ok := t.(*importTask); ok {
+			task.ImportTaskV2.StatsSegmentIDs = segmentIDs
+		}
+	}
+}
+
 type ImportTask interface {
 	GetJobID() int64
 	GetTaskID() int64
