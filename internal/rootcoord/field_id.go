@@ -29,6 +29,9 @@ const (
 	// StartOfUserFieldID id of user defined field begin from here
 	StartOfUserFieldID = common.StartOfUserFieldID
 
+	// StartOfUserFunctionID id of user defined function begin from here
+	StartOfUserFunctionID = common.StartOfUserFunctionID
+
 	// RowIDField id of row ID field
 	RowIDField = common.RowIDField
 

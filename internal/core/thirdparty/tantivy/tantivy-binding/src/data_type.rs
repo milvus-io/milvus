@@ -1,6 +1,6 @@
 #[repr(u8)]
 pub enum TantivyDataType {
-    // Text,
+    Text,
     Keyword,
     // U64,
     I64,

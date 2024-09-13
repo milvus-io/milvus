@@ -53,7 +53,7 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
-	if !segment.GetIsSorted() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
+	if !segment.GetIsSorted() && Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
 		log.Info("segment not sorted, skip create index", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -80,10 +80,15 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 }
 
 func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
-	if !segment.GetIsSorted() && !segment.GetIsImporting() && segment.GetLevel() != datapb.SegmentLevel_L0 {
-		log.Debug("segment is not sorted by pk, skip create index", zap.Int64("segmentID", segment.ID))
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
+		log.Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
+	if segment.GetLevel() == datapb.SegmentLevel_L0 {
+		log.Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		return nil
+	}
+
 	indexes := s.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := s.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
@@ -134,7 +139,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 		case collectionID := <-s.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
 			segments := s.meta.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && info.GetIsSorted()
+				return isFlush(info) && (!Params.DataCoordCfg.EnableStatsTask.GetAsBool() || info.GetIsSorted())
 			}))
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
@@ -142,7 +147,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 					continue
 				}
 			}
-		case segID := <-s.buildIndexCh:
+		case segID := <-getBuildIndexChSingleton():
 			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
 			segment := s.meta.GetSegment(segID)
 			if segment == nil {
@@ -183,6 +188,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Any("TypeParams", req.GetTypeParams()),
 		zap.Any("IndexParams", req.GetIndexParams()),
+		zap.Any("UserIndexParams", req.GetUserIndexParams()),
 	)
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -343,7 +349,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 		// update index params
 		newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
-		log.Info("alter index user index params",
+		log.Info("alter index index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newIndexParams),
 		)

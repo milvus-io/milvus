@@ -54,15 +54,18 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog := mocks.NewDataCoordCatalog(s.T())
 			catalog.EXPECT().ListStatsTasks(mock.Anything).Return([]*indexpb.StatsTask{
 				{
-					CollectionID:  s.collectionID,
-					PartitionID:   s.partitionID,
-					SegmentID:     10000,
-					InsertChannel: "ch1",
-					TaskID:        10001,
-					Version:       1,
-					NodeID:        0,
-					State:         indexpb.JobState_JobStateFinished,
-					FailReason:    "",
+					CollectionID:    s.collectionID,
+					PartitionID:     s.partitionID,
+					SegmentID:       10000,
+					InsertChannel:   "ch1",
+					TaskID:          10001,
+					Version:         1,
+					NodeID:          0,
+					State:           indexpb.JobState_JobStateFinished,
+					FailReason:      "",
+					TargetSegmentID: 10002,
+					SubJobType:      indexpb.StatsSubJob_Sort,
+					CanRecycle:      true,
 				},
 			}, nil)
 
@@ -97,6 +100,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		NodeID:        0,
 		State:         indexpb.JobState_JobStateInit,
 		FailReason:    "",
+		SubJobType:    indexpb.StatsSubJob_Sort,
 	}
 
 	s.Run("AddStatsTask", func() {
@@ -106,9 +110,6 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.Error(m.AddStatsTask(t))
 			_, ok := m.tasks[1]
 			s.False(ok)
-
-			_, ok = m.segmentStatsTaskIndex[s.segmentID]
-			s.False(ok)
 		})
 
 		s.Run("normal case", func() {
@@ -117,17 +118,11 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.NoError(m.AddStatsTask(t))
 			_, ok := m.tasks[1]
 			s.True(ok)
-
-			_, ok = m.segmentStatsTaskIndex[s.segmentID]
-			s.True(ok)
 		})
 
 		s.Run("already exist", func() {
 			s.Error(m.AddStatsTask(t))
 			_, ok := m.tasks[1]
-			s.True(ok)
-
-			_, ok = m.segmentStatsTaskIndex[s.segmentID]
 			s.True(ok)
 		})
 	})
@@ -140,10 +135,6 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			task, ok := m.tasks[1]
 			s.True(ok)
 			s.Equal(int64(1), task.GetVersion())
-
-			sTask, ok := m.segmentStatsTaskIndex[s.segmentID]
-			s.True(ok)
-			s.Equal(int64(1), sTask.GetVersion())
 		})
 
 		s.Run("task not exist", func() {
@@ -161,10 +152,6 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.True(ok)
 			// still 1
 			s.Equal(int64(1), task.GetVersion())
-
-			sTask, ok := m.segmentStatsTaskIndex[s.segmentID]
-			s.True(ok)
-			s.Equal(int64(1), sTask.GetVersion())
 		})
 	})
 
@@ -215,7 +202,6 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			StatsLogs: []*datapb.FieldBinlog{
 				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 9}}},
 			},
-			DeltaLogs: nil,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				100: {
 					FieldID:    100,
@@ -264,42 +250,36 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 	s.Run("GetStatsTaskStateBySegmentID", func() {
 		s.Run("task not exist", func() {
-			state := m.GetStatsTaskStateBySegmentID(100)
+			state := m.GetStatsTaskStateBySegmentID(100, indexpb.StatsSubJob_Sort)
+			s.Equal(indexpb.JobState_JobStateNone, state)
+
+			state = m.GetStatsTaskStateBySegmentID(s.segmentID, indexpb.StatsSubJob_BM25Job)
 			s.Equal(indexpb.JobState_JobStateNone, state)
 		})
 
 		s.Run("normal case", func() {
-			state := m.GetStatsTaskStateBySegmentID(s.segmentID)
+			state := m.GetStatsTaskStateBySegmentID(s.segmentID, indexpb.StatsSubJob_Sort)
 			s.Equal(indexpb.JobState_JobStateFinished, state)
 		})
 	})
 
-	s.Run("RemoveStatsTask", func() {
+	s.Run("DropStatsTask", func() {
 		s.Run("failed case", func() {
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Twice()
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
-			s.Error(m.RemoveStatsTaskByTaskID(1))
+			s.Error(m.DropStatsTask(1))
 			_, ok := m.tasks[1]
-			s.True(ok)
-
-			s.Error(m.RemoveStatsTaskBySegmentID(s.segmentID))
-			_, ok = m.segmentStatsTaskIndex[s.segmentID]
 			s.True(ok)
 		})
 
 		s.Run("normal case", func() {
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Twice()
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
-			s.NoError(m.RemoveStatsTaskByTaskID(1))
+			s.NoError(m.DropStatsTask(1))
 			_, ok := m.tasks[1]
 			s.False(ok)
 
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(m.AddStatsTask(t))
-
-			s.NoError(m.RemoveStatsTaskBySegmentID(s.segmentID))
-			_, ok = m.segmentStatsTaskIndex[s.segmentID]
-			s.False(ok)
+			s.NoError(m.DropStatsTask(1000))
 		})
 	})
 }

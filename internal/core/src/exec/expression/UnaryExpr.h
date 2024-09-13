@@ -331,6 +331,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseIndexForArray();
 
+    VectorPtr
+    ExecTextMatch();
+
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
     ColumnVectorPtr cached_overflow_res_{nullptr};

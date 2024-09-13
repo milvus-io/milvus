@@ -753,69 +753,41 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 
-	toReduceResults := make([]*internalpb.SearchResults, len(req.GetDmlChannels()))
-	runningGp, runningCtx := errgroup.WithContext(ctx)
-
-	for i, ch := range req.GetDmlChannels() {
-		ch := ch
-		req := &querypb.SearchRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			Scope:           req.Scope,
-			TotalChannelNum: req.TotalChannelNum,
-		}
-
-		i := i
-		runningGp.Go(func() error {
-			ret, err := node.searchChannel(runningCtx, req, ch)
-			if err != nil {
-				return err
-			}
-			if err := merr.Error(ret.GetStatus()); err != nil {
-				return err
-			}
-			toReduceResults[i] = ret
-			return nil
-		})
+	if len(req.GetDmlChannels()) != 1 {
+		err := merr.WrapErrParameterInvalid(1, len(req.GetDmlChannels()), "count of channel to be searched should only be 1, wrong code")
+		resp.Status = merr.Status(err)
+		log.Warn("got wrong number of channels to be searched", zap.Error(err))
+		return resp, nil
 	}
-	if err := runningGp.Wait(); err != nil {
+
+	ch := req.GetDmlChannels()[0]
+	channelReq := &querypb.SearchRequest{
+		Req:             req.Req,
+		DmlChannels:     []string{ch},
+		SegmentIDs:      req.SegmentIDs,
+		Scope:           req.Scope,
+		TotalChannelNum: req.TotalChannelNum,
+	}
+	ret, err := node.searchChannel(ctx, channelReq, ch)
+	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
 	tr.RecordSpan()
-	var result *internalpb.SearchResults
-	var err2 error
-	if req.GetReq().GetIsAdvanced() {
-		result, err2 = segments.ReduceAdvancedSearchResults(ctx, toReduceResults, req.Req.GetNq())
-	} else {
-		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, segments.NewReduceInfo(req.Req.GetNq(),
-			req.Req.GetTopk(),
-			req.Req.GetExtraSearchParam().GetGroupByFieldId(),
-			req.Req.GetExtraSearchParam().GetGroupSize(),
-			req.Req.GetMetricType()))
-	}
-
-	if err2 != nil {
-		log.Warn("failed to reduce search results", zap.Error(err2))
-		resp.Status = merr.Status(err2)
-		return resp, nil
-	}
-	result.Status = merr.Success()
+	ret.Status = merr.Success()
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.
 		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
-
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
-	if result.GetCostAggregation() != nil {
-		result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	if ret.GetCostAggregation() != nil {
+		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
-	return result, nil
+	return ret, nil
 }
 
 // only used for delegator query segments from worker

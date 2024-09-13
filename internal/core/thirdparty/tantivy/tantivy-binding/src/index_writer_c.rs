@@ -40,6 +40,21 @@ pub extern "C" fn tantivy_finish_index(ptr: *mut c_void) {
     unsafe { Box::from_raw(real).finish() }
 }
 
+#[no_mangle]
+pub extern "C" fn tantivy_commit_index(ptr: *mut c_void) {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        (*real).commit();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_create_reader_from_writer(ptr: *mut c_void) -> *mut c_void {
+    let writer = ptr as *mut IndexWriterWrapper;
+    let reader = unsafe { (*writer).create_reader() };
+    create_binding(reader)
+}
+
 // -------------------------build--------------------
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_int8s(

@@ -317,8 +317,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-			segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-			segment.GetIsSorted() // segment is sorted
+			segment.GetLevel() != datapb.SegmentLevel_L2 // ignore l2 segment
 	}) // partSegments is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(partSegments) == 0 {

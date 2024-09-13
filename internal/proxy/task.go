@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -43,12 +44,19 @@ import (
 )
 
 const (
+	SumScorer string = "sum"
+	MaxScorer string = "max"
+	AvgScorer string = "avg"
+)
+
+const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
 	GroupStrictSize      = "group_strict_size"
+	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"
@@ -293,6 +301,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.schema.AutoID = false
 
+	if err := validateFunction(t.schema); err != nil {
+		return err
+	}
+
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
@@ -387,6 +399,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		// TODO should remove the index params in the field schema
 		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
 		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+			return err
+		}
+
+		if err := ctokenizer.ValidateTextSchema(field); err != nil {
 			return err
 		}
 	}
@@ -620,6 +636,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			Description: "",
 			AutoID:      false,
 			Fields:      make([]*schemapb.FieldSchema, 0),
+			Functions:   make([]*schemapb.FunctionSchema, 0),
 		},
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
@@ -669,22 +686,27 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
 			t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-				FieldID:         field.FieldID,
-				Name:            field.Name,
-				IsPrimaryKey:    field.IsPrimaryKey,
-				AutoID:          field.AutoID,
-				Description:     field.Description,
-				DataType:        field.DataType,
-				TypeParams:      field.TypeParams,
-				IndexParams:     field.IndexParams,
-				IsDynamic:       field.IsDynamic,
-				IsPartitionKey:  field.IsPartitionKey,
-				IsClusteringKey: field.IsClusteringKey,
-				DefaultValue:    field.DefaultValue,
-				ElementType:     field.ElementType,
-				Nullable:        field.Nullable,
+				FieldID:          field.FieldID,
+				Name:             field.Name,
+				IsPrimaryKey:     field.IsPrimaryKey,
+				AutoID:           field.AutoID,
+				Description:      field.Description,
+				DataType:         field.DataType,
+				TypeParams:       field.TypeParams,
+				IndexParams:      field.IndexParams,
+				IsDynamic:        field.IsDynamic,
+				IsPartitionKey:   field.IsPartitionKey,
+				IsClusteringKey:  field.IsClusteringKey,
+				DefaultValue:     field.DefaultValue,
+				ElementType:      field.ElementType,
+				Nullable:         field.Nullable,
+				IsFunctionOutput: field.IsFunctionOutput,
 			})
 		}
+	}
+
+	for _, function := range result.Schema.Functions {
+		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 	}
 	return nil
 }

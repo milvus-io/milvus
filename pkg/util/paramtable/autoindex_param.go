@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -50,7 +51,13 @@ type autoIndexConfig struct {
 	ScalarVarcharIndexType ParamItem `refreshable:"true"`
 	ScalarBoolIndexType    ParamItem `refreshable:"true"`
 	ScalarFloatIndexType   ParamItem `refreshable:"true"`
+
+	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 }
+
+const (
+	DefaultBitmapCardinalityLimit = 100
+)
 
 func (p *autoIndexConfig) init(base *BaseTable) {
 	p.Enable = ParamItem{
@@ -194,6 +201,14 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarFloatIndexType.Init(base.mgr)
+
+	p.BitmapCardinalityLimit = ParamItem{
+		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",
+		Version:      "2.5.0",
+		DefaultValue: strconv.Itoa(DefaultBitmapCardinalityLimit),
+		Export:       true,
+	}
+	p.BitmapCardinalityLimit.Init(base.mgr)
 
 	p.ScalarVarcharIndexType = ParamItem{
 		Version: "2.4.0",
