@@ -70,11 +70,6 @@ class PhyTermFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
-    void
-    SetUseCacheOffsets() {
-        use_cache_offsets_ = true;
-    }
-
  private:
     void
     InitPkCacheOffset();
@@ -125,10 +120,7 @@ class PhyTermFilterExpr : public SegmentExpr {
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
     milvus::Timestamp query_timestamp_;
-    // If expr is like "pk in (..)", can use pk index to optimize
-    bool use_cache_offsets_{false};
-    bool cached_offsets_inited_{false};
-    ColumnVectorPtr cached_offsets_;
+    bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
 };
 }  //namespace exec

@@ -14,7 +14,6 @@
 #include <limits>
 #include <string>
 
-#include "query/Expr.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
