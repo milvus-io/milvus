@@ -6,11 +6,25 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
+
+func SparseVectorDataToPlaceholderGroupBytes(contents [][]byte) []byte {
+	placeholderGroup := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_SparseFloatVector,
+			Values: contents,
+		}},
+	}
+
+	bytes, _ := proto.Marshal(placeholderGroup)
+	return bytes
+}
 
 func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, error) {
 	placeholderValue, err := fieldDataToPlaceholderValue(fieldData)
@@ -93,6 +107,14 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 			Values: [][]byte{bytes},
 		}
 		return placeholderValue, nil
+	case schemapb.DataType_VarChar:
+		strs := fieldData.GetScalars().GetStringData().GetData()
+		placeholderValue := &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_VarChar,
+			Values: lo.Map(strs, func(str string, _ int) []byte { return []byte(str) }),
+		}
+		return placeholderValue, nil
 	default:
 		return nil, errors.New("field is not a vector field")
 	}
@@ -156,4 +178,8 @@ func flattenedBFloat16VectorsToByteVectors(flattenedVectors []byte, dimension in
 	}
 
 	return result
+}
+
+func GetVarCharFromPlaceholder(holder *commonpb.PlaceholderValue) []string {
+	return lo.Map(holder.Values, func(bytes []byte, _ int) string { return string(bytes) })
 }

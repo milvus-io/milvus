@@ -299,6 +299,18 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 	}
 }
 
+// new collection without segcore prepare
+// ONLY FOR TEST
+func NewCollectionWithoutSegcore(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
+	coll := &Collection{
+		id:         collectionID,
+		partitions: typeutil.NewConcurrentSet[int64](),
+		refCount:   atomic.NewUint32(0),
+	}
+	coll.schema.Store(schema)
+	return coll
+}
+
 // deleteCollection delete collection and free the collection memory
 func DeleteCollection(collection *Collection) {
 	/*

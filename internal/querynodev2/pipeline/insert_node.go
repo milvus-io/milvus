@@ -95,21 +95,23 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
 		})
 
-		insertDatas := make(map[UniqueID]*delegator.InsertData)
-		collection := iNode.manager.Collection.Get(iNode.collectionID)
-		if collection == nil {
-			log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
-			panic("insertNode with collection not exist")
+		// build insert data if no embedding node
+		if nodeMsg.insertDatas == nil {
+			collection := iNode.manager.Collection.Get(iNode.collectionID)
+			if collection == nil {
+				log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
+				panic("insertNode with collection not exist")
+			}
+
+			nodeMsg.insertDatas = make(map[UniqueID]*delegator.InsertData)
+			// get InsertData and merge datas of same segment
+			for _, msg := range nodeMsg.insertMsgs {
+				iNode.addInsertData(nodeMsg.insertDatas, msg, collection)
+			}
 		}
 
-		// get InsertData and merge datas of same segment
-		for _, msg := range nodeMsg.insertMsgs {
-			iNode.addInsertData(insertDatas, msg, collection)
-		}
-
-		iNode.delegator.ProcessInsert(insertDatas)
+		iNode.delegator.ProcessInsert(nodeMsg.insertDatas)
 	}
-
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Inc()
 
 	return &deleteNodeMsg{

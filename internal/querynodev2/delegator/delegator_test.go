@@ -178,6 +178,84 @@ func (s *DelegatorSuite) TearDownTest() {
 	s.delegator = nil
 }
 
+func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
+	s.Run("init function failed", func() {
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Name: "TestCollection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "id",
+					FieldID:      100,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				}, {
+					Name:         "vector",
+					FieldID:      101,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{102},
+				OutputFieldIds: []int64{101, 103}, // invalid output field
+			}},
+		}, nil, nil)
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
+				return s.mq, nil
+			},
+		}, 10000, nil, s.chunkManager)
+		s.Error(err)
+	})
+
+	s.Run("init function failed", func() {
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Name: "TestCollection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "id",
+					FieldID:      100,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				}, {
+					Name:         "vector",
+					FieldID:      101,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_SparseFloatVector,
+				}, {
+					Name:     "text",
+					FieldID:  102,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "256",
+						},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{102},
+				OutputFieldIds: []int64{101},
+			}},
+		}, nil, nil)
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
+				return s.mq, nil
+			},
+		}, 10000, nil, s.chunkManager)
+		s.NoError(err)
+	})
+}
+
 func (s *DelegatorSuite) TestBasicInfo() {
 	s.Equal(s.collectionID, s.delegator.Collection())
 	s.Equal(s.version, s.delegator.Version())

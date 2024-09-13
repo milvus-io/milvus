@@ -652,7 +652,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.Equal(datapb.CompactionTaskState_failed, t.GetState())
 	})
 
-	s.Run("test unkonwn task", func() {
+	s.Run("test unknown task", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_unknown)
 
 		got := t.Process()
