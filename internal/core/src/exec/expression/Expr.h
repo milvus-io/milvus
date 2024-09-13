@@ -494,7 +494,7 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessDataChunksForValid() {
-        TargetBitmap valid_result;
+        TargetBitmap valid_result(batch_size_);
         valid_result.set();
         int64_t processed_size = 0;
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
@@ -519,7 +519,7 @@ class SegmentExpr : public Expr {
             valid_data += data_pos;
             for (int i = 0; i < size; i++) {
                 if (!valid_data[i]) {
-                    valid_result[i] = false;
+                    valid_result[i + data_pos] = false;
                 }
             }
             processed_size += size;
@@ -600,12 +600,13 @@ class SegmentExpr : public Expr {
             auto res = std::move(func(index, values...));
             auto valid_res = index->IsNotNull();
             cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-            cached_index_chunk_valid_res_ = std::move(valid_result);
+            cached_index_chunk_valid_res_ = std::move(valid_res);
             if (cached_match_res_->size() < active_count_) {
                 // some entities are not visible in inverted index.
                 // only happend on growing segment.
                 TargetBitmap tail(active_count_ - cached_match_res_->size());
                 cached_match_res_->append(tail);
+                cached_index_chunk_valid_res_.append(tail);
             }
         }
 

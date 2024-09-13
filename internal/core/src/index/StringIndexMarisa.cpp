@@ -137,7 +137,7 @@ StringIndexMarisa::Build(size_t n,
     }
 
     trie_.build(keyset, MARISA_LABEL_ORDER);
-    fill_str_ids(n, values);
+    fill_str_ids(n, values, valid_data);
     fill_offsets();
 
     built_ = true;
@@ -218,7 +218,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
-    str_ids_.resize(str_ids_len / sizeof(size_t));
+    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
 
     fill_offsets();
@@ -496,9 +496,14 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
 }
 
 void
-StringIndexMarisa::fill_str_ids(size_t n, const std::string* values) {
-    str_ids_.resize(n);
+StringIndexMarisa::fill_str_ids(size_t n,
+                                const std::string* values,
+                                const bool* valid_data) {
+    str_ids_.resize(n, MARISA_NULL_KEY_ID);
     for (size_t i = 0; i < n; i++) {
+        if (valid_data && !valid_data[i]) {
+            continue;
+        }
         auto str = values[i];
         auto str_id = lookup(str);
         AssertInfo(valid_str_id(str_id), "invalid marisa key");

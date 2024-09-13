@@ -102,7 +102,7 @@ class StringIndexMarisa : public StringIndex {
 
  private:
     void
-    fill_str_ids(size_t n, const std::string* values);
+    fill_str_ids(size_t n, const std::string* values, const bool* valid_data);
 
     void
     fill_offsets();
@@ -124,7 +124,7 @@ class StringIndexMarisa : public StringIndex {
  private:
     Config config_;
     marisa::Trie trie_;
-    std::vector<size_t> str_ids_;  // used to retrieve.
+    std::vector<int64_t> str_ids_;  // used to retrieve.
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;

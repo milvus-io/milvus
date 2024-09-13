@@ -683,6 +683,11 @@ ReverseDataFromIndex(const index::IndexBase* index,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    auto nullable = field_meta.is_nullable();
+    std::vector<bool> valid_data;
+    if (nullable) {
+        valid_data.resize(count);
+    }
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -692,8 +697,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<bool> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -707,8 +717,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<int8_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -722,8 +737,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<int16_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -737,8 +757,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<int32_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -752,8 +777,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<int64_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -767,8 +797,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<float> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -782,8 +817,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<double> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -797,8 +837,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<std::string> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto value = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!value.has_value()) {
+                    valid_data[i] = false;
                     continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
                 }
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]).value();
             }
@@ -810,6 +855,11 @@ ReverseDataFromIndex(const index::IndexBase* index,
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
+    }
+
+    if (nullable) {
+        *(data_array->mutable_valid_data()) = {valid_data.begin(),
+                                               valid_data.end()};
     }
 
     return data_array;

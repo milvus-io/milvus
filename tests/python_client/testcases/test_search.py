@@ -13017,7 +13017,6 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip(reason="issue #36184")
     def test_search_after_different_index_with_params_none_default_data(self, varchar_scalar_index, numeric_scalar_index,
                                                                         null_data_percent, _async):
         """

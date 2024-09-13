@@ -127,8 +127,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
     std::vector<IndexStructure<T>> data_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     size_t total_num_rows_{0};
-    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
-    TargetBitmap valid_bitset;
+    // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
+    TargetBitmap valid_bitset_;
 };
 
 template <typename T>
