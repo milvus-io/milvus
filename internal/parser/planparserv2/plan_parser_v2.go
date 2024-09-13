@@ -2,8 +2,10 @@ package planparserv2
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -14,8 +16,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// exprParseKey is used to cache the parse result. Currently only collectionName is used besides expr string, which implies
+// that the same collectionName will have the same schema thus the same parse result. In the future, if there is case that the
+// schema changes without changing the collectionName, we need to change the cache key.
+type exprParseKey struct {
+	collectionName string
+	expr           string
+}
+
+var exprCache = expirable.NewLRU[exprParseKey, any](256, nil, time.Minute*10)
+
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
-	return handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+	parseKey := exprParseKey{collectionName: schema.GetCollectionName(), expr: exprStr}
+	val, ok := exprCache.Get(parseKey)
+	if !ok {
+		val = handleExprWithErrorListener(schema, exprStr, &errorListenerImpl{})
+		// Note that the errors will be cached, too.
+		exprCache.Add(parseKey, val)
+	}
+	return val
 }
 
 func handleExprWithErrorListener(schema *typeutil.SchemaHelper, exprStr string, errorListener errorListener) interface{} {

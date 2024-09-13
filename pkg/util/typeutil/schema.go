@@ -440,6 +440,10 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 	return nil, fmt.Errorf("function not exist")
 }
 
+func (helper *SchemaHelper) GetCollectionName() string {
+	return helper.schema.Name
+}
+
 func IsBinaryVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_BinaryVector
 }
