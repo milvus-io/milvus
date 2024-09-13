@@ -22,13 +22,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/tecbot/gorocksdb"
 
-	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-var _ kv.BaseKV = (*RocksdbKV)(nil)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {

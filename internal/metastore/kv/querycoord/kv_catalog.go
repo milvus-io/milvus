@@ -104,7 +104,7 @@ func (s Catalog) RemoveResourceGroup(rgName string) error {
 }
 
 func (s Catalog) GetCollections() ([]*querypb.CollectionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(CollectionLoadInfoPrefix)
+	_, values, err := s.cli.LoadAtDirectory(CollectionLoadInfoPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s Catalog) GetCollections() ([]*querypb.CollectionLoadInfo, error) {
 }
 
 func (s Catalog) GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(PartitionLoadInfoPrefix)
+	_, values, err := s.cli.LoadAtDirectory(PartitionLoadInfoPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s Catalog) GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
 }
 
 func (s Catalog) GetReplicas() ([]*querypb.Replica, error) {
-	_, values, err := s.cli.LoadWithPrefix(ReplicaPrefix)
+	_, values, err := s.cli.LoadAtDirectory(ReplicaPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func (s Catalog) GetReplicas() ([]*querypb.Replica, error) {
 }
 
 func (s Catalog) getReplicasFromV1() ([]*querypb.Replica, error) {
-	_, replicaValues, err := s.cli.LoadWithPrefix(ReplicaMetaPrefixV1)
+	_, replicaValues, err := s.cli.LoadAtDirectory(ReplicaMetaPrefixV1)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (s Catalog) getReplicasFromV1() ([]*querypb.Replica, error) {
 }
 
 func (s Catalog) GetResourceGroups() ([]*querypb.ResourceGroup, error) {
-	_, rgs, err := s.cli.LoadWithPrefix(ResourceGroupPrefix)
+	_, rgs, err := s.cli.LoadAtDirectory(ResourceGroupPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +272,7 @@ func (s Catalog) RemoveCollectionTarget(collectionID int64) error {
 }
 
 func (s Catalog) GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error) {
-	keys, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
+	keys, values, err := s.cli.LoadAtDirectory(CollectionTargetPrefix)
 	if err != nil {
 		return nil, err
 	}

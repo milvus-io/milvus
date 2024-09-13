@@ -152,7 +152,7 @@ func (s *EtcdKVSuite) TestSaveLoad() {
 	}
 
 	for _, test := range loadPrefixTests {
-		actualKeys, actualValues, err := etcdKV.LoadWithPrefix(test.prefix)
+		actualKeys, actualValues, err := etcdKV.LoadAtDirectory(test.prefix)
 		s.ElementsMatch(test.expectedKeys, actualKeys)
 		s.ElementsMatch(test.expectedValues, actualValues)
 		s.Equal(test.expectedError, err)
@@ -399,7 +399,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 		err = etcdKV.RemoveWithPrefix(k)
 		s.NoError(err)
 
-		ks, vs, err := etcdKV.LoadWithPrefix(k)
+		ks, vs, err := etcdKV.LoadAtDirectory(k)
 		s.Empty(ks)
 		s.Empty(vs)
 		s.NoError(err)
@@ -415,7 +415,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 	err = etcdKV.MultiRemove(multiRemoveTests)
 	s.NoError(err)
 
-	ks, vs, err := etcdKV.LoadWithPrefix("")
+	ks, vs, err := etcdKV.LoadAtDirectory("")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -436,7 +436,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 		s.NoError(err)
 	}
 
-	ks, vs, err = etcdKV.LoadWithPrefix("")
+	ks, vs, err = etcdKV.LoadAtDirectory("")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -634,14 +634,14 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
 	}
 
 	for _, test := range multiSaveAndRemoveWithPrefixTests {
-		k, _, err := etcdKV.LoadWithPrefix(test.loadPrefix)
+		k, _, err := etcdKV.LoadAtDirectory(test.loadPrefix)
 		s.NoError(err)
 		s.Equal(test.lengthBeforeRemove, len(k))
 
 		err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
 		s.NoError(err)
 
-		k, _, err = etcdKV.LoadWithPrefix(test.loadPrefix)
+		k, _, err = etcdKV.LoadAtDirectory(test.loadPrefix)
 		s.NoError(err)
 		s.Equal(test.lengthAfterRemove, len(k))
 	}
@@ -740,14 +740,14 @@ func Test_WalkWithPagination(t *testing.T) {
 	}
 
 	t.Run("apply function error ", func(t *testing.T) {
-		err = etcdKV.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+		err = etcdKV.WalkAtDirectory("A", 5, func(key []byte, value []byte) error {
 			return errors.New("error")
 		})
 		assert.Error(t, err)
 	})
 
 	t.Run("get with non-exist prefix ", func(t *testing.T) {
-		err = etcdKV.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+		err = etcdKV.WalkAtDirectory("non-exist-prefix", 5, func(key []byte, value []byte) error {
 			return nil
 		})
 		assert.NoError(t, err)
@@ -768,7 +768,7 @@ func Test_WalkWithPagination(t *testing.T) {
 			ret := make(map[string]string)
 			actualSortedKey := make([]string, 0)
 
-			err = etcdKV.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+			err = etcdKV.WalkAtDirectory("A", pagination, func(key []byte, value []byte) error {
 				k := string(key)
 				k = k[len(rootPath)+1:]
 				ret[k] = string(value)

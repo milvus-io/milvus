@@ -304,8 +304,8 @@ func (_c *MockMetaKv_Load_Call) RunAndReturn(run func(string) (string, error)) *
 	return _c
 }
 
-// LoadWithPrefix provides a mock function with given fields: key
-func (_m *MockMetaKv) LoadWithPrefix(key string) ([]string, []string, error) {
+// LoadAtDirectory provides a mock function with given fields: key
+func (_m *MockMetaKv) LoadAtDirectory(key string) ([]string, []string, error) {
 	ret := _m.Called(key)
 
 	var r0 []string
@@ -339,30 +339,30 @@ func (_m *MockMetaKv) LoadWithPrefix(key string) ([]string, []string, error) {
 	return r0, r1, r2
 }
 
-// MockMetaKv_LoadWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithPrefix'
-type MockMetaKv_LoadWithPrefix_Call struct {
+// MockMetaKv_LoadAtDirectory_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadAtDirectory'
+type MockMetaKv_LoadAtDirectory_Call struct {
 	*mock.Call
 }
 
-// LoadWithPrefix is a helper method to define mock.On call
+// LoadAtDirectory is a helper method to define mock.On call
 //   - key string
-func (_e *MockMetaKv_Expecter) LoadWithPrefix(key interface{}) *MockMetaKv_LoadWithPrefix_Call {
-	return &MockMetaKv_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
+func (_e *MockMetaKv_Expecter) LoadAtDirectory(key interface{}) *MockMetaKv_LoadAtDirectory_Call {
+	return &MockMetaKv_LoadAtDirectory_Call{Call: _e.mock.On("LoadAtDirectory", key)}
 }
 
-func (_c *MockMetaKv_LoadWithPrefix_Call) Run(run func(key string)) *MockMetaKv_LoadWithPrefix_Call {
+func (_c *MockMetaKv_LoadAtDirectory_Call) Run(run func(key string)) *MockMetaKv_LoadAtDirectory_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *MockMetaKv_LoadWithPrefix_Call) Return(_a0 []string, _a1 []string, _a2 error) *MockMetaKv_LoadWithPrefix_Call {
+func (_c *MockMetaKv_LoadAtDirectory_Call) Return(_a0 []string, _a1 []string, _a2 error) *MockMetaKv_LoadAtDirectory_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockMetaKv_LoadWithPrefix_Call) RunAndReturn(run func(string) ([]string, []string, error)) *MockMetaKv_LoadWithPrefix_Call {
+func (_c *MockMetaKv_LoadAtDirectory_Call) RunAndReturn(run func(string) ([]string, []string, error)) *MockMetaKv_LoadAtDirectory_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -748,8 +748,8 @@ func (_c *MockMetaKv_Save_Call) RunAndReturn(run func(string, string) error) *Mo
 	return _c
 }
 
-// WalkWithPrefix provides a mock function with given fields: prefix, paginationSize, fn
-func (_m *MockMetaKv) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+// WalkAtDirectory provides a mock function with given fields: prefix, paginationSize, fn
+func (_m *MockMetaKv) WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	ret := _m.Called(prefix, paginationSize, fn)
 
 	var r0 error
@@ -762,32 +762,32 @@ func (_m *MockMetaKv) WalkWithPrefix(prefix string, paginationSize int, fn func(
 	return r0
 }
 
-// MockMetaKv_WalkWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WalkWithPrefix'
-type MockMetaKv_WalkWithPrefix_Call struct {
+// MockMetaKv_WalkAtDirectory_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WalkAtDirectory'
+type MockMetaKv_WalkAtDirectory_Call struct {
 	*mock.Call
 }
 
-// WalkWithPrefix is a helper method to define mock.On call
+// WalkAtDirectory is a helper method to define mock.On call
 //   - prefix string
 //   - paginationSize int
 //   - fn func([]byte , []byte) error
-func (_e *MockMetaKv_Expecter) WalkWithPrefix(prefix interface{}, paginationSize interface{}, fn interface{}) *MockMetaKv_WalkWithPrefix_Call {
-	return &MockMetaKv_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", prefix, paginationSize, fn)}
+func (_e *MockMetaKv_Expecter) WalkAtDirectory(prefix interface{}, paginationSize interface{}, fn interface{}) *MockMetaKv_WalkAtDirectory_Call {
+	return &MockMetaKv_WalkAtDirectory_Call{Call: _e.mock.On("WalkAtDirectory", prefix, paginationSize, fn)}
 }
 
-func (_c *MockMetaKv_WalkWithPrefix_Call) Run(run func(prefix string, paginationSize int, fn func([]byte, []byte) error)) *MockMetaKv_WalkWithPrefix_Call {
+func (_c *MockMetaKv_WalkAtDirectory_Call) Run(run func(prefix string, paginationSize int, fn func([]byte, []byte) error)) *MockMetaKv_WalkAtDirectory_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string), args[1].(int), args[2].(func([]byte, []byte) error))
 	})
 	return _c
 }
 
-func (_c *MockMetaKv_WalkWithPrefix_Call) Return(_a0 error) *MockMetaKv_WalkWithPrefix_Call {
+func (_c *MockMetaKv_WalkAtDirectory_Call) Return(_a0 error) *MockMetaKv_WalkAtDirectory_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockMetaKv_WalkWithPrefix_Call) RunAndReturn(run func(string, int, func([]byte, []byte) error) error) *MockMetaKv_WalkWithPrefix_Call {
+func (_c *MockMetaKv_WalkAtDirectory_Call) RunAndReturn(run func(string, int, func([]byte, []byte) error) error) *MockMetaKv_WalkAtDirectory_Call {
 	_c.Call.Return(run)
 	return _c
 }

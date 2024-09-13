@@ -25,7 +25,6 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/kv"
 	rocksdb "github.com/milvus-io/milvus/pkg/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -115,7 +114,7 @@ var topicMu = sync.Map{}
 type rocksmq struct {
 	store       *gorocksdb.DB
 	cfh         []*gorocksdb.ColumnFamilyHandle
-	kv          kv.BaseKV
+	kv          *rocksdb.RocksdbKV
 	storeMu     *sync.Mutex
 	consumers   sync.Map
 	consumersID sync.Map
@@ -1066,7 +1065,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 	defer readOpts.Destroy()
 	pageMsgFirstKey := pageMsgPrefix + strconv.FormatInt(firstID, 10)
 
-	iter := rocksdb.NewRocksIteratorWithUpperBound(rmq.kv.(*rocksdb.RocksdbKV).DB, typeutil.AddOne(pageMsgPrefix), readOpts)
+	iter := rocksdb.NewRocksIteratorWithUpperBound(rmq.kv.DB, typeutil.AddOne(pageMsgPrefix), readOpts)
 	defer iter.Close()
 	var pageIDs []UniqueID
 

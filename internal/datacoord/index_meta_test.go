@@ -565,7 +565,7 @@ func TestMeta_GetIndexIDByName(t *testing.T) {
 	metakv := mockkv.NewMetaKv(t)
 	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+	metakv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, nil).Maybe()
 
 	m := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: metakv})
 	t.Run("no indexes", func(t *testing.T) {
@@ -620,7 +620,7 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 	metakv := mockkv.NewMetaKv(t)
 	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+	metakv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, nil).Maybe()
 
 	m := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: metakv})
 	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{

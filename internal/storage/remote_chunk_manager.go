@@ -54,10 +54,10 @@ type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
 	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	// WalkWithPrefix walks all objects with prefix @prefix, and call walker for each object.
-	// WalkWithPrefix will stop if following conditions met:
-	// 1. cb return false or reach the last object, WalkWithPrefix will stop and return nil.
-	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
+	// WalkWithObjects walks all objects with prefix @prefix, and call walker for each object.
+	// WalkWithObjects will stop if following conditions met:
+	// 1. cb return false or reach the last object, WalkWithObjects will stop and return nil.
+	// 2. underlying walking failed or context canceled, WalkWithObjects will stop and return a error.
 	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }

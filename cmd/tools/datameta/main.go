@@ -37,7 +37,7 @@ func main() {
 
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, *rootPath)
 
-	keys, values, err := etcdkv.LoadWithPrefix("/")
+	keys, values, err := etcdkv.LoadAtDirectory("/")
 	if err != nil {
 		log.Fatal("failed to list ", zap.Error(err))
 	}

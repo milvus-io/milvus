@@ -16,7 +16,7 @@ func TestCatalog(t *testing.T) {
 	kv := mock_kv.NewMockMetaKv(t)
 
 	kvStorage := make(map[string]string)
-	kv.EXPECT().LoadWithPrefix(mock.Anything).RunAndReturn(func(s string) ([]string, []string, error) {
+	kv.EXPECT().LoadAtDirectory(mock.Anything).RunAndReturn(func(s string) ([]string, []string, error) {
 		keys := make([]string, 0, len(kvStorage))
 		vals := make([]string, 0, len(kvStorage))
 		for k, v := range kvStorage {
@@ -54,8 +54,8 @@ func TestCatalog(t *testing.T) {
 	assert.Len(t, metas, 2)
 
 	// error path.
-	kv.EXPECT().LoadWithPrefix(mock.Anything).Unset()
-	kv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("load error"))
+	kv.EXPECT().LoadAtDirectory(mock.Anything).Unset()
+	kv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, errors.New("load error"))
 	metas, err = catalog.ListPChannel(context.Background())
 	assert.Error(t, err)
 	assert.Nil(t, metas)

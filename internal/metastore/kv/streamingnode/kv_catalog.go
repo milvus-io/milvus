@@ -29,7 +29,7 @@ type catalog struct {
 
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	prefix := buildSegmentAssignmentMetaPath(pChannelName)
-	keys, values, err := c.metaKV.LoadWithPrefix(prefix)
+	keys, values, err := c.metaKV.LoadAtDirectory(prefix)
 	if err != nil {
 		return nil, err
 	}

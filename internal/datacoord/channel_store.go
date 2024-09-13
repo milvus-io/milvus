@@ -332,7 +332,7 @@ func NewStateChannelStore(kv kv.TxnKV) *StateChannelStore {
 
 func (c *StateChannelStore) Reload() error {
 	record := timerecord.NewTimeRecorder("datacoord")
-	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
+	keys, values, err := c.store.LoadAtDirectory(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
 	if err != nil {
 		return err
 	}

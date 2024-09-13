@@ -728,7 +728,7 @@ func TestTryToSealSegment(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
 		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, nil).Maybe()
 		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())
@@ -757,7 +757,7 @@ func TestTryToSealSegment(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
 		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, nil).Maybe()
 		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())

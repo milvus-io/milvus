@@ -56,18 +56,18 @@ func Test_mockSnapshotKV_MultiSave(t *testing.T) {
 	})
 }
 
-func Test_mockSnapshotKV_LoadWithPrefix(t *testing.T) {
+func Test_mockSnapshotKV_LoadAtDirectory(t *testing.T) {
 	t.Run("func not set", func(t *testing.T) {
 		snapshot := NewMockSnapshotKV()
-		_, _, err := snapshot.LoadWithPrefix("prefix", 0)
+		_, _, err := snapshot.LoadAtDirectory("prefix", 0)
 		assert.NoError(t, err)
 	})
 	t.Run("func set", func(t *testing.T) {
 		snapshot := NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
-		_, _, err := snapshot.LoadWithPrefix("prefix", 0)
+		_, _, err := snapshot.LoadAtDirectory("prefix", 0)
 		assert.NoError(t, err)
 	})
 }

@@ -365,7 +365,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 0; i < 20; i++ {
-		keys, vals, err := ss.LoadWithPrefix("k", typeutil.Timestamp(100+i*5+2))
+		keys, vals, err := ss.LoadAtDirectory("k", typeutil.Timestamp(100+i*5+2))
 		t.Log(i, keys, vals)
 		assert.NoError(t, err)
 		assert.Equal(t, len(keys), len(vals))
@@ -375,7 +375,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		assert.Equal(t, vals[0], fmt.Sprintf("v1-%d", i))
 		assert.Equal(t, vals[1], fmt.Sprintf("v2-%d", i))
 	}
-	keys, vals, err := ss.LoadWithPrefix("k", 0)
+	keys, vals, err := ss.LoadAtDirectory("k", 0)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
@@ -385,7 +385,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	assert.Equal(t, vals[1], "v2-19")
 
 	for i := 0; i < 20; i++ {
-		keys, vals, err := ss.LoadWithPrefix("k", typeutil.Timestamp(100+i*5+2))
+		keys, vals, err := ss.LoadAtDirectory("k", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, len(keys), len(vals))
 		assert.Equal(t, len(keys), 2)
@@ -395,7 +395,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	// mix non ts k-v
 	err = ss.Save("kextra", "extra-value", 0)
 	assert.NoError(t, err)
-	keys, vals, err = ss.LoadWithPrefix("k", typeutil.Timestamp(300))
+	keys, vals, err = ss.LoadAtDirectory("k", typeutil.Timestamp(300))
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
@@ -477,7 +477,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 
 	countPrefix := func(prefix string) int {
 		cnt := 0
-		err := etcdkv.WalkWithPrefix("", 10, func(key []byte, value []byte) error {
+		err := etcdkv.WalkAtDirectory("", 10, func(key []byte, value []byte) error {
 			cnt++
 			return nil
 		})
@@ -569,7 +569,7 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		rootPath := "root/"
 		kv := mocks.NewMetaKv(t)
 		kv.EXPECT().
-			WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).
+			WalkAtDirectory(mock.Anything, mock.Anything, mock.Anything).
 			Return(errors.New("error"))
 
 		ss, err := NewSuffixSnapshot(kv, sep, rootPath, snapshotPrefix)
@@ -632,7 +632,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, i+1, len(vals))
 	}
@@ -640,7 +640,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, 39-i, len(vals))
 	}
@@ -649,7 +649,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, i+1, len(vals))
 	}
@@ -657,7 +657,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, 39-i, len(vals))
 	}
@@ -724,7 +724,7 @@ func Test_SuffixSnapshotMultiSaveAndRemove(t *testing.T) {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, i+1, len(vals))
 	}
@@ -732,7 +732,7 @@ func Test_SuffixSnapshotMultiSaveAndRemove(t *testing.T) {
 		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
-		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		_, vals, err := ss.LoadAtDirectory("kd-", typeutil.Timestamp(100+i*5+2))
 		assert.NoError(t, err)
 		assert.Equal(t, 39-i, len(vals))
 	}
@@ -749,7 +749,7 @@ func Test_SuffixSnapshotMultiSaveAndRemove(t *testing.T) {
 	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)
 }
 
-func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
+func TestSuffixSnapshot_LoadAtDirectory(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
@@ -781,7 +781,7 @@ func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 		err = etcdkv.Save(ss.composeSnapshotPrefix(key), "")
 		assert.NoError(t, err)
 
-		keys, values, err := ss.LoadWithPrefix(prefix, 100)
+		keys, values, err := ss.LoadAtDirectory(prefix, 100)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(keys))
 		assert.Equal(t, 0, len(values))
@@ -796,14 +796,14 @@ func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 		rootPath := "root/"
 		kv := mocks.NewMetaKv(t)
 		kv.EXPECT().
-			WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).
+			WalkAtDirectory(mock.Anything, mock.Anything, mock.Anything).
 			Return(errors.New("error"))
 
 		ss, err := NewSuffixSnapshot(kv, sep, rootPath, snapshotPrefix)
 		assert.NotNil(t, ss)
 		assert.NoError(t, err)
 
-		keys, values, err := ss.LoadWithPrefix("t", 100)
+		keys, values, err := ss.LoadAtDirectory("t", 100)
 		assert.Error(t, err)
 		assert.Nil(t, keys)
 		assert.Nil(t, values)

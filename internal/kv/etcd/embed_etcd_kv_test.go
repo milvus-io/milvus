@@ -124,7 +124,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range loadPrefixTests {
-			actualKeys, actualValues, err := metaKv.LoadWithPrefix(test.prefix)
+			actualKeys, actualValues, err := metaKv.LoadAtDirectory(test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
@@ -379,7 +379,7 @@ func TestEmbedEtcd(te *testing.T) {
 			err = metaKv.RemoveWithPrefix(k)
 			assert.NoError(t, err)
 
-			ks, vs, err := metaKv.LoadWithPrefix(k)
+			ks, vs, err := metaKv.LoadAtDirectory(k)
 			assert.Empty(t, ks)
 			assert.Empty(t, vs)
 			assert.NoError(t, err)
@@ -395,7 +395,7 @@ func TestEmbedEtcd(te *testing.T) {
 		err = metaKv.MultiRemove(multiRemoveTests)
 		assert.NoError(t, err)
 
-		ks, vs, err := metaKv.LoadWithPrefix("")
+		ks, vs, err := metaKv.LoadAtDirectory("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -416,7 +416,7 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		ks, vs, err = metaKv.LoadWithPrefix("")
+		ks, vs, err = metaKv.LoadAtDirectory("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -569,14 +569,14 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err := metaKv.LoadWithPrefix(test.loadPrefix)
+			k, _, err := metaKv.LoadAtDirectory(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
 			err = metaKv.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
 			assert.NoError(t, err)
 
-			k, _, err = metaKv.LoadWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadAtDirectory(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
@@ -727,14 +727,14 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		t.Run("apply function error ", func(t *testing.T) {
-			err = metaKv.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+			err = metaKv.WalkAtDirectory("A", 5, func(key []byte, value []byte) error {
 				return errors.New("error")
 			})
 			assert.Error(t, err)
 		})
 
 		t.Run("get with non-exist prefix ", func(t *testing.T) {
-			err = metaKv.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+			err = metaKv.WalkAtDirectory("non-exist-prefix", 5, func(key []byte, value []byte) error {
 				return nil
 			})
 			assert.NoError(t, err)
@@ -755,7 +755,7 @@ func TestEmbedEtcd(te *testing.T) {
 				ret := make(map[string]string)
 				actualSortedKey := make([]string, 0)
 
-				err = metaKv.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+				err = metaKv.WalkAtDirectory("A", pagination, func(key []byte, value []byte) error {
 					k := string(key)
 					k = k[len(rootPath)+1:]
 					ret[k] = string(value)

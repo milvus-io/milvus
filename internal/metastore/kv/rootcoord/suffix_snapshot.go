@@ -211,9 +211,9 @@ func (ss *SuffixSnapshot) checkKeyTS(key string, ts typeutil.Timestamp) (bool, e
 // loadLatestTS load the loatest ts for specified key
 func (ss *SuffixSnapshot) loadLatestTS(key string) error {
 	prefix := ss.composeSnapshotPrefix(key)
-	keys, _, err := ss.MetaKv.LoadWithPrefix(prefix)
+	keys, _, err := ss.MetaKv.LoadAtDirectory(prefix)
 	if err != nil {
-		log.Warn("SuffixSnapshot MetaKv LoadWithPrefix failed", zap.String("key", key),
+		log.Warn("SuffixSnapshot MetaKv LoadAtDirectory failed", zap.String("key", key),
 			zap.Error(err))
 		return err
 	}
@@ -338,9 +338,9 @@ func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 
 	// before ts, do time travel
 	// 1. load all tsKey with key/ prefix
-	keys, values, err := ss.MetaKv.LoadWithPrefix(ss.composeSnapshotPrefix(key))
+	keys, values, err := ss.MetaKv.LoadAtDirectory(ss.composeSnapshotPrefix(key))
 	if err != nil {
-		log.Warn("prefixSnapshot MetaKv LoadWithPrefix failed", zap.String("key", key), zap.Error(err))
+		log.Warn("prefixSnapshot MetaKv LoadAtDirectory failed", zap.String("key", key), zap.Error(err))
 		return "", err
 	}
 
@@ -431,11 +431,11 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 	return execute, updateList, nil
 }
 
-// LoadWithPrefix load keys with provided prefix and returns value in the ts
-func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+// LoadAtDirectory load keys with provided prefix and returns value in the ts
+func (ss *SuffixSnapshot) LoadAtDirectory(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
 	if ts == 0 {
-		keys, values, err := ss.MetaKv.LoadWithPrefix(key)
+		keys, values, err := ss.MetaKv.LoadAtDirectory(key)
 		fks := keys[:0]   // make([]string, 0, len(keys))
 		fvs := values[:0] // make([]string, 0, len(values))
 		// hide rootPrefix from return value
@@ -469,7 +469,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 		resultValues = append(resultValues, value)
 	}
 
-	err := ss.MetaKv.WalkWithPrefix(prefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkAtDirectory(prefix, PaginationSize, func(k []byte, v []byte) error {
 		sKey := string(k)
 		sValue := string(v)
 
@@ -570,9 +570,9 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 
 	// load each removal, change execution to adding tombstones
 	for _, removal := range removals {
-		keys, values, err := ss.MetaKv.LoadWithPrefix(removal)
+		keys, values, err := ss.MetaKv.LoadAtDirectory(removal)
 		if err != nil {
-			log.Warn("SuffixSnapshot MetaKv LoadwithPrefix failed", zap.String("key", removal), zap.Error(err))
+			log.Warn("SuffixSnapshot MetaKv LoadAtDirectory failed", zap.String("key", removal), zap.Error(err))
 			return err
 		}
 
@@ -664,7 +664,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 	// walk all kvs with SortAsc, we need walk to the latest key for each key group to check the kv
 	// whether contains tombstone, then if so, it represents the original key has been removed.
 	// TODO: walk with Desc
-	err := ss.MetaKv.WalkWithPrefix(ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkAtDirectory(ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
 		key := string(k)
 		value := string(v)
 

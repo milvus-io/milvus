@@ -29,6 +29,7 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv/utility"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -72,7 +73,6 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 		e, err = embed.StartEtcd(cfg)
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,6 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 			return errors.New("Embedded etcd took too long to start")
 		}
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +122,8 @@ func (kv *EmbedEtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
-func (kv *EmbedEtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	prefix = path.Join(kv.rootPath, prefix)
+func (kv *EmbedEtcdKV) WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	prefix = utility.CheckDirectoryPrefix(kv.rootPath, prefix)
 	ctx, cancel := context.WithTimeout(context.TODO(), kv.requestTimeout)
 	defer cancel()
 
@@ -157,10 +156,10 @@ func (kv *EmbedEtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func
 	return nil
 }
 
-// LoadWithPrefix returns all the keys and values with the given key prefix
-func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	key = path.Join(kv.rootPath, key)
-	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
+// LoadAtDirectory returns all the keys and values with the given key prefix
+func (kv *EmbedEtcdKV) LoadAtDirectory(key string) ([]string, []string, error) {
+	key = utility.CheckDirectoryPrefix(kv.rootPath, key)
+	log.Debug("LoadAtDirectory ", zap.String("prefix", key))
 	ctx, cancel := context.WithTimeout(context.TODO(), kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),

@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv/utility"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -270,13 +271,13 @@ func (kv *txnTiKV) MultiLoad(keys []string) ([]string, error) {
 	return validValues, loggingErr
 }
 
-// LoadWithPrefix returns all the keys and values for the given key prefix.
-func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+// LoadAtDirectory returns all the keys and values for the given key prefix.
+func (kv *txnTiKV) LoadAtDirectory(prefix string) ([]string, []string, error) {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = utility.CheckDirectoryPrefix(kv.rootPath, prefix)
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadWithPrefix() error", zap.String("prefix", prefix))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadAtDirectory() error", zap.String("prefix", prefix))
 
 	ss := getSnapshot(kv.txn, SnapshotScanSize)
 
@@ -285,7 +286,7 @@ func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	endKey := tikv.PrefixNextKey([]byte(prefix))
 	iter, err := ss.Iter(startKey, endKey)
 	if err != nil {
-		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for LoadWithPrefix() for prefix: %s", prefix))
+		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for LoadAtDirectory() for prefix: %s", prefix))
 		return nil, nil, loggingErr
 	}
 	defer iter.Close()
@@ -302,11 +303,11 @@ func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 		values = append(values, strVal)
 		err = iter.Next()
 		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to iterate for LoadWithPrefix() for prefix: %s", prefix))
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to iterate for LoadAtDirectory() for prefix: %s", prefix))
 			return nil, nil, loggingErr
 		}
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV LoadWithPrefix() operation", zap.String("prefix", prefix))
+	CheckElapseAndWarn(start, "Slow txnTiKV LoadAtDirectory() operation", zap.String("prefix", prefix))
 	return keys, values, nil
 }
 
@@ -584,10 +585,10 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 	return nil
 }
 
-// WalkWithPrefix visits each kv with input prefix and apply given fn to it.
-func (kv *txnTiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+// WalkAtDirectory visits each kv with input prefix and apply given fn to it.
+func (kv *txnTiKV) WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = utility.CheckDirectoryPrefix(kv.rootPath, prefix)
 
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", zap.String("prefix", prefix))
@@ -600,7 +601,7 @@ func (kv *txnTiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]b
 	endKey := tikv.PrefixNextKey([]byte(prefix))
 	iter, err := ss.Iter(startKey, endKey)
 	if err != nil {
-		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for %s during WalkWithPrefix", prefix))
+		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterater for %s during WalkAtDirectory", prefix))
 		return loggingErr
 	}
 	defer iter.Close()
@@ -620,7 +621,7 @@ func (kv *txnTiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]b
 		}
 		err = iter.Next()
 		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for WalkWithPrefix", string(iter.Key())))
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for WalkAtDirectory", string(iter.Key())))
 			return loggingErr
 		}
 	}

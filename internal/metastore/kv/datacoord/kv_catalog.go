@@ -112,7 +112,7 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 		}
 
 		// due to StatsTaskPrefix has the same prefix with SegmentPrefix, so skip it.
-		// when the WalkWithPrefix is refactored, this patch can be removed.
+		// when the WalkAtDirectory is refactored, this patch can be removed.
 		if strings.Contains(string(value), StatsTaskPrefix) {
 			return nil
 		}
@@ -127,7 +127,7 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(SegmentPrefix+"/", paginationSize, applyFn)
+	err := kc.MetaKv.WalkAtDirectory(SegmentPrefix+"/", paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 		return nil
 	}
 
-	err = kc.MetaKv.WalkWithPrefix(logPathPrefix, paginationSize, applyFn)
+	err = kc.MetaKv.WalkAtDirectory(logPathPrefix, paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +477,7 @@ func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 }
 
 func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ChannelCheckpointPrefix)
+	keys, values, err := kc.MetaKv.LoadAtDirectory(ChannelCheckpointPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +540,7 @@ func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectio
 	default:
 		return nil, nil, fmt.Errorf("invalid binlog type: %d", binlogType)
 	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(binlogPrefix)
+	keys, values, err := kc.MetaKv.LoadAtDirectory(binlogPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -563,7 +563,7 @@ func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 }
 
 func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(util.FieldIndexPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(util.FieldIndexPrefix)
 	if err != nil {
 		log.Error("list index meta fail", zap.String("prefix", util.FieldIndexPrefix), zap.Error(err))
 		return nil, err
@@ -640,7 +640,7 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 }
 
 func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(util.SegmentIndexPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(util.SegmentIndexPrefix)
 	if err != nil {
 		log.Error("list segment index meta fail", zap.String("prefix", util.SegmentIndexPrefix), zap.Error(err))
 		return nil, err
@@ -697,7 +697,7 @@ func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
 
 func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
 	jobs := make([]*datapb.ImportJob, 0)
-	_, values, err := kc.MetaKv.LoadWithPrefix(ImportJobPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(ImportJobPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +729,7 @@ func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
 func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
 	tasks := make([]*datapb.PreImportTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(PreImportTaskPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(PreImportTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -762,7 +762,7 @@ func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
 func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
 	tasks := make([]*datapb.ImportTaskV2, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(ImportTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +789,7 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	if partitionID != common.AllPartitionsID {
 		prefix = buildPartitionPrefix(collectionID, partitionID)
 	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(prefix)
+	keys, values, err := kc.MetaKv.LoadAtDirectory(prefix)
 	if err != nil {
 		// error case can be regarded as not finished.
 		return false
@@ -800,7 +800,7 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
 	tasks := make([]*datapb.CompactionTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(CompactionTaskPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(CompactionTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -837,7 +837,7 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(AnalyzeTaskPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(AnalyzeTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -875,7 +875,7 @@ func (kc *Catalog) DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID
 func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
 	infos := make([]*datapb.PartitionStatsInfo, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(PartitionStatsInfoPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(PartitionStatsInfoPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -932,7 +932,7 @@ func (kc *Catalog) DropCurrentPartitionStatsVersion(ctx context.Context, collID,
 
 func (kc *Catalog) ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error) {
 	tasks := make([]*indexpb.StatsTask, 0)
-	_, values, err := kc.MetaKv.LoadWithPrefix(StatsTaskPrefix)
+	_, values, err := kc.MetaKv.LoadAtDirectory(StatsTaskPrefix)
 	if err != nil {
 		return nil, err
 	}

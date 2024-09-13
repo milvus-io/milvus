@@ -395,7 +395,7 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
-	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadAtDirectory(key string) ([]string, []string, error)
 	Save(key, value string) error
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
@@ -425,9 +425,9 @@ type TxnKV interface {
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
-	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadAtDirectory(key string) ([]string, []string, error)
 	CompareVersionAndSwap(key string, version int64, target string) error
-    WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
+    WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 ```
@@ -455,7 +455,7 @@ type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)
 	MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
-	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	LoadAtDirectory(key string, ts typeutil.Timestamp) ([]string, []string, error)
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
 ```
 
@@ -469,7 +469,7 @@ type etcdKV struct {
 
 func (kv *etcdKV) Close()
 func (kv *etcdKV) GetPath(key string) string
-func (kv *etcdKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *etcdKV) LoadAtDirectory(key string) ([]string, []string, error)
 func (kv *etcdKV) Load(key string) (string, error)
 func (kv *etcdKV) GetCount(key string) (int64, error)
 func (kv *etcdKV) MultiLoad(keys []string) ([]string, error)
@@ -505,60 +505,10 @@ func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error)
 func (kv *MemoryKV) MultiSave(kvs map[string]string) error
 func (kv *MemoryKV) MultiRemove(keys []string) error
 func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
-func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *MemoryKV) LoadAtDirectory(key string) ([]string, []string, error)
 func (kv *MemoryKV) Close()
 func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error
 func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 ```
 
 MemoryKV implements all _TxnKV_ interfaces.
-
-###### A.7.8 MinIO KV
-
-```go
-type MinIOKV struct {
-	ctx         context.Context
-	minioClient *minio.Client
-	bucketName  string
-}
-
-func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error)
-func (kv *MinIOKV) Load(key string) (string, error)
-func (kv *MinIOKV) MultiLoad(keys []string) ([]string, error)
-func (kv *MinIOKV) Save(key, value string) error
-func (kv *MinIOKV) MultiSave(kvs map[string]string) error
-func (kv *MinIOKV) RemoveWithPrefix(key string) error
-func (kv *MinIOKV) Remove(key string) error
-func (kv *MinIOKV) MultiRemove(keys []string) error
-func (kv *MinIOKV) Close()
-```
-
-MinIOKV implements all _KV_ interfaces.
-
-###### A.7.9 RocksdbKV KV
-
-```go
-type RocksdbKV struct {
-	opts         *gorocksdb.Options
-	db           *gorocksdb.DB
-	writeOptions *gorocksdb.WriteOptions
-	readOptions  *gorocksdb.ReadOptions
-	name         string
-}
-
-func (kv *RocksdbKV) Close()
-func (kv *RocksdbKV) GetName() string
-func (kv *RocksdbKV) Load(key string) (string, error)
-func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error)
-func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error)
-func (kv *RocksdbKV) Save(key, value string) error
-func (kv *RocksdbKV) MultiSave(kvs map[string]string) error
-func (kv *RocksdbKV) RemoveWithPrefix(key string) error
-func (kv *RocksdbKV) Remove(key string) error
-func (kv *RocksdbKV) MultiRemove(keys []string) error
-func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
-func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error
-func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
-```
-
-RocksdbKV implements all _TxnKV_ interfaces.h

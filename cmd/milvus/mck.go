@@ -107,7 +107,7 @@ func (c *mck) execute(args []string, flags *flag.FlagSet) {
 func (c *mck) run() {
 	c.connectMinio()
 
-	_, values, err := c.metaKV.LoadWithPrefix(segmentPrefix)
+	_, values, err := c.metaKV.LoadAtDirectory(segmentPrefix)
 	if err != nil {
 		log.Fatal("failed to list the segment info", zap.String("key", segmentPrefix), zap.Error(err))
 	}
@@ -121,7 +121,7 @@ func (c *mck) run() {
 		c.segmentIDMap[info.ID] = info
 	}
 
-	_, values, err = c.metaKV.LoadWithPrefix(collectionPrefix)
+	_, values, err = c.metaKV.LoadAtDirectory(collectionPrefix)
 	if err != nil {
 		log.Fatal("failed to list the collection info", zap.String("key", collectionPrefix), zap.Error(err))
 	}
@@ -150,13 +150,13 @@ func (c *mck) run() {
 	}
 	log.Info("partition ids", zap.Int64s("ids", ids))
 
-	keys, values, err := c.metaKV.LoadWithPrefix(triggerTaskPrefix)
+	keys, values, err := c.metaKV.LoadAtDirectory(triggerTaskPrefix)
 	if err != nil {
 		log.Fatal("failed to list the trigger task info", zap.Error(err))
 	}
 	c.extractTask(triggerTaskPrefix, keys, values)
 
-	keys, values, err = c.metaKV.LoadWithPrefix(activeTaskPrefix)
+	keys, values, err = c.metaKV.LoadAtDirectory(activeTaskPrefix)
 	if err != nil {
 		log.Fatal("failed to list the active task info", zap.Error(err))
 	}
@@ -259,7 +259,7 @@ func getConfigValue(a string, b string, name string) string {
 }
 
 func (c *mck) cleanTrash() {
-	keys, _, err := c.metaKV.LoadWithPrefix(MckTrash)
+	keys, _, err := c.metaKV.LoadAtDirectory(MckTrash)
 	if err != nil {
 		log.Error("failed to load backup info", zap.Error(err))
 		return

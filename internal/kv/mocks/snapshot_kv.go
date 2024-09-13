@@ -70,8 +70,8 @@ func (_c *SnapShotKV_Load_Call) RunAndReturn(run func(string, uint64) (string, e
 	return _c
 }
 
-// LoadWithPrefix provides a mock function with given fields: key, ts
-func (_m *SnapShotKV) LoadWithPrefix(key string, ts uint64) ([]string, []string, error) {
+// LoadAtDirectory provides a mock function with given fields: key, ts
+func (_m *SnapShotKV) LoadAtDirectory(key string, ts uint64) ([]string, []string, error) {
 	ret := _m.Called(key, ts)
 
 	var r0 []string
@@ -105,31 +105,31 @@ func (_m *SnapShotKV) LoadWithPrefix(key string, ts uint64) ([]string, []string,
 	return r0, r1, r2
 }
 
-// SnapShotKV_LoadWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithPrefix'
-type SnapShotKV_LoadWithPrefix_Call struct {
+// SnapShotKV_LoadAtDirectory_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadAtDirectory'
+type SnapShotKV_LoadAtDirectory_Call struct {
 	*mock.Call
 }
 
-// LoadWithPrefix is a helper method to define mock.On call
+// LoadAtDirectory is a helper method to define mock.On call
 //   - key string
 //   - ts uint64
-func (_e *SnapShotKV_Expecter) LoadWithPrefix(key interface{}, ts interface{}) *SnapShotKV_LoadWithPrefix_Call {
-	return &SnapShotKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key, ts)}
+func (_e *SnapShotKV_Expecter) LoadAtDirectory(key interface{}, ts interface{}) *SnapShotKV_LoadAtDirectory_Call {
+	return &SnapShotKV_LoadAtDirectory_Call{Call: _e.mock.On("LoadAtDirectory", key, ts)}
 }
 
-func (_c *SnapShotKV_LoadWithPrefix_Call) Run(run func(key string, ts uint64)) *SnapShotKV_LoadWithPrefix_Call {
+func (_c *SnapShotKV_LoadAtDirectory_Call) Run(run func(key string, ts uint64)) *SnapShotKV_LoadAtDirectory_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string), args[1].(uint64))
 	})
 	return _c
 }
 
-func (_c *SnapShotKV_LoadWithPrefix_Call) Return(_a0 []string, _a1 []string, _a2 error) *SnapShotKV_LoadWithPrefix_Call {
+func (_c *SnapShotKV_LoadAtDirectory_Call) Return(_a0 []string, _a1 []string, _a2 error) *SnapShotKV_LoadAtDirectory_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *SnapShotKV_LoadWithPrefix_Call) RunAndReturn(run func(string, uint64) ([]string, []string, error)) *SnapShotKV_LoadWithPrefix_Call {
+func (_c *SnapShotKV_LoadAtDirectory_Call) RunAndReturn(run func(string, uint64) ([]string, []string, error)) *SnapShotKV_LoadAtDirectory_Call {
 	_c.Call.Return(run)
 	return _c
 }

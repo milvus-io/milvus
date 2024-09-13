@@ -208,8 +208,8 @@ func (_c *TxnKV_Load_Call) RunAndReturn(run func(string) (string, error)) *TxnKV
 	return _c
 }
 
-// LoadWithPrefix provides a mock function with given fields: key
-func (_m *TxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
+// LoadAtDirectory provides a mock function with given fields: key
+func (_m *TxnKV) LoadAtDirectory(key string) ([]string, []string, error) {
 	ret := _m.Called(key)
 
 	var r0 []string
@@ -243,30 +243,30 @@ func (_m *TxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return r0, r1, r2
 }
 
-// TxnKV_LoadWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithPrefix'
-type TxnKV_LoadWithPrefix_Call struct {
+// TxnKV_LoadAtDirectory_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadAtDirectory'
+type TxnKV_LoadAtDirectory_Call struct {
 	*mock.Call
 }
 
-// LoadWithPrefix is a helper method to define mock.On call
+// LoadAtDirectory is a helper method to define mock.On call
 //   - key string
-func (_e *TxnKV_Expecter) LoadWithPrefix(key interface{}) *TxnKV_LoadWithPrefix_Call {
-	return &TxnKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
+func (_e *TxnKV_Expecter) LoadAtDirectory(key interface{}) *TxnKV_LoadAtDirectory_Call {
+	return &TxnKV_LoadAtDirectory_Call{Call: _e.mock.On("LoadAtDirectory", key)}
 }
 
-func (_c *TxnKV_LoadWithPrefix_Call) Run(run func(key string)) *TxnKV_LoadWithPrefix_Call {
+func (_c *TxnKV_LoadAtDirectory_Call) Run(run func(key string)) *TxnKV_LoadAtDirectory_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *TxnKV_LoadWithPrefix_Call) Return(_a0 []string, _a1 []string, _a2 error) *TxnKV_LoadWithPrefix_Call {
+func (_c *TxnKV_LoadAtDirectory_Call) Return(_a0 []string, _a1 []string, _a2 error) *TxnKV_LoadAtDirectory_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *TxnKV_LoadWithPrefix_Call) RunAndReturn(run func(string) ([]string, []string, error)) *TxnKV_LoadWithPrefix_Call {
+func (_c *TxnKV_LoadAtDirectory_Call) RunAndReturn(run func(string) ([]string, []string, error)) *TxnKV_LoadAtDirectory_Call {
 	_c.Call.Return(run)
 	return _c
 }

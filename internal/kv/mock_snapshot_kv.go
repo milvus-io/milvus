@@ -10,7 +10,7 @@ type mockSnapshotKV struct {
 	SaveFunc                         func(key string, value string, ts typeutil.Timestamp) error
 	LoadFunc                         func(key string, ts typeutil.Timestamp) (string, error)
 	MultiSaveFunc                    func(kvs map[string]string, ts typeutil.Timestamp) error
-	LoadWithPrefixFunc               func(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	LoadAtDirectoryFunc              func(key string, ts typeutil.Timestamp) ([]string, []string, error)
 	MultiSaveAndRemoveWithPrefixFunc func(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 	MultiSaveAndRemoveFunc           func(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }
@@ -40,9 +40,9 @@ func (m mockSnapshotKV) MultiSave(kvs map[string]string, ts typeutil.Timestamp) 
 	return nil
 }
 
-func (m mockSnapshotKV) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
-	if m.LoadWithPrefixFunc != nil {
-		return m.LoadWithPrefixFunc(key, ts)
+func (m mockSnapshotKV) LoadAtDirectory(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+	if m.LoadAtDirectoryFunc != nil {
+		return m.LoadAtDirectoryFunc(key, ts)
 	}
 	return nil, nil, nil
 }

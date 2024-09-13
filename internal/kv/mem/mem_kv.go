@@ -246,8 +246,8 @@ func (kv *MemoryKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []
 	return nil
 }
 
-// LoadWithPrefix returns all keys & values with given prefix.
-func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
+// LoadAtDirectory returns all keys & values with given prefix.
+func (kv *MemoryKV) LoadAtDirectory(key string) ([]string, []string, error) {
 	kv.Lock()
 	defer kv.Unlock()
 

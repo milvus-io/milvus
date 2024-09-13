@@ -494,7 +494,7 @@ func (s *StateChannelStoreSuite) TestReload() {
 				s.Require().NoError(err)
 				values = append(values, string(bs))
 			}
-			s.mockTxn.EXPECT().LoadWithPrefix(mock.AnythingOfType("string")).Return(keys, values, nil)
+			s.mockTxn.EXPECT().LoadAtDirectory(mock.AnythingOfType("string")).Return(keys, values, nil)
 
 			store := NewStateChannelStore(s.mockTxn)
 			err := store.Reload()

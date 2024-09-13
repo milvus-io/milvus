@@ -54,7 +54,7 @@ type ChannelManagerSuite struct {
 func (s *ChannelManagerSuite) prepareMeta(chNodes map[string]int64, state datapb.ChannelWatchState) {
 	s.SetupTest()
 	if chNodes == nil {
-		s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Once()
+		s.mockKv.EXPECT().LoadAtDirectory(mock.Anything).Return(nil, nil, nil).Once()
 		return
 	}
 	var keys, values []string
@@ -65,7 +65,7 @@ func (s *ChannelManagerSuite) prepareMeta(chNodes map[string]int64, state datapb
 		s.Require().NoError(err)
 		values = append(values, string(bs))
 	}
-	s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(keys, values, nil).Once()
+	s.mockKv.EXPECT().LoadAtDirectory(mock.Anything).Return(keys, values, nil).Once()
 }
 
 func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImpl, nodeID int64, channel string, state ChannelState) {
@@ -723,7 +723,7 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 		s.Require().NoError(err)
 		values = append(values, string(bs))
 	}
-	s.mockKv.EXPECT().LoadWithPrefix(mock.Anything).Return(keys, values, nil).Once()
+	s.mockKv.EXPECT().LoadAtDirectory(mock.Anything).Return(keys, values, nil).Once()
 	s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
 	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 	s.Require().NoError(err)

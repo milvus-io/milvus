@@ -42,7 +42,7 @@ func NewCompareFailedError(err error) error {
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
-	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadAtDirectory(key string) ([]string, []string, error)
 	Save(key, value string) error
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
@@ -68,9 +68,9 @@ type TxnKV interface {
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
-	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadAtDirectory(key string) ([]string, []string, error)
 	CompareVersionAndSwap(key string, version int64, target string) (bool, error)
-	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
+	WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 // WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.
@@ -90,7 +90,7 @@ type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)
 	MultiSave(kvs map[string]string, ts typeutil.Timestamp) error
-	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	LoadAtDirectory(key string, ts typeutil.Timestamp) ([]string, []string, error)
 	MultiSaveAndRemove(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }

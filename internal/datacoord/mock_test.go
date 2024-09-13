@@ -51,8 +51,8 @@ func NewMetaMemoryKV() *metaMemoryKV {
 	return &metaMemoryKV{MemoryKV: *memkv.NewMemoryKV()}
 }
 
-func (mm *metaMemoryKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(prefix)
+func (mm *metaMemoryKV) WalkAtDirectory(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, values, err := mm.MemoryKV.LoadAtDirectory(prefix)
 	if err != nil {
 		return err
 	}

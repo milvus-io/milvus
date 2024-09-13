@@ -133,7 +133,7 @@ func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Tim
 }
 
 func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
-	_, vals, err := kc.Snapshot.LoadWithPrefix(DBInfoMetaPrefix, ts)
+	_, vals, err := kc.Snapshot.LoadAtDirectory(DBInfoMetaPrefix, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Creden
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
 	prefix := BuildPartitionPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, values, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 
 func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
 	prefix := BuildFieldPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, values, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 
 func (kc *Catalog) listFunctions(collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
 	prefix := BuildFunctionPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, values, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +644,7 @@ func (kc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts t
 
 func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
-	_, vals, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, vals, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		log.Warn("get collection meta fail", zap.String("collectionName", collectionName), zap.Error(err))
 		return nil, err
@@ -668,7 +668,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 
 func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
-	_, vals, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, vals, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		log.Error("get collections meta fail",
 			zap.String("prefix", prefix),
@@ -713,7 +713,7 @@ func (kv *Catalog) fixDefaultDBIDConsistency(_ context.Context, collMeta *pb.Col
 }
 
 func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(CollectionAliasMetaPrefix210, ts)
+	_, values, err := kc.Snapshot.LoadAtDirectory(CollectionAliasMetaPrefix210, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -737,7 +737,7 @@ func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timesta
 
 func (kc *Catalog) listAliasesAfter210WithDb(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Alias, error) {
 	prefix := BuildAliasPrefixWithDB(dbID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	_, values, err := kc.Snapshot.LoadAtDirectory(prefix, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -793,7 +793,7 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 }
 
 func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(CredentialPrefix)
+	keys, values, err := kc.Txn.LoadAtDirectory(CredentialPrefix)
 	if err != nil {
 		log.Error("list all credential usernames fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
 		return nil, err
@@ -902,7 +902,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 	roleToUsers := make(map[string][]string)
 	if includeUserInfo {
 		roleMappingKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
-		keys, _, err := kc.Txn.LoadWithPrefix(roleMappingKey)
+		keys, _, err := kc.Txn.LoadAtDirectory(roleMappingKey)
 		if err != nil {
 			log.Error("fail to load role mappings", zap.String("key", roleMappingKey), zap.Error(err))
 			return results, err
@@ -933,7 +933,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 
 	if entity == nil {
 		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, "")
-		keys, _, err := kc.Txn.LoadWithPrefix(roleKey)
+		keys, _, err := kc.Txn.LoadAtDirectory(roleKey)
 		if err != nil {
 			log.Error("fail to load roles", zap.String("key", roleKey), zap.Error(err))
 			return results, err
@@ -965,7 +965,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 func (kc *Catalog) getRolesByUsername(tenant string, username string) ([]string, error) {
 	var roles []string
 	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, username)
-	keys, _, err := kc.Txn.LoadWithPrefix(k)
+	keys, _, err := kc.Txn.LoadAtDirectory(k)
 	if err != nil {
 		log.Error("fail to load role mappings by the username", zap.String("key", k), zap.Error(err))
 		return roles, err
@@ -1120,7 +1120,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			return nil
 		}
 		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v)
-		keys, values, err := kc.Txn.LoadWithPrefix(granteeIDKey)
+		keys, values, err := kc.Txn.LoadAtDirectory(granteeIDKey)
 		if err != nil {
 			log.Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
 			return err
@@ -1181,7 +1181,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		}
 	} else {
 		granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name)
-		keys, values, err := kc.Txn.LoadWithPrefix(granteeKey)
+		keys, values, err := kc.Txn.LoadAtDirectory(granteeKey)
 		if err != nil {
 			log.Error("fail to load grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
@@ -1212,7 +1212,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 	removeKeys = append(removeKeys, k)
 
 	// the values are the grantee id list
-	_, values, err := kc.Txn.LoadWithPrefix(k)
+	_, values, err := kc.Txn.LoadAtDirectory(k)
 	if err != nil {
 		log.Warn("fail to load grant privilege entities", zap.String("key", k), zap.Error(err))
 		return err
@@ -1231,7 +1231,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
 	var grantInfoStrs []string
 	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
-	keys, values, err := kc.Txn.LoadWithPrefix(granteeKey)
+	keys, values, err := kc.Txn.LoadAtDirectory(granteeKey)
 	if err != nil {
 		log.Error("fail to load all grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
 		return []string{}, err
@@ -1244,7 +1244,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, err
 			continue
 		}
 		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i])
-		idKeys, _, err := kc.Txn.LoadWithPrefix(granteeIDKey)
+		idKeys, _, err := kc.Txn.LoadAtDirectory(granteeIDKey)
 		if err != nil {
 			log.Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
 			return []string{}, err
@@ -1266,7 +1266,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, err
 func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
 	var userRoles []string
 	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
-	keys, _, err := kc.Txn.LoadWithPrefix(k)
+	keys, _, err := kc.Txn.LoadAtDirectory(k)
 	if err != nil {
 		log.Error("fail to load all user-role mappings", zap.String("key", k), zap.Error(err))
 		return []string{}, err

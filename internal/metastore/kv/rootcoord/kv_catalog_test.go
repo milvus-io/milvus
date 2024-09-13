@@ -101,7 +101,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 	t.Run("load collection with prefix fail", func(t *testing.T) {
 		kv := mocks.NewSnapShotKV(t)
 		ts := uint64(1)
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+		kv.On("LoadAtDirectory", CollectionMetaPrefix, ts).
 			Return(nil, nil, targetErr)
 
 		kc := Catalog{Snapshot: kv}
@@ -116,9 +116,9 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+		kv.On("LoadAtDirectory", CollectionMetaPrefix, ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
@@ -136,20 +136,20 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+		kv.On("LoadAtDirectory", CollectionMetaPrefix, ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
 			Return([]string{"key"}, []string{string(pm)}, nil)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
@@ -167,7 +167,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll1)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+		kv.On("LoadAtDirectory", CollectionMetaPrefix, ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
@@ -185,14 +185,14 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", BuildDatabasePrefixWithDBID(testDb), ts).
+		kv.On("LoadAtDirectory", BuildDatabasePrefixWithDBID(testDb), ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
@@ -202,7 +202,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		fm, err := proto.Marshal(fieldMeta)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
@@ -211,7 +211,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
@@ -235,14 +235,14 @@ func TestCatalog_ListCollections(t *testing.T) {
 		aColl, err := proto.Marshal(coll3)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+		kv.On("LoadAtDirectory", CollectionMetaPrefix, ts).
 			Return([]string{"key", "key2"}, []string{string(bColl), string(aColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
@@ -252,7 +252,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		fm, err := proto.Marshal(fieldMeta)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
@@ -261,7 +261,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		functionMeta := &schemapb.FunctionSchema{}
 		fcm, err := proto.Marshal(functionMeta)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.MatchedBy(
+		kv.On("LoadAtDirectory", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
@@ -544,7 +544,7 @@ func TestCatalog_listPartitionsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, errors.New("mock")
 		}
 
@@ -558,7 +558,7 @@ func TestCatalog_listPartitionsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{"not in pb format"}, nil
 		}
 
@@ -576,7 +576,7 @@ func TestCatalog_listPartitionsAfter210(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{string(value)}, nil
 		}
 
@@ -602,7 +602,7 @@ func TestCatalog_listFieldsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, errors.New("mock")
 		}
 
@@ -616,7 +616,7 @@ func TestCatalog_listFieldsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{"not in pb format"}, nil
 		}
 
@@ -634,7 +634,7 @@ func TestCatalog_listFieldsAfter210(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{string(value)}, nil
 		}
 
@@ -808,7 +808,7 @@ func TestCatalog_listAliasesBefore210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, errors.New("mock")
 		}
 
@@ -822,7 +822,7 @@ func TestCatalog_listAliasesBefore210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{"not in pb format"}, nil
 		}
 
@@ -840,7 +840,7 @@ func TestCatalog_listAliasesBefore210(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{string(value)}, nil
 		}
 
@@ -858,7 +858,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, errors.New("mock")
 		}
 
@@ -872,7 +872,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{"not in pb format"}, nil
 		}
 
@@ -890,7 +890,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{string(value)}, nil
 		}
 
@@ -908,7 +908,7 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 		ctx := context.Background()
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return []string{"key"}, []string{"not in pb format"}, nil
 		}
 
@@ -926,7 +926,7 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			if key == AliasMetaPrefix {
 				return nil, nil, errors.New("mock")
 			}
@@ -954,7 +954,7 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		snapshot.LoadAtDirectoryFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			dbStr := fmt.Sprintf("%d", testDb)
 			if strings.Contains(key, dbStr) && strings.Contains(key, Aliases) {
 				return []string{"key1"}, []string{string(value2)}, nil
@@ -1471,12 +1471,12 @@ func TestRBAC_Credential(t *testing.T) {
 		kvmock.EXPECT().Load(fmt.Sprintf("%s/%s", CredentialPrefix, validName)).Return(getUserInfoMetaString(validName), nil)
 		kvmock.EXPECT().Load(fmt.Sprintf("%s/%s", CredentialPrefix, dropFailName)).Return(getUserInfoMetaString(dropFailName), nil)
 
-		kvmock.EXPECT().LoadWithPrefix(validUserRoleKeyPrefix).Return(
+		kvmock.EXPECT().LoadAtDirectory(validUserRoleKeyPrefix).Return(
 			[]string{validUserRoleKeyPrefix + "/role1", validUserRoleKeyPrefix + "/role2"},
 			[]string{"", ""},
 			nil,
 		)
-		kvmock.EXPECT().LoadWithPrefix(dropUserRoleKeyPrefix).Return([]string{}, []string{}, nil)
+		kvmock.EXPECT().LoadAtDirectory(dropUserRoleKeyPrefix).Return([]string{}, []string{}, nil)
 
 		tests := []struct {
 			description string
@@ -1512,7 +1512,7 @@ func TestRBAC_Credential(t *testing.T) {
 
 		// Return valid keys if count==0
 		// return error if count!=0
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 			func(key string) []string {
 				cmu.RLock()
 				defer cmu.RUnlock()
@@ -1737,7 +1737,7 @@ func TestRBAC_Role(t *testing.T) {
 			return funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", username, rolename))
 		}
 
-		kvmock.EXPECT().LoadWithPrefix(funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")).Return(
+		kvmock.EXPECT().LoadAtDirectory(funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")).Return(
 			[]string{getRoleMappingKey("user1", validName), getRoleMappingKey("user2", validName), getRoleMappingKey("user3", "role3")},
 			[]string{},
 			nil,
@@ -1845,7 +1845,7 @@ func TestRBAC_Role(t *testing.T) {
 
 			// Return valid keys if loadWithPrefixReturn == True
 			// return error if loadWithPrefixReturn == False
-			kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+			kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 				func(key string) []string {
 					if loadWithPrefixReturn.Load() {
 						return []string{
@@ -1916,7 +1916,7 @@ func TestRBAC_Role(t *testing.T) {
 			// Return valid keys if loadWithPrefixReturn == True
 			// return error if loadWithPrefixReturn == False
 			// Mocking the return of kv_catalog.go:L699
-			kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+			kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 				func(key string) []string {
 					if loadWithPrefixReturn.Load() {
 						return []string{
@@ -1973,12 +1973,12 @@ func TestRBAC_Role(t *testing.T) {
 			invalidUserKey = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, invalidUser)
 		)
 		// returns error for invalidUserKey
-		kvmock.EXPECT().LoadWithPrefix(invalidUserKey).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(invalidUserKey).Call.Return(
 			nil, nil, errors.New("Mock load with prefix wrong"))
 
 		// Returns keys for RoleMappingPrefix/tenant/user1
 		user1Key := fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1")
-		kvmock.EXPECT().LoadWithPrefix(user1Key).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(user1Key).Call.Return(
 			func(key string) []string {
 				return []string{
 					fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1/role1"),
@@ -1989,7 +1989,7 @@ func TestRBAC_Role(t *testing.T) {
 
 		// Returns keys for CredentialPrefix
 		var loadCredentialPrefixReturn atomic.Bool
-		kvmock.EXPECT().LoadWithPrefix(CredentialPrefix).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(CredentialPrefix).Call.Return(
 			func(key string) []string {
 				if loadCredentialPrefixReturn.Load() {
 					return []string{
@@ -2115,7 +2115,7 @@ func TestRBAC_Role(t *testing.T) {
 		// Return valid keys if loadWithPrefixReturn == True
 		// return error if loadWithPrefixReturn == False
 		// Mocking the return of kv_catalog.go:ListUserRole:L982
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 			func(key string) []string {
 				if loadWithPrefixReturn.Load() {
 					return []string{
@@ -2381,8 +2381,8 @@ func TestRBAC_Grant(t *testing.T) {
 			granteePrefix       = funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, granteeID+"/")
 		)
 
-		kvmock.EXPECT().LoadWithPrefix(loadErrorRolePrefix).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(nil, []string{granteeID}, nil)
+		kvmock.EXPECT().LoadAtDirectory(loadErrorRolePrefix).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
+		kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(nil, []string{granteeID}, nil)
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, []string{errorRolePrefix, granteePrefix}, mock.Anything).Call.Return(errors.New("mock removeWithPrefix error"))
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil)
 
@@ -2432,8 +2432,8 @@ func TestRBAC_Grant(t *testing.T) {
 			Return("", errors.New("mock Load error"))
 
 		invalidRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, invalidRole)
-		kvmock.EXPECT().LoadWithPrefix(invalidRoleKey).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(invalidRoleKey).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
+		kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 			func(key string) []string {
 				// Mock kv_catalog.go:ListGrant:L871
 				if strings.Contains(key, GranteeIDPrefix) {
@@ -2533,15 +2533,15 @@ func TestRBAC_Grant(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = &Catalog{Txn: kvmock}
 
-			firstLoadWithPrefixReturn  atomic.Bool
-			secondLoadWithPrefixReturn atomic.Bool
+			firstLoadAtDirectoryReturn  atomic.Bool
+			secondLoadAtDirectoryReturn atomic.Bool
 		)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything).Call.Return(
+		kvmock.EXPECT().LoadAtDirectory(mock.Anything).Call.Return(
 			func(key string) []string {
 				contains := strings.Contains(key, GranteeIDPrefix)
 				if contains {
-					if secondLoadWithPrefixReturn.Load() {
+					if secondLoadAtDirectoryReturn.Load() {
 						return []string{
 							fmt.Sprintf("%s/%s", key, "PrivilegeLoad"),
 							fmt.Sprintf("%s/%s", key, "PrivilegeRelease"),
@@ -2551,7 +2551,7 @@ func TestRBAC_Grant(t *testing.T) {
 					return nil
 				}
 
-				if firstLoadWithPrefixReturn.Load() {
+				if firstLoadAtDirectoryReturn.Load() {
 					return []string{
 						fmt.Sprintf("%s/%s", key, "role1/obj1/obj_name1"),
 						fmt.Sprintf("%s/%s", key, "role2/obj2/obj_name2"),
@@ -2562,7 +2562,7 @@ func TestRBAC_Grant(t *testing.T) {
 			},
 
 			func(key string) []string {
-				if firstLoadWithPrefixReturn.Load() {
+				if firstLoadAtDirectoryReturn.Load() {
 					return []string{
 						crypto.MD5(fmt.Sprintf("%s/%s", key, "obj1/obj_name1")),
 						crypto.MD5(fmt.Sprintf("%s/%s", key, "obj2/obj_name2")),
@@ -2574,13 +2574,13 @@ func TestRBAC_Grant(t *testing.T) {
 			func(key string) error {
 				contains := strings.Contains(key, GranteeIDPrefix)
 				if contains {
-					if secondLoadWithPrefixReturn.Load() {
+					if secondLoadAtDirectoryReturn.Load() {
 						return nil
 					}
 					return errors.New("mock loadwithprefix error")
 				}
 
-				if firstLoadWithPrefixReturn.Load() {
+				if firstLoadAtDirectoryReturn.Load() {
 					return nil
 				}
 				return errors.New("mock loadWithPrefix error")
@@ -2602,8 +2602,8 @@ func TestRBAC_Grant(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				firstLoadWithPrefixReturn.Store(test.firstReturn)
-				secondLoadWithPrefixReturn.Store(test.secondReturn)
+				firstLoadAtDirectoryReturn.Store(test.firstReturn)
+				secondLoadAtDirectoryReturn.Store(test.secondReturn)
 
 				policy, err := c.ListPolicy(ctx, tenant)
 				if test.isValid {
@@ -2834,11 +2834,11 @@ func TestCatalog_AlterDatabase(t *testing.T) {
 func TestCatalog_listFunctionError(t *testing.T) {
 	mockSnapshot := newMockSnapshot(t)
 	kc := &Catalog{Snapshot: mockSnapshot}
-	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, fmt.Errorf("mock error"))
+	mockSnapshot.EXPECT().LoadAtDirectory(mock.Anything, mock.Anything).Return(nil, nil, fmt.Errorf("mock error"))
 	_, err := kc.listFunctions(1, 1)
 	assert.Error(t, err)
 
-	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{"test-key"}, []string{"invalid bytes"}, nil)
+	mockSnapshot.EXPECT().LoadAtDirectory(mock.Anything, mock.Anything).Return([]string{"test-key"}, []string{"invalid bytes"}, nil)
 	_, err = kc.listFunctions(1, 1)
 	assert.Error(t, err)
 }

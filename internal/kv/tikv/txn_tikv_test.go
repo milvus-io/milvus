@@ -110,7 +110,7 @@ func TestTiKVLoad(te *testing.T) {
 		}
 
 		for _, test := range loadPrefixTests {
-			actualKeys, actualValues, err := kv.LoadWithPrefix(test.prefix)
+			actualKeys, actualValues, err := kv.LoadAtDirectory(test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
@@ -205,7 +205,7 @@ func TestTiKVLoad(te *testing.T) {
 			err = kv.RemoveWithPrefix(k)
 			assert.NoError(t, err)
 
-			ks, vs, err := kv.LoadWithPrefix(k)
+			ks, vs, err := kv.LoadAtDirectory(k)
 			assert.Empty(t, ks)
 			assert.Empty(t, vs)
 			assert.NoError(t, err)
@@ -221,7 +221,7 @@ func TestTiKVLoad(te *testing.T) {
 		err = kv.MultiRemove(multiRemoveTests)
 		assert.NoError(t, err)
 
-		ks, vs, err := kv.LoadWithPrefix("")
+		ks, vs, err := kv.LoadAtDirectory("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -242,7 +242,7 @@ func TestTiKVLoad(te *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		ks, vs, err = kv.LoadWithPrefix("")
+		ks, vs, err = kv.LoadAtDirectory("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -282,14 +282,14 @@ func TestTiKVLoad(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err := kv.LoadWithPrefix(test.loadPrefix)
+			k, _, err := kv.LoadAtDirectory(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
 			err = kv.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
 			assert.NoError(t, err)
 
-			k, _, err = kv.LoadWithPrefix(test.loadPrefix)
+			k, _, err = kv.LoadAtDirectory(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
@@ -371,14 +371,14 @@ func TestWalkWithPagination(t *testing.T) {
 	}
 
 	t.Run("apply function error ", func(t *testing.T) {
-		err = kv.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+		err = kv.WalkAtDirectory("A", 5, func(key []byte, value []byte) error {
 			return errors.New("error")
 		})
 		assert.Error(t, err)
 	})
 
 	t.Run("get with non-exist prefix ", func(t *testing.T) {
-		err = kv.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+		err = kv.WalkAtDirectory("non-exist-prefix", 5, func(key []byte, value []byte) error {
 			return nil
 		})
 		assert.NoError(t, err)
@@ -399,7 +399,7 @@ func TestWalkWithPagination(t *testing.T) {
 			ret := make(map[string]string)
 			actualKeys := make([]string, 0)
 
-			err = kv.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+			err = kv.WalkAtDirectory("A", pagination, func(key []byte, value []byte) error {
 				k := string(key)
 				k = k[len(rootPath)+1:]
 				ret[k] = string(value)
@@ -514,7 +514,7 @@ func TestEmptyKey(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, val, "")
 
-	_, vals, err := kv.LoadWithPrefix("key")
+	_, vals, err := kv.LoadAtDirectory("key")
 	assert.NoError(t, err)
 	assert.Equal(t, vals[0], "")
 
@@ -528,7 +528,7 @@ func TestEmptyKey(t *testing.T) {
 		return nil
 	}
 
-	err = kv.WalkWithPrefix("", 1, nothing)
+	err = kv.WalkAtDirectory("", 1, nothing)
 	assert.NoError(t, err)
 	assert.Equal(t, res, "")
 
@@ -579,7 +579,7 @@ func TestScanSize(t *testing.T) {
 	err = kv.MultiSave(keyMap)
 	assert.NoError(t, err)
 
-	keys, _, err := kv.LoadWithPrefix("")
+	keys, _, err := kv.LoadAtDirectory("")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), scanSize+100)
 

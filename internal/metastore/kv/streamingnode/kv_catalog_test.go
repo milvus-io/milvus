@@ -19,7 +19,7 @@ func TestCatalog(t *testing.T) {
 	vs, err := proto.Marshal(&v)
 	assert.NoError(t, err)
 
-	kv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
+	kv.EXPECT().LoadAtDirectory(mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
 	catalog := NewCataLog(kv)
 	ctx := context.Background()
 	metas, err := catalog.ListSegmentAssignment(ctx, "p1")
