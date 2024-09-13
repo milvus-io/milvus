@@ -458,11 +458,20 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			skipDupCnt++
 			if ts != 0 && ts > idTsMap[pk] {
 				idTsMap[pk] = ts
-				lastIdx := len(selections) - 1
-				selections[lastIdx] = selection{
-					batchIndex:  sel,
-					resultIndex: cursors[sel],
-					offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+				idx := len(selections) - 1
+				for ; idx >= 0; idx-- {
+					selection := selections[idx]
+					pkValue := typeutil.GetPK(validRetrieveResults[selection.batchIndex].GetIds(), selection.resultIndex)
+					if pk == pkValue {
+						break
+					}
+				}
+				if idx >= 0 {
+					selections[idx] = selection{
+						batchIndex:  sel,
+						resultIndex: cursors[sel],
+						offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+					}
 				}
 			}
 		}
@@ -528,9 +537,11 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span3.End()
+		// retrieve result is compacted, use 0,1,2...end
+		segmentResOffset := make([]int64, len(segmentResults))
 		for _, selection := range selections {
-			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), selection.resultIndex)
-
+			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), segmentResOffset[selection.batchIndex])
+			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
