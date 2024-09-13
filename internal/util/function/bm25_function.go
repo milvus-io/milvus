@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // BM25 Runner
@@ -71,7 +72,16 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 	defer tokenizer.Destroy()
 
 	for i := 0; i < len(data); i++ {
-		dst[i] = bm25Embedding(tokenizer, data[i])
+		embeddingMap := map[uint32]float32{}
+		tokenStream := tokenizer.NewTokenStream(data[i])
+		defer tokenStream.Destroy()
+		for tokenStream.Advance() {
+			token := tokenStream.Token()
+			// TODO More Hash Option
+			hash := typeutil.HashString2Uint32(token)
+			embeddingMap[hash] += 1
+		}
+		dst[i] = embeddingMap
 	}
 	return nil
 }
@@ -117,7 +127,7 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 		}
 	}
 
-	return []any{embedData}, nil
+	return []any{buildSparseFloatArray(embedData)}, nil
 }
 
 func (v *BM25FunctionRunner) GetSchema() *schemapb.FunctionSchema {
@@ -128,15 +138,17 @@ func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.outputField}
 }
 
-func bm25Embedding(tokenizer tokenizerapi.Tokenizer, text string) map[uint32]float32 {
-	embeddingMap := map[uint32]float32{}
-	tokenStream := tokenizer.NewTokenStream(text)
-	defer tokenStream.Destroy()
-	for tokenStream.Advance() {
-		token := tokenStream.Token()
-		// TODO More Hash Option
-		hash := typeutil.HashString2Uint32(token)
-		embeddingMap[hash] += 1
+func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
+	dim := 0
+	bytes := lo.Map(mapdata, func(sparseMap map[uint32]float32, _ int) []byte {
+		if len(sparseMap) > dim {
+			dim = len(sparseMap)
+		}
+		return typeutil.CreateAndSortSparseFloatRow(sparseMap)
+	})
+
+	return &schemapb.SparseFloatArray{
+		Contents: bytes,
+		Dim:      int64(dim),
 	}
-	return embeddingMap
 }

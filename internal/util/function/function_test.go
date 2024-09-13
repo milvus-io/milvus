@@ -68,9 +68,9 @@ func (s *FunctionRunnerSuite) TestBM25() {
 	s.NoError(err)
 
 	s.Equal(1, len(output))
-	result, ok := output[0].([]map[uint32]float32)
+	result, ok := output[0].(*schemapb.SparseFloatArray)
 	s.True(ok)
-	s.Equal(2, len(result))
+	s.Equal(2, len(result.GetContents()))
 
 	// return error because receive more than one field input
 	_, err = runner.BatchRun([]string{}, []string{})

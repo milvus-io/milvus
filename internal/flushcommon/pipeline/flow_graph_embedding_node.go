@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -29,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // TODO support set EmbddingType
@@ -96,21 +94,13 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 		return err
 	}
 
-	sparseMaps, ok := output[0].([]map[uint32]float32)
+	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
 		return fmt.Errorf("bm25 embedding failed: ibm25 runner output not sparse map")
 	}
 
-	meta[outputFieldId].Append(sparseMaps...)
-
-	dim := 0
-	sparseVector := lo.Map(sparseMaps, func(sparseMap map[uint32]float32, _ int) []byte {
-		if len(sparseMap) > dim {
-			dim = len(sparseMap)
-		}
-		return typeutil.CreateAndSortSparseFloatRow(sparseMap)
-	})
-	data.Data[outputFieldId] = BuildSparseFieldData(int64(dim), sparseVector)
+	meta[outputFieldId].AppendBytes(sparseArray.GetContents()...)
+	data.Data[outputFieldId] = BuildSparseFieldData(sparseArray)
 	log.Info("test-- time cost", zap.Int("numrow", len(embeddingData)), zap.Duration("cost", time.Since(start)))
 	return nil
 }
@@ -168,11 +158,11 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	return []Msg{fgMsg}
 }
 
-func BuildSparseFieldData(dim int64, data [][]byte) storage.FieldData {
+func BuildSparseFieldData(array *schemapb.SparseFloatArray) storage.FieldData {
 	return &storage.SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
-			Contents: data,
-			Dim:      dim,
+			Contents: array.GetContents(),
+			Dim:      array.GetDim(),
 		},
 	}
 }
