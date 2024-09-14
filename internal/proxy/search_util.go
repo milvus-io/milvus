@@ -70,11 +70,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 			topK = externalLimit
 		} else {
-			if topKInParam < externalLimit {
-				topK = externalLimit
-			} else {
-				topK = topKInParam
-			}
+			topK = topKInParam
 		}
 	}
 
