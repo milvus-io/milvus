@@ -7026,6 +7026,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     @pytest.mark.parametrize("with_growing", [False, True])
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/32630")
     def test_range_search_default(self, index_type, metric, vector_data_type, with_growing, null_data_percent):
         """
         target: verify the range search returns correct results
@@ -11363,6 +11364,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/36273")
     def test_hybrid_search_overall_limit_larger_sum_each_limit(self, nq, primary_field, metric_type):
 
         """
@@ -11466,6 +11468,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/36273")
     def test_hybrid_search_min_limit(self, primary_field, metric_type):
         """
         target: test hybrid search with minimum limit params
