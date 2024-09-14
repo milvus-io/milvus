@@ -219,6 +219,10 @@ func (t *createCollectionTask) validatePartitionKey() error {
 				return errors.New("the partition key field must not be primary field")
 			}
 
+			if field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+			}
+
 			// The type of the partition key field can only be int64 and varchar
 			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
 				return errors.New("the data type of partition key should be Int64 or VarChar")
