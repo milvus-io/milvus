@@ -1287,3 +1287,15 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
 	return nil, nil
 }
+
+func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
+	if reqConsistencyLevel != "" {
+		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
+		if !ok {
+			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+		}
+		return commonpb.ConsistencyLevel(level), false, nil
+	}
+	// ConsistencyLevel_Session default in PyMilvus
+	return commonpb.ConsistencyLevel_Session, true, nil
+}
