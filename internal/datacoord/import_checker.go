@@ -299,9 +299,11 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 				err := c.sjm.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
 				if err != nil {
 					logger.Warn("submit stats task failed", zap.Error(err))
+					continue
 				}
+				log.Info("submit stats task done", WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))...)
 			case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateInProgress:
-				logger.Debug("waiting for stats task...", zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))
+				logger.Debug("waiting for stats task...", WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))...)
 			case indexpb.JobState_JobStateFailed:
 				updateJobState(internalpb.ImportJobState_Failed)
 				return

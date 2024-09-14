@@ -111,6 +111,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				return nil, err
 			}
 			task.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
+			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", task.StatsSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
 	}
