@@ -323,9 +323,11 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
-	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+	statsSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetStatsSegmentIDs()
 	})
+
+	targetSegmentIDs := statsSegmentIDs
 	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 		targetSegmentIDs = originSegmentIDs
 	}
@@ -343,7 +345,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	}
 
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
-	isImportingSegments := lo.Filter(append(originSegmentIDs, targetSegmentIDs...), func(segmentID int64, _ int) bool {
+	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(segmentID)
 		if segment == nil {
 			logger.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
