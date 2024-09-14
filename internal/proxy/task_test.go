@@ -3216,6 +3216,16 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 		partitionKeyField.DataType = schemapb.DataType_Int64
 
+		// test partition key set nullable == true
+		partitionKeyField.Nullable = true
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		partitionKeyField.DataType = schemapb.DataType_Int64
+		partitionKeyField.Nullable = false
+
 		// test partition key field not primary key field
 		primaryField, _ := typeutil.GetPrimaryFieldSchema(schema)
 		primaryField.IsPartitionKey = true
