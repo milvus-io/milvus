@@ -97,7 +97,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 func (jm *statsJobManager) triggerSortStatsTask() {
 	segments := jm.mt.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted()
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
 	}))
 	for _, segment := range segments {
 		jm.createSortStatsTaskForSegment(segment)
