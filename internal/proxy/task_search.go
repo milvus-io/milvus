@@ -170,7 +170,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	if t.SearchRequest.GetIsAdvanced() {
-		t.rankParams, err = parseRankParams(t.request.GetSearchParams())
+		t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema)
 		if err != nil {
 			log.Info("parseRankParams failed", zap.Error(err))
 			return err
@@ -366,8 +366,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			Topk:               queryInfo.GetTopk(),
 			Offset:             offset,
 			MetricType:         queryInfo.GetMetricType(),
-			GroupByFieldId:     queryInfo.GetGroupByFieldId(),
-			GroupSize:          queryInfo.GetGroupSize(),
+			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
+			GroupSize:          t.rankParams.GetGroupSize(),
 		}
 
 		// set PartitionIDs for sub search
@@ -407,10 +407,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
-	if len(t.queryInfos) > 0 {
-		t.SearchRequest.GroupByFieldId = t.queryInfos[0].GetGroupByFieldId()
-		t.SearchRequest.GroupSize = t.queryInfos[0].GetGroupSize()
-	}
+
+	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
+	t.SearchRequest.GroupSize = t.rankParams.GetGroupSize()
 
 	// used for requery
 	if t.partitionKeyMode {
