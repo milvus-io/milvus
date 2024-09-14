@@ -685,6 +685,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -783,6 +785,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -869,6 +873,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -966,6 +972,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -1046,6 +1054,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -1104,6 +1114,8 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		mockFlowgraphManager := pipeline.NewMockFlowgraphManager(s.T())
 		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).
 			Return(pipeline.NewDataSyncServiceWithMetaCache(cache), true)
+		mockFlowgraphManager.EXPECT().ClearFlowgraphs().Return().Maybe()
+		mockFlowgraphManager.EXPECT().Close().Return().Maybe()
 		s.node.flowgraphManager = mockFlowgraphManager
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
