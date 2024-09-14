@@ -17,6 +17,7 @@ from minio import Minio
 from pymilvus import DataType, CollectionSchema
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
+from common.common_params import ExprCheckParams
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
 import pickle
@@ -2061,6 +2062,48 @@ def gen_varchar_expression(expr_fields):
     return exprs
 
 
+def gen_varchar_unicode_expression(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            (Expr.like(field, "国%").value, field, r'^国.*'),
+            (Expr.LIKE(field, "%中").value, field, r'.*中$'),
+            (Expr.AND(Expr.like(field, "%江").subset, Expr.LIKE(field, "麚%").subset).value, field, r'^麚.*江$'),
+            (Expr.And(Expr.like(field, "鄷%").subset, Expr.LIKE(field, "%薞").subset).value, field, r'^鄷.*薞$'),
+            (Expr.OR(Expr.like(field, "%核%").subset, Expr.LIKE(field, "%臥蜜").subset).value, field, fr'(?:核.*|.*臥蜜$)'),
+            (Expr.Or(Expr.like(field, "咴矷%").subset, Expr.LIKE(field, "%濉蠬%").subset).value, field, fr'(?:^咴矷.*|.*濉蠬)'),
+        ])
+    return exprs
+
+
+def gen_varchar_unicode_expression_array(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            ExprCheckParams(field, Expr.ARRAY_CONTAINS(field, '"中"').value, 'set(["中"]).issubset({0})'),
+            ExprCheckParams(field, Expr.array_contains(field, '"国"').value, 'set(["国"]).issubset({0})'),
+            ExprCheckParams(field, Expr.ARRAY_CONTAINS_ALL(field, ["华"]).value, 'set(["华"]).issubset({0})'),
+            ExprCheckParams(field, Expr.array_contains_all(field, ["中", "国"]).value, 'set(["中", "国"]).issubset({0})'),
+            ExprCheckParams(field, Expr.ARRAY_CONTAINS_ANY(field, ["紅"]).value, 'not set(["紅"]).isdisjoint({0})'),
+            ExprCheckParams(field, Expr.array_contains_any(field, ["紅", "父", "环", "稵"]).value,
+                            'not set(["紅", "父", "环", "稵"]).isdisjoint({0})'),
+            ExprCheckParams(field, Expr.AND(Expr.ARRAY_CONTAINS(field, '"噜"').value,
+                                            Expr.ARRAY_CONTAINS_ANY(field, ["浮", "沮", "茫"]).value).value,
+                            'set(["噜"]).issubset({0}) and not set(["浮", "沮", "茫"]).isdisjoint({0})'),
+            ExprCheckParams(field, Expr.And(Expr.ARRAY_CONTAINS_ALL(field, ["爤"]).value,
+                                            Expr.array_contains_any(field, ["暁", "非", "鸳", "丹"]).value).value,
+                            'set(["爤"]).issubset({0}) and not set(["暁", "非", "鸳", "丹"]).isdisjoint({0})'),
+            ExprCheckParams(field, Expr.OR(Expr.array_contains(field, '"草"').value,
+                                           Expr.array_contains_all(field, ["昩", "苴"]).value).value,
+                            'set(["草"]).issubset({0}) or set(["昩", "苴"]).issubset({0})'),
+            ExprCheckParams(field, Expr.Or(Expr.ARRAY_CONTAINS_ANY(field, ["魡", "展", "隶", "韀", "脠", "噩"]).value,
+                                           Expr.array_contains_any(field, ["备", "嘎", "蝐", "秦", "万"]).value).value,
+                            'not set(["魡", "展", "隶", "韀", "脠", "噩"]).isdisjoint({0}) or ' +
+                            'not set(["备", "嘎", "蝐", "秦", "万"]).isdisjoint({0})')
+        ])
+    return exprs
+
+
 def gen_number_operation(expr_fields):
     exprs = []
     for field in expr_fields:
@@ -2747,3 +2790,16 @@ def check_key_exist(source: dict, target: dict):
 
     check_keys(source, target)
     return flag
+
+
+def gen_unicode_string():
+    return chr(random.randint(0x4e00, 0x9fbf))
+
+
+def gen_unicode_string_batch(nb, string_len: int = 1):
+    return [''.join([gen_unicode_string() for _ in range(string_len)]) for _ in range(nb)]
+
+
+def gen_unicode_string_array_batch(nb, string_len: int = 1, max_capacity: int = ct.default_max_capacity):
+    return [[''.join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))]) for _ in
+             range(random.randint(0, max_capacity))] for _ in range(nb)]

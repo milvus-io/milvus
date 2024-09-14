@@ -388,3 +388,10 @@ class AlterIndexParams:
     @staticmethod
     def index_mmap(enable: bool = True):
         return {'mmap.enabled': enable}
+
+
+@dataclass
+class ExprCheckParams:
+    field: str
+    field_expr: str
+    rex: str
