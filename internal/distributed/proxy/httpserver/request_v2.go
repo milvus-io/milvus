@@ -141,18 +141,28 @@ type CollectionDataReq struct {
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 
+type searchParams struct {
+	// not use metricType any more, just for compatibility
+	MetricType    string                 `json:"metricType"`
+	Params        map[string]interface{} `json:"params"`
+	IgnoreGrowing bool                   `json:"ignoreGrowing"`
+}
+
 type SearchReqV2 struct {
-	DbName         string             `json:"dbName"`
-	CollectionName string             `json:"collectionName" binding:"required"`
-	Data           []interface{}      `json:"data" binding:"required"`
-	AnnsField      string             `json:"annsField"`
-	PartitionNames []string           `json:"partitionNames"`
-	Filter         string             `json:"filter"`
-	GroupByField   string             `json:"groupingField"`
-	Limit          int32              `json:"limit"`
-	Offset         int32              `json:"offset"`
-	OutputFields   []string           `json:"outputFields"`
-	Params         map[string]float64 `json:"params"`
+	DbName           string        `json:"dbName"`
+	CollectionName   string        `json:"collectionName" binding:"required"`
+	Data             []interface{} `json:"data" binding:"required"`
+	AnnsField        string        `json:"annsField"`
+	PartitionNames   []string      `json:"partitionNames"`
+	Filter           string        `json:"filter"`
+	GroupByField     string        `json:"groupingField"`
+	Limit            int32         `json:"limit"`
+	Offset           int32         `json:"offset"`
+	OutputFields     []string      `json:"outputFields"`
+	SearchParams     searchParams  `json:"searchParams"`
+	ConsistencyLevel string        `json:"consistencyLevel"`
+	// not use Params any more, just for compatibility
+	Params map[string]float64 `json:"params"`
 }
 
 func (req *SearchReqV2) GetDbName() string { return req.DbName }
@@ -163,25 +173,25 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Data          []interface{}      `json:"data" binding:"required"`
-	AnnsField     string             `json:"annsField"`
-	Filter        string             `json:"filter"`
-	GroupByField  string             `json:"groupingField"`
-	MetricType    string             `json:"metricType"`
-	Limit         int32              `json:"limit"`
-	Offset        int32              `json:"offset"`
-	IgnoreGrowing bool               `json:"ignoreGrowing"`
-	Params        map[string]float64 `json:"params"`
+	Data         []interface{} `json:"data" binding:"required"`
+	AnnsField    string        `json:"annsField"`
+	Filter       string        `json:"filter"`
+	GroupByField string        `json:"groupingField"`
+	MetricType   string        `json:"metricType"`
+	Limit        int32         `json:"limit"`
+	Offset       int32         `json:"offset"`
+	SearchParams searchParams  `json:"searchParams"`
 }
 
 type HybridSearchReq struct {
-	DbName         string         `json:"dbName"`
-	CollectionName string         `json:"collectionName" binding:"required"`
-	PartitionNames []string       `json:"partitionNames"`
-	Search         []SubSearchReq `json:"search"`
-	Rerank         Rand           `json:"rerank"`
-	Limit          int32          `json:"limit"`
-	OutputFields   []string       `json:"outputFields"`
+	DbName           string         `json:"dbName"`
+	CollectionName   string         `json:"collectionName" binding:"required"`
+	PartitionNames   []string       `json:"partitionNames"`
+	Search           []SubSearchReq `json:"search"`
+	Rerank           Rand           `json:"rerank"`
+	Limit            int32          `json:"limit"`
+	OutputFields     []string       `json:"outputFields"`
+	ConsistencyLevel string         `json:"consistencyLevel"`
 }
 
 func (req *HybridSearchReq) GetDbName() string { return req.DbName }

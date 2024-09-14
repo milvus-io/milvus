@@ -1314,3 +1314,15 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 	}
 	return params, nil
 }
+
+func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
+	if reqConsistencyLevel != "" {
+		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
+		if !ok {
+			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+		}
+		return commonpb.ConsistencyLevel(level), false, nil
+	}
+	// ConsistencyLevel_Bounded default in PyMilvus
+	return commonpb.ConsistencyLevel_Bounded, true, nil
+}
