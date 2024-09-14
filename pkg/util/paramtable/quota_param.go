@@ -132,6 +132,7 @@ type quotaConfig struct {
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
+	MaxGroupSize                   ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                      ParamItem `refreshable:"true"`
@@ -1587,6 +1588,15 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		Export:       true,
 	}
 	p.MaxResourceGroupNumOfQueryNode.Init(base.mgr)
+
+	p.MaxGroupSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxGroupSize",
+		Version:      "2.5.0",
+		Doc:          `maximum size for one single group when doing search group by`,
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.MaxGroupSize.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{

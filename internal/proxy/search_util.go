@@ -172,6 +172,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			groupSize = 1
 		}
 	}
+	if groupSize > Params.QuotaConfig.MaxGroupSize.GetAsInt64() {
+		return nil, 0, merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("input group size:%d exceeds configured max group size:%d", groupSize, Params.QuotaConfig.MaxGroupSize.GetAsInt64()))
+	}
 
 	var groupStrictSize bool
 	groupStrictSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupStrictSize, searchParamsPair)
