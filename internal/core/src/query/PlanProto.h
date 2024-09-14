@@ -27,40 +27,6 @@ class ProtoParser {
     explicit ProtoParser(const Schema& schema) : schema(schema) {
     }
 
-    // ExprPtr
-    // ExprFromProto(const proto::plan::Expr& expr_proto);
-
-    ExprPtr
-    ParseBinaryArithOpEvalRangeExpr(
-        const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb);
-
-    ExprPtr
-    ParseCompareExpr(const proto::plan::CompareExpr& expr_pb);
-
-    ExprPtr
-    ParseTermExpr(const proto::plan::TermExpr& expr_pb);
-
-    ExprPtr
-    ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb);
-
-    ExprPtr
-    ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb);
-
-    ExprPtr
-    ParseExistExpr(const proto::plan::ExistsExpr& expr_pb);
-
-    ExprPtr
-    ParseJsonContainsExpr(const proto::plan::JSONContainsExpr& expr_pb);
-
-    ExprPtr
-    ParseExpr(const proto::plan::Expr& expr_pb);
-
     std::unique_ptr<VectorPlanNode>
     PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
 
@@ -112,7 +78,7 @@ class ProtoParser {
 };
 
 }  // namespace milvus::query
-   //
+//
 template <>
 struct fmt::formatter<milvus::proto::plan::GenericValue::ValCase>
     : formatter<string_view> {

@@ -18,9 +18,11 @@ package flusherimpl
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -39,8 +41,11 @@ type LifetimeState int
 const (
 	Pending LifetimeState = iota
 	Cancel
+	Fail
 	Done
 )
+
+var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
 
 type ChannelLifetime interface {
 	Run() error
@@ -71,6 +76,9 @@ func (c *channelLifetime) Run() error {
 	if c.state == Cancel || c.state == Done {
 		return nil
 	}
+	if c.state == Fail {
+		return errChannelLifetimeUnrecoverable
+	}
 	log.Info("start to build pipeline", zap.String("vchannel", c.vchannel))
 
 	// Get recovery info from datacoord.
@@ -80,6 +88,12 @@ func (c *channelLifetime) Run() error {
 		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
+	}
+	// The channel has been dropped, skip to recover it.
+	if len(resp.GetInfo().GetSeekPosition().GetMsgID()) == 0 && resp.GetInfo().GetSeekPosition().GetTimestamp() == math.MaxUint64 {
+		log.Info("channel has been dropped, skip to create flusher for vchannel", zap.String("vchannel", c.vchannel))
+		c.state = Fail
+		return errChannelLifetimeUnrecoverable
 	}
 
 	// Convert common.MessageID to message.messageID.
@@ -121,7 +135,7 @@ func (c *channelLifetime) Cancel() {
 	switch c.state {
 	case Pending:
 		c.state = Cancel
-	case Cancel:
+	case Cancel, Fail:
 		return
 	case Done:
 		err := c.scanner.Close()

@@ -286,4 +286,18 @@ inline void SparseRowsToProto(
     proto->set_dim(max_dim);
 }
 
+class Defer {
+ public:
+    Defer(std::function<void()> fn) : fn_(fn) {
+    }
+    ~Defer() {
+        fn_();
+    }
+
+ private:
+    std::function<void()> fn_;
+};
+
+#define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
+
 }  // namespace milvus

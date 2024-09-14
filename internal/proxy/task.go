@@ -219,6 +219,10 @@ func (t *createCollectionTask) validatePartitionKey() error {
 				return errors.New("the partition key field must not be primary field")
 			}
 
+			if field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+			}
+
 			// The type of the partition key field can only be int64 and varchar
 			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
 				return errors.New("the data type of partition key should be Int64 or VarChar")
@@ -1544,7 +1548,6 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	// prepare load field list
-	// TODO use load collection load field list after proto merged
 	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
 		return err
@@ -1571,9 +1574,10 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 	}
 
+	loadFieldsSet := typeutil.NewSet(loadFields...)
 	unindexedVecFields := make([]string, 0)
 	for _, field := range collSchema.GetFields() {
-		if typeutil.IsVectorType(field.GetDataType()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -1815,21 +1819,28 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	hasVecIndex := false
+	// not support multiple indexes on one field
 	fieldIndexIDs := make(map[int64]int64)
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
-		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
-				hasVecIndex = true
+	}
+
+	loadFieldsSet := typeutil.NewSet(loadFields...)
+	unindexedVecFields := make([]string, 0)
+	for _, field := range collSchema.GetFields() {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
+				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
 		}
 	}
-	if !hasVecIndex {
-		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", t.LoadPartitionsRequest.CollectionName)
-		log.Ctx(ctx).Error(errMsg)
+
+	if len(unindexedVecFields) != 0 {
+		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
+		log.Debug(errMsg)
 		return errors.New(errMsg)
 	}
+
 	for _, partitionName := range t.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.CollectionName, partitionName)
 		if err != nil {

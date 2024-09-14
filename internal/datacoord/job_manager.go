@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type StatsTaskManager interface {
@@ -42,7 +41,8 @@ type statsJobManager struct {
 func newJobManager(ctx context.Context,
 	mt *meta,
 	scheduler *taskScheduler,
-	allocator allocator.Allocator) *statsJobManager {
+	allocator allocator.Allocator,
+) *statsJobManager {
 	ctx, cancel := context.WithCancel(ctx)
 	return &statsJobManager{
 		ctx:       ctx,
@@ -243,7 +243,8 @@ func (jm *statsJobManager) cleanupStatsTasksLoop() {
 }
 
 func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int64,
-	subJobType indexpb.StatsSubJob, canRecycle bool) error {
+	subJobType indexpb.StatsSubJob, canRecycle bool,
+) error {
 	originSegment := jm.mt.GetHealthySegment(originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)

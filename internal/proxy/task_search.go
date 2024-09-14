@@ -172,8 +172,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if t.SearchRequest.GetIsAdvanced() {
 		t.rankParams, err = parseRankParams(t.request.GetSearchParams())
 		if err != nil {
+			log.Info("parseRankParams failed", zap.Error(err))
 			return err
 		}
+	} else {
+		t.rankParams = nil
 	}
 	// Manually update nq if not set.
 	nq, err := t.checkNq(ctx)
@@ -348,7 +351,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	for index, subReq := range t.request.GetSubReqs() {
-		plan, queryInfo, offset, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), true)
+		plan, queryInfo, offset, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl())
 		if err != nil {
 			return err
 		}
@@ -441,7 +444,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	// fetch search_growing from search param
 
-	plan, queryInfo, offset, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), false)
+	plan, queryInfo, offset, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl())
 	if err != nil {
 		return err
 	}
@@ -488,7 +491,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, ignoreOffset bool) (*planpb.PlanNode, *planpb.QueryInfo, int64, error) {
+func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string) (*planpb.PlanNode, *planpb.QueryInfo, int64, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
@@ -501,7 +504,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, ignoreOffset)
+	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
 	if parseErr != nil {
 		return nil, nil, 0, parseErr
 	}

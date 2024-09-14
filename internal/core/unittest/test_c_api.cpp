@@ -29,7 +29,6 @@
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
-#include "query/ExprImpl.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
@@ -40,7 +39,7 @@
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "query/generated/ExecExprVisitor.h"
+#include "test_utils/GenExprProto.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
@@ -50,6 +49,7 @@
 namespace chrono = std::chrono;
 
 using namespace milvus;
+using namespace milvus::test;
 using namespace milvus::index;
 using namespace milvus::segcore;
 using namespace milvus::tracer;
@@ -645,8 +645,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -672,8 +671,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result->proto_blob,
@@ -759,8 +757,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
 
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -786,8 +783,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_pks);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     res = CRetrieve(segment, plan.get(), max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result->proto_blob,
@@ -880,8 +876,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
         retrive_row_ids);
 
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -963,8 +958,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -1142,8 +1136,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -1240,8 +1233,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -1438,8 +1430,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
             FieldId(101), DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -4443,8 +4434,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
         milvus::expr::ColumnInfo(
             i64_fid, DataType::INT64, std::vector<std::string>()),
         retrive_row_ids);
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_field_ids;
 
     // retrieve value
@@ -4759,49 +4749,6 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, AssembeChunkTest) {
-    TargetBitmap chunk(1000);
-    for (size_t i = 0; i < 1000; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    BitsetType result;
-    milvus::query::AppendOneChunk(result, chunk);
-    //    std::string s;
-    //    boost::to_string(result, s);
-    //    std::cout << s << std::endl;
-    int index = 0;
-    for (size_t i = 0; i < 1000; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(934);
-    for (int i = 0; i < 934; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 934; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(62);
-    for (int i = 0; i < 62; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 62; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-
-    chunk = TargetBitmap(105);
-    for (int i = 0; i < 105; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    milvus::query::AppendOneChunk(result, chunk);
-    for (size_t i = 0; i < 105; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-}
-
 std::vector<SegOffset>
 search_id(const BitsetType& bitset,
           Timestamp* timestamps,
@@ -4881,31 +4828,6 @@ TEST(CApiTest, SearchIdTest) {
     for (auto nt : test_nt) {
         test(nt);
     }
-}
-
-TEST(CApiTest, AssembeChunkPerfTest) {
-    TargetBitmap chunk(100000000);
-    for (size_t i = 0; i < 100000000; ++i) {
-        chunk[i] = (i % 2 == 0);
-    }
-    BitsetType result;
-    // while (true) {
-    std::cout << "start test" << std::endl;
-    auto start = std::chrono::steady_clock::now();
-    milvus::query::AppendOneChunk(result, chunk);
-    std::cout << "cost: "
-              << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << "us" << std::endl;
-    int index = 0;
-    for (size_t i = 0; i < 1000; i++) {
-        ASSERT_EQ(result[index++], chunk[i]) << i;
-    }
-    // }
-    // std::string s;
-    // boost::to_string(result, s);
-    // std::cout << s << std::endl;
 }
 
 TEST(CApiTest, Indexing_Without_Predicate_float16) {
