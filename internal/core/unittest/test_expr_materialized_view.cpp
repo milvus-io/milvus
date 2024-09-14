@@ -27,7 +27,7 @@
 #include "knowhere/config.h"
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "plan/PlanNode.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentSealedImpl.h"

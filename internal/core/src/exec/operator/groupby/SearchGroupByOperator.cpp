@@ -19,7 +19,7 @@
 #include "query/Utils.h"
 
 namespace milvus {
-namespace query {
+namespace exec {
 
 void
 SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
@@ -198,7 +198,8 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
 
     //3. sorted based on distances and metrics
     auto customComparator = [&](const auto& lhs, const auto& rhs) {
-        return dis_closer(std::get<1>(lhs), std::get<1>(rhs), metrics_type);
+        return milvus::query::dis_closer(
+            std::get<1>(lhs), std::get<1>(rhs), metrics_type);
     };
     std::sort(res.begin(), res.end(), customComparator);
 
@@ -210,5 +211,5 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     }
 }
 
-}  // namespace query
+}  // namespace exec
 }  // namespace milvus

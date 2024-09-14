@@ -26,20 +26,60 @@ type rankParams struct {
 	roundDecimal int64
 }
 
-// parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool) (*planpb.QueryInfo, int64, error) {
-	// 0. parse iterator field
-	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+func (r *rankParams) GetLimit() int64 {
+	if r != nil {
+		return r.limit
+	}
+	return 0
+}
 
-	// 1. parse offset and real topk
+func (r *rankParams) GetOffset() int64 {
+	if r != nil {
+		return r.offset
+	}
+	return 0
+}
+
+func (r *rankParams) GetRoundDecimal() int64 {
+	if r != nil {
+		return r.roundDecimal
+	}
+	return 0
+}
+
+func (r *rankParams) String() string {
+	return fmt.Sprintf("limit: %d, offset: %d, roundDecimal: %d", r.GetLimit(), r.GetOffset(), r.GetRoundDecimal())
+}
+
+// parseSearchInfo returns QueryInfo and offset
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*planpb.QueryInfo, int64, error) {
+	var topK int64
+	isAdvanced := rankParams != nil
+	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, errors.New(TopKKey + " not found in search_params")
+		if externalLimit <= 0 {
+			return nil, 0, fmt.Errorf("%s is required", TopKKey)
+		}
+		topK = externalLimit
+	} else {
+		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
+		if err != nil {
+			if externalLimit <= 0 {
+				return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+			}
+			topK = externalLimit
+		} else {
+			if topKInParam < externalLimit {
+				topK = externalLimit
+			} else {
+				topK = topKInParam
+			}
+		}
 	}
-	topK, err := strconv.ParseInt(topKStr, 0, 64)
-	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
-	}
+
+	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+
 	if err := validateLimit(topK); err != nil {
 		if isIterator == "True" {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
@@ -51,7 +91,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	var offset int64
-	if !ignoreOffset {
+	// ignore offset if isAdvanced
+	if !isAdvanced {
 		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, searchParamsPair)
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)

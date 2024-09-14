@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 #include <boost/pointer_cast.hpp>
@@ -606,8 +607,38 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
+    }
+
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
+
+    // all record filtered
+    if (size == 0) {
+        return;
+    }
+
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<PkType> sort_pks(size);
+    std::vector<Timestamp> sort_timestamps(size);
+
+    for (int i = 0; i < size; i++) {
+        auto [t, pk] = ordering[i];
+        sort_timestamps[i] = t;
+        sort_pks[i] = pk;
+    }
+
+    deleted_record_.push(sort_pks, sort_timestamps.data());
 }
 
 void
@@ -908,7 +939,7 @@ SegmentSealedImpl::get_deleted_bitmap_s(int64_t del_barrier,
 }
 
 void
-SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
+SegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
@@ -1846,7 +1877,7 @@ SegmentSealedImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
+SegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                         Timestamp timestamp) const {
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
