@@ -376,8 +376,9 @@ func (node *QueryNode) Start() error {
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-		mmapScarlarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
-		mmapScarlarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
+		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -389,8 +390,9 @@ func (node *QueryNode) Start() error {
 			zap.Bool("growingmmapEnable", growingmmapEnable),
 			zap.Bool("mmapVectorIndex", mmapVectorIndex),
 			zap.Bool("mmapVectorField", mmapVectorField),
-			zap.Bool("mmapScarlarIndex", mmapScarlarIndex),
-			zap.Bool("mmapScarlarField", mmapScarlarField),
+			zap.Bool("mmapScalarIndex", mmapScalarIndex),
+			zap.Bool("mmapScalarField", mmapScalarField),
+			zap.Bool("mmapChunkCache", mmapChunkCache),
 		)
 	})
 
