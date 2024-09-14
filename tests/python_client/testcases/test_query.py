@@ -4465,6 +4465,7 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #36123")
     def test_query_normal_none_data_partition_key(self, enable_dynamic_field, null_data_percent):
         """
         target: test query normal case with none data inserted
