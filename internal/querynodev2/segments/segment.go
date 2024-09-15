@@ -1384,7 +1384,8 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 			}
 
 			// 4.
-			s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), isDataMmapEnable(fieldSchema))
+			mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
+			s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), mmapChunkCache)
 			warmupChunkCacheSpan := tr.RecordSpan()
 			log.Info("Finish loading index",
 				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
