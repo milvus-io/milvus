@@ -31,6 +31,7 @@ import (
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -170,7 +171,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	// test checkImportingJob
-	s.checker.checkImportingJob(job) // not completed
+	s.checker.checkImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
@@ -194,12 +195,34 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		err := s.checker.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 		err = s.imeta.UpdateTask(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}))
+			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{rand.Int63()}))
 		s.NoError(err)
 		err = s.checker.meta.UpdateChannelCheckpoint(segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
+	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
+
+	// test check stats job
+	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
+	sjm := s.checker.sjm.(*MockStatsJobManager)
+	sjm.EXPECT().SubmitStatsTask(mock.Anything, mock.Anything, mock.Anything, false).Return(nil)
+	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateNone)
+	s.checker.checkStatsJob(job)
+	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
+	sjm = NewMockStatsJobManager(s.T())
+	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateInProgress)
+	s.checker.sjm = sjm
+	s.checker.checkStatsJob(job)
+	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(job.GetJobID()).GetState())
+	sjm = NewMockStatsJobManager(s.T())
+	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateFinished)
+	s.checker.sjm = sjm
+	s.checker.checkStatsJob(job)
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.imeta.GetJob(job.GetJobID()).GetState())
+
+	// test check IndexBuilding job
+	s.checker.checkIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
@@ -294,39 +317,40 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 
-	pit1 := &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:  s.jobID,
-			TaskID: 1,
-			State:  datapb.ImportTaskStateV2_Pending,
+	it := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:           s.jobID,
+			TaskID:          1,
+			State:           datapb.ImportTaskStateV2_Pending,
+			SegmentIDs:      []int64{2},
+			StatsSegmentIDs: []int64{3},
 		},
 	}
-	err := s.imeta.AddTask(pit1)
+	err := s.imeta.AddTask(it)
 	s.NoError(err)
 
-	pit2 := &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:  s.jobID,
-			TaskID: 2,
-			State:  datapb.ImportTaskStateV2_Completed,
-		},
-	}
-	err = s.imeta.AddTask(pit2)
-	s.NoError(err)
+	sjm := NewMockStatsJobManager(s.T())
+	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	s.checker.sjm = sjm
+	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
+	s.Equal(0, len(tasks))
+	sjm.ExpectedCalls = nil
+	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock error"))
-	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
-	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(errors.New("mock error"))
+	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
 	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
-	s.Equal(2, len(tasks))
+	s.Equal(1, len(tasks))
 }
 
 func (s *ImportCheckerSuite) TestCheckGC() {
@@ -336,10 +360,11 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:      s.jobID,
-			TaskID:     1,
-			State:      datapb.ImportTaskStateV2_Failed,
-			SegmentIDs: []int64{2},
+			JobID:           s.jobID,
+			TaskID:          1,
+			State:           datapb.ImportTaskStateV2_Failed,
+			SegmentIDs:      []int64{2},
+			StatsSegmentIDs: []int64{3},
 		},
 	}
 	err := s.imeta.AddTask(task)
@@ -363,11 +388,18 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
 
-	// segment not dropped
+	// origin segment not dropped
 	s.checker.checkGC(s.imeta.GetJob(s.jobID))
 	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
 	s.Equal(1, len(s.imeta.GetJobBy()))
 	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs([]int64{}))
+	s.NoError(err)
+
+	// stats segment not dropped
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateStatsSegmentIDs([]int64{}))
 	s.NoError(err)
 
 	// task is not dropped

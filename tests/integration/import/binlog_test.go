@@ -268,8 +268,11 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		return segment.GetCollectionID() == newCollectionID
 	})
 	log.Info("Show segments", zap.Any("segments", segments))
-	s.Equal(1, len(segments))
-	segment := segments[0]
+	s.Equal(2, len(segments))
+	segment, ok := lo.Find(segments, func(segment *datapb.SegmentInfo) bool {
+		return segment.GetState() == commonpb.SegmentState_Flushed
+	})
+	s.True(ok)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
 	s.True(len(segment.GetBinlogs()) > 0)
 	s.NoError(CheckLogID(segment.GetBinlogs()))
