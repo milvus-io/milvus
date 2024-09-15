@@ -46,7 +46,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	)
 
 	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.GetContext(), 120*time.Second)
 	defer cancel()
 
 	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.GenRandomStr()

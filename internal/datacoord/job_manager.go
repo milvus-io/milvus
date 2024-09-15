@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type StatsTaskManager interface {
+type StatsJobManager interface {
 	Start()
 	Stop()
 	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
@@ -24,7 +24,7 @@ type StatsTaskManager interface {
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
 
-var _ StatsTaskManager = (*statsJobManager)(nil)
+var _ StatsJobManager = (*statsJobManager)(nil)
 
 type statsJobManager struct {
 	ctx    context.Context
@@ -90,15 +90,6 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
 				continue
 			}
-			// TODO @xiaocai2333 @bigsheeper: remove code after allow create stats task for importing segment
-			if segment.GetIsImporting() {
-				log.Info("segment is importing, skip stats task", zap.Int64("segmentID", segID))
-				select {
-				case getBuildIndexChSingleton() <- segID:
-				default:
-				}
-				continue
-			}
 			jm.createSortStatsTaskForSegment(segment)
 		}
 	}
@@ -106,17 +97,10 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 func (jm *statsJobManager) triggerSortStatsTask() {
 	segments := jm.mt.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted()
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
 	}))
 	for _, segment := range segments {
-		if !segment.GetIsSorted() {
-			// TODO @xiaocai2333, @bigsheeper:
-			if segment.GetIsImporting() {
-				log.Warn("segment is importing, skip stats task, wait @bigsheeper support it")
-				continue
-			}
-			jm.createSortStatsTaskForSegment(segment)
-		}
+		jm.createSortStatsTaskForSegment(segment)
 	}
 }
 
