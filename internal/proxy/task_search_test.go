@@ -1995,7 +1995,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
 		assert.NoError(t, err)
 		assert.NotNil(t, info)
-		assert.Equal(t, externalLimit, info.GetTopk())
+		assert.Equal(t, int64(10), info.GetTopk())
 		assert.Equal(t, int64(0), offset)
 	})
 
