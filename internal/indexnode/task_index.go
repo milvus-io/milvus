@@ -364,9 +364,6 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	}
 	data, err := it.cm.Read(ctx, toLoadDataPaths[0])
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return err
-		}
 		return err
 	}
 
