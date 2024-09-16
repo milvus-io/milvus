@@ -2259,7 +2259,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
 		assert.NoError(t, err)
 		assert.NotNil(t, info)
-		assert.Equal(t, externalLimit, info.GetTopk())
+		assert.Equal(t, int64(10), info.GetTopk())
 		assert.Equal(t, int64(0), offset)
 	})
 
@@ -2446,13 +2446,13 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
 
 		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-		info, _, err = parseSearchInfo(normalParam, schema, false)
+		info, _, err = parseSearchInfo(normalParam, schema, nil)
 		assert.NotNil(t, info)
 		assert.NoError(t, err)
 	})
