@@ -39,6 +39,7 @@ class IndexErrorMessage(ExceptionsMessage):
     CheckBitmapIndex = "bitmap index are only supported on bool, int, string and array field"
     CheckBitmapOnPK = "create bitmap index on primary key not supported"
     CheckBitmapCardinality = "failed to check bitmap cardinality limit, should be larger than 0 and smaller than 1000"
+    NotConfigable = "{0} is not configable index param"
 
 
 class QueryErrorMessage(ExceptionsMessage):
