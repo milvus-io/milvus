@@ -17,9 +17,10 @@
 #pragma once
 
 #include <memory>
-#include <string>
 
+#include <boost/variant.hpp>
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 
 namespace milvus {
 
@@ -27,7 +28,6 @@ namespace milvus {
  * @brief base class for different type vector  
  * @todo implement full null value support
  */
-
 class BaseVector {
  public:
     BaseVector(DataType data_type,
@@ -87,7 +87,7 @@ class ColumnVector final : public BaseVector {
     }
 
     void*
-    GetRawData() {
+    GetRawData() const {
         return values_->Data();
     }
 
@@ -156,4 +156,80 @@ class RowVector : public BaseVector {
 
 using RowVectorPtr = std::shared_ptr<RowVector>;
 
+class ConstantVector final : public BaseVector {
+ public:
+    ConstantVector(DataType data_type,
+                   size_t length,
+                   const proto::plan::GenericValue&& val,
+                   std::optional<size_t> null_count = std::nullopt)
+        : BaseVector(data_type, length, null_count), val_(val) {
+    }
+
+    const proto::plan::GenericValue&
+    GetGenericValue() const {
+        return val_;
+    }
+
+    bool ToBool() const {
+        switch (type_kind_) {
+            case DataType::BOOL:
+                return val_.bool_val();
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+                return val_.int64_val();
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+                return val_.float_val() != 0;
+            default:
+                return false;
+        }
+    }
+
+ private:
+    const proto::plan::GenericValue val_;
+};
+
+using ConstantVectorPtr = std::shared_ptr<ConstantVector>;
+
+// TODO: simd support
+class LazySegmentVector final : public BaseVector {
+ public:
+    LazySegmentVector(DataType data_type,
+                      size_t length,
+                      int64_t size_per_chunk,
+                      std::optional<size_t> null_count = std::nullopt)
+        : BaseVector(data_type, length, null_count),
+          size_per_chunk_(size_per_chunk) {
+    }
+
+    // NOTE: same as PhyCompareFilterExpr
+    using number = boost::variant<bool,
+                                  int8_t,
+                                  int16_t,
+                                  int32_t,
+                                  int64_t,
+                                  float,
+                                  double,
+                                  std::string>;
+    using ChunkDataAccessor = std::function<const number(int)>;
+    void
+    AddChunkData(ChunkDataAccessor accessor) {
+        chunk_data_accesors_.push_back(accessor);
+    }
+
+    template<typename T>
+    T GetValue(size_t i) {
+        auto chunk_id = i / size_per_chunk_;
+        auto chunk_pos = i % size_per_chunk_;
+        auto& accessor = chunk_data_accesors_[chunk_id];
+        auto value = accessor(chunk_pos);
+        return boost::get<T>(value);
+    }
+
+ private:
+    std::vector<ChunkDataAccessor> chunk_data_accesors_;
+    const int64_t size_per_chunk_;
+};
 }  // namespace milvus

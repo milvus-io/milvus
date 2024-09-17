@@ -60,10 +60,10 @@ func assertValidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr string
 	_, err := ParseExpr(helper, exprStr)
 	assert.NoError(t, err, exprStr)
 
-	// expr, err := ParseExpr(helper, exprStr)
-	// assert.NoError(t, err, exprStr)
-	// fmt.Printf("expr: %s\n", exprStr)
-	// ShowExpr(expr)
+	expr, err := ParseExpr(helper, exprStr)
+	assert.NoError(t, err, exprStr)
+	fmt.Printf("expr: %s\n", exprStr)
+	ShowExpr(expr)
 }
 
 func assertInvalidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
@@ -103,6 +103,43 @@ func TestExpr_Term(t *testing.T) {
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
+}
+
+func TestExpr_Call(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	testcases := []struct {
+		CallExpr     string
+		FunctionName string
+		ParameterNum int
+	}{
+		{`hello123()`, "hello123", 0},
+		{`lt(Int32Field)`, "lt", 1},
+		// test parens
+		{`lt((((Int32Field))))`, "lt", 1},
+		{`empty(VarCharField,)`, "empty", 1},
+		{`f2(Int64Field)`, "f2", 1},
+		{`f2(Int64Field, 4)`, "f2", 2},
+		{`f3(JSON_FIELD["A"], Int32Field)`, "f3", 2},
+		{`f5(3+3, Int32Field)`, "f5", 2},
+	}
+	for _, testcase := range testcases {
+		expr, err := ParseExpr(helper, testcase.CallExpr)
+		assert.NoError(t, err, testcase)
+		assert.Equal(t, testcase.FunctionName, expr.GetCallExpr().FunctionName, testcase)
+		assert.Equal(t, testcase.ParameterNum, len(expr.GetCallExpr().FunctionParameters), testcase)
+		ShowExpr(expr)
+	}
+
+	expr, err := ParseExpr(helper, "xxx(1+1, !true, f(10+10))")
+	assert.NoError(t, err)
+	assert.Equal(t, "xxx", expr.GetCallExpr().FunctionName)
+	assert.Equal(t, 3, len(expr.GetCallExpr().FunctionParameters))
+	assert.Equal(t, int64(2), expr.GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
+	assert.Equal(t, false, expr.GetCallExpr().GetFunctionParameters()[1].GetValueExpr().GetValue().GetBoolVal())
+	assert.Equal(t, int64(20), expr.GetCallExpr().GetFunctionParameters()[2].GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
 }
 
 func TestExpr_Compare(t *testing.T) {
@@ -285,6 +322,7 @@ func TestExpr_Value(t *testing.T) {
 		`true`,
 		`false`,
 		`"str"`,
+		`3 > 2`,
 	}
 	for _, exprStr := range exprStrs {
 		expr := handleExpr(helper, exprStr)

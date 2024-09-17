@@ -125,8 +125,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
-    auto left_data_barrier = segment_->num_chunk_data(expr_->left_field_id_);
-    auto right_data_barrier = segment_->num_chunk_data(expr_->right_field_id_);
+    const auto left_data_barrier = segment_->num_chunk_data(expr_->left_field_id_);
+    const auto right_data_barrier = segment_->num_chunk_data(expr_->right_field_id_);
 
     int64_t processed_rows = 0;
     for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;

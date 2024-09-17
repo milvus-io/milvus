@@ -75,11 +75,22 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
 
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[0]);
-        auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        bitset.append(view);
-        num_processed_rows_ += col_vec_size;
+        if (auto col_vec =
+                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+            auto col_vec_size = col_vec->size();
+            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+            bitset.append(view);
+            num_processed_rows_ += col_vec_size;
+        } else if (auto vec =
+                       std::dynamic_pointer_cast<ConstantVector>(results_[0])) {
+            auto col_vec_size = col_vec->size();
+            TargetBitmap result(col_vec_size, vec->ToBool());
+            bitset.append(result);
+            num_processed_rows_ += col_vec_size;
+        } else {
+            PanicInfo(ExprInvalid,
+                      "PhyFilterBitsNode result should be ColumnVector");
+        }
     }
     bitset.flip();
     Assert(bitset.size() == need_process_rows_);
