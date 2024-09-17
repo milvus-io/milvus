@@ -58,13 +58,11 @@ func newTestSchemaHelper(t *testing.T) *typeutil.SchemaHelper {
 }
 
 func assertValidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
-	_, err := ParseExpr(helper, exprStr)
+	expr, err := ParseExpr(helper, exprStr)
 	assert.NoError(t, err, exprStr)
-
-	// expr, err := ParseExpr(helper, exprStr)
-	// assert.NoError(t, err, exprStr)
 	// fmt.Printf("expr: %s\n", exprStr)
-	// ShowExpr(expr)
+	assert.NotNil(t, expr, exprStr)
+	ShowExpr(expr)
 }
 
 func assertInvalidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
@@ -104,6 +102,43 @@ func TestExpr_Term(t *testing.T) {
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
+}
+
+func TestExpr_Call(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	testcases := []struct {
+		CallExpr     string
+		FunctionName string
+		ParameterNum int
+	}{
+		{`hello123()`, "hello123", 0},
+		{`lt(Int32Field)`, "lt", 1},
+		// test parens
+		{`lt((((Int32Field))))`, "lt", 1},
+		{`empty(VarCharField,)`, "empty", 1},
+		{`f2(Int64Field)`, "f2", 1},
+		{`f2(Int64Field, 4)`, "f2", 2},
+		{`f3(JSON_FIELD["A"], Int32Field)`, "f3", 2},
+		{`f5(3+3, Int32Field)`, "f5", 2},
+	}
+	for _, testcase := range testcases {
+		expr, err := ParseExpr(helper, testcase.CallExpr)
+		assert.NoError(t, err, testcase)
+		assert.Equal(t, testcase.FunctionName, expr.GetCallExpr().FunctionName, testcase)
+		assert.Equal(t, testcase.ParameterNum, len(expr.GetCallExpr().FunctionParameters), testcase)
+		ShowExpr(expr)
+	}
+
+	expr, err := ParseExpr(helper, "xxx(1+1, !true, f(10+10))")
+	assert.NoError(t, err)
+	assert.Equal(t, "xxx", expr.GetCallExpr().FunctionName)
+	assert.Equal(t, 3, len(expr.GetCallExpr().FunctionParameters))
+	assert.Equal(t, int64(2), expr.GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
+	assert.Equal(t, false, expr.GetCallExpr().GetFunctionParameters()[1].GetValueExpr().GetValue().GetBoolVal())
+	assert.Equal(t, int64(20), expr.GetCallExpr().GetFunctionParameters()[2].GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
 }
 
 func TestExpr_Compare(t *testing.T) {
@@ -247,7 +282,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 	exprStrs := []string{
 		`Int64Field % 10 == 9`,
 		`Int64Field % 10 != 9`,
-		`Int64Field + 1.1 == 2.1`,
+		`FloatField + 1.1 == 2.1`,
 		`A % 10 != 2`,
 		`Int8Field + 1 < 2`,
 		`Int16Field - 3 <= 4`,
@@ -263,6 +298,13 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
+	}
+
+	invalidExprs := []string{
+		`Int64Field + 1.1 == 2.1`,
+	}
+	for _, exprStr := range invalidExprs {
+		assertInvalidExpr(t, helper, exprStr)
 	}
 
 	// TODO: enable these after execution backend is ready.
@@ -286,6 +328,7 @@ func TestExpr_Value(t *testing.T) {
 		`true`,
 		`false`,
 		`"str"`,
+		`3 > 2`,
 	}
 	for _, exprStr := range exprStrs {
 		expr := handleExpr(helper, exprStr)
@@ -935,6 +978,8 @@ func Test_JSONContains(t *testing.T) {
 		`json_contains(JSONField["x"], 5)`,
 		`not json_contains(JSONField["x"], 5)`,
 		`JSON_CONTAINS(JSONField["x"], 5)`,
+		`json_Contains(JSONField, 5)`,
+		`JSON_contains(JSONField, 5)`,
 		`json_contains(A, [1,2,3])`,
 		`array_contains(A, [1,2,3])`,
 		`array_contains(ArrayField, [1,2,3])`,
@@ -970,8 +1015,6 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
-		`json_Contains(JSONField, 5)`,
-		`JSON_contains(JSONField, 5)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
