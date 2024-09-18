@@ -130,20 +130,6 @@ var (
 		},
 	}
 
-	getlogs = func(id int64) []*datapb.FieldBinlog {
-		return []*datapb.FieldBinlog{
-			{
-				FieldID: 1,
-				Binlogs: []*datapb.Binlog{
-					{
-						EntriesNum: 5,
-						LogID:      id,
-					},
-				},
-			},
-		}
-	}
-
 	segment1 = &datapb.SegmentInfo{
 		ID:           segmentID,
 		CollectionID: collectionID,
@@ -153,17 +139,6 @@ var (
 		Binlogs:      binlogs,
 		Deltalogs:    deltalogs,
 		Statslogs:    statslogs,
-	}
-
-	droppedSegment = &datapb.SegmentInfo{
-		ID:           segmentID2,
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
-		NumOfRows:    100,
-		State:        commonpb.SegmentState_Dropped,
-		Binlogs:      getlogs(logID),
-		Deltalogs:    getlogs(logID),
-		Statslogs:    getlogs(logID),
 	}
 )
 
@@ -254,6 +229,10 @@ func Test_ListSegments(t *testing.T) {
 			}
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
+			}
+			// return empty bm25log list
+			if strings.HasPrefix(s, SegmentBM25logPathPrefix) {
+				return nil
 			}
 			return errors.New("should not reach here")
 		})

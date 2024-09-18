@@ -63,7 +63,7 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 	}
 
 	for _, field := range s.collSchema.Fields {
-		if field.GetIsPartitionKey() {
+		if field.GetIsPrimaryKey() {
 			s.pkSchema = field
 			break
 		}
@@ -188,7 +188,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
-		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
@@ -202,33 +202,9 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.MetricsEqual(value, 5607)
 
 		delMsg = s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-		insertData, err = PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
-		s.NoError(err)
-		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		err = wb.BufferData([]*InsertData{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
 		s.MetricsEqual(value, 5847)
-	})
-
-	s.Run("pk_type_not_match", func() {
-		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-			idAllocator: s.allocator,
-		})
-		s.NoError(err)
-
-		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
-		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-
-		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
-		s.NoError(err)
-
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
-		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-
-		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.Error(err)
 	})
 }
 

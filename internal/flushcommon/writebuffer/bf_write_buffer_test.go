@@ -216,7 +216,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
 		s.metacacheInt64.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
@@ -246,7 +246,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
 		s.metacacheVarchar.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacacheVarchar.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-		s.metacacheVarchar.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacacheVarchar.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheVarchar.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
@@ -263,46 +263,18 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		s.NoError(err)
 		s.MetricsEqual(value, 7227)
 	})
+}
 
+func (s *BFWriteBufferSuite) TestPrepareInsert() {
 	s.Run("int_pk_type_not_match", func() {
-		wb, err := NewBFWriteBuffer(s.channelName, s.metacacheInt64, s.syncMgr, &writeBufferOption{})
-		s.NoError(err)
-
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
-		s.metacacheInt64.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-
-		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
-		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-
-		insertData, err := PrepareInsert(s.collVarcharSchema, s.collVarcharPkField, []*msgstream.InsertMsg{msg})
-		s.NoError(err)
-
-		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		_, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
+		_, err := PrepareInsert(s.collInt64Schema, s.collInt64PkField, []*msgstream.InsertMsg{msg})
 		s.Error(err)
 	})
 
 	s.Run("varchar_pk_not_match", func() {
-		wb, err := NewBFWriteBuffer(s.channelName, s.metacacheVarchar, s.syncMgr, &writeBufferOption{})
-		s.NoError(err)
-
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, pkoracle.NewBloomFilterSet(), nil)
-		s.metacacheVarchar.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-		s.metacacheVarchar.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-		s.metacacheVarchar.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.metacacheVarchar.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-
-		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
-		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
-
-		insertData, err := PrepareInsert(s.collInt64Schema, s.collInt64PkField, []*msgstream.InsertMsg{msg})
-		s.NoError(err)
-
-		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		_, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
+		_, err := PrepareInsert(s.collVarcharSchema, s.collVarcharPkField, []*msgstream.InsertMsg{msg})
 		s.Error(err)
 	})
 }
@@ -328,7 +300,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1002)).Return(seg1, true)
 		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
 		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
-		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(nil)

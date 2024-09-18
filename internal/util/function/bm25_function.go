@@ -41,6 +41,10 @@ type BM25FunctionRunner struct {
 }
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
+	if len(schema.GetOutputFieldIds()) != 1 {
+		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
+	}
+
 	runner := &BM25FunctionRunner{
 		schema:      schema,
 		concurrency: 8,

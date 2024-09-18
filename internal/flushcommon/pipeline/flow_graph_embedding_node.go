@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -49,7 +48,6 @@ func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*e
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
-	log.Info("test--- schema", zap.Any("schema", schema))
 	node := &embeddingNode{
 		BaseNode:        baseNode,
 		channelName:     channelName,
@@ -79,14 +77,13 @@ func (eNode *embeddingNode) Name() string {
 }
 
 func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputFieldId, outputFieldId int64, data *storage.InsertData, meta map[int64]*storage.BM25Stats) error {
-	start := time.Now()
 	if _, ok := meta[outputFieldId]; !ok {
 		meta[outputFieldId] = storage.NewBM25Stats()
 	}
 
 	embeddingData, ok := data.Data[inputFieldId].GetDataRows().([]string)
 	if !ok {
-		return fmt.Errorf("bm25 embedding failed: input field data not varchar")
+		return fmt.Errorf("BM25 embedding failed: input field data not varchar")
 	}
 
 	output, err := runner.BatchRun(embeddingData)
@@ -96,12 +93,11 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return fmt.Errorf("bm25 embedding failed: ibm25 runner output not sparse map")
+		return fmt.Errorf("BM25 embedding failed: BM25 runner output not sparse map")
 	}
 
 	meta[outputFieldId].AppendBytes(sparseArray.GetContents()...)
 	data.Data[outputFieldId] = BuildSparseFieldData(sparseArray)
-	log.Info("test-- time cost", zap.Int("numrow", len(embeddingData)), zap.Duration("cost", time.Since(start)))
 	return nil
 }
 
