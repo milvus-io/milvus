@@ -60,7 +60,7 @@ class TestInsertParams(TestcaseBase):
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == data[0]
+        assert mutation_res.primary_keys == data[0].tolist()
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -214,7 +214,7 @@ class TestInsertParams(TestcaseBase):
         data = cf.gen_default_list_data(nb=1)
         mutation_res, _ = collection_w.insert(data=data)
         assert mutation_res.insert_count == 1
-        assert mutation_res.primary_keys == data[0]
+        assert mutation_res.primary_keys == data[0].tolist()
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L2)
