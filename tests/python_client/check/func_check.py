@@ -323,6 +323,7 @@ class ResponseChecker:
         for hits in search_res:
             searched_original_vectors = []
             ids = []
+            vector_id = 0
             if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit['id'])
@@ -349,12 +350,13 @@ class ResponseChecker:
                         raise Exception("inserted vectors are needed for distance check")
                     for id in hits.ids:
                         searched_original_vectors.append(check_items["original_vectors"][id])
-                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][i],
+                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][vector_id],
                                                                searched_original_vectors,
                                                                check_items["metric"], hits.distances)
                     log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
                     pass  # just check nq and topk, not specific ids need check
+            vector_id +=  1
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
 
