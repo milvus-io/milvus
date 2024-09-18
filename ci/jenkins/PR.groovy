@@ -135,6 +135,7 @@ pipeline {
                                                     yq -i '.pulsar.enabled=false' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.enabled=true' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.metrics.kafka.enabled=true' values/ci/pr_kafka.yaml
+                                                    yq -i '.standalone.messageQueue="kafka"' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.metrics.jmx.enabled=true' values/ci/pr_kafka.yaml
                                                     yq -i '.kafka.metrics.serviceMonitor.enabled=true' values/ci/pr_kafka.yaml
                                                 """
