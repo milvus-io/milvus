@@ -54,6 +54,9 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 bool enable_mmap,
                 const char* mmap_dir_path);
 
+struct LoadResourceRequest*
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
+
 CStatus
 AppendIndexInfo(CLoadIndexInfo c_load_index_info,
                 int64_t index_id,
