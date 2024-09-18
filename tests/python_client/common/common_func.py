@@ -805,10 +805,10 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
     return df
 
 
-def gen_general_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                                  random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
-                                  vector_data_type="FLOAT_VECTOR", auto_id=False,
-                                  primary_field=ct.default_int64_field_name, nullable_fields={}):
+def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
+                          random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
+                          vector_data_type="FLOAT_VECTOR", auto_id=False,
+                          primary_field=ct.default_int64_field_name, nullable_fields={}):
     insert_list = []
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
@@ -1243,19 +1243,19 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
 
     return df, binary_raw_values
 
-
-def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-    int_values = [i for i in range(start, start + nb)]
-    float_values = [np.float32(i) for i in range(start, start + nb)]
-    string_values = [str(i) for i in range(start, start + nb)]
-    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
-                   for i in range(start, start + nb)]
-    float_vec_values = gen_vectors(nb, dim)
-    if with_json is False:
-        data = [int_values, float_values, string_values, float_vec_values]
-    else:
-        data = [int_values, float_values, string_values, json_values, float_vec_values]
-    return data
+#
+# def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
+#     int_values = [i for i in range(start, start + nb)]
+#     float_values = [np.float32(i) for i in range(start, start + nb)]
+#     string_values = [str(i) for i in range(start, start + nb)]
+#     json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
+#                    for i in range(start, start + nb)]
+#     float_vec_values = gen_vectors(nb, dim)
+#     if with_json is False:
+#         data = [int_values, float_values, string_values, float_vec_values]
+#     else:
+#         data = [int_values, float_values, string_values, json_values, float_vec_values]
+#     return data
 
 
 def gen_default_list_sparse_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=False):
@@ -2304,13 +2304,13 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                   auto_id=auto_id, primary_field=primary_field,
                                                                   nullable_fields=nullable_fields)
                     elif vector_data_type in ct.append_vector_type:
-                        default_data = gen_general_default_list_data(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                     random_primary_key=random_primary_key,
-                                                                     multiple_dim_array=multiple_dim_array,
-                                                                     multiple_vector_field_name=vector_name_list,
-                                                                     vector_data_type=vector_data_type,
-                                                                     auto_id=auto_id, primary_field=primary_field,
-                                                                     nullable_fields=nullable_fields)
+                        default_data = gen_default_list_data(nb // num, dim=dim, start=start, with_json=with_json,
+                                                             random_primary_key=random_primary_key,
+                                                             multiple_dim_array=multiple_dim_array,
+                                                             multiple_vector_field_name=vector_name_list,
+                                                             vector_data_type=vector_data_type,
+                                                             auto_id=auto_id, primary_field=primary_field,
+                                                             nullable_fields=nullable_fields)
 
                 else:
                     default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json,
