@@ -39,7 +39,7 @@ import (
 func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
 	info := s.meta.GetQuotaInfo()
 	// Just generate the metrics data regularly
-	_ = s.meta.GetCollectionIndexFilesSize()
+	_ = s.meta.SetStoredIndexFileSizeMetric()
 	return info
 }
 

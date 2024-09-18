@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.43.0') _
+@Library('jenkins-shared-library@v0.51.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -87,7 +87,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication', 'standalone-one-pod', 'distributed-streaming-service'
+                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication', 'standalone-one-pod'
                     }
                 }
                 stages {

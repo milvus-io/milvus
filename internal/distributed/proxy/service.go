@@ -323,6 +323,17 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
+			// both inbound and outbound
+			WithTargetMethods(
+				milvuspb.MilvusService_Search_FullMethodName,
+				milvuspb.MilvusService_HybridSearch_FullMethodName,
+				milvuspb.MilvusService_Query_FullMethodName,
+			).
+			// inbound only
+			WithInboundRecord(milvuspb.MilvusService_Insert_FullMethodName,
+				milvuspb.MilvusService_Delete_FullMethodName,
+				milvuspb.MilvusService_Upsert_FullMethodName)),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {

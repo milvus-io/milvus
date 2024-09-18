@@ -2504,9 +2504,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	)
 	method := "Insert"
 	tr := timerecord.NewTimeRecorder(method)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.InsertLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(method).
+		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
 	it := &insertTask{
@@ -2630,10 +2631,12 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	)
 	log.Debug("Start processing delete request in Proxy")
 	defer log.Debug("Finish processing delete request in Proxy")
+	method := "Delete"
 
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.DeleteLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(method).
+		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.MutationResult{
@@ -2641,7 +2644,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	method := "Delete"
 	tr := timerecord.NewTimeRecorder(method)
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -2740,9 +2742,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	method := "Upsert"
 	tr := timerecord.NewTimeRecorder(method)
 
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.UpsertLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(method).
+		SetCollectionName(request.GetCollectionName())
+
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
 	request.Base = commonpbutil.NewMsgBase(
@@ -2895,12 +2899,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.SearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3082,8 +3084,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
-
-		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
 	}
 	return qt.result, nil
 }
@@ -3107,12 +3107,10 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.HybridSearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.HybridSearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3271,8 +3269,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
-
-		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
 	}
 	return qt.result, nil
 }
@@ -3532,12 +3528,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	}
 
 	subLabel := GetCollectionRateSubLabel(request)
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.QueryLabel).
+		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.SearchLabel,
@@ -3579,9 +3573,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		request.GetDbName(),
 		request.GetCollectionName(),
 	).Inc()
-
-	sentSize := proto.Size(qt.result)
-	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()

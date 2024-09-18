@@ -30,6 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -371,6 +372,21 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(mr.ServerType)
 	}
 
+	enableComponents := []bool{
+		mr.EnableRootCoord,
+		mr.EnableProxy,
+		mr.EnableQueryCoord,
+		mr.EnableQueryNode,
+		mr.EnableDataCoord,
+		mr.EnableDataNode,
+		mr.EnableIndexCoord,
+		mr.EnableIndexNode,
+	}
+	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
+		return v
+	})
+	healthz.SetComponentNum(len(enableComponents))
+
 	expr.Init()
 	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
@@ -413,35 +429,6 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableQueryCoord {
 		queryCoord = mr.runQueryCoord(ctx, local, &wg)
 		componentMap[typeutil.QueryCoordRole] = queryCoord
-	}
-
-	waitCoordBecomeHealthy := func() {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("wait all coord become healthy loop quit")
-				return
-			default:
-				rcState := rootCoord.Health(ctx)
-				dcState := dataCoord.Health(ctx)
-				icState := indexCoord.Health(ctx)
-				qcState := queryCoord.Health(ctx)
-
-				if rcState == commonpb.StateCode_Healthy && dcState == commonpb.StateCode_Healthy && icState == commonpb.StateCode_Healthy && qcState == commonpb.StateCode_Healthy {
-					log.Info("all coord become healthy")
-					return
-				}
-				log.Info("wait all coord become healthy", zap.String("rootCoord", rcState.String()), zap.String("dataCoord", dcState.String()), zap.String("indexCoord", icState.String()), zap.String("queryCoord", qcState.String()))
-				time.Sleep(time.Second)
-			}
-		}
-	}
-
-	// In standalone mode, block the start process until the new coordinator is active to avoid the coexistence of the old coordinator and the new node/proxy
-	// 1. In the start/restart process, the new coordinator will become active immediately and will not be blocked
-	// 2. In the rolling upgrade process, the new coordinator will not be active until the old coordinator is down, and it will be blocked
-	if mr.Local {
-		waitCoordBecomeHealthy()
 	}
 
 	if mr.EnableQueryNode {

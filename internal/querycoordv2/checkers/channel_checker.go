@@ -91,11 +91,24 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
+	// clean channel which has been released
 	channels := c.dist.ChannelDistManager.GetByFilter()
 	released := utils.FilterReleased(channels, collectionIDs)
 	releaseTasks := c.createChannelReduceTasks(ctx, released, meta.NilReplica)
 	task.SetReason("collection released", releaseTasks...)
 	tasks = append(tasks, releaseTasks...)
+
+	// clean node which has been move out from replica
+	for _, nodeInfo := range c.nodeMgr.GetAll() {
+		nodeID := nodeInfo.ID()
+		replicas := c.meta.ReplicaManager.GetByNode(nodeID)
+		channels := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+		if len(replicas) == 0 && len(channels) != 0 {
+			reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
+			task.SetReason("dirty channel exists", reduceTasks...)
+			tasks = append(tasks, reduceTasks...)
+		}
+	}
 	return tasks
 }
 
