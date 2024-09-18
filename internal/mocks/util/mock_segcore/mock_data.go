@@ -817,6 +817,7 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 		IndexParams:         indexInfo.GetIndexParams(),
 		IndexFilePaths:      indexPaths,
 		CurrentIndexVersion: indexVersion.CurrentIndexVersion,
+		IndexID:             indexInfo.GetIndexID(),
 	}, nil
 }
 
