@@ -3018,7 +3018,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.StreamingDeltaForwardPolicy = ParamItem{
 		Key:          "queryNode.streamingDeltaForwardPolicy",
 		Version:      "2.4.12",
-		Doc:          "delegator level zero deletion forward policy, possible option[\"FilterByBF\", \"Direct\"]",
+		Doc:          "delegator streaming deletion forward policy, possible option[\"FilterByBF\", \"Direct\"]",
 		DefaultValue: "FilterByBF",
 		Export:       true,
 	}
