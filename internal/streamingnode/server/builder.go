@@ -9,10 +9,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ServerBuilder is used to build a server.
@@ -87,8 +85,7 @@ func (b *ServerBuilder) Build() *Server {
 	)
 	resource.Done()
 	return &Server{
-		session:               b.session,
-		grpcServer:            b.grpcServer,
-		componentStateService: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
+		session:    b.session,
+		grpcServer: b.grpcServer,
 	}
 }

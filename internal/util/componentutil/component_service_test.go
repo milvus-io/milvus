@@ -15,11 +15,6 @@ func TestComponentStateService(t *testing.T) {
 	s := NewComponentStateService("role")
 	resp, err := s.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_StandBy, resp.State.StateCode)
-
-	s.OnInitializing()
-	resp, err = s.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Initializing, resp.State.StateCode)
 
 	s.OnInitialized(1)

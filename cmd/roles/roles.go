@@ -398,6 +398,7 @@ func (mr *MilvusRoles) Run() {
 		mr.EnableDataNode,
 		mr.EnableIndexCoord,
 		mr.EnableIndexNode,
+		mr.EnableStreamingNode,
 	}
 	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
 		return v
