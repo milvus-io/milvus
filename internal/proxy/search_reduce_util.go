@@ -234,6 +234,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 				j              int64
 				groupByValMap  = make(map[interface{}][]*groupReduceInfo)
+				skipOffsetMap  = make(map[interface{}]bool)
 				groupByValList = make([]interface{}, limit)
 				groupByValIdx  = 0
 			)
@@ -253,15 +254,24 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 						"there must be sth wrong on queryNode side")
 				}
 
-				if len(groupByValMap[groupByVal]) == 0 {
-					groupByValList[groupByValIdx] = groupByVal
-					groupByValIdx++
+				if int64(len(skipOffsetMap)) < offset || skipOffsetMap[groupByVal] {
+					skipOffsetMap[groupByVal] = true
+					// the first offset's group will be ignored
+				} else if len(groupByValMap[groupByVal]) == 0 && int64(len(groupByValMap)) >= limit {
+					// skip when groupbyMap has been full and found new groupByVal
+				} else if int64(len(groupByValMap[groupByVal])) >= groupSize {
+					// skip when target group has been full
+				} else {
+					if len(groupByValMap[groupByVal]) == 0 {
+						groupByValList[groupByValIdx] = groupByVal
+						groupByValIdx++
+					}
+					groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
+						subSearchIdx: subSearchIdx,
+						resultIdx:    resultDataIdx, id: id, score: score,
+					})
+					j++
 				}
-				groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
-					subSearchIdx: subSearchIdx,
-					resultIdx:    resultDataIdx, id: id, score: score,
-				})
-				j++
 
 				cursors[subSearchIdx]++
 			}
