@@ -218,15 +218,12 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		totalResCount += subSearchNqOffset[i][nq-1]
 	}
 
-	if subSearchNum == 1 {
+	if subSearchNum == 1 && offset == 0 {
 		ret.Results = subSearchResultData[0]
 	} else {
-		var (
-			skipDupCnt int64
-			realTopK   int64 = -1
-		)
-
+		var realTopK int64 = -1
 		var retSize int64
+
 		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 		// reducing nq * topk results
 		for i := int64(0); i < nq; i++ {
@@ -236,9 +233,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				cursors = make([]int64, subSearchNum)
 
 				j              int64
-				pkSet          = make(map[interface{}]struct{})
 				groupByValMap  = make(map[interface{}][]*groupReduceInfo)
-				skipOffsetMap  = make(map[interface{}]bool)
 				groupByValList = make([]interface{}, limit)
 				groupByValIdx  = 0
 			)
@@ -257,33 +252,16 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 					return nil, errors.New("get nil groupByVal from subSearchRes, wrong states, as milvus doesn't support nil value," +
 						"there must be sth wrong on queryNode side")
 				}
-				// remove duplicates
-				if _, ok := pkSet[id]; !ok {
-					if int64(len(skipOffsetMap)) < offset || skipOffsetMap[groupByVal] {
-						skipOffsetMap[groupByVal] = true
-						// the first offset's group will be ignored
-						skipDupCnt++
-					} else if len(groupByValMap[groupByVal]) == 0 && int64(len(groupByValMap)) >= limit {
-						// skip when groupbyMap has been full and found new groupByVal
-						skipDupCnt++
-					} else if int64(len(groupByValMap[groupByVal])) >= groupSize {
-						// skip when target group has been full
-						skipDupCnt++
-					} else {
-						if len(groupByValMap[groupByVal]) == 0 {
-							groupByValList[groupByValIdx] = groupByVal
-							groupByValIdx++
-						}
-						groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
-							subSearchIdx: subSearchIdx,
-							resultIdx:    resultDataIdx, id: id, score: score,
-						})
-						pkSet[id] = struct{}{}
-						j++
-					}
-				} else {
-					skipDupCnt++
+
+				if len(groupByValMap[groupByVal]) == 0 {
+					groupByValList[groupByValIdx] = groupByVal
+					groupByValIdx++
 				}
+				groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
+					subSearchIdx: subSearchIdx,
+					resultIdx:    resultDataIdx, id: id, score: score,
+				})
+				j++
 
 				cursors[subSearchIdx]++
 			}
@@ -316,14 +294,6 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
-		}
-		log.Ctx(ctx).Debug("skip duplicated search result when doing group by", zap.Int64("count", skipDupCnt))
-
-		if float64(skipDupCnt) >= float64(totalResCount)*0.3 {
-			log.Warn("GroupBy reduce skipped too many results, "+
-				"this may influence the final result seriously",
-				zap.Int64("skipDupCnt", skipDupCnt),
-				zap.Int64("groupBound", groupBound))
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	}
@@ -384,8 +354,8 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		}
 	}
 
-	if subSearchNum == 1 {
-		// sorting is not needed if there is only one shard, assigning the result directly
+	if subSearchNum == 1 && offset == 0 {
+		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
 		//  we still need to adjust the scores later.
 		ret.Results = subSearchResultData[0]
 	} else {
@@ -402,9 +372,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				// cursor of current data of each subSearch for merging the j-th data of TopK.
 				// sum(cursors) == j
 				cursors = make([]int64, subSearchNum)
-
-				j     int64
-				idSet = make(map[interface{}]struct{}, limit)
+				j       int64
 			)
 
 			// skip offset results
@@ -426,20 +394,11 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				if subSearchIdx == -1 {
 					break
 				}
-				id := typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)
 				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-				// remove duplicatessds
-				if _, ok := idSet[id]; !ok {
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
-					typeutil.AppendPKs(ret.Results.Ids, id)
-					ret.Results.Scores = append(ret.Results.Scores, score)
-					idSet[id] = struct{}{}
-					j++
-				} else {
-					// skip entity with same id
-					skipDupCnt++
-				}
+				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
+				ret.Results.Scores = append(ret.Results.Scores, score)
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {
