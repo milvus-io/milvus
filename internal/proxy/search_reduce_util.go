@@ -386,7 +386,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			}
 
 			// keep limit results
-			for j = 0; j < limit; {
+			for j = 0; j < limit; j++ {
 				// From all the sub-query result sets of the i-th query vector,
 				//   find the sub-query result set index of the score j-th data,
 				//   and the index of the data in schemapb.SearchResultData
