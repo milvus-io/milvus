@@ -109,6 +109,10 @@ func (s *L0Segment) GetIndex(fieldID int64) *IndexedFieldInfo {
 	return nil
 }
 
+func (s *L0Segment) GetIndexByID(indexID int64) *IndexedFieldInfo {
+	return nil
+}
+
 func (s *L0Segment) ExistIndex(fieldID int64) bool {
 	return false
 }

@@ -1178,7 +1178,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
-				return info.IndexInfo.FieldID, info.IndexInfo
+				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 		})
 	}

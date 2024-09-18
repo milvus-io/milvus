@@ -244,6 +244,23 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
+func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
+	if err != nil {
+		return false
+	}
+	castType2, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+	if err != nil || castType1 != castType2 {
+		return false
+	}
+	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+	if err != nil {
+		return false
+	}
+	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+	return err == nil && jsonPath1 == jsonPath2
+}
+
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
 	if len(fieldIndex.TypeParams) != len(req.TypeParams) {
 		return false
@@ -330,7 +347,7 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	return !notEq
 }
 
-func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, error) {
+func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -343,7 +360,7 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			if req.FieldID == index.FieldID && checkParams(index, req) {
+			if req.FieldID == index.FieldID && checkParams(index, req) && (!isJson || checkJsonParams(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -355,6 +372,20 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
+			if isJson {
+				// if it is json index, check if json paths are same
+				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				if jsonPath1 != jsonPath2 {
+					continue
+				}
+			}
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
@@ -1043,6 +1074,7 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
 	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
+
 		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
 			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
 		}
