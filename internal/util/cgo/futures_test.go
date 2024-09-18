@@ -25,6 +25,32 @@ func TestMain(m *testing.M) {
 	}
 }
 
+func TestFutureWithConcurrentReleaseAndCancel(t *testing.T) {
+	wg := sync.WaitGroup{}
+	for i := 0; i < 20; i++ {
+		future := createFutureWithTestCase(context.Background(), testCase{
+			interval: 100 * time.Millisecond,
+			loopCnt:  10,
+			caseNo:   100,
+		})
+		wg.Add(3)
+		// Double release should be ok.
+		go func() {
+			defer wg.Done()
+			future.Release()
+		}()
+		go func() {
+			defer wg.Done()
+			future.Release()
+		}()
+		go func() {
+			defer wg.Done()
+			future.cancel(context.DeadlineExceeded)
+		}()
+	}
+	wg.Wait()
+}
+
 func TestFutureWithSuccessCase(t *testing.T) {
 	// Test success case.
 	future := createFutureWithTestCase(context.Background(), testCase{
