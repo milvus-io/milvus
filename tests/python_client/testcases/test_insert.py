@@ -1417,7 +1417,7 @@ class TestInsertString(TestcaseBase):
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == data[2]
+        assert mutation_res.primary_keys == data[2].tolist()
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1")],
