@@ -648,6 +648,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.Int64("collectionID", req.Req.GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.Any("metric_type", req.GetReq().GetMetricType()),
 	)
 	channelsMvcc := make(map[string]uint64)
 	for _, ch := range req.GetDmlChannels() {
@@ -750,6 +751,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if collection == nil {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
 		return resp, nil
+	}
+	if req.Req.MetricType == "" {
+		req.Req.MetricType = collection.GetMetricType()
 	}
 
 	toReduceResults := make([]*internalpb.SearchResults, len(req.GetDmlChannels()))
