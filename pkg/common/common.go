@@ -138,6 +138,9 @@ const (
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
+
+	JSONCastTypeKey = "json_cast_type"
+	JSONPathKey     = "json_path"
 )
 
 // Doc-in-doc-out
