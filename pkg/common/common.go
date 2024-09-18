@@ -145,6 +145,9 @@ const (
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
 	HintsKey                  = "hints"
+
+	JSONCastTypeKey = "json_cast_type"
+	JSONPathKey     = "json_path"
 )
 
 // Doc-in-doc-out

@@ -59,6 +59,53 @@ class SegmentSealed : public SegmentInternalInterface {
     type() const override {
         return SegmentType::Sealed;
     }
+
+    index::IndexBase*
+    chunk_index_impl(FieldId field_id,
+                     std::string path,
+                     int64_t chunk_id) const override {
+        JSONIndexKey key;
+        key.field_id = field_id;
+        key.nested_path = path;
+        AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
+                   "Cannot find json index with path: " + path);
+        return json_indexings_.at(key).get();
+    }
+
+    virtual bool
+    HasIndex(FieldId field_id) const override = 0;
+    bool
+    HasIndex(FieldId field_id, const std::string& path) const override {
+        JSONIndexKey key;
+        key.field_id = field_id;
+        key.nested_path = path;
+        return json_indexings_.find(key) != json_indexings_.end();
+    }
+
+ protected:
+    struct JSONIndexKey {
+        FieldId field_id;
+        std::string nested_path;
+        bool
+        operator==(const JSONIndexKey& other) const {
+            return field_id == other.field_id &&
+                   nested_path == other.nested_path;
+        }
+    };
+
+    struct hash_helper {
+        size_t
+        operator()(const JSONIndexKey& k) const {
+            std::hash<int64_t> h1;
+            std::hash<std::string> h2;
+            size_t hash_result = 0;
+            boost::hash_combine(hash_result, h1(k.field_id.get()));
+            boost::hash_combine(hash_result, h2(k.nested_path));
+            return hash_result;
+        }
+    };
+    std::unordered_map<JSONIndexKey, index::IndexBasePtr, hash_helper>
+        json_indexings_;
 };
 
 using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;
