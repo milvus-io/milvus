@@ -26,6 +26,8 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "pb/cgo_msg.pb.h"
+#include "knowhere/index/index_static.h"
+#include "knowhere/comp/knowhere_check.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -201,6 +203,34 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    }
+}
+
+LoadResourceRequest*
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
+    try {
+        auto load_index_info =
+            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        auto field_type = load_index_info->field_type;
+        auto& index_params = load_index_info->index_params;
+        bool find_index_type =
+            index_params.count("index_type") > 0 ? true : false;
+        AssertInfo(find_index_type == true,
+                   "Can't find index type in index_params");
+
+        LoadResourceRequest* request =
+            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                field_type,
+                load_index_info->index_engine_version,
+                load_index_info->index_size,
+                index_params,
+                load_index_info->enable_mmap);
+        return request;
+    } catch (std::exception& e) {
+        LOG_ERROR(
+            "failed to estimate index load resource, encounter exception : {}",
+            e.what());
+        return nullptr;
     }
 }
 
