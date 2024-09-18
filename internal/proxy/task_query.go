@@ -633,7 +633,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; {
+	for j := 0; j < loopEnd; j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
 			break
