@@ -1085,6 +1085,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
+						userDynamicFieldsMap[outputFieldName] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
 						return nil, nil, nil, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)

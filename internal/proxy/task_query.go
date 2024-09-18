@@ -245,6 +245,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	t.plan.DynamicFields = t.userDynamicFields
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
+		zap.Any("DynamicField", t.userDynamicFields),
 		zap.String("requestType", "query"))
 
 	return nil
