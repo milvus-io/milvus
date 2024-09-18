@@ -483,8 +483,6 @@ InvertedIndexTantivy<T>::build_index_for_array(
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            assert(array_column[i].get_element_type() ==
-                   static_cast<DataType>(schema_.element_type()));
             if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset.push_back(i);
             }
