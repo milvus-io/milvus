@@ -19,8 +19,9 @@ package typeutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func TestPKSlice(t *testing.T) {
