@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -107,7 +108,7 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 ) error {
 	info = typeutil.Clone(info)
 	// load l0 segment deltalogs
-	info.Deltalogs = sd.getLevel0Deltalogs(info.GetPartitionID())
+	info.Deltalogs = sd.getLevel0Deltalogs(info.GetPartitionID(), info.GetL0SegmentIds())
 
 	return worker.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -124,13 +125,24 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 	})
 }
 
-func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldBinlog {
+func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64, targetLevelZeroIDs []int64) []*datapb.FieldBinlog {
 	sd.level0Mut.Lock()
 	defer sd.level0Mut.Unlock()
+
+	// NOTE for compatibility concern:
+	// system only allow new coord with old querynode
+	// New Coord with old nodes, old node will not have target l0 segment id filtering here, OK
+	// New Coord with new nodes, new node will always have correct l0 segment ids with target, OK
+	// Old Coord with new node, target level zero ids will be nil, but shall not happen
+	targetIDs := typeutil.NewSet(targetLevelZeroIDs...)
 
 	level0Segments := sd.segmentManager.GetBy(
 		segments.WithLevel(datapb.SegmentLevel_L0),
 		segments.WithChannel(sd.vchannelName))
+
+	level0Segments = lo.Filter(level0Segments, func(segment segments.Segment, _ int) bool {
+		return targetIDs.Contain(segment.ID())
+	})
 
 	var deltalogs []*datapb.FieldBinlog
 
