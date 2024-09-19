@@ -344,7 +344,7 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 		}
 	}
 
-	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad {
+	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
 		// In SkipBFStatsLoad mode, flushed segments no longer maintain a bloom filter.
 		// So, here we skip loading the bloom filter for flushed segments.
 		info.Vchan.FlushedSegments = flushedSegmentInfos

@@ -4132,8 +4132,7 @@ type dataNodeConfig struct {
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
 	// Skip BF
-	skipBFStatsLoad ParamItem `refreshable:"true"`
-	SkipBFStatsLoad bool      // The SkipBFStatsLoad is a static config that not allow dynamic refresh.
+	SkipBFStatsLoad ParamItem `refreshable:"true"`
 
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
@@ -4357,15 +4356,14 @@ Setting this parameter too small causes the system to store a small amount of da
 	}
 	p.DataNodeTimeTickInterval.Init(base.mgr)
 
-	p.skipBFStatsLoad = ParamItem{
+	p.SkipBFStatsLoad = ParamItem{
 		Key:          "dataNode.skip.BFStats.Load",
 		Version:      "2.2.5",
 		PanicIfEmpty: false,
 		DefaultValue: "true",
+		Forbidden:    true, // The SkipBFStatsLoad is a static config that not allow dynamic refresh.
 	}
-	p.skipBFStatsLoad.Init(base.mgr)
-
-	p.SkipBFStatsLoad = p.skipBFStatsLoad.GetAsBool()
+	p.SkipBFStatsLoad.Init(base.mgr)
 
 	p.ChannelWorkPoolSize = ParamItem{
 		Key:          "dataNode.channel.workPoolSize",

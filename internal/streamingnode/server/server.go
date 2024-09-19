@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 
 	"google.golang.org/grpc"
 
@@ -46,7 +45,7 @@ func (s *Server) Init(ctx context.Context) (err error) {
 // Start starts the streamingnode server.
 func (s *Server) Start() {
 	if !paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
-		panic(fmt.Sprintf("In streaming service mode, disable L0 is not allowed."))
+		panic("In streaming service mode, disable L0 is not allowed.")
 	}
 	resource.Resource().Flusher().Start()
 	log.Info("flusher started")
