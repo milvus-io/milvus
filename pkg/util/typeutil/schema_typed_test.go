@@ -20,7 +20,113 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/stretchr/testify/assert"
 )
+
+func TestPKSlice(t *testing.T) {
+	data1 := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{1, 2, 3},
+			},
+		},
+	}
+
+	ints := NewInt64PkSchemaSlice(data1)
+	assert.Equal(t, int64(1), ints.Get(0))
+	assert.Equal(t, int64(2), ints.Get(1))
+	assert.Equal(t, int64(3), ints.Get(2))
+	ints.Append(4)
+	assert.Equal(t, int64(4), ints.Get(3))
+
+	data2 := &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: []string{"1", "2", "3"},
+			},
+		},
+	}
+	strs := NewStringPkSchemaSlice(data2)
+	assert.Equal(t, "1", strs.Get(0))
+	assert.Equal(t, "2", strs.Get(1))
+	assert.Equal(t, "3", strs.Get(2))
+	strs.Append("4")
+	assert.Equal(t, "4", strs.Get(3))
+}
+
+func TestCopyPk(t *testing.T) {
+	type args struct {
+		dst      *schemapb.IDs
+		src      *schemapb.IDs
+		offset   int
+		dstAfter *schemapb.IDs
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "ints",
+			args: args{
+				dst: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				src: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				offset: 0,
+				dstAfter: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3, 1},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "strs",
+			args: args{
+				dst: &schemapb.IDs{
+					IdField: &schemapb.IDs_StrId{
+						StrId: &schemapb.StringArray{
+							Data: []string{"1", "2", "3"},
+						},
+					},
+				},
+				src: &schemapb.IDs{
+					IdField: &schemapb.IDs_StrId{
+						StrId: &schemapb.StringArray{
+							Data: []string{"1", "2", "3"},
+						},
+					},
+				},
+				offset: 0,
+				dstAfter: &schemapb.IDs{
+					IdField: &schemapb.IDs_StrId{
+						StrId: &schemapb.StringArray{
+							Data: []string{"1", "2", "3", "1"},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			CopyPk(tt.args.dst, tt.args.src, tt.args.offset)
+			assert.Equal(t, tt.args.dst, tt.args.dstAfter)
+		})
+	}
+}
 
 func BenchmarkCopyPK(b *testing.B) {
 	internal := make([]int64, 1000)
