@@ -72,6 +72,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	t.Run("test channel cp after segment dml position", func(t *testing.T) {
 		channel := proto.Clone(channel).(*datapb.VchannelInfo)
 		channel.SeekPosition.Timestamp = t3
+		metaChannel.VchannelInfo = channel
 		req := PackSegmentLoadInfo(segmentInfo, metaChannel, nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
@@ -81,6 +82,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	t.Run("test tsLag > 10minutes", func(t *testing.T) {
 		channel := proto.Clone(channel).(*datapb.VchannelInfo)
 		channel.SeekPosition.Timestamp = t0
+		metaChannel.VchannelInfo = channel
 		req := PackSegmentLoadInfo(segmentInfo, metaChannel, nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)

@@ -573,7 +573,7 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 	sd.level0Mut.Lock()
 	defer sd.level0Mut.Unlock()
 
-	// NOTE for compatability concern:
+	// NOTE for compatibility concern:
 	// system only allow new coord with old querynode
 	// New Coord with old nodes, old node will not have target l0 segment id filtering here, OK
 	// New Coord with new nodes, new node will always have correct l0 segment ids with target, OK
