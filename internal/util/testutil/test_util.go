@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -102,7 +103,7 @@ func randomString(length int) string {
 	return string(b)
 }
 
-func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.InsertData, error) {
+func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent ...int) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(schema)
 	if err != nil {
 		return nil, err
@@ -193,13 +194,22 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.Ins
 			panic(fmt.Sprintf("unsupported data type: %s", f.GetDataType().String()))
 		}
 		if f.GetNullable() {
-			insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
+			if len(nullPercent) > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
+			}
+			if len(nullPercent) == 0 || nullPercent[0] == 50 {
+				insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
+			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
+				insertData.Data[f.FieldID].AppendValidDataRows(make([]bool, rows))
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent")
+			}
 		}
 	}
 	return insertData, nil
 }
 
-func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]arrow.Array, error) {
+func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
 	mem := memory.NewGoAllocator()
 	columns := make([]arrow.Array, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
@@ -209,6 +219,10 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 		fieldID := field.GetFieldID()
 		dataType := field.GetDataType()
 		elementType := field.GetElementType()
+		if field.GetNullable() && useNullType {
+			columns = append(columns, array.NewNull(insertData.Data[fieldID].RowNum()))
+			continue
+		}
 		switch dataType {
 		case schemapb.DataType_Bool:
 			builder := array.NewBooleanBuilder(mem)
