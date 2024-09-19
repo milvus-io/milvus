@@ -556,7 +556,7 @@ func TestServer_AlterIndex(t *testing.T) {
 			catalog:   catalog,
 			indexMeta: indexMeta,
 			segments: &SegmentsInfo{
-				compactionTo: make(map[int64]int64),
+				compactionTo: make(map[int64][]int64),
 				segments: map[UniqueID]*SegmentInfo{
 					invalidSegID: {
 						SegmentInfo: &datapb.SegmentInfo{
