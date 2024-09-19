@@ -29,7 +29,7 @@ spec:
   components:
     enableRollingUpdate: true
     imageUpdateMode: rollingUpgrade
-    image: harbor.milvus.io/milvus/milvus:master-20240912-b5ff3489-amd64
+    image: harbor.milvus.io/milvus/milvus:master-20240914-ef8289ea-amd64
     disableMetric: false
     dataNode:
       replicas: 1
