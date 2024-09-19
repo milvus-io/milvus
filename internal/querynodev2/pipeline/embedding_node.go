@@ -70,6 +70,9 @@ func newEmbeddingNode(collectionID int64, channelName string, manager *DataManag
 		if err != nil {
 			return nil, err
 		}
+		if functionRunner == nil {
+			continue
+		}
 		node.functionRunners = append(node.functionRunners, functionRunner)
 	}
 	return node, nil

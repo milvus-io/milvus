@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -1021,6 +1022,47 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		err = task2.PreExecute(ctx)
 		assert.Error(t, err)
+	})
+
+	t.Run("collection with embedding function ", func(t *testing.T) {
+		fmt.Println(schema)
+		schema.Functions = []*schemapb.FunctionSchema{
+			{
+				Name:             "test",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{varCharField},
+				OutputFieldNames: []string{floatVecField},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "provider", Value: "openai"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "api_key", Value: "mock"},
+				},
+			},
+		}
+
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task2 := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		err = task2.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = task2.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

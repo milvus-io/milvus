@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -152,6 +153,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Calculate embedding fields
+	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessInsert(it.upsertMsg.InsertMsg); err != nil {
+			return err
+		}
+	}
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")

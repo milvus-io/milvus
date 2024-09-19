@@ -1038,8 +1038,8 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 	if vectorField.GetIsFunctionOutput() {
 		for _, function := range collSchema.Functions {
-			if function.Type == schemapb.FunctionType_BM25 {
-				// TODO: currently only BM25 function is supported, thus guarantees one input field to one output field
+			if function.Type == schemapb.FunctionType_BM25 || function.Type == schemapb.FunctionType_TextEmbedding {
+				// TODO: currently only BM25 & text embedding function is supported, thus guarantees one input field to one output field
 				if function.OutputFieldNames[0] == vectorField.Name {
 					dataType = schemapb.DataType_VarChar
 				}

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -704,6 +705,10 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			return err
 		}
 	}
+
+	if err := function.ValidateFunctions(coll); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -716,6 +721,10 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
+		}
+	case schemapb.FunctionType_TextEmbedding:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_FloatVector {
+			return fmt.Errorf("TextEmbedding function output field must be a FloatVector field")
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")
@@ -743,7 +752,10 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 		if !h.EnableAnalyzer() {
 			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
 		}
-
+	case schemapb.FunctionType_TextEmbedding:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
+			return fmt.Errorf("TextEmbedding function input field must be a VARCHAR field")
+		}
 	default:
 		return fmt.Errorf("check input field with unknown function type")
 	}
@@ -784,6 +796,10 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	case schemapb.FunctionType_BM25:
 		if len(function.GetParams()) != 0 {
 			return fmt.Errorf("BM25 function accepts no params")
+		}
+	case schemapb.FunctionType_TextEmbedding:
+		if len(function.GetParams()) == 0 {
+			return fmt.Errorf("TextEmbedding function need provider and model_name params")
 		}
 	default:
 		return fmt.Errorf("check function params with unknown function type")
@@ -941,7 +957,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
-		if !field.GetIsFunctionOutput() {
+		if !IsBM25FunctionOutputField(field, schema) {
 			expectColumnNum++
 		}
 	}
@@ -1493,12 +1509,12 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -1522,7 +1538,6 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
-
 	expectedNum := len(schema.Fields)
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
@@ -2204,4 +2219,22 @@ func GetReplicateID(ctx context.Context, database, collectionName string) (strin
 	}
 	replicateID, _ := common.GetReplicateID(dbInfo.properties)
 	return replicateID, nil
+}
+
+func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
+		}
+	}
+	return false
 }
