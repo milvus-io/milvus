@@ -68,8 +68,12 @@ func randomString(length int) string {
 	return string(b)
 }
 
-func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int) (*storage.InsertData, error) {
-	pqSchema, err := ConvertToArrowSchema(schema)
+func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int, nullPercent int) (*storage.InsertData, error) {
+	useNullType := false
+	if nullPercent == 100 {
+		useNullType = true
+	}
+	pqSchema, err := ConvertToArrowSchema(schema, useNullType)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +83,11 @@ func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int) (
 	}
 	defer fw.Close()
 
-	insertData, err := testutil.CreateInsertData(schema, numRows)
+	insertData, err := testutil.CreateInsertData(schema, numRows, nullPercent)
 	if err != nil {
 		return nil, err
 	}
-
-	columns, err := testutil.BuildArrayData(schema, insertData)
+	columns, err := testutil.BuildArrayData(schema, insertData, useNullType)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +101,7 @@ func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int) (
 	return insertData, nil
 }
 
-func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool) {
+func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -148,7 +151,7 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 	defer os.Remove(filePath)
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(s.T(), err)
-	insertData, err := writeParquet(wf, schema, s.numRows)
+	insertData, err := writeParquet(wf, schema, s.numRows, nullPercent)
 	assert.NoError(s.T(), err)
 
 	ctx := context.Background()
@@ -250,7 +253,7 @@ func (s *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 	defer os.Remove(filePath)
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(s.T(), err)
-	_, err = writeParquet(wf, schema, s.numRows)
+	_, err = writeParquet(wf, schema, s.numRows, 50)
 	assert.NoError(s.T(), err)
 
 	ctx := context.Background()
@@ -265,66 +268,85 @@ func (s *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 }
 
 func (s *ReaderSuite) TestReadScalarFields() {
-	s.run(schemapb.DataType_Bool, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Int8, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Int16, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Int64, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Float, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Double, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_String, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_JSON, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Bool, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Int8, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Int16, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Int64, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Float, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Double, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_String, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_JSON, schemapb.DataType_None, false, 0)
 
-	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Float, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Double, false)
-	s.run(schemapb.DataType_Array, schemapb.DataType_String, false)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Float, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Double, false, 0)
+	s.run(schemapb.DataType_Array, schemapb.DataType_String, false, 0)
 
-	s.run(schemapb.DataType_Bool, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Int8, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Int16, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Int64, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Float, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_Double, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_String, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true)
-	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true)
+	s.run(schemapb.DataType_Bool, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Int8, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Int16, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Int64, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Float, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 50)
 
-	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Float, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Double, true)
-	s.run(schemapb.DataType_Array, schemapb.DataType_String, true)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Float, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Double, true, 50)
+	s.run(schemapb.DataType_Array, schemapb.DataType_String, true, 50)
+
+	s.run(schemapb.DataType_Bool, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Int8, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Int16, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Int64, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_Float, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 100)
+	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 100)
+
+	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Float, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_Double, true, 100)
+	s.run(schemapb.DataType_Array, schemapb.DataType_String, true, 100)
 
 	s.failRun(schemapb.DataType_JSON, true)
 }
 
 func (s *ReaderSuite) TestStringPK() {
 	s.pkDataType = schemapb.DataType_VarChar
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 50)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 100)
 }
 
 func (s *ReaderSuite) TestVector() {
 	s.vecDataType = schemapb.DataType_BinaryVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 	s.vecDataType = schemapb.DataType_FloatVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 	s.vecDataType = schemapb.DataType_Float16Vector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 	s.vecDataType = schemapb.DataType_BFloat16Vector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 	s.vecDataType = schemapb.DataType_SparseFloatVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 }
 
 func TestUtil(t *testing.T) {
