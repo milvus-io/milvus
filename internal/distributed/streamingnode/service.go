@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -48,6 +49,7 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -78,11 +80,12 @@ type Server struct {
 	factory dependency.Factory
 
 	// component client
-	etcdCli      *clientv3.Client
-	tikvCli      *txnkv.Client
-	rootCoord    types.RootCoordClient
-	dataCoord    types.DataCoordClient
-	chunkManager storage.ChunkManager
+	etcdCli        *clientv3.Client
+	tikvCli        *txnkv.Client
+	rootCoord      types.RootCoordClient
+	dataCoord      types.DataCoordClient
+	chunkManager   storage.ChunkManager
+	componentState *componentutil.ComponentStateService
 }
 
 // NewServer create a new StreamingNode server.
@@ -91,6 +94,7 @@ func NewServer(f dependency.Factory) (*Server, error) {
 		stopOnce:       sync.Once{},
 		factory:        f,
 		grpcServerChan: make(chan struct{}),
+		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 	}, nil
 }
 
@@ -120,6 +124,8 @@ func (s *Server) Stop() (err error) {
 
 // stop stops the server.
 func (s *Server) stop() {
+	s.componentState.OnStopping()
+
 	addr, _ := s.getAddress()
 	log.Info("streamingnode stop", zap.String("Address", addr))
 
@@ -162,7 +168,8 @@ func (s *Server) stop() {
 
 // Health check the health status of streamingnode.
 func (s *Server) Health(ctx context.Context) commonpb.StateCode {
-	return s.streamingnode.Health(ctx)
+	resp, _ := s.componentState.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	return resp.GetState().StateCode
 }
 
 func (s *Server) init(ctx context.Context) (err error) {
@@ -230,9 +237,10 @@ func (s *Server) start(ctx context.Context) (err error) {
 	if err := s.startGPRCServer(ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode start gRPC server fail")
 	}
-
 	// Register current server to etcd.
 	s.registerSessionToETCD()
+
+	s.componentState.OnInitialized(s.session.ServerID)
 	return nil
 }
 
@@ -349,6 +357,7 @@ func (s *Server) initGRPCServer() {
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	)
+	streamingpb.RegisterStreamingNodeStateServiceServer(s.grpcServer, s.componentState)
 }
 
 // allocateAddress allocates a available address for streamingnode grpc server.
