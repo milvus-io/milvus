@@ -196,6 +196,8 @@ func CalcColumnSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetJsonData().GetData() {
 			res += len(str)
 		}
+	default:
+		panic("Unknown data type:" + column.Type.String())
 	}
 	return res
 }
@@ -244,6 +246,8 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			// counting only the size of the vector data, ignoring other
 			// bytes used in proto.
 			res += len(vec.Contents[rowOffset])
+		default:
+			panic("Unknown data type:" + fs.GetType().String())
 		}
 	}
 	return res, nil
