@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -16,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // Server is the streamingnode server.
