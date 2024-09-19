@@ -163,21 +163,21 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		s.Run("segment is compacting", func() {
 			s.mt.segments.segments[s.segID].isCompacting = true
 
-			s.Error(st.UpdateVersion(context.Background(), s.mt))
+			s.Error(st.UpdateVersion(context.Background(), 1, s.mt))
 		})
 
 		s.Run("normal case", func() {
 			s.mt.segments.segments[s.segID].isCompacting = false
 
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(st.UpdateVersion(context.Background(), s.mt))
+			s.NoError(st.UpdateVersion(context.Background(), 1, s.mt))
 		})
 
 		s.Run("failed case", func() {
 			s.mt.segments.segments[s.segID].isCompacting = false
 
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
-			s.Error(st.UpdateVersion(context.Background(), s.mt))
+			s.Error(st.UpdateVersion(context.Background(), 1, s.mt))
 		})
 	})
 
@@ -187,12 +187,12 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 		s.Run("normal case", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(st.UpdateMetaBuildingState(1, s.mt))
+			s.NoError(st.UpdateMetaBuildingState(s.mt))
 		})
 
 		s.Run("update error", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
-			s.Error(st.UpdateMetaBuildingState(1, s.mt))
+			s.Error(st.UpdateMetaBuildingState(s.mt))
 		})
 	})
 
