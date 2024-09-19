@@ -111,7 +111,6 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	if needUpdate {
 		ttn.updateChannelCP(channelPos, curTs, true)
 	}
-
 	return []Msg{}
 }
 

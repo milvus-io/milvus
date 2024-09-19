@@ -276,7 +276,7 @@ func (s *WriteBufferSuite) TestSyncSegmentsError() {
 
 	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1,
-	}, nil)
+	}, nil, nil)
 	s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(segment, true)
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -348,7 +348,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 2,
-		}, nil)
+		}, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)

@@ -189,7 +189,7 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 		PartitionID:  PartitionID,
 		ID:           99999,
 		NumOfRows:    0,
-	}, pkoracle.NewBloomFilterSet())
+	}, pkoracle.NewBloomFilterSet(), nil)
 
 	s.plan.SegmentBinlogs = append(s.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 		SegmentID: seg.SegmentID(),

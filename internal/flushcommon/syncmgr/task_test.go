@@ -185,7 +185,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	}
 
 	bfs.UpdatePKRange(fd)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
@@ -273,7 +273,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -314,7 +314,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 
 	s.metacache.ExpectedCalls = nil
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet())
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})

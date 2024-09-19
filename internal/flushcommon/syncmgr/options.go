@@ -19,6 +19,7 @@ func NewSyncTask() *SyncTask {
 		insertBinlogs: make(map[int64]*datapb.FieldBinlog),
 		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
 		deltaBinlog:   &datapb.FieldBinlog{},
+		bm25Binlogs:   make(map[int64]*datapb.FieldBinlog),
 		segmentData:   make(map[string][]byte),
 		binlogBlobs:   make(map[int64]*storage.Blob),
 	}

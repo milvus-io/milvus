@@ -26,13 +26,13 @@ func (_m *MockBufferManager) EXPECT() *MockBufferManager_Expecter {
 	return &MockBufferManager_Expecter{mock: &_m.Mock}
 }
 
-// BufferData provides a mock function with given fields: channel, insertMsgs, deleteMsgs, startPos, endPos
-func (_m *MockBufferManager) BufferData(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) error {
-	ret := _m.Called(channel, insertMsgs, deleteMsgs, startPos, endPos)
+// BufferData provides a mock function with given fields: channel, insertData, deleteMsgs, startPos, endPos
+func (_m *MockBufferManager) BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) error {
+	ret := _m.Called(channel, insertData, deleteMsgs, startPos, endPos)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, []*msgstream.InsertMsg, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error); ok {
-		r0 = rf(channel, insertMsgs, deleteMsgs, startPos, endPos)
+	if rf, ok := ret.Get(0).(func(string, []*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error); ok {
+		r0 = rf(channel, insertData, deleteMsgs, startPos, endPos)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -47,17 +47,17 @@ type MockBufferManager_BufferData_Call struct {
 
 // BufferData is a helper method to define mock.On call
 //   - channel string
-//   - insertMsgs []*msgstream.InsertMsg
+//   - insertData []*InsertData
 //   - deleteMsgs []*msgstream.DeleteMsg
 //   - startPos *msgpb.MsgPosition
 //   - endPos *msgpb.MsgPosition
-func (_e *MockBufferManager_Expecter) BufferData(channel interface{}, insertMsgs interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}) *MockBufferManager_BufferData_Call {
-	return &MockBufferManager_BufferData_Call{Call: _e.mock.On("BufferData", channel, insertMsgs, deleteMsgs, startPos, endPos)}
+func (_e *MockBufferManager_Expecter) BufferData(channel interface{}, insertData interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}) *MockBufferManager_BufferData_Call {
+	return &MockBufferManager_BufferData_Call{Call: _e.mock.On("BufferData", channel, insertData, deleteMsgs, startPos, endPos)}
 }
 
-func (_c *MockBufferManager_BufferData_Call) Run(run func(channel string, insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition)) *MockBufferManager_BufferData_Call {
+func (_c *MockBufferManager_BufferData_Call) Run(run func(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition)) *MockBufferManager_BufferData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].([]*msgstream.InsertMsg), args[2].([]*msgstream.DeleteMsg), args[3].(*msgpb.MsgPosition), args[4].(*msgpb.MsgPosition))
+		run(args[0].(string), args[1].([]*InsertData), args[2].([]*msgstream.DeleteMsg), args[3].(*msgpb.MsgPosition), args[4].(*msgpb.MsgPosition))
 	})
 	return _c
 }
@@ -67,7 +67,7 @@ func (_c *MockBufferManager_BufferData_Call) Return(_a0 error) *MockBufferManage
 	return _c
 }
 
-func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*msgstream.InsertMsg, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error) *MockBufferManager_BufferData_Call {
+func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error) *MockBufferManager_BufferData_Call {
 	_c.Call.Return(run)
 	return _c
 }

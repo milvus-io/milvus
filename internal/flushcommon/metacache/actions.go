@@ -159,6 +159,12 @@ func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 	}
 }
 
+func MergeBm25Stats(newStats map[int64]*storage.BM25Stats) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.bm25stats.Merge(newStats)
+	}
+}
+
 func StartSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.syncingRows += batchSize

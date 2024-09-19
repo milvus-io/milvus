@@ -96,7 +96,7 @@ func (s *MetaCacheSuite) SetupTest() {
 			FlushedSegments:   flushSegmentInfos,
 			UnflushedSegments: growingSegmentInfos,
 		},
-	}, s.bfsFactory)
+	}, s.bfsFactory, NoneBm25StatsFactory)
 }
 
 func (s *MetaCacheSuite) TestMetaInfo() {
@@ -113,7 +113,7 @@ func (s *MetaCacheSuite) TestAddSegment() {
 		}
 		s.cache.AddSegment(info, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSet()
-		}, UpdateState(commonpb.SegmentState_Flushed))
+		}, NoneBm25StatsFactory, UpdateState(commonpb.SegmentState_Flushed))
 	}
 
 	segments := s.cache.GetSegmentsBy(WithSegmentIDs(testSegs...))
@@ -262,7 +262,7 @@ func BenchmarkGetSegmentsBy(b *testing.B) {
 		},
 	}, func(*datapb.SegmentInfo) pkoracle.PkStat {
 		return pkoracle.NewBloomFilterSet()
-	})
+	}, NoneBm25StatsFactory)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filter := WithSegmentIDs(0)
@@ -294,7 +294,7 @@ func BenchmarkGetSegmentsByWithoutIDs(b *testing.B) {
 		},
 	}, func(*datapb.SegmentInfo) pkoracle.PkStat {
 		return pkoracle.NewBloomFilterSet()
-	})
+	}, NoneBm25StatsFactory)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// use old func filter

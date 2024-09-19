@@ -39,8 +39,9 @@ func BrokerMetaWriter(broker broker.Broker, serverID int64, opts ...retry.Option
 
 func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error {
 	var (
-		checkPoints       = []*datapb.CheckPoint{}
-		deltaFieldBinlogs = []*datapb.FieldBinlog{}
+		checkPoints                                 = []*datapb.CheckPoint{}
+		deltaFieldBinlogs                           = []*datapb.FieldBinlog{}
+		deltaBm25StatsBinlogs []*datapb.FieldBinlog = nil
 	)
 
 	insertFieldBinlogs := lo.MapToSlice(pack.insertBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
@@ -49,6 +50,9 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
 
+	if len(pack.bm25Binlogs) > 0 {
+		deltaBm25StatsBinlogs = lo.MapToSlice(pack.bm25Binlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
+	}
 	// only current segment checkpoint info
 	segment, ok := pack.metacache.GetSegmentByID(pack.segmentID)
 	if !ok {
@@ -77,6 +81,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		zap.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
 		zap.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
 		zap.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
+		zap.Int("bm25logNum", lo.SumBy(deltaBm25StatsBinlogs, getBinlogNum)),
 		zap.String("vChannelName", pack.channelName),
 	)
 
@@ -91,6 +96,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		PartitionID:         pack.partitionID,
 		Field2BinlogPaths:   insertFieldBinlogs,
 		Field2StatslogPaths: statsFieldBinlogs,
+		Field2Bm25LogPaths:  deltaBm25StatsBinlogs,
 		Deltalogs:           deltaFieldBinlogs,
 
 		CheckPoints: checkPoints,

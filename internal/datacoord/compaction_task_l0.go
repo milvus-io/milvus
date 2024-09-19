@@ -411,7 +411,7 @@ func (t *l0CompactionTask) saveSegmentMeta() error {
 	result := t.result
 	var operators []UpdateOperator
 	for _, seg := range result.GetSegments() {
-		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
+		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
 	}
 
 	for _, segID := range t.InputSegments {
