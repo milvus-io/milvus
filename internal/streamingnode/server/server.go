@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"google.golang.org/grpc"
 
@@ -49,6 +52,9 @@ func (s *Server) Init(ctx context.Context) (err error) {
 
 // Start starts the streamingnode server.
 func (s *Server) Start() {
+	if !paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
+		panic(fmt.Sprintf("In streaming service mode, disable L0 is not allowed."))
+	}
 	resource.Resource().Flusher().Start()
 	log.Info("flusher started")
 }
