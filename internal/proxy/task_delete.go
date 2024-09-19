@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -212,7 +211,6 @@ func repackDeleteMsgByHash(
 
 	numRows := int64(0)
 	numMessage := 0
-	st := time.Now()
 
 	createMessage := func(key uint32, vchannel string) *msgstream.DeleteMsg {
 		numMessage++
@@ -275,7 +273,6 @@ func repackDeleteMsgByHash(
 			cnt++
 		}
 	}
-	log.Info("test-- end repack", zap.Duration("cost", time.Since(st)), zap.Int("num", numMessage), zap.Any("result", result))
 	return result, numRows, nil
 }
 
