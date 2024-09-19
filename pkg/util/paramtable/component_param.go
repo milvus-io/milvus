@@ -1565,7 +1565,8 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.workloadToleranceFactor",
 		Version:      "2.4.12",
 		DefaultValue: "0.1",
-		Doc:          "tolerance factor for query node workload difference",
+		Doc: `tolerance factor for query node workload difference, default to 10%, which means if query node's workload diff is higher than this factor, 
+		proxy will compute each querynode's workload score, and assign request to the lowest workload node; otherwise, it will assign request to the node by round robin`,
 	}
 	p.WorkloadToleranceFactor.Init(base.mgr)
 
