@@ -352,29 +352,25 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		ret.GetResults().AllSearchCount = allSearchCount
 	}
 
-	var (
-		subSearchNum = len(subSearchResultData)
-		// for results of each subSearchResultData, storing the start offset of each query of nq queries
-		subSearchNqOffset = make([][]int64, subSearchNum)
-	)
-	for i := 0; i < subSearchNum; i++ {
-		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
-		for j := int64(1); j < nq; j++ {
-			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
-		}
-	}
-
+	subSearchNum := len(subSearchResultData)
 	if subSearchNum == 1 && offset == 0 {
 		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
 		//  we still need to adjust the scores later.
 		ret.Results = subSearchResultData[0]
+		// realTopK is the topK of the nq-th query, it is used in proxy but not handled by delegator.
+		ret.Results.TopK = subSearchResultData[0].Topks[nq-1]
 	} else {
-		var (
-			skipDupCnt int64
-			realTopK   int64 = -1
-		)
-
+		var realTopK int64 = -1
 		var retSize int64
+
+		// for results of each subSearchResultData, storing the start offset of each query of nq queries
+		subSearchNqOffset := make([][]int64, subSearchNum)
+		for i := 0; i < subSearchNum; i++ {
+			subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
+			for j := int64(1); j < nq; j++ {
+				subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+			}
+		}
 		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 		// reducing nq * topk results
 		for i := int64(0); i < nq; i++ {
@@ -422,11 +418,6 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
-		}
-		log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-
-		if skipDupCnt > 0 {
-			log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	}
