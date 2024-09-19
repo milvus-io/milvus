@@ -8,12 +8,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
@@ -28,9 +25,8 @@ type Server struct {
 	grpcServer *grpc.Server
 
 	// service level instances.
-	handlerService        service.HandlerService
-	managerService        service.ManagerService
-	componentStateService *componentutil.ComponentStateService // state.
+	handlerService service.HandlerService
+	managerService service.ManagerService
 
 	// basic component instances.
 	walManager walmanager.Manager
@@ -39,14 +35,12 @@ type Server struct {
 // Init initializes the streamingnode server.
 func (s *Server) Init(ctx context.Context) (err error) {
 	log.Info("init streamingnode server...")
-	s.componentStateService.OnInitializing()
 	// init all basic components.
 	s.initBasicComponent(ctx)
 
 	// init all service.
 	s.initService(ctx)
 	log.Info("streamingnode server initialized")
-	s.componentStateService.OnInitialized(s.session.ServerID)
 	return nil
 }
 
@@ -62,19 +56,12 @@ func (s *Server) Start() {
 // Stop stops the streamingnode server.
 func (s *Server) Stop() {
 	log.Info("stopping streamingnode server...")
-	s.componentStateService.OnStopping()
 	log.Info("close wal manager...")
 	s.walManager.Close()
 	log.Info("streamingnode server stopped")
 	log.Info("stopping flusher...")
 	resource.Resource().Flusher().Stop()
 	log.Info("flusher stopped")
-}
-
-// Health returns the health status of the streamingnode server.
-func (s *Server) Health(ctx context.Context) commonpb.StateCode {
-	resp, _ := s.componentStateService.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-	return resp.State.StateCode
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.
@@ -97,5 +84,4 @@ func (s *Server) initService(_ context.Context) {
 func (s *Server) registerGRPCService(grpcServer *grpc.Server) {
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(grpcServer, s.handlerService)
 	streamingpb.RegisterStreamingNodeManagerServiceServer(grpcServer, s.managerService)
-	streamingpb.RegisterStreamingNodeStateServiceServer(grpcServer, s.componentStateService)
 }
