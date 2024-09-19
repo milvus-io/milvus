@@ -358,7 +358,10 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		//  we still need to adjust the scores later.
 		ret.Results = subSearchResultData[0]
 		// realTopK is the topK of the nq-th query, it is used in proxy but not handled by delegator.
-		ret.Results.TopK = subSearchResultData[0].Topks[nq-1]
+		topks := subSearchResultData[0].Topks
+		if len(topks) > 0 {
+			ret.Results.TopK = topks[len(topks)-1]
+		}
 	} else {
 		var realTopK int64 = -1
 		var retSize int64
