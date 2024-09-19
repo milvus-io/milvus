@@ -21,6 +21,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stretchr/testify/suite"
@@ -104,8 +105,11 @@ func (s *MiniClusterSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.Cluster = c
 
+	checkWg := sync.WaitGroup{}
+	checkWg.Add(1)
 	// start mini cluster
 	nodeIDCheckReport := func() {
+		defer checkWg.Done()
 		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
 		defer cancelFunc()
 
@@ -124,6 +128,7 @@ func (s *MiniClusterSuite) SetupTest() {
 	}
 	go nodeIDCheckReport()
 	s.Require().NoError(s.Cluster.Start())
+	checkWg.Wait()
 }
 
 func (s *MiniClusterSuite) TearDownTest() {
