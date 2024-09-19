@@ -108,8 +108,8 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 		}
 	}
 
-	log.Info("add stats task", zap.Int64("taskID", t.GetTaskID()),
-		zap.Int64("segmentID", t.GetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
+	log.Info("add stats task", zap.Int64("taskID", t.GetTaskID()), zap.Int64("originSegmentID", t.GetSegmentID()),
+		zap.Int64("targetSegmentID", t.GetTargetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
 	t.State = indexpb.JobState_JobStateInit
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, t); err != nil {
@@ -124,8 +124,8 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	stm.tasks[t.GetTaskID()] = t
 	stm.updateMetrics()
 
-	log.Info("add stats task success", zap.Int64("taskID", t.GetTaskID()),
-		zap.Int64("segmentID", t.GetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
+	log.Info("add stats task success", zap.Int64("taskID", t.GetTaskID()), zap.Int64("originSegmentID", t.GetSegmentID()),
+		zap.Int64("targetSegmentID", t.GetTargetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
 	return nil
 }
 

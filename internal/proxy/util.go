@@ -276,6 +276,10 @@ func validateFieldName(fieldName string) error {
 			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
+	if _, ok := common.FieldNameKeywords[fieldName]; ok {
+		msg := invalidMsg + fmt.Sprintf("%s is keyword in milvus.", fieldName)
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
+	}
 	return nil
 }
 

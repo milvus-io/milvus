@@ -18,7 +18,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -154,9 +154,8 @@ TEST(TextMatch, GrowingNaive) {
 
     {
         auto expr = get_text_match_expr("football");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -164,9 +163,8 @@ TEST(TextMatch, GrowingNaive) {
 
     {
         auto expr = get_text_match_expr("swimming");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -174,9 +172,8 @@ TEST(TextMatch, GrowingNaive) {
 
     {
         auto expr = get_text_match_expr("basketball, swimming");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -225,9 +222,8 @@ TEST(TextMatch, SealedNaive) {
 
     {
         auto expr = get_text_match_expr("football");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -235,9 +231,8 @@ TEST(TextMatch, SealedNaive) {
 
     {
         auto expr = get_text_match_expr("swimming");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -245,9 +240,8 @@ TEST(TextMatch, SealedNaive) {
 
     {
         auto expr = get_text_match_expr("basketball, swimming");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -304,9 +298,8 @@ TEST(TextMatch, GrowingJieBa) {
 
     {
         auto expr = get_text_match_expr("青铜");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
@@ -314,9 +307,8 @@ TEST(TextMatch, GrowingJieBa) {
 
     {
         auto expr = get_text_match_expr("黄金");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -324,9 +316,8 @@ TEST(TextMatch, GrowingJieBa) {
 
     {
         auto expr = get_text_match_expr("时代");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -377,9 +368,8 @@ TEST(TextMatch, SealedJieBa) {
 
     {
         auto expr = get_text_match_expr("青铜");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
@@ -387,9 +377,8 @@ TEST(TextMatch, SealedJieBa) {
 
     {
         auto expr = get_text_match_expr("黄金");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -397,9 +386,8 @@ TEST(TextMatch, SealedJieBa) {
 
     {
         auto expr = get_text_match_expr("时代");
-        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(expr, seg.get(), N, final);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);

@@ -244,8 +244,16 @@ DiskFileManagerImpl::CacheIndexToDisk(
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
         auto pos = file_path.find_last_of('_');
-        index_slices[file_path.substr(0, pos)].emplace_back(
-            std::stoi(file_path.substr(pos + 1)));
+        AssertInfo(pos > 0, "invalided index file path:{}", file_path);
+        try {
+            auto idx = std::stoi(file_path.substr(pos + 1));
+            index_slices[file_path.substr(0, pos)].emplace_back(idx);
+        } catch (const std::logic_error& e) {
+            auto err_message = fmt::format(
+                "invalided index file path:{}, error:{}", file_path, e.what());
+            LOG_ERROR(err_message);
+            throw std::logic_error(err_message);
+        }
     }
 
     for (auto& slices : index_slices) {
@@ -303,9 +311,17 @@ DiskFileManagerImpl::CacheTextLogToDisk(
 
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
-        auto pos = file_path.find_last_of('_');
-        index_slices[file_path.substr(0, pos)].emplace_back(
-            std::stoi(file_path.substr(pos + 1)));
+        auto pos = file_path.find_last_of("_");
+        AssertInfo(pos > 0, "invalided index file path:{}", file_path);
+        try {
+            auto idx = std::stoi(file_path.substr(pos + 1));
+            index_slices[file_path.substr(0, pos)].emplace_back(idx);
+        } catch (const std::logic_error& e) {
+            auto err_message = fmt::format(
+                "invalided text log path:{}, error:{}", file_path, e.what());
+            LOG_ERROR(err_message);
+            throw std::logic_error(err_message);
+        }
     }
 
     for (auto& slices : index_slices) {

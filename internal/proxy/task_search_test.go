@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -2198,7 +2199,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 }
 
-func TestTaskSearch_parseQueryInfo(t *testing.T) {
+func TestTaskSearch_parseSearchInfo(t *testing.T) {
 	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
@@ -2234,7 +2235,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, false)
+				info, offset, err := parseSearchInfo(test.validParams, nil, nil)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 				if test.description == "offsetParam" {
@@ -2242,6 +2243,24 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("parseSearchInfo externalLimit", func(t *testing.T) {
+		var externalLimit int64 = 200
+		offsetParam := getValidSearchParams()
+		offsetParam = append(offsetParam, &commonpb.KeyValuePair{
+			Key:   OffsetKey,
+			Value: strconv.FormatInt(10, 10),
+		})
+		rank := &rankParams{
+			limit: externalLimit,
+		}
+
+		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
+		assert.NoError(t, err)
+		assert.NotNil(t, info)
+		assert.Equal(t, int64(10), info.GetTopk())
+		assert.Equal(t, int64(0), offset)
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -2323,7 +2342,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, false)
+				info, offset, err := parseSearchInfo(test.invalidParams, nil, nil)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -2350,7 +2369,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2369,7 +2388,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2388,7 +2407,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2407,10 +2426,35 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.NotNil(t, info)
 		assert.NoError(t, err)
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
+	})
+
+	t.Run("check max group size", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: "128",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, info)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
+
+		resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
+		info, _, err = parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, info)
+		assert.NoError(t, err)
 	})
 }
 

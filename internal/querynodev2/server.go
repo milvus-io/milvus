@@ -109,8 +109,7 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler       tasks.Scheduler
-	streamBatchSzie int
+	scheduler tasks.Scheduler
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -316,9 +315,8 @@ func (node *QueryNode) Init() error {
 		node.scheduler = tasks.NewScheduler(
 			schedulePolicy,
 		)
-		node.streamBatchSzie = paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt()
-		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
+		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
 			if nodeID == node.GetNodeID() {
 				return NewLocalWorker(node), nil
@@ -378,8 +376,9 @@ func (node *QueryNode) Start() error {
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-		mmapScarlarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
-		mmapScarlarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
+		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+		mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -391,8 +390,9 @@ func (node *QueryNode) Start() error {
 			zap.Bool("growingmmapEnable", growingmmapEnable),
 			zap.Bool("mmapVectorIndex", mmapVectorIndex),
 			zap.Bool("mmapVectorField", mmapVectorField),
-			zap.Bool("mmapScarlarIndex", mmapScarlarIndex),
-			zap.Bool("mmapScarlarField", mmapScarlarField),
+			zap.Bool("mmapScalarIndex", mmapScalarIndex),
+			zap.Bool("mmapScalarField", mmapScalarField),
+			zap.Bool("mmapChunkCache", mmapChunkCache),
 		)
 	})
 

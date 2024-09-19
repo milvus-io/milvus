@@ -466,11 +466,13 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	return info
 }
 
-// GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
-func (m *meta) GetCollectionIndexFilesSize() uint64 {
+// SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
+func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
 	m.RLock()
 	defer m.RUnlock()
 	var total uint64
+
+	metrics.DataCoordStoredIndexFilesSize.Reset()
 	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
 		coll, ok := m.collections[segmentIdx.CollectionID]
 		if ok {

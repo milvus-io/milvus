@@ -17,7 +17,6 @@
 #include "Plan.h"
 #include "common/Utils.h"
 #include "PlanProto.h"
-#include "generated/ShowPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -144,21 +143,5 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 //    }
 //    return plan;
 //}
-
-void
-Plan::check_identical(Plan& other) {
-    Assert(&schema_ == &other.schema_);
-    auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
-    auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
-    Assert(json.dump(2) == other_json.dump(2));
-    Assert(this->extra_info_opt_.has_value() ==
-           other.extra_info_opt_.has_value());
-    if (this->extra_info_opt_.has_value()) {
-        Assert(this->extra_info_opt_->involved_fields_ ==
-               other.extra_info_opt_->involved_fields_);
-    }
-    Assert(this->tag2field_ == other.tag2field_);
-    Assert(this->target_entries_ == other.target_entries_);
-}
 
 }  // namespace milvus::query

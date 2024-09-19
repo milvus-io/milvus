@@ -18,7 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {
 
@@ -257,6 +257,14 @@ SegmentInternalInterface::get_real_count() const {
 #endif
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId());
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    plannode = std::make_shared<milvus::plan::CountNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    plan->plan_node_->plannodes_ = plannode;
     plan->plan_node_->is_count_ = true;
     auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
     AssertInfo(res->fields_data().size() == 1,

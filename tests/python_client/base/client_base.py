@@ -86,8 +86,8 @@ class Base:
             rgs_list = self.utility_wrap.list_resource_groups()[0]
             for rg_name in self.resource_group_list:
                 if rg_name is not None and rg_name in rgs_list:
-                    rg = \
-                    self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                    rg = self.utility_wrap.describe_resource_group(
+                        name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
                     if isinstance(rg, ResourceGroupInfo):
                         if rg.num_available_node > 0:
                             self.utility_wrap.transfer_node(source=rg_name,
@@ -443,27 +443,7 @@ class TestcaseBase(Base):
         log.info("[TestcaseBase] Collection: `{0}` index: {1}".format(collection_obj.name, indexes))
         return indexes
 
-
-class TestCaseClassBase(TestcaseBase):
-    """
-    Setup objects on class
-    """
-
-    def setup_class(self):
-        log.info("[setup_class] " + " Start setup class ".center(100, "~"))
-        self._setup_objects(self)
-
-    def teardown_class(self):
-        log.info("[teardown_class]" + " Start teardown class ".center(100, "~"))
-        self._teardown_objects(self)
-
-    def setup_method(self, method):
-        log.info(" setup ".center(80, "*"))
-        log.info("[setup_method] Start setup test case %s." % method.__name__)
-
-    def teardown_method(self, method):
-        log.info(" teardown ".center(80, "*"))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+    """ Property """
 
     @property
     def all_scalar_fields(self):
@@ -493,3 +473,25 @@ class TestCaseClassBase(TestcaseBase):
     @property
     def bitmap_not_support_dtype_names(self):
         return list(set(self.all_scalar_fields) - set(self.bitmap_support_dtype_names))
+
+
+class TestCaseClassBase(TestcaseBase):
+    """
+    Setup objects on class
+    """
+
+    def setup_class(self):
+        log.info("[setup_class] " + " Start setup class ".center(100, "~"))
+        self._setup_objects(self)
+
+    def teardown_class(self):
+        log.info("[teardown_class]" + " Start teardown class ".center(100, "~"))
+        self._teardown_objects(self)
+
+    def setup_method(self, method):
+        log.info(" setup ".center(80, "*"))
+        log.info("[setup_method] Start setup test case %s." % method.__name__)
+
+    def teardown_method(self, method):
+        log.info(" teardown ".center(80, "*"))
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)

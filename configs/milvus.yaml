@@ -412,6 +412,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
+    chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
     # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -459,7 +460,8 @@ queryNode:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
-  queryStreamBatchSize: 4194304 # return batch size of stream query
+  queryStreamBatchSize: 4194304 # return min batch size of stream query
+  queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
@@ -830,6 +832,7 @@ quotaAndLimits:
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
     maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
+    maxGroupSize: 10 # maximum size for one single group when doing search group by
   ddl:
     enabled: false # Whether DDL request throttling is enabled.
     # Maximum number of collection-related DDL requests per second.

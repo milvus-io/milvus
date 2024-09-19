@@ -2337,6 +2337,7 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapChunkCache                      ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2404,6 +2405,7 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
+	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
 
 	// worker
@@ -2661,6 +2663,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapScalarIndex.Init(base.mgr)
+
+	p.MmapChunkCache = ParamItem{
+		Key:          "queryNode.mmap.chunkCache",
+		Version:      "2.4.12",
+		DefaultValue: "true",
+		Doc:          "Enable mmap for chunk cache (raw vector retrieving).",
+		Export:       true,
+	}
+	p.MmapChunkCache.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
@@ -3108,10 +3119,19 @@ user-task-polling:
 		Key:          "queryNode.queryStreamBatchSize",
 		Version:      "2.4.1",
 		DefaultValue: "4194304",
-		Doc:          "return batch size of stream query",
+		Doc:          "return min batch size of stream query",
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.QueryStreamMaxBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamMaxBatchSize",
+		Version:      "2.4.10",
+		DefaultValue: "134217728",
+		Doc:          "return max batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamMaxBatchSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "queryNode.bloomFilterApplyParallelFactor",

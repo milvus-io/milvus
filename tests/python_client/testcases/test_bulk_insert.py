@@ -748,7 +748,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
-    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field,
+                                                        enable_partition_key, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -757,20 +759,22 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         2. import data
         3. verify
         """
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
@@ -878,10 +882,18 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        if not nullable:
+            expr_field = df.string_field
+            expr = f"{expr_field} >= '0'"
+        else:
+            expr_field = df.pk_field
+            expr = f"{expr_field} >= 0"
+
+        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[expr_field, df.int_field])
         assert len(res) == entities
-        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
-        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        log.info(res)
+        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
@@ -893,7 +905,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -905,13 +918,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
+        if nullable is True:
+            pytest.skip("issue #36241")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
             cf.gen_json_field(name=df.json_field),
@@ -1037,7 +1052,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta):
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field,
+                                                enable_partition_key, include_meta, nullable):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1048,20 +1065,24 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
+        if nullable is True:
+            pytest.skip("issue #36252")
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
         fp16_vec_field_dim = dim+random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
-            cf.gen_int64_field(name=df.int_field),
-            cf.gen_float_field(name=df.float_field),
-            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
-            cf.gen_json_field(name=df.json_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable),
+            cf.gen_float_field(name=df.float_field, nullable=nullable),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_json_field(name=df.json_field, nullable=nullable),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),

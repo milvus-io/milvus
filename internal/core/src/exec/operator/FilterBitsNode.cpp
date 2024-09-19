@@ -14,11 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "FilterBits.h"
+#include "FilterBitsNode.h"
 
 namespace milvus {
 namespace exec {
-FilterBits::FilterBits(
+PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
     DriverContext* driverctx,
     const std::shared_ptr<const plan::FilterBitsNode>& filter)
@@ -26,23 +26,23 @@ FilterBits::FilterBits(
                filter->output_type(),
                operator_id,
                filter->id(),
-               "FilterBits") {
+               "PhyFilterBitsNode") {
     ExecContext* exec_context = operator_context_->get_exec_context();
-    QueryContext* query_context = exec_context->get_query_context();
+    query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
     exprs_ = std::make_unique<ExprSet>(filters, exec_context);
-    need_process_rows_ = query_context->get_active_count();
+    need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 }
 
 void
-FilterBits::AddInput(RowVectorPtr& input) {
+PhyFilterBitsNode::AddInput(RowVectorPtr& input) {
     input_ = std::move(input);
 }
 
 bool
-FilterBits::AllInputProcessed() {
+PhyFilterBitsNode::AllInputProcessed() {
     if (num_processed_rows_ == need_process_rows_) {
         input_ = nullptr;
         return true;
@@ -51,31 +51,49 @@ FilterBits::AllInputProcessed() {
 }
 
 bool
-FilterBits::IsFinished() {
+PhyFilterBitsNode::IsFinished() {
     return AllInputProcessed();
 }
 
 RowVectorPtr
-FilterBits::GetOutput() {
+PhyFilterBitsNode::GetOutput() {
     if (AllInputProcessed()) {
         return nullptr;
     }
 
+    std::chrono::high_resolution_clock::time_point scalar_start =
+        std::chrono::high_resolution_clock::now();
+
     EvalCtx eval_ctx(
         operator_context_->get_exec_context(), exprs_.get(), input_.get());
 
-    exprs_->Eval(0, 1, true, eval_ctx, results_);
+    TargetBitmap bitset;
+    while (num_processed_rows_ < need_process_rows_) {
+        exprs_->Eval(0, 1, true, eval_ctx, results_);
 
-    AssertInfo(results_.size() == 1 && results_[0] != nullptr,
-               "FilterBits result size should be one and not be nullptr");
+        AssertInfo(results_.size() == 1 && results_[0] != nullptr,
+                   "PhyFilterBitsNode result size should be size one and not "
+                   "be nullptr");
 
-    if (results_[0]->type() == DataType::ROW) {
-        auto row_vec = std::dynamic_pointer_cast<RowVector>(results_[0]);
-        num_processed_rows_ += row_vec->child(0)->size();
-    } else {
-        num_processed_rows_ += results_[0]->size();
+        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[0]);
+        auto col_vec_size = col_vec->size();
+        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+        bitset.append(view);
+        num_processed_rows_ += col_vec_size;
     }
-    return std::make_shared<RowVector>(results_);
+    bitset.flip();
+    Assert(bitset.size() == need_process_rows_);
+    // num_processed_rows_ = need_process_rows_;
+    std::vector<VectorPtr> col_res;
+    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset)));
+    std::chrono::high_resolution_clock::time_point scalar_end =
+        std::chrono::high_resolution_clock::now();
+    double scalar_cost =
+        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+            .count();
+    monitor::internal_core_search_latency_scalar.Observe(scalar_cost);
+
+    return std::make_shared<RowVector>(col_res);
 }
 
 }  // namespace exec

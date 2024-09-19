@@ -342,7 +342,7 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
             **DefaultVectorIndexParams.HNSW(DataType.BFLOAT16_VECTOR.name),
             **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name),
             **DefaultVectorIndexParams.BIN_FLAT(DataType.BINARY_VECTOR.name),
-            # build Hybrid index
+            # build INVERTED index
             **DefaultScalarIndexParams.list_inverted([self.primary_field] + self.inverted_support_dtype_names)
         }
         self.build_multi_index(index_params=index_params)
@@ -466,7 +466,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
             **DefaultVectorIndexParams.DISKANN(DataType.BFLOAT16_VECTOR.name),
             **DefaultVectorIndexParams.SPARSE_WAND(DataType.SPARSE_FLOAT_VECTOR.name),
             **DefaultVectorIndexParams.BIN_IVF_FLAT(DataType.BINARY_VECTOR.name),
-            # build Hybrid index
+            # build BITMAP index
             **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
         }
         self.build_multi_index(index_params=index_params)
@@ -474,6 +474,32 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
         # load collection
         self.collection_wrap.load()
+
+    # https://github.com/milvus-io/milvus/issues/36221
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bitmap_index_query_with_invalid_array_params(self):
+        """
+        target:
+            1. check query with invalid array params
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. query with the different wrong expr
+            3. check query result error
+        expected:
+            1. query response check error
+        """
+        # query
+        self.collection_wrap.query(
+            expr=Expr.array_contains_any('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+
+        self.collection_wrap.query(
+            expr=Expr.array_contains_all('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "fail to Query on QueryNode"})
+
+        self.collection_wrap.query(
+            expr=Expr.array_contains('ARRAY_VARCHAR', [['a', 'b']]).value, limit=1, check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: qem.ParseExpressionFailed})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr, expr_field", cf.gen_modulo_expression(['INT8', 'INT16', 'INT32', 'INT64']))
@@ -940,6 +966,119 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         self.collection_wrap.hybrid_search(
             req_list, RRFRanker(), limit, check_task=CheckTasks.check_search_results,
             check_items={"nq": nq, "ids": self.insert_data.get('int64_pk'), "limit": limit})
+
+
+@pytest.mark.xdist_group("TestIndexUnicodeString")
+class TestIndexUnicodeString(TestCaseClassBase):
+    """
+    Scalar fields build BITMAP index, and verify Unicode string
+
+    Author: Ting.Wang
+    """
+
+    def setup_class(self):
+        super().setup_class(self)
+
+        # connect to server before testing
+        self._connect(self)
+
+        # init params
+        self.primary_field, self.nb = "int64_pk", 3000
+
+        # create a collection with fields
+        self.collection_wrap.init_collection(
+            name=cf.gen_unique_str("test_bitmap_index_unicode"),
+            schema=cf.set_collection_schema(
+                fields=[self.primary_field, DataType.FLOAT_VECTOR.name,
+                        f"{DataType.VARCHAR.name}_BITMAP", f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_BITMAP",
+                        f"{DataType.VARCHAR.name}_INVERTED", f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_INVERTED",
+                        f"{DataType.VARCHAR.name}_NoIndex", f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_NoIndex"],
+                field_params={
+                    self.primary_field: FieldParams(is_primary=True).to_dict
+                },
+            )
+        )
+
+        # prepare data (> 1024 triggering index building)
+        # insert unicode string
+        self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
+            f"{DataType.VARCHAR.name}_BITMAP": cf.gen_unicode_string_batch(nb=self.nb, string_len=30),
+            f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_BITMAP": cf.gen_unicode_string_array_batch(
+                nb=self.nb, string_len=1, max_capacity=100),
+            f"{DataType.VARCHAR.name}_INVERTED": cf.gen_unicode_string_batch(nb=self.nb, string_len=30),
+            f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_INVERTED": cf.gen_unicode_string_array_batch(
+                nb=self.nb, string_len=1, max_capacity=100),
+            f"{DataType.VARCHAR.name}_NoIndex": cf.gen_unicode_string_batch(nb=self.nb, string_len=30),
+            f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_NoIndex": cf.gen_unicode_string_array_batch(
+                nb=self.nb, string_len=1, max_capacity=100),
+        })
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_data(self):
+        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+
+        # flush collection, segment sealed
+        self.collection_wrap.flush()
+
+        # build scalar index
+        index_params = {
+            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
+            # build BITMAP index
+            **DefaultScalarIndexParams.list_bitmap([f"{DataType.VARCHAR.name}_BITMAP",
+                                                    f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_BITMAP"]),
+            # build INVERTED index
+            **DefaultScalarIndexParams.list_inverted([f"{DataType.VARCHAR.name}_INVERTED",
+                                                      f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_INVERTED"])
+        }
+        self.build_multi_index(index_params=index_params)
+        assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
+
+        # load collection
+        self.collection_wrap.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr, expr_field, rex",
+                             cf.gen_varchar_unicode_expression(['VARCHAR_BITMAP', 'VARCHAR_INVERTED']))
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_index_unicode_string_query(self, expr, expr_field, limit, rex):
+        """
+        target:
+            1. check string expression
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. query with the different expr and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(expr_field, []) if re.search(rex, i) is not None])
+
+        # query
+        res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("obj", cf.gen_varchar_unicode_expression_array(
+        ['ARRAY_VARCHAR_BITMAP', 'ARRAY_VARCHAR_INVERTED', 'ARRAY_VARCHAR_NoIndex']))
+    @pytest.mark.parametrize("limit", [1])
+    def test_index_unicode_string_array_query(self, limit, obj):
+        """
+        target:
+            1. check string expression
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. query with the different expr and limit
+            3. check query result
+        expected:
+            1. query response equal to min(insert data, limit)
+        """
+        # the total number of inserted data that matches the expression
+        expr_count = len([i for i in self.insert_data.get(obj.field, []) if eval(obj.rex.format(str(i)))])
+
+        # query
+        res, _ = self.collection_wrap.query(expr=obj.field_expr, limit=limit, output_fields=[obj.field])
+        assert len(res) == min(expr_count, limit), f"actual: {len(res)} == expect: {min(expr_count, limit)}"
 
 
 class TestMixScenes(TestcaseBase):
