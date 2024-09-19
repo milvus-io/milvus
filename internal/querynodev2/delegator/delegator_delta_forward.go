@@ -75,7 +75,7 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 		deleteScope = querypb.DataScope_Streaming
 	}
 
-	deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
+	deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate, info.GetL0SegmentIds())
 	deleteData := &storage.DeleteData{}
 	deleteData.AppendBatch(deletedPks, deletedTss)
 	if deleteData.RowCount > 0 {

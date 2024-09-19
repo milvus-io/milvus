@@ -1156,33 +1156,33 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	})
 	l0Global.LoadDeltaData(context.TODO(), allPartitionDeleteData)
 
-	pks, _ := delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ := delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.Empty(pks)
 
 	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
-	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.ElementsMatch(pks, []storage.PrimaryKey{partitionDeleteData.Pks[0], allPartitionDeleteData.Pks[0]})
 
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
 	bfs.UpdateBloomFilter(allPartitionDeleteData.Pks)
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs)
+	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs, []int64{2, 3})
 	// bf filtered segment
 	s.Equal(len(pks), 1)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
 	delegator.segmentManager.Remove(context.TODO(), l0.ID(), querypb.DataScope_All)
-	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
 	delegator.segmentManager.Remove(context.TODO(), l0Global.ID(), querypb.DataScope_All)
-	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing), []int64{2, 3})
 	s.Empty(pks)
 }
 

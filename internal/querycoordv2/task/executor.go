@@ -719,6 +719,6 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 	}
 
-	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes)
+	loadInfo := utils.PackSegmentLoadInfo(segment, channel, indexes)
 	return loadInfo, indexInfos, nil
 }

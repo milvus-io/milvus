@@ -22,7 +22,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -60,7 +59,8 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
-func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channel *meta.DmChannel, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+	channelCheckpoint := channel.GetSeekPosition()
 	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
@@ -88,6 +88,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		StorageVersion: segment.GetStorageVersion(),
 		IsSorted:       segment.GetIsSorted(),
 		TextStatsLogs:  segment.GetTextStatsLogs(),
+		L0SegmentIds:   channel.GetLevelZeroSegmentIds(),
 	}
 	return loadInfo
 }

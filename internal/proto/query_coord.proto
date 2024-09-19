@@ -365,6 +365,7 @@ message SegmentLoadInfo {
     int64 storageVersion = 18;
     bool is_sorted = 19;
     map<int64, data.TextIndexStats> textStatsLogs = 20;
+    repeated int64 l0_segment_ids = 21;
 }
 
 message FieldIndexInfo {

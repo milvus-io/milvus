@@ -409,6 +409,9 @@ func (sd *shardDelegator) addGrowing(entries ...SegmentEntry) {
 func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	log := sd.getLogger(ctx)
 
+	idInfo := lo.SliceToMap(infos, func(info *querypb.SegmentLoadInfo) (int64, *querypb.SegmentLoadInfo) {
+		return info.GetSegmentID(), info
+	})
 	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	log.Info("loading growing segments...", zap.Int64s("segmentIDs", segmentIDs))
 	loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, infos...)
@@ -421,7 +424,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		log := log.With(
 			zap.Int64("segmentID", segment.ID()),
 		)
-		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
+		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing), idInfo[segment.ID()].GetL0SegmentIds())
 		if len(deletedPks) == 0 {
 			continue
 		}
@@ -566,9 +569,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	return nil
 }
 
-func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) ([]storage.PrimaryKey, []storage.Timestamp) {
+func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate, targetLevelZeroIDs []int64) ([]storage.PrimaryKey, []storage.Timestamp) {
 	sd.level0Mut.Lock()
 	defer sd.level0Mut.Unlock()
+
+	// NOTE for compatability concern:
+	// system only allow new coord with old querynode
+	// New Coord with old nodes, old node will not have target l0 segment id filtering here, OK
+	// New Coord with new nodes, new node will always have correct l0 segment ids with target, OK
+	// Old Coord with new node, target level zero ids will be nil, but shall not happen
+	targetIDs := typeutil.NewSet(targetLevelZeroIDs...)
 
 	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
@@ -576,22 +586,24 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 	tss := make([]storage.Timestamp, 0)
 
 	for _, segment := range level0Segments {
-		segment := segment.(*segments.L0Segment)
-		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
-			segmentPks, segmentTss := segment.DeleteRecords()
-			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-			for idx := 0; idx < len(segmentPks); idx += batchSize {
-				endIdx := idx + batchSize
-				if endIdx > len(segmentPks) {
-					endIdx = len(segmentPks)
-				}
+		if targetIDs.Contain(segment.ID()) {
+			segment := segment.(*segments.L0Segment)
+			if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
+				segmentPks, segmentTss := segment.DeleteRecords()
+				batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+				for idx := 0; idx < len(segmentPks); idx += batchSize {
+					endIdx := idx + batchSize
+					if endIdx > len(segmentPks) {
+						endIdx = len(segmentPks)
+					}
 
-				lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
-				hits := candidate.BatchPkExist(lc)
-				for i, hit := range hits {
-					if hit {
-						pks = append(pks, segmentPks[idx+i])
-						tss = append(tss, segmentTss[idx+i])
+					lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
+					hits := candidate.BatchPkExist(lc)
+					for i, hit := range hits {
+						if hit {
+							pks = append(pks, segmentPks[idx+i])
+							tss = append(tss, segmentTss[idx+i])
+						}
 					}
 				}
 			}

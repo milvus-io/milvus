@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -57,9 +58,12 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 			Timestamp:   t2,
 		},
 	}
+	metaChannel := &meta.DmChannel{
+		VchannelInfo: channel,
+	}
 
 	t.Run("test set deltaPosition from channel seek position", func(t *testing.T) {
-		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
+		req := PackSegmentLoadInfo(segmentInfo, metaChannel, nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t2, req.GetDeltaPosition().Timestamp)
@@ -68,7 +72,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	t.Run("test channel cp after segment dml position", func(t *testing.T) {
 		channel := proto.Clone(channel).(*datapb.VchannelInfo)
 		channel.SeekPosition.Timestamp = t3
-		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
+		req := PackSegmentLoadInfo(segmentInfo, metaChannel, nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t3, req.GetDeltaPosition().Timestamp)
@@ -77,7 +81,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	t.Run("test tsLag > 10minutes", func(t *testing.T) {
 		channel := proto.Clone(channel).(*datapb.VchannelInfo)
 		channel.SeekPosition.Timestamp = t0
-		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
+		req := PackSegmentLoadInfo(segmentInfo, metaChannel, nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, channel.SeekPosition.Timestamp, req.GetDeltaPosition().GetTimestamp())
