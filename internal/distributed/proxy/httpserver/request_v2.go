@@ -156,6 +156,8 @@ type SearchReqV2 struct {
 	PartitionNames   []string      `json:"partitionNames"`
 	Filter           string        `json:"filter"`
 	GroupByField     string        `json:"groupingField"`
+	GroupSize        int32         `json:"groupSize"`
+	GroupStrictSize  bool          `json:"groupStrictSize"`
 	Limit            int32         `json:"limit"`
 	Offset           int32         `json:"offset"`
 	OutputFields     []string      `json:"outputFields"`
@@ -190,6 +192,9 @@ type HybridSearchReq struct {
 	Search           []SubSearchReq `json:"search"`
 	Rerank           Rand           `json:"rerank"`
 	Limit            int32          `json:"limit"`
+	GroupByField     string         `json:"groupingField"`
+	GroupSize        int32          `json:"groupSize"`
+	GroupStrictSize  bool           `json:"groupStrictSize"`
 	OutputFields     []string       `json:"outputFields"`
 	ConsistencyLevel string         `json:"consistencyLevel"`
 }

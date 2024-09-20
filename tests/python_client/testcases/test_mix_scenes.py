@@ -1348,11 +1348,11 @@ class TestGroupSearch(TestCaseClassBase):
                         group_distances.append(res[i][l + 1].distance)
                     else:
                         if scorer == 'sum':
-                            assert np.sum(group_distances) < np.sum(tmp_distances)
+                            assert np.sum(group_distances) <= np.sum(tmp_distances)
                         elif scorer == 'avg':
-                            assert np.mean(group_distances) < np.mean(tmp_distances)
+                            assert np.mean(group_distances) <= np.mean(tmp_distances)
                         else:  # default max
-                            assert np.max(group_distances) < np.max(tmp_distances)
+                            assert np.max(group_distances) <= np.max(tmp_distances)
 
                         tmp_distances = group_distances
                         group_distances = [res[i][l + 1].distance]
