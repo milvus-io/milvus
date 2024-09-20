@@ -102,7 +102,7 @@ func (s *statsTaskSuite) SetupSuite() {
 					},
 				},
 			},
-			compactionTo: map[UniqueID]UniqueID{},
+			compactionTo: map[UniqueID][]UniqueID{},
 		},
 
 		statsTaskMeta: &statsTaskMeta{

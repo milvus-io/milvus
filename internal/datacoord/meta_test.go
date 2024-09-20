@@ -861,7 +861,7 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
-					compactionTo: make(map[int64]UniqueID),
+					compactionTo: make(map[int64][]UniqueID),
 				},
 			},
 			args{
