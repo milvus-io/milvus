@@ -137,5 +137,6 @@ const (
 	ParamRadius       = "radius"
 	ParamRangeFilter  = "range_filter"
 	ParamGroupByField = "group_by_field"
+	ParamGroupSize    = "group_size"
 	BoundedTimestamp  = 2
 )
