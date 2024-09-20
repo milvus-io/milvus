@@ -34,6 +34,7 @@ class DataField:
     fp16_vec_field = "float16_vec_field"
     int_field = "int_scalar"
     string_field = "string_scalar"
+    text_field = "text_scalar"
     bool_field = "bool_scalar"
     float_field = "float_scalar"
     double_field = "double_scalar"
@@ -403,6 +404,21 @@ def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
     return file_name
 
 
+def gen_text_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        # non vector columns
+        data = []
+        if rows > 0:
+            data = [fake.text() + "milvus" for i in range(start, rows+start)]
+        arr = np.array(data)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
 def gen_dynamic_field_in_numpy_file(dir, rows, start=0, force=False):
     file_name = f"$meta.npy"
     file = f"{dir}/{file_name}"
@@ -553,6 +569,11 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = [gen_unique_str(str(i)) for i in range(start, rows + start)]
             else:
                 data = [None for _ in range(start, rows + start)]
+        elif data_field == DataField.text_field:
+            if not nullable:
+                data = [fake.text() + " milvus " for i in range(start, rows + start)]
+            else:
+                data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.bool_field:
             if not nullable:
                 data = [random.choice([True, False]) for i in range(start, rows + start)]
@@ -598,6 +619,8 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             else:
                 data = pd.Series(
                     [np.array(None) for i in range(start, rows + start)])
+        else:
+            raise Exception("unsupported field name")
     return data
 
 
@@ -714,6 +737,9 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
             elif data_field == DataField.string_field:
                 if not nullable:
                     d[data_field] = gen_unique_str(str(r + start))
+            elif data_field == DataField.text_field:
+                if not nullable:
+                    d[data_field] = fake.text() + " milvus "
             elif data_field == DataField.bool_field:
                 if not nullable:
                     d[data_field] = random.choice([True, False])
@@ -746,6 +772,8 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = [gen_unique_str(str(i)) for i in range(array_length)]
                 else:
                     d[data_field] = None
+            else:
+                raise Exception("unsupported field name")
         if enable_dynamic_field:
             d[str(r+start)] = r+start
             d["name"] = fake.name()
@@ -845,6 +873,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                                                       vector_type=vector_type, rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
                 file_name = gen_string_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
+            elif data_field == DataField.text_field:
+                file_name = gen_text_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.bool_field:
                 file_name = gen_bool_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.json_field:

@@ -770,6 +770,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field, nullable=nullable),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_string_field(name=df.text_field, enable_match=True),
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
@@ -895,6 +896,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        assert len(res) == entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
@@ -929,6 +932,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
+            cf.gen_string_field(name=df.text_field, enable_match=True),
             cf.gen_json_field(name=df.json_field),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
@@ -1042,6 +1046,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        assert len(res) == entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
@@ -1078,6 +1084,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
             cf.gen_float_field(name=df.float_field, nullable=nullable),
             cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key, nullable=nullable),
+            cf.gen_string_field(name=df.text_field, enable_match=True),
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
@@ -1195,6 +1202,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
         assert len(res) == len(query_data)
+        res, _ = self.collection_wrap.query(expr=f"TextMatch({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        assert len(res) == entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
