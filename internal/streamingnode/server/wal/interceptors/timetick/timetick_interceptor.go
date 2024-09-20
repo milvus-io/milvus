@@ -89,6 +89,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			defer func() {
 				if err != nil {
 					txnSession.AddNewMessageFail()
+					return
 				}
 				// perform keepalive for the transaction session if append success.
 				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick())
