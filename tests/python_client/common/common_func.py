@@ -84,7 +84,7 @@ def analyze_documents(texts, language="en"):
         stopword = " "
         new_texts = []
         for doc in texts:
-            seg_list = jieba.cut(doc)
+            seg_list = jieba.cut(doc, cut_all=True)
             new_texts.append(" ".join(seg_list))
         texts = new_texts
         stopwords = [stopword]

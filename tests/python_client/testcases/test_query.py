@@ -4507,7 +4507,7 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    @pytest.mark.parametrize("tokenizer", ["default", "jieba"])
+    @pytest.mark.parametrize("tokenizer", ["jieba", "default"])
     def test_query_text_match_normal(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -4603,8 +4603,6 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one token
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            if tokenizer == "jieba":
-                token = jieba.cut(token)[0]
             expr = f"TextMatch({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
