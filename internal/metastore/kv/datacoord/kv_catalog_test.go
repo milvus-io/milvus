@@ -22,6 +22,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,7 @@ var (
 	k6 = buildFieldBinlogPath(collectionID, partitionID, segmentID2, fieldID)
 	k7 = buildFieldDeltalogPath(collectionID, partitionID, segmentID2, fieldID)
 	k8 = buildFieldStatslogPath(collectionID, partitionID, segmentID2, fieldID)
+	k9 = buildStatsTaskKey(10000)
 
 	keys = map[string]struct{}{
 		k1: {},
@@ -74,6 +76,7 @@ var (
 		k6: {},
 		k7: {},
 		k8: {},
+		k9: {},
 	}
 
 	invalidSegment = &datapb.SegmentInfo{
@@ -200,6 +203,22 @@ func Test_ListSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		verifySegments(t, logID, ret)
+	})
+
+	t.Run("test compatibility with stats task", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+			if strings.HasPrefix(k9, path.Join(s)) {
+				return f([]byte(k9), nil)
+			}
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		ret, err := catalog.ListSegments(context.TODO())
+		assert.NotNil(t, ret)
+		assert.NoError(t, err)
+		assert.Zero(t, len(ret))
 	})
 
 	t.Run("list successfully", func(t *testing.T) {

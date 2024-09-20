@@ -115,7 +115,7 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 
 		// due to StatsTaskPrefix has the same prefix with SegmentPrefix, so skip it.
 		// when the WalkWithPrefix is refactored, this patch can be removed.
-		if strings.Contains(string(value), StatsTaskPrefix) {
+		if strings.Contains(string(key), StatsTaskPrefix) {
 			return nil
 		}
 
