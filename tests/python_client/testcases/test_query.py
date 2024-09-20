@@ -1,3 +1,5 @@
+import jieba
+
 import utils.util_pymilvus as ut
 from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
@@ -4600,7 +4602,9 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one token
         for field in text_fields:
-            token = list(wf_map[field].keys())[0]
+            token = wf_map[field].most_common()[0][0]
+            if tokenizer == "jieba":
+                token = jieba.cut(token)[0]
             expr = f"TextMatch({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
