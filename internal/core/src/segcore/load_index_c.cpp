@@ -230,7 +230,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         LOG_ERROR(
             "failed to estimate index load resource, encounter exception : {}",
             e.what());
-        return nullptr;
+        return LoadResourceRequest{};
     }
 }
 
@@ -481,6 +481,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
             load_index_info->schema = info_proto->field();
+            load_index_info->index_size = info_proto->index_file_size();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;
