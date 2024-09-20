@@ -12,8 +12,6 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.5.0rc80
-pymilvus[bulk_writer]==2.5.0rc80
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -26,6 +24,10 @@ PyYAML==6.0
 pytest-sugar==0.9.5
 pytest-parallel
 pytest-random-order
+
+# pymilvus
+pymilvus==2.5.0rc80
+pymilvus[bulk_writer]==2.5.0rc80
 
 # for customize config test
 python-benedict==0.24.3
@@ -51,7 +53,7 @@ rich==13.7.0
 etcd-sdk-python==0.0.4
 deepdiff==6.7.1
 
-# for test result anaylszer
+# for test result analyzer
 prettytable==3.8.0
 pyarrow==14.0.1
 fastparquet==2023.7.0
@@ -59,3 +61,9 @@ fastparquet==2023.7.0
 # for bf16 datatype
 ml-dtypes==0.2.0
 
+# for text match
+bm25s==0.2.0
+jieba==0.42.1
+
+# for perf test
+locust==2.31.6
