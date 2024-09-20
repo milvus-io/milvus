@@ -95,7 +95,8 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.disk_limit = c_mmap_config.disk_limit;
         mmap_config.fix_file_size = c_mmap_config.fix_file_size;
         mmap_config.growing_enable_mmap = c_mmap_config.growing_enable_mmap;
-        mmap_config.scalar_index_enable_mmap = c_mmap_config.scalar_index_enable_mmap;
+        mmap_config.scalar_index_enable_mmap =
+            c_mmap_config.scalar_index_enable_mmap;
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
