@@ -66,4 +66,4 @@ bm25s==0.2.0
 jieba==0.42.1
 
 # for perf test
-locust==2.31.6
+locust==2.25.0
