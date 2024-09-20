@@ -20,7 +20,10 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/storage"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -295,13 +298,30 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 
 func (t *clusteringCompactionTask) processStats() error {
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
+	existNonStats := false
+	tmpToResultSegments := make(map[int64][]int64, len(t.GetTmpSegments()))
 	resultSegments := make([]int64, 0, len(t.GetTmpSegments()))
 	for _, segmentID := range t.GetTmpSegments() {
 		to, ok := t.meta.(*meta).GetCompactionTo(segmentID)
 		if !ok {
-			return nil
+			select {
+			case getStatsTaskChSingleton() <- segmentID:
+			default:
+			}
+			existNonStats = true
+			continue
 		}
+		tmpToResultSegments[segmentID] = lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })
 		resultSegments = append(resultSegments, lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
+	}
+
+	if existNonStats {
+		return nil
+	}
+
+	if err := t.regeneratePartitionStats(tmpToResultSegments); err != nil {
+		log.Warn("regenerate partition stats failed, wait for retry", zap.Error(err))
+		return merr.WrapErrClusteringCompactionMetaError("regeneratePartitionStats", err)
 	}
 
 	log.Info("clustering compaction stats task finished",
@@ -309,6 +329,56 @@ func (t *clusteringCompactionTask) processStats() error {
 		zap.Int64s("result segments", resultSegments))
 
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
+}
+
+func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments map[int64][]int64) error {
+	//
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
+	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	if err != nil {
+		log.Error("chunk manager init failed", zap.Error(err))
+		return err
+	}
+	partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+		metautil.JoinIDPath(t.GetCollectionID(), t.GetPartitionID()), t.plan.GetChannel(),
+		strconv.FormatInt(t.GetPlanID(), 10))
+
+	value, err := cli.Read(ctx, partitionStatsFile)
+	if err != nil {
+		log.Warn("read partition stats file failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	partitionStats, err := storage.DeserializePartitionsStatsSnapshot(value)
+	if err != nil {
+		log.Warn("deserialize partition stats failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	for from, to := range tmpToResultSegments {
+		stats := partitionStats.SegmentStats[from]
+		// stats task only one to
+		for _, toID := range to {
+			partitionStats.SegmentStats[toID] = stats
+		}
+		delete(partitionStats.SegmentStats, from)
+	}
+
+	partitionStatsBytes, err := storage.SerializePartitionStatsSnapshot(partitionStats)
+	if err != nil {
+		log.Warn("serialize partition stats failed", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
+		return err
+	}
+
+	err = cli.Write(ctx, partitionStatsFile, partitionStatsBytes)
+	if err != nil {
+		log.Warn("save partition stats file failed", zap.Int64("planID", t.GetPlanID()),
+			zap.String("path", partitionStatsFile), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (t *clusteringCompactionTask) processIndexing() error {
