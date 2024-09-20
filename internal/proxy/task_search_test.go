@@ -2263,6 +2263,63 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		assert.Equal(t, int64(0), offset)
 	})
 
+	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "c1"},
+				{FieldID: 102, Name: "c2"},
+				{FieldID: 103, Name: "c3"},
+			},
+		}
+		// 1. first parse rank params
+		// outer params require to group by field 101 and groupSize=3 and groupStrictSize=false
+		testRankParamsPairs := getValidSearchParams()
+		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c1",
+		})
+		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: strconv.FormatInt(3, 10),
+		})
+		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
+			Key:   GroupStrictSize,
+			Value: "false",
+		})
+		testRankParamsPairs = append(testRankParamsPairs, &commonpb.KeyValuePair{
+			Key:   LimitKey,
+			Value: "100",
+		})
+		testRankParams, err := parseRankParams(testRankParamsPairs, schema)
+		assert.NoError(t, err)
+
+		// 2. parse search params for sub request in hybridsearch
+		params := getValidSearchParams()
+		// inner params require to group by field 103 and groupSize=10 and groupStrictSize=true
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "c3",
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupSizeKey,
+			Value: strconv.FormatInt(10, 10),
+		})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   GroupStrictSize,
+			Value: "true",
+		})
+
+		info, _, err := parseSearchInfo(params, schema, testRankParams)
+		assert.NoError(t, err)
+		assert.NotNil(t, info)
+
+		// all group_by related parameters should be aligned to parameters
+		// set by main request rather than inner sub request
+		assert.Equal(t, int64(101), info.GetGroupByFieldId())
+		assert.Equal(t, int64(3), info.GetGroupSize())
+		assert.False(t, info.GetGroupStrictSize())
+	})
+
 	t.Run("parseSearchInfo error", func(t *testing.T) {
 		spNoTopk := []*commonpb.KeyValuePair{{
 			Key:   AnnsFieldKey,
