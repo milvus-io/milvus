@@ -203,6 +203,9 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, Params.SkipPartitionKeyCheck.GetAsBool())
 		params.Save("proxy.skipPartitionKeyCheck", "true")
 		assert.True(t, Params.SkipPartitionKeyCheck.GetAsBool())
+
+		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
+		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

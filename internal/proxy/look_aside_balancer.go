@@ -19,8 +19,6 @@ package proxy
 import (
 	"context"
 	"math"
-	"math/rand"
-	"strconv"
 	"sync"
 	"time"
 
@@ -31,45 +29,49 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+type CostMetrics struct {
+	cost        atomic.Pointer[internalpb.CostAggregation]
+	executingNQ atomic.Int64
+	ts          atomic.Int64
+	unavailable atomic.Bool
+}
 
 type LookAsideBalancer struct {
 	clientMgr shardClientMgr
 
-	// query node -> workload latest metrics
-	metricsMap *typeutil.ConcurrentMap[int64, *internalpb.CostAggregation]
-
-	// query node -> last update metrics ts
-	metricsUpdateTs *typeutil.ConcurrentMap[int64, int64]
-
-	// query node -> total nq of requests which already send but response hasn't received
-	executingTaskTotalNQ *typeutil.ConcurrentMap[int64, *atomic.Int64]
-
-	unreachableQueryNodes *typeutil.ConcurrentSet[int64]
-
+	metricsMap *typeutil.ConcurrentMap[int64, *CostMetrics]
 	// query node id -> number of consecutive heartbeat failures
 	failedHeartBeatCounter *typeutil.ConcurrentMap[int64, *atomic.Int64]
+
+	// idx for round_robin
+	idx atomic.Int64
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
+
+	// param for replica selection
+	metricExpireInterval    int64
+	checkWorkloadRequestNum int64
+	workloadToleranceFactor float64
 }
 
 func NewLookAsideBalancer(clientMgr shardClientMgr) *LookAsideBalancer {
 	balancer := &LookAsideBalancer{
 		clientMgr:              clientMgr,
-		metricsMap:             typeutil.NewConcurrentMap[int64, *internalpb.CostAggregation](),
-		metricsUpdateTs:        typeutil.NewConcurrentMap[int64, int64](),
-		executingTaskTotalNQ:   typeutil.NewConcurrentMap[int64, *atomic.Int64](),
-		unreachableQueryNodes:  typeutil.NewConcurrentSet[int64](),
+		metricsMap:             typeutil.NewConcurrentMap[int64, *CostMetrics](),
 		failedHeartBeatCounter: typeutil.NewConcurrentMap[int64, *atomic.Int64](),
 		closeCh:                make(chan struct{}),
 	}
+
+	balancer.metricExpireInterval = Params.ProxyCfg.CostMetricsExpireTime.GetAsInt64()
+	balancer.checkWorkloadRequestNum = Params.ProxyCfg.CheckWorkloadRequestNum.GetAsInt64()
+	balancer.workloadToleranceFactor = Params.ProxyCfg.WorkloadToleranceFactor.GetAsFloat()
 
 	return balancer
 }
@@ -86,54 +88,82 @@ func (b *LookAsideBalancer) Close() {
 	})
 }
 
-func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
-	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 1, 60)
+func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
 	targetNode := int64(-1)
-	targetScore := float64(math.MaxFloat64)
-	rand.Shuffle(len(availableNodes), func(i, j int) {
-		availableNodes[i], availableNodes[j] = availableNodes[j], availableNodes[i]
-	})
-	for _, node := range availableNodes {
-		if b.unreachableQueryNodes.Contain(node) {
-			log.RatedWarn(5, "query node  is unreachable, skip it",
-				zap.Int64("nodeID", node))
-			continue
+	defer func() {
+		if targetNode != -1 {
+			metrics, _ := b.metricsMap.GetOrInsert(targetNode, &CostMetrics{})
+			metrics.executingNQ.Add(nq)
+		}
+	}()
+
+	// after assign n request, try to assign the task to a query node which has much less workload
+	idx := b.idx.Load()
+	if idx%b.checkWorkloadRequestNum != 0 {
+		for i := 0; i < len(availableNodes); i++ {
+			targetNode = availableNodes[int(idx)%len(availableNodes)]
+			targetMetrics, ok := b.metricsMap.Get(targetNode)
+			if !ok || !targetMetrics.unavailable.Load() {
+				break
+			}
 		}
 
-		cost, _ := b.metricsMap.Get(node)
-		executingNQ, ok := b.executingTaskTotalNQ.Get(node)
-		if !ok {
-			executingNQ = atomic.NewInt64(0)
-			b.executingTaskTotalNQ.Insert(node, executingNQ)
+		if targetNode == -1 {
+			return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 		}
 
-		score := b.calculateScore(node, cost, executingNQ.Load())
-		metrics.ProxyWorkLoadScore.WithLabelValues(strconv.FormatInt(node, 10)).Set(score)
+		b.idx.Inc()
+		return targetNode, nil
+	}
 
-		if targetNode == -1 || score < targetScore {
-			targetScore = score
+	// compute each query node's workload score, select the one with least workload score
+	minScore := int64(math.MaxInt64)
+	maxScore := int64(0)
+	nowTs := time.Now().UnixMilli()
+	for i := 0; i < len(availableNodes); i++ {
+		node := availableNodes[(int(idx)+i)%len(availableNodes)]
+		score := int64(0)
+		metrics, ok := b.metricsMap.Get(node)
+		if ok {
+			if metrics.unavailable.Load() {
+				continue
+			}
+
+			executingNQ := metrics.executingNQ.Load()
+			// for multi-replica cases, when there are no task which waiting in queue,
+			// the response time will effect the score, to prevent the score based on a too old metrics
+			// we expire the cost metrics if no task in queue.
+			if executingNQ != 0 || nowTs-metrics.ts.Load() <= b.metricExpireInterval {
+				score = b.calculateScore(node, metrics.cost.Load(), executingNQ)
+			}
+		}
+
+		if score < minScore || targetNode == -1 {
+			minScore = score
 			targetNode = node
 		}
+		if score > maxScore {
+			maxScore = score
+		}
+	}
+
+	if float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
+		// if all query node has nearly same workload, just fall back to round_robin
+		b.idx.Inc()
 	}
 
 	if targetNode == -1 {
-		return -1, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 	}
-
-	// update executing task cost
-	totalNQ, _ := b.executingTaskTotalNQ.Get(targetNode)
-	nq := totalNQ.Add(cost)
-	metrics.ProxyExecutingTotalNq.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Set(float64(nq))
 
 	return targetNode, nil
 }
 
 // when task canceled, should reduce executing total nq cost
 func (b *LookAsideBalancer) CancelWorkload(node int64, nq int64) {
-	totalNQ, ok := b.executingTaskTotalNQ.Get(node)
+	metrics, ok := b.metricsMap.Get(node)
 	if ok {
-		nq := totalNQ.Sub(nq)
-		metrics.ProxyExecutingTotalNq.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Set(float64(nq))
+		metrics.executingNQ.Sub(nq)
 	}
 }
 
@@ -141,29 +171,29 @@ func (b *LookAsideBalancer) CancelWorkload(node int64, nq int64) {
 func (b *LookAsideBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {
 	// cache the latest query node cost metrics for updating the score
 	if cost != nil {
-		b.metricsMap.Insert(node, cost)
+		metrics, ok := b.metricsMap.Get(node)
+		if !ok {
+			metrics = &CostMetrics{}
+			b.metricsMap.Insert(node, metrics)
+		}
+		metrics.cost.Store(cost)
+		metrics.ts.Store(time.Now().UnixMilli())
+		metrics.unavailable.CompareAndSwap(true, false)
 	}
-	b.metricsUpdateTs.Insert(node, time.Now().UnixMilli())
-
-	// one query/search succeed, we regard heartbeat succeed, clear heartbeat failed counter
-	b.trySetQueryNodeReachable(node)
 }
 
 // calculateScore compute the query node's workload score
 // https://www.usenix.org/conference/nsdi15/technical-sessions/presentation/suresh
-func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggregation, executingNQ int64) float64 {
+func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggregation, executingNQ int64) int64 {
+	pow3 := func(n int64) int64 {
+		return n * n * n
+	}
+
 	if cost == nil || cost.GetResponseTime() == 0 {
-		return math.Pow(float64(executingNQ), 3.0)
+		return pow3(executingNQ)
 	}
 
-	// for multi-replica cases, when there are no task which waiting in queue,
-	// the response time will effect the score, to prevent the score based on a too old value
-	// we expire the cost metrics by second if no task in queue.
-	if executingNQ == 0 && b.isNodeCostMetricsTooOld(node) {
-		return 0
-	}
-
-	executeSpeed := float64(cost.ResponseTime) - float64(cost.ServiceTime)
+	executeSpeed := cost.ResponseTime - cost.ServiceTime
 	if executingNQ < 0 {
 		log.Warn("unexpected executing nq value",
 			zap.Int64("executingNQ", executingNQ))
@@ -176,30 +206,21 @@ func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggr
 		return executeSpeed
 	}
 
-	workload := math.Pow(float64(1+cost.GetTotalNQ()+executingNQ), 3.0) * float64(cost.ServiceTime)
+	// workload := math.Pow(float64(1+cost.GetTotalNQ()+executingNQ), 3.0) * float64(cost.ServiceTime)
+	workload := pow3(1+cost.GetTotalNQ()+executingNQ) * cost.ServiceTime
 	if workload < 0 {
-		return math.MaxFloat64
+		return math.MaxInt64
 	}
 
 	return executeSpeed + workload
-}
-
-// if the node cost metrics hasn't been updated for a second, we think the metrics is too old
-func (b *LookAsideBalancer) isNodeCostMetricsTooOld(node int64) bool {
-	lastUpdateTs, ok := b.metricsUpdateTs.Get(node)
-	if !ok || lastUpdateTs == 0 {
-		return false
-	}
-
-	return time.Now().UnixMilli()-lastUpdateTs > Params.ProxyCfg.CostMetricsExpireTime.GetAsInt64()
 }
 
 func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 1, 60)
 	defer b.wg.Done()
 
-	checkQueryNodeHealthInterval := Params.ProxyCfg.CheckQueryNodeHealthInterval.GetAsDuration(time.Millisecond)
-	ticker := time.NewTicker(checkQueryNodeHealthInterval)
+	checkHealthInterval := Params.ProxyCfg.CheckQueryNodeHealthInterval.GetAsDuration(time.Millisecond)
+	ticker := time.NewTicker(checkHealthInterval)
 	defer ticker.Stop()
 	log.Info("Start check query node health loop")
 	pool := conc.NewDefaultPool[any]()
@@ -210,14 +231,18 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 			return
 
 		case <-ticker.C:
-			now := time.Now().UnixMilli()
 			var futures []*conc.Future[any]
-			b.metricsUpdateTs.Range(func(node int64, lastUpdateTs int64) bool {
-				if now-lastUpdateTs > checkQueryNodeHealthInterval.Milliseconds() {
-					futures = append(futures, pool.Submit(func() (any, error) {
-						checkInterval := Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
-						ctx, cancel := context.WithTimeout(context.Background(), checkInterval)
+			now := time.Now()
+			b.metricsMap.Range(func(node int64, metrics *CostMetrics) bool {
+				futures = append(futures, pool.Submit(func() (any, error) {
+					if now.UnixMilli()-metrics.ts.Load() > checkHealthInterval.Milliseconds() {
+						checkTimeout := Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
+						ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 						defer cancel()
+
+						if node == -1 {
+							panic("let it panic")
+						}
 
 						qn, err := b.clientMgr.GetClient(ctx, node)
 						if err != nil {
@@ -228,26 +253,23 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 
 						resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 						if err != nil {
-							if b.trySetQueryNodeUnReachable(node, err) {
-								log.Warn("get component status failed, set node unreachable", zap.Int64("node", node), zap.Error(err))
-							}
+							b.trySetQueryNodeUnReachable(node, err)
+							log.RatedWarn(10, "get component status failed, set node unreachable", zap.Int64("node", node), zap.Error(err))
 							return struct{}{}, nil
 						}
 
 						if resp.GetState().GetStateCode() != commonpb.StateCode_Healthy {
-							if b.trySetQueryNodeUnReachable(node, merr.ErrServiceUnavailable) {
-								log.Warn("component status unhealthy, set node unreachable", zap.Int64("node", node), zap.Error(err))
-							}
+							b.trySetQueryNodeUnReachable(node, merr.ErrServiceUnavailable)
+							log.RatedWarn(10, "component status unhealthy, set node unreachable", zap.Int64("node", node), zap.Error(err))
+
 							return struct{}{}, nil
 						}
+					}
 
-						// check health successfully, try set query node reachable
-						b.metricsUpdateTs.Insert(node, time.Now().Local().UnixMilli())
-						b.trySetQueryNodeReachable(node)
-
-						return struct{}{}, nil
-					}))
-				}
+					// check health successfully, try set query node reachable
+					b.trySetQueryNodeReachable(node)
+					return struct{}{}, nil
+				}))
 
 				return true
 			})
@@ -256,7 +278,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 	}
 }
 
-func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) bool {
+func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) {
 	failures, ok := b.failedHeartBeatCounter.Get(node)
 	if !ok {
 		failures = atomic.NewInt64(0)
@@ -270,8 +292,9 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) bo
 		zap.Error(err))
 
 	if failures.Load() < Params.ProxyCfg.RetryTimesOnHealthCheck.GetAsInt64() {
-		return false
+		return
 	}
+
 	// if the total time of consecutive heartbeat failures reach the session.ttl, remove the offline query node
 	limit := Params.CommonCfg.SessionTTL.GetAsDuration(time.Second).Seconds() /
 		Params.ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond).Seconds()
@@ -279,14 +302,14 @@ func (b *LookAsideBalancer) trySetQueryNodeUnReachable(node int64, err error) bo
 		log.Info("the heartbeat failures has reach it's upper limit, remove the query node",
 			zap.Int64("nodeID", node))
 		// stop the heartbeat
-		b.metricsUpdateTs.GetAndRemove(node)
-		b.metricsMap.GetAndRemove(node)
-		b.executingTaskTotalNQ.GetAndRemove(node)
-		b.unreachableQueryNodes.Remove(node)
-		return false
+		b.metricsMap.Remove(node)
+		return
 	}
 
-	return b.unreachableQueryNodes.Insert(node)
+	metrics, ok := b.metricsMap.Get(node)
+	if ok {
+		metrics.unavailable.Store(true)
+	}
 }
 
 func (b *LookAsideBalancer) trySetQueryNodeReachable(node int64) {
@@ -295,7 +318,9 @@ func (b *LookAsideBalancer) trySetQueryNodeReachable(node int64) {
 	if ok {
 		failures.Store(0)
 	}
-	if b.unreachableQueryNodes.TryRemove(node) {
+
+	metrics, ok := b.metricsMap.Get(node)
+	if !ok || metrics.unavailable.CompareAndSwap(true, false) {
 		log.Info("component recuperated, set node reachable", zap.Int64("node", node))
 	}
 }
