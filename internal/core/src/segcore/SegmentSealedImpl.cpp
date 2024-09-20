@@ -2031,7 +2031,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
-    if (!cfg.GetEnableMmap()) {
+    if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
