@@ -35,8 +35,9 @@ import (
 type SegmentsInfo struct {
 	segments         map[UniqueID]*SegmentInfo
 	secondaryIndexes segmentInfoIndexes
-	compactionTo     map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
-	// A segment can be compacted to only one segment finally in meta.
+	// map the compact relation, value is the segment which `CompactFrom` contains key.
+	// now segment could be compacted to multiple segments
+	compactionTo map[UniqueID][]UniqueID
 }
 
 type segmentInfoIndexes struct {
@@ -87,7 +88,7 @@ func NewSegmentsInfo() *SegmentsInfo {
 			coll2Segments:    make(map[UniqueID]map[UniqueID]*SegmentInfo),
 			channel2Segments: make(map[string]map[UniqueID]*SegmentInfo),
 		},
-		compactionTo: make(map[UniqueID]UniqueID),
+		compactionTo: make(map[UniqueID][]UniqueID),
 	}
 }
 
@@ -167,15 +168,21 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
 // Return (notnil, true) if given segmentID can be found and has compaction to.
-func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool) {
+func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
 	if _, ok := s.segments[fromSegmentID]; !ok {
 		return nil, false
 	}
-	if toID, ok := s.compactionTo[fromSegmentID]; ok {
-		if to, ok := s.segments[toID]; ok {
-			return to, true
+	if compactTos, ok := s.compactionTo[fromSegmentID]; ok {
+		result := []*SegmentInfo{}
+		for _, compactTo := range compactTos {
+			to, ok := s.segments[compactTo]
+			if !ok {
+				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
+				return nil, true
+			}
+			result = append(result, to)
 		}
-		log.Warn("unreachable code: compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+		return result, true
 	}
 	return nil, true
 }
@@ -380,7 +387,7 @@ func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 // addCompactTo adds the compact relation to the segment
 func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		s.compactionTo[from] = segment.GetID()
+		s.compactionTo[from] = append(s.compactionTo[from], segment.GetID())
 	}
 }
 

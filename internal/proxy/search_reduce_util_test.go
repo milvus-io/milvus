@@ -14,7 +14,7 @@ type SearchReduceUtilTestSuite struct {
 	suite.Suite
 }
 
-func (struts *SearchReduceUtilTestSuite) TestRankByGroup() {
+func genTestDataSearchResultsData() []*schemapb.SearchResultData {
 	var searchResultData1 *schemapb.SearchResultData
 	var searchResultData2 *schemapb.SearchResultData
 
@@ -49,10 +49,14 @@ func (struts *SearchReduceUtilTestSuite) TestRankByGroup() {
 			GroupByFieldValue: getFieldData("string", int64(101), schemapb.DataType_VarChar, groupFieldValue, 1),
 		}
 	}
+	return []*schemapb.SearchResultData{searchResultData1, searchResultData2}
+}
 
+func (struts *SearchReduceUtilTestSuite) TestRankByGroup() {
+	data := genTestDataSearchResultsData()
 	searchResults := []*milvuspb.SearchResults{
-		{Results: searchResultData1},
-		{Results: searchResultData2},
+		{Results: data[0]},
+		{Results: data[1]},
 	}
 
 	nq := int64(1)
@@ -125,6 +129,16 @@ func (struts *SearchReduceUtilTestSuite) TestRankByGroup() {
 		groupScorer, err := GetGroupScorer(scorerType)
 		struts.Error(err)
 		struts.Nil(groupScorer)
+	}
+}
+
+func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult() {
+	data := genTestDataSearchResultsData()
+
+	{
+		results, err := reduceSearchResultDataNoGroupBy(context.Background(), []*schemapb.SearchResultData{data[0]}, 0, 0, "L2", schemapb.DataType_Int64, 0)
+		struts.NoError(err)
+		struts.Equal([]string{"7", "5", "4", "2", "3", "6", "1", "9", "8"}, results.Results.GetIds().GetStrId().Data)
 	}
 }
 

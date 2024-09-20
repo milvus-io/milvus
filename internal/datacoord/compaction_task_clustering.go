@@ -301,7 +301,7 @@ func (t *clusteringCompactionTask) processStats() error {
 		if !ok {
 			return nil
 		}
-		resultSegments = append(resultSegments, to.GetID())
+		resultSegments = append(resultSegments, lo.Map(to, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 	}
 
 	log.Info("clustering compaction stats task finished",
