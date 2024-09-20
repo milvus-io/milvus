@@ -136,8 +136,11 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
 	}
 
+	if err := meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID); err != nil {
+		return err
+	}
 	st.nodeID = nodeID
-	return meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID)
+	return nil
 }
 
 func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {

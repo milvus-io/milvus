@@ -119,8 +119,11 @@ func (it *indexBuildTask) GetFailReason() string {
 }
 
 func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
+		return err
+	}
 	it.nodeID = nodeID
-	return meta.indexMeta.UpdateVersion(it.taskID, nodeID)
+	return nil
 }
 
 func (it *indexBuildTask) UpdateMetaBuildingState(meta *meta) error {
