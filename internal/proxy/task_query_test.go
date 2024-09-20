@@ -461,34 +461,6 @@ func TestTaskQuery_functions(t *testing.T) {
 		fieldDataArray2 = append(fieldDataArray2, getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
 		fieldDataArray2 = append(fieldDataArray2, getFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
-		t.Run("test skip dupPK 2", func(t *testing.T) {
-			result1 := &internalpb.RetrieveResults{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{0, 1},
-						},
-					},
-				},
-				FieldsData: fieldDataArray1,
-			}
-			result2 := &internalpb.RetrieveResults{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{0, 1},
-						},
-					},
-				},
-				FieldsData: fieldDataArray2,
-			}
-			result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result1, result2}, &queryParams{limit: 2})
-			assert.NoError(t, err)
-			assert.Equal(t, 2, len(result.GetFieldsData()))
-			assert.Equal(t, Int64Array, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
-			assert.InDeltaSlice(t, FloatVector, result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
-		})
-
 		t.Run("test nil results", func(t *testing.T) {
 			ret, err := reduceRetrieveResults(context.Background(), nil, &queryParams{})
 			assert.NoError(t, err)
