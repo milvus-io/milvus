@@ -35,92 +35,6 @@ IsLoadWithDisk(const char* index_type, int index_engine_version) {
            strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
 }
 
-bool
-IndexHasRawData(CLoadIndexInfo c_load_index_info) {
-    auto load_index_info = static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
-
-    const auto& index_params = load_index_info->index_params;
-    const auto& field_type = load_index_info->field_type;
-
-    // get index type
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
-    const auto& index_type = index_params.at("index_type");
-    if (!milvus::IsVectorDataType(field_type)) {
-        if (index_type == milvus::index::ASCENDING_SORT ||
-            index_type == milvus::index::MARISA_TRIE ||
-            index_type == milvus::index::MARISA_TRIE_UPPER ||
-            (index_type == milvus::index::BITMAP_INDEX_TYPE && field_type != milvus::DataType::ARRAY)) {
-            return true;
-        }
-        return false;
-    }
-
-    // get metric type
-    AssertInfo(index_params.find("metric_type") != index_params.end(),
-               "metric type is empty");
-    const auto& metric_type = index_params.at("metric_type");
-
-    // index engine version
-    const auto& index_engine_version = load_index_info->index_engine_version;
-
-    // config json
-    auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
-    config[milvus::index::INDEX_FILES] = load_index_info->index_files;
-    if (load_index_info->enable_mmap &&
-        load_index_info->index->IsMmapSupported()) {
-        AssertInfo(!load_index_info->mmap_dir_path.empty(),
-                   "mmap directory path is empty");
-        auto filepath =
-                std::filesystem::path(load_index_info->mmap_dir_path) /
-                "index_files" / std::to_string(load_index_info->index_id) /
-                std::to_string(load_index_info->segment_id) /
-                std::to_string(load_index_info->field_id);
-
-        config[milvus::index::ENABLE_MMAP] = "true";
-        config[milvus::index::MMAP_FILE_PATH] = filepath.string();
-    }
-    knowhere::Json load_config;
-    load_config.update(config);
-
-    if (field_type == milvus::DataType::VECTOR_BINARY) {
-        return knowhere::KnowhereCheck::IndexHasRawData<KnowhereDataTypeTraits<milvus::DataType::VECTOR_BINARY>::value_type>(index_type, metric_type,
-                                                                             index_engine_version, load_config);
-    } else if (field_type == milvus::DataType::VECTOR_FLOAT) {
-        return knowhere::KnowhereCheck::IndexHasRawData<KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT>::value_type>(index_type, metric_type,
-                                                                             index_engine_version, load_config);
-    } else if (field_type == milvus::DataType::VECTOR_FLOAT16) {
-        return knowhere::KnowhereCheck::IndexHasRawData<KnowhereDataTypeTraits<milvus::DataType::VECTOR_FLOAT16>::value_type>(index_type, metric_type,
-                                                                             index_engine_version, load_config);
-    } else if (field_type == milvus::DataType::VECTOR_BFLOAT16) {
-        return knowhere::KnowhereCheck::IndexHasRawData<KnowhereDataTypeTraits<milvus::DataType::VECTOR_BFLOAT16>::value_type>(index_type, metric_type,
-                                                                             index_engine_version, load_config);
-    } else if (field_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
-        return knowhere::KnowhereCheck::IndexHasRawData<KnowhereDataTypeTraits<milvus::DataType::VECTOR_SPARSE_FLOAT>::value_type>(index_type, metric_type,
-                                                                             index_engine_version, load_config);
-    }
-    AssertInfo(false, "not supported yet, field type: {}", field_type);
-    return false;
-}
-
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
-    auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-    auto field_type = load_index_info->field_type;
-
-    LoadResourceRequest load_resource_request{};
-//    //estimate
-//    if (milvus::IsVectorDataType(field_type)) {
-//        return estimateVecIndexLoadResource(c_load_index_info);
-//    } else {
-//        return nullptr;
-//    }
-
-    load_resource_request.has_raw_data = IndexHasRawData(c_load_index_info);
-    return load_resource_request;
-}
-
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
     try {
@@ -292,7 +206,7 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     }
 }
 
-LoadResourceRequest*
+LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
@@ -304,7 +218,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         AssertInfo(find_index_type == true,
                    "Can't find index type in index_params");
 
-        LoadResourceRequest* request =
+        LoadResourceRequest request =
             milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                 field_type,
                 load_index_info->index_engine_version,

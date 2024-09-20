@@ -27,12 +27,6 @@ typedef void* CLoadIndexInfo;
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version);
 
-//bool
-//IndexHasRawData(CLoadIndexInfo c_load_index_info, int index_engine_version);
-
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
-
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 
@@ -54,7 +48,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 bool enable_mmap,
                 const char* mmap_dir_path);
 
-struct LoadResourceRequest*
+LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
 CStatus

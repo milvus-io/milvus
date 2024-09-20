@@ -79,7 +79,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #endif
 }
 
-LoadResourceRequest*
+LoadResourceRequest
 IndexFactory::IndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
@@ -95,7 +95,7 @@ IndexFactory::IndexLoadResource(
     }
 }
 
-LoadResourceRequest*
+LoadResourceRequest
 IndexFactory::VecIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
@@ -178,23 +178,23 @@ IndexFactory::VecIndexLoadResource(
                     field_type));
     }
 
-    LoadResourceRequest* request = new LoadResourceRequest();
+    LoadResourceRequest request{};
 
-    request->hasRawData = has_raw_data;
-    request->finalDiskCost = resource.value().diskCost;
-    request->finalMemoryCost = resource.value().memoryCost;
+    request.has_raw_data = has_raw_data;
+    request.final_disk_cost = resource.value().diskCost;
+    request.final_memory_cost = resource.value().memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version)) {
-        request->maxDiskCost = resource.value().diskCost;
-        request->maxMemoryCost =
+        request.max_disk_cost = resource.value().diskCost;
+        request.max_memory_cost =
             std::max(resource.value().memoryCost, download_buffer_size_gb);
     } else {
-        request->maxDiskCost = 0;
-        request->maxMemoryCost = 2 * resource.value().memoryCost;
+        request.max_disk_cost = 0;
+        request.max_memory_cost = 2 * resource.value().memoryCost;
     }
     return request;
 }
 
-LoadResourceRequest*
+LoadResourceRequest
 IndexFactory::ScalarIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
@@ -210,56 +210,56 @@ IndexFactory::ScalarIndexLoadResource(
     knowhere::expected<knowhere::Resource> resource;
     float index_size_gb = index_size * 1.0 / 1024.0 / 1024.0 / 1024.0;
 
-    LoadResourceRequest* request = new LoadResourceRequest();
-    request->hasRawData = false;
+    LoadResourceRequest request{};
+    request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request->finalMemoryCost = index_size_gb;
-        request->finalDiskCost = 0;
-        request->maxMemoryCost = 2 * index_size_gb;
-        request->maxDiskCost = 0;
-        request->hasRawData = false;
-    } else if (index_type == milvus::index::MARISA_TRIE) {
+        request.final_memory_cost = index_size_gb;
+        request.final_disk_cost = 0;
+        request.max_memory_cost = 2 * index_size_gb;
+        request.max_disk_cost = 0;
+        request.has_raw_data = false;
+    } else if (index_type == milvus::index::MARISA_TRIE || index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
-            request->finalMemoryCost = 0;
-            request->finalDiskCost = index_size_gb;
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_gb;
         } else {
-            request->finalMemoryCost = index_size_gb;
-            request->finalDiskCost = 0;
+            request.final_memory_cost = index_size_gb;
+            request.final_disk_cost = 0;
         }
-        request->maxMemoryCost = index_size_gb;
-        request->maxDiskCost = request->finalDiskCost;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = request.final_disk_cost;
 
-        request->hasRawData = false;
+        request.has_raw_data = false;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE) {
-        request->finalMemoryCost = 0;
-        request->finalDiskCost = index_size_gb;
-        request->maxMemoryCost = index_size_gb;
-        request->maxDiskCost = index_size_gb;
+        request.final_memory_cost = 0;
+        request.final_disk_cost = index_size_gb;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = index_size_gb;
 
-        request->hasRawData = false;
+        request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
-            request->finalMemoryCost = 0;
-            request->finalDiskCost = index_size_gb;
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_gb;
         } else {
-            request->finalMemoryCost = index_size_gb;
-            request->finalDiskCost = 0;
+            request.final_memory_cost = index_size_gb;
+            request.final_disk_cost = 0;
         }
-        request->maxMemoryCost = index_size_gb;
-        request->maxDiskCost = request->finalDiskCost;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = request.final_disk_cost;
 
         if (field_type == milvus::DataType::ARRAY) {
-            request->hasRawData = false;
+            request.has_raw_data = false;
         } else {
-            request->hasRawData = true;
+            request.has_raw_data = true;
         }
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
-        request->finalMemoryCost = index_size_gb;
-        request->finalDiskCost = index_size_gb;
-        request->maxMemoryCost = index_size_gb;
-        request->maxDiskCost = index_size_gb;
-        request->hasRawData = false;
+        request.final_memory_cost = index_size_gb;
+        request.final_disk_cost = index_size_gb;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = index_size_gb;
+        request.has_raw_data = false;
     } else {
         PanicInfo(milvus::UnexpectedError,
                   fmt::format("invalid data type to estimate scalar index "
