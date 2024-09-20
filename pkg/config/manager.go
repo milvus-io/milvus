@@ -384,7 +384,7 @@ func (m *Manager) updateEvent(e *Event) error {
 // OnEvent Triggers actions when an event is generated
 func (m *Manager) OnEvent(event *Event) {
 	if m.forbiddenKeys.Contain(formatKey(event.Key)) {
-		log.Debug("ignore event for forbidden key", zap.String("key", event.Key))
+		log.Info("ignore event for forbidden key", zap.String("key", event.Key))
 		return
 	}
 	err := m.updateEvent(event)
