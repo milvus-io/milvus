@@ -242,11 +242,12 @@ IndexFactory::ScalarIndexLoadResource(
         if (mmap_enable) {
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_gb;
+            request.max_memory_cost = index_size_gb;
         } else {
             request.final_memory_cost = index_size_gb;
             request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_gb;
         }
-        request.max_memory_cost = index_size_gb;
         request.max_disk_cost = request.final_disk_cost;
 
         if (field_type == milvus::DataType::ARRAY) {
@@ -257,7 +258,7 @@ IndexFactory::ScalarIndexLoadResource(
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
         request.final_memory_cost = index_size_gb;
         request.final_disk_cost = index_size_gb;
-        request.max_memory_cost = index_size_gb;
+        request.max_memory_cost = 2 * index_size_gb;
         request.max_disk_cost = index_size_gb;
         request.has_raw_data = false;
     } else {
