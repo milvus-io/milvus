@@ -13,6 +13,7 @@ package retry
 
 import (
 	"context"
+	"runtime/debug"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -43,7 +44,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
 			if i%4 == 0 {
-				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
+				log.Warn("retry func failed", zap.Uint("retried", i), zap.ByteString("stack", debug.Stack()), zap.Error(err))
 			}
 
 			if !IsRecoverable(err) {
