@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -37,7 +38,8 @@ func RecoverPChannelSegmentAllocManager(
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to get pchannel info from rootcoord")
 	}
-	managers, waitForSealed := buildNewPartitionManagers(pchannel, rawMetas, resp.GetCollections())
+	metrics := metricsutil.NewSegmentAssignMetrics(pchannel.Name)
+	managers, waitForSealed := buildNewPartitionManagers(pchannel, rawMetas, resp.GetCollections(), metrics)
 
 	// PChannelSegmentAllocManager is the segment assign manager of determined pchannel.
 	logger := log.With(zap.Any("pchannel", pchannel))
@@ -47,7 +49,8 @@ func RecoverPChannelSegmentAllocManager(
 		logger:   logger,
 		pchannel: pchannel,
 		managers: managers,
-		helper:   newSealQueue(logger, wal, waitForSealed),
+		helper:   newSealQueue(logger, wal, waitForSealed, metrics),
+		metrics:  metrics,
 	}, nil
 }
 
@@ -59,7 +62,8 @@ type PChannelSegmentAllocManager struct {
 	pchannel types.PChannelInfo
 	managers *partitionSegmentManagers
 	// There should always
-	helper *sealQueue
+	helper  *sealQueue
+	metrics *metricsutil.SegmentAssignMetrics
 }
 
 // Channel returns the pchannel info.
@@ -200,7 +204,16 @@ func (m *PChannelSegmentAllocManager) MustSealSegments(ctx context.Context, info
 
 	for _, info := range infos {
 		if pm, err := m.managers.Get(info.CollectionID, info.PartitionID); err == nil {
-			m.helper.AsyncSeal(pm.CollectionMustSealed(info.SegmentID))
+			if segment := pm.CollectionMustSealed(info.SegmentID); segment != nil {
+				m.helper.AsyncSeal(segment)
+			} else {
+				m.logger.Info(
+					"segment not found when trigger must seal, may be already sealed",
+					zap.Int64("collectionID", info.CollectionID),
+					zap.Int64("partitionID", info.PartitionID),
+					zap.Int64("segmentID", info.SegmentID),
+				)
+			}
 		}
 	}
 	m.helper.SealAllWait(ctx)
@@ -273,4 +286,6 @@ func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 			resource.Resource().SegmentAssignStatsManager().UnregisterSealedSegment(segment.GetSegmentID())
 		}
 	}
+
+	m.metrics.Close()
 }

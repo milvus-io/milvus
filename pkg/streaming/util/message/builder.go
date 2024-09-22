@@ -192,6 +192,15 @@ func (b *ImmutableTxnMessageBuilder) Add(msg ImmutableMessage) *ImmutableTxnMess
 	return b
 }
 
+// EstimateSize estimates the size of the txn message.
+func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
+	size := b.begin.EstimateSize()
+	for _, m := range b.messages {
+		size += m.EstimateSize()
+	}
+	return size
+}
+
 // Build builds a txn message.
 func (b *ImmutableTxnMessageBuilder) Build(commit ImmutableCommitTxnMessageV2) (ImmutableTxnMessage, error) {
 	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit)

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -25,6 +26,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			DeliverPolicy: options.DeliverPolicyAll(),
 			MessageFilter: nil,
 		},
+		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 		func() {})
 	defer s.Close()
 

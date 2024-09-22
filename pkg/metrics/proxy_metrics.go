@@ -447,6 +447,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReqInQueueLatency)
 
 	registry.MustRegister(MaxInsertRate)
+
+	RegisterStreamingServiceClient(registry)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {

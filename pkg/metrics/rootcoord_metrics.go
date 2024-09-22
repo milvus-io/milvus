@@ -275,6 +275,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(QueryNodeMemoryHighWaterLevel)
 	registry.MustRegister(DiskQuota)
+
+	RegisterStreamingServiceClient(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {

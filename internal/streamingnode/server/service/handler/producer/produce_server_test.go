@@ -212,6 +212,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 		logger:           log.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
+		metrics:          newProducerMetrics(l.Channel()),
 	}
 
 	// Test send arm

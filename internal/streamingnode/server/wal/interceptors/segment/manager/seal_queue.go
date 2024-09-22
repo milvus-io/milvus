@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -15,13 +16,19 @@ import (
 )
 
 // newSealQueue creates a new seal helper queue.
-func newSealQueue(logger *log.MLogger, wal *syncutil.Future[wal.WAL], waitForSealed []*segmentAllocManager) *sealQueue {
+func newSealQueue(
+	logger *log.MLogger,
+	wal *syncutil.Future[wal.WAL],
+	waitForSealed []*segmentAllocManager,
+	metrics *metricsutil.SegmentAssignMetrics,
+) *sealQueue {
 	return &sealQueue{
 		cond:          syncutil.NewContextCond(&sync.Mutex{}),
 		logger:        logger,
 		wal:           wal,
 		waitForSealed: waitForSealed,
 		waitCounter:   len(waitForSealed),
+		metrics:       metrics,
 	}
 }
 
@@ -33,10 +40,21 @@ type sealQueue struct {
 	waitForSealed []*segmentAllocManager
 	waitCounter   int // wait counter count the real wait segment count, it is not equal to waitForSealed length.
 	// some segments may be in sealing process.
+	metrics *metricsutil.SegmentAssignMetrics
 }
 
 // AsyncSeal adds a segment into the queue, and will be sealed at next time.
 func (q *sealQueue) AsyncSeal(manager ...*segmentAllocManager) {
+	if q.logger.Level().Enabled(zap.DebugLevel) {
+		for _, m := range manager {
+			q.logger.Debug("segment is added into seal queue",
+				zap.Int("collectionID", int(m.GetCollectionID())),
+				zap.Int("partitionID", int(m.GetPartitionID())),
+				zap.Int("segmentID", int(m.GetSegmentID())),
+				zap.String("policy", string(m.SealPolicy())))
+		}
+	}
+
 	q.cond.LockAndBroadcast()
 	defer q.cond.L.Unlock()
 
@@ -106,7 +124,17 @@ func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentA
 				if err := tx.Commit(ctx); err != nil {
 					q.logger.Warn("flushed segment failed at commit, maybe sent repeated flush message into wal", zap.Int64("segmentID", segment.GetSegmentID()), zap.Error(err))
 					undone = append(undone, segment)
+					continue
 				}
+				q.metrics.ObserveSegmentFlushed(
+					string(segment.SealPolicy()),
+					int64(segment.GetStat().Insert.BinarySize))
+				q.logger.Info("segment has been flushed",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("vchannel", segment.GetVChannel()),
+					zap.Int64("segmentID", segment.GetSegmentID()),
+					zap.String("sealPolicy", string(segment.SealPolicy())))
 			}
 		}
 	}
@@ -124,11 +152,18 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 	undone := make([]*segmentAllocManager, 0)
 	sealedSegments := make(map[int64]map[string][]*segmentAllocManager)
 	for _, segment := range segments {
+		logger := q.logger.With(
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.Int64("partitionID", segment.GetPartitionID()),
+			zap.String("vchannel", segment.GetVChannel()),
+			zap.Int64("segmentID", segment.GetSegmentID()),
+			zap.String("sealPolicy", string(segment.SealPolicy())))
+
 		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
 			tx := segment.BeginModification()
 			tx.IntoSealed()
 			if err := tx.Commit(ctx); err != nil {
-				q.logger.Warn("seal segment failed at commit", zap.Int64("segmentID", segment.GetSegmentID()), zap.Error(err))
+				logger.Warn("seal segment failed at commit", zap.Error(err))
 				undone = append(undone, segment)
 				continue
 			}
@@ -142,14 +177,14 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 		ackSem := segment.AckSem()
 		if ackSem > 0 {
 			undone = append(undone, segment)
-			q.logger.Info("segment has been sealed, but there are flying acks, delay it", zap.Int64("segmentID", segment.GetSegmentID()), zap.Int32("ackSem", ackSem))
+			logger.Info("segment has been sealed, but there are flying acks, delay it", zap.Int32("ackSem", ackSem))
 			continue
 		}
 
 		txnSem := segment.TxnSem()
 		if txnSem > 0 {
 			undone = append(undone, segment)
-			q.logger.Info("segment has been sealed, but there are flying txns, delay it", zap.Int64("segmentID", segment.GetSegmentID()), zap.Int32("txnSem", txnSem))
+			logger.Info("segment has been sealed, but there are flying txns, delay it", zap.Int32("txnSem", txnSem))
 			continue
 		}
 
@@ -161,6 +196,7 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 			sealedSegments[segment.GetCollectionID()][segment.GetVChannel()] = make([]*segmentAllocManager, 0)
 		}
 		sealedSegments[segment.GetCollectionID()][segment.GetVChannel()] = append(sealedSegments[segment.GetCollectionID()][segment.GetVChannel()], segment)
+		logger.Info("segment has been mark as sealed, can be flushed")
 	}
 	return undone, sealedSegments
 }
@@ -189,24 +225,4 @@ func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collect
 	}
 	m.logger.Info("send flush message into wal", zap.Int64("collectionID", collectionID), zap.String("vchannel", vchannel), zap.Int64s("segmentIDs", segmentIDs), zap.Any("msgID", msgID))
 	return nil
-}
-
-// createNewFlushMessage creates a new flush message.
-func (m *sealQueue) createNewFlushMessage(
-	collectionID int64,
-	vchannel string,
-	segmentIDs []int64,
-) (message.MutableMessage, error) {
-	// Create a flush message.
-	msg, err := message.NewFlushMessageBuilderV2().
-		WithVChannel(vchannel).
-		WithHeader(&message.FlushMessageHeader{}).
-		WithBody(&message.FlushMessageBody{
-			CollectionId: collectionID,
-			SegmentId:    segmentIDs,
-		}).BuildMutable()
-	if err != nil {
-		return nil, errors.Wrap(err, "at create new flush message")
-	}
-	return msg, nil
 }
