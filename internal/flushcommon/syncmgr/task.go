@@ -71,14 +71,20 @@ type SyncTask struct {
 
 	insertBinlogs map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
 	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
+	bm25Binlogs   map[int64]*datapb.FieldBinlog
 	deltaBinlog   *datapb.FieldBinlog
 
-	binlogBlobs     map[int64]*storage.Blob // fieldID => blob
-	binlogMemsize   map[int64]int64         // memory size
+	binlogBlobs   map[int64]*storage.Blob // fieldID => blob
+	binlogMemsize map[int64]int64         // memory size
+
+	bm25Blobs      map[int64]*storage.Blob
+	mergedBm25Blob map[int64]*storage.Blob
+
 	batchStatsBlob  *storage.Blob
 	mergedStatsBlob *storage.Blob
-	deltaBlob       *storage.Blob
-	deltaRowCount   int64
+
+	deltaBlob     *storage.Blob
+	deltaRowCount int64
 
 	// prefetched log ids
 	ids []int64
@@ -145,6 +151,10 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.processStatsBlob()
 	t.processDeltaBlob()
 
+	if len(t.bm25Binlogs) > 0 || len(t.mergedBm25Blob) > 0 {
+		t.processBM25StastBlob()
+	}
+
 	err = t.writeLogs(ctx)
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
@@ -182,7 +192,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		log.Info("segment removed", zap.Int64("segmentID", t.segment.SegmentID()), zap.String("channel", t.channelName))
 	}
 
-	log.Info("task done", zap.Float64("flushedSize", totalSize))
+	log.Info("task done", zap.Float64("flushedSize", totalSize), zap.Duration("interval", t.tr.RecordSpan()))
 
 	if !t.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
@@ -207,6 +217,10 @@ func (t *SyncTask) prefetchIDs() error {
 	if t.deltaBlob != nil {
 		totalIDCount++
 	}
+	if t.bm25Blobs != nil {
+		totalIDCount += len(t.bm25Blobs)
+	}
+
 	start, _, err := t.allocator.Alloc(uint32(totalIDCount))
 	if err != nil {
 		return err
@@ -236,6 +250,36 @@ func (t *SyncTask) processInsertBlobs() {
 			LogPath:       key,
 			LogSize:       int64(len(blob.GetValue())),
 			MemorySize:    t.binlogMemsize[fieldID],
+		})
+	}
+}
+
+func (t *SyncTask) processBM25StastBlob() {
+	for fieldID, blob := range t.bm25Blobs {
+		k := metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID, fieldID, t.nextID())
+		key := path.Join(t.chunkManager.RootPath(), common.SegmentBm25LogPath, k)
+		t.segmentData[key] = blob.GetValue()
+		t.appendBM25Statslog(fieldID, &datapb.Binlog{
+			EntriesNum:    blob.RowNum,
+			TimestampFrom: t.tsFrom,
+			TimestampTo:   t.tsTo,
+			LogPath:       key,
+			LogSize:       int64(len(blob.GetValue())),
+			MemorySize:    blob.MemorySize,
+		})
+	}
+
+	for fieldID, blob := range t.mergedBm25Blob {
+		k := metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID, fieldID, int64(storage.CompoundStatsType))
+		key := path.Join(t.chunkManager.RootPath(), common.SegmentBm25LogPath, k)
+		t.segmentData[key] = blob.GetValue()
+		t.appendBM25Statslog(fieldID, &datapb.Binlog{
+			EntriesNum:    blob.RowNum,
+			TimestampFrom: t.tsFrom,
+			TimestampTo:   t.tsTo,
+			LogPath:       key,
+			LogSize:       int64(len(blob.GetValue())),
+			MemorySize:    blob.MemorySize,
 		})
 	}
 }
@@ -295,6 +339,17 @@ func (t *SyncTask) appendBinlog(fieldID int64, binlog *datapb.Binlog) {
 	}
 
 	fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, binlog)
+}
+
+func (t *SyncTask) appendBM25Statslog(fieldID int64, log *datapb.Binlog) {
+	fieldBinlog, ok := t.bm25Binlogs[fieldID]
+	if !ok {
+		fieldBinlog = &datapb.FieldBinlog{
+			FieldID: fieldID,
+		}
+		t.bm25Binlogs[fieldID] = fieldBinlog
+	}
+	fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, log)
 }
 
 func (t *SyncTask) appendStatslog(fieldID int64, statlog *datapb.Binlog) {

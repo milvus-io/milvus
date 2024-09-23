@@ -218,55 +218,49 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		totalResCount += subSearchNqOffset[i][nq-1]
 	}
 
-	var (
-		skipDupCnt int64
-		realTopK   int64 = -1
-	)
+	if subSearchNum == 1 && offset == 0 {
+		ret.Results = subSearchResultData[0]
+	} else {
+		var realTopK int64 = -1
+		var retSize int64
 
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+		// reducing nq * topk results
+		for i := int64(0); i < nq; i++ {
+			var (
+				// cursor of current data of each subSearch for merging the j-th data of TopK.
+				// sum(cursors) == j
+				cursors = make([]int64, subSearchNum)
 
-	// reducing nq * topk results
-	for i := int64(0); i < nq; i++ {
-		var (
-			// cursor of current data of each subSearch for merging the j-th data of TopK.
-			// sum(cursors) == j
-			cursors = make([]int64, subSearchNum)
+				j              int64
+				groupByValMap  = make(map[interface{}][]*groupReduceInfo)
+				skipOffsetMap  = make(map[interface{}]bool)
+				groupByValList = make([]interface{}, limit)
+				groupByValIdx  = 0
+			)
 
-			j              int64
-			pkSet          = make(map[interface{}]struct{})
-			groupByValMap  = make(map[interface{}][]*groupReduceInfo)
-			skipOffsetMap  = make(map[interface{}]bool)
-			groupByValList = make([]interface{}, limit)
-			groupByValIdx  = 0
-		)
+			for j = 0; j < groupBound; {
+				subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+				if subSearchIdx == -1 {
+					break
+				}
+				subSearchRes := subSearchResultData[subSearchIdx]
 
-		for j = 0; j < groupBound; {
-			subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
-			if subSearchIdx == -1 {
-				break
-			}
-			subSearchRes := subSearchResultData[subSearchIdx]
+				id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
+				score := subSearchRes.GetScores()[resultDataIdx]
+				groupByVal := typeutil.GetData(subSearchRes.GetGroupByFieldValue(), int(resultDataIdx))
+				if groupByVal == nil {
+					return nil, errors.New("get nil groupByVal from subSearchRes, wrong states, as milvus doesn't support nil value," +
+						"there must be sth wrong on queryNode side")
+				}
 
-			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
-			score := subSearchRes.GetScores()[resultDataIdx]
-			groupByVal := typeutil.GetData(subSearchRes.GetGroupByFieldValue(), int(resultDataIdx))
-			if groupByVal == nil {
-				return nil, errors.New("get nil groupByVal from subSearchRes, wrong states, as milvus doesn't support nil value," +
-					"there must be sth wrong on queryNode side")
-			}
-			// remove duplicates
-			if _, ok := pkSet[id]; !ok {
 				if int64(len(skipOffsetMap)) < offset || skipOffsetMap[groupByVal] {
 					skipOffsetMap[groupByVal] = true
 					// the first offset's group will be ignored
-					skipDupCnt++
 				} else if len(groupByValMap[groupByVal]) == 0 && int64(len(groupByValMap)) >= limit {
 					// skip when groupbyMap has been full and found new groupByVal
-					skipDupCnt++
 				} else if int64(len(groupByValMap[groupByVal])) >= groupSize {
 					// skip when target group has been full
-					skipDupCnt++
 				} else {
 					if len(groupByValMap[groupByVal]) == 0 {
 						groupByValList[groupByValIdx] = groupByVal
@@ -276,55 +270,43 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 						subSearchIdx: subSearchIdx,
 						resultIdx:    resultDataIdx, id: id, score: score,
 					})
-					pkSet[id] = struct{}{}
 					j++
 				}
-			} else {
-				skipDupCnt++
+
+				cursors[subSearchIdx]++
 			}
 
-			cursors[subSearchIdx]++
-		}
-
-		// assemble all eligible values in group
-		// values in groupByValList is sorted by the highest score in each group
-		for _, groupVal := range groupByValList {
-			if groupVal != nil {
-				groupEntities := groupByValMap[groupVal]
-				for _, groupEntity := range groupEntities {
-					subResData := subSearchResultData[groupEntity.subSearchIdx]
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
-					typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
-					ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
-					if err := typeutil.AppendGroupByValue(ret.Results, groupVal, subResData.GetGroupByFieldValue().GetType()); err != nil {
-						log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
-						return ret, err
+			// assemble all eligible values in group
+			// values in groupByValList is sorted by the highest score in each group
+			for _, groupVal := range groupByValList {
+				if groupVal != nil {
+					groupEntities := groupByValMap[groupVal]
+					for _, groupEntity := range groupEntities {
+						subResData := subSearchResultData[groupEntity.subSearchIdx]
+						retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+						typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
+						ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
+						if err := typeutil.AppendGroupByValue(ret.Results, groupVal, subResData.GetGroupByFieldValue().GetType()); err != nil {
+							log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
+							return ret, err
+						}
 					}
 				}
 			}
-		}
 
-		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-		}
-		realTopK = j
-		ret.Results.Topks = append(ret.Results.Topks, realTopK)
+			if realTopK != -1 && realTopK != j {
+				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			}
+			realTopK = j
+			ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
-		// limit search result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			// limit search result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
 		}
+		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	}
-	log.Ctx(ctx).Debug("skip duplicated search result when doing group by", zap.Int64("count", skipDupCnt))
-
-	if float64(skipDupCnt) >= float64(totalResCount)*0.3 {
-		log.Warn("GroupBy reduce skipped too many results, "+
-			"this may influence the final result seriously",
-			zap.Int64("skipDupCnt", skipDupCnt),
-			zap.Int64("groupBound", groupBound))
-	}
-
-	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
@@ -370,91 +352,79 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		ret.GetResults().AllSearchCount = allSearchCount
 	}
 
-	var (
-		subSearchNum = len(subSearchResultData)
+	subSearchNum := len(subSearchResultData)
+	if subSearchNum == 1 && offset == 0 {
+		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
+		//  we still need to adjust the scores later.
+		ret.Results = subSearchResultData[0]
+		// realTopK is the topK of the nq-th query, it is used in proxy but not handled by delegator.
+		topks := subSearchResultData[0].Topks
+		if len(topks) > 0 {
+			ret.Results.TopK = topks[len(topks)-1]
+		}
+	} else {
+		var realTopK int64 = -1
+		var retSize int64
+
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
-		subSearchNqOffset = make([][]int64, subSearchNum)
-	)
-	for i := 0; i < subSearchNum; i++ {
-		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
-		for j := int64(1); j < nq; j++ {
-			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+		subSearchNqOffset := make([][]int64, subSearchNum)
+		for i := 0; i < subSearchNum; i++ {
+			subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
+			for j := int64(1); j < nq; j++ {
+				subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
+			}
 		}
-	}
+		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+		// reducing nq * topk results
+		for i := int64(0); i < nq; i++ {
+			var (
+				// cursor of current data of each subSearch for merging the j-th data of TopK.
+				// sum(cursors) == j
+				cursors = make([]int64, subSearchNum)
+				j       int64
+			)
 
-	var (
-		skipDupCnt int64
-		realTopK   int64 = -1
-	)
+			// skip offset results
+			for k := int64(0); k < offset; k++ {
+				subSearchIdx, _ := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+				if subSearchIdx == -1 {
+					break
+				}
 
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-
-	// reducing nq * topk results
-	for i := int64(0); i < nq; i++ {
-		var (
-			// cursor of current data of each subSearch for merging the j-th data of TopK.
-			// sum(cursors) == j
-			cursors = make([]int64, subSearchNum)
-
-			j     int64
-			idSet = make(map[interface{}]struct{}, limit)
-		)
-
-		// skip offset results
-		for k := int64(0); k < offset; k++ {
-			subSearchIdx, _ := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
-			if subSearchIdx == -1 {
-				break
+				cursors[subSearchIdx]++
 			}
 
-			cursors[subSearchIdx]++
-		}
+			// keep limit results
+			for j = 0; j < limit; j++ {
+				// From all the sub-query result sets of the i-th query vector,
+				//   find the sub-query result set index of the score j-th data,
+				//   and the index of the data in schemapb.SearchResultData
+				subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+				if subSearchIdx == -1 {
+					break
+				}
+				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-		// keep limit results
-		for j = 0; j < limit; {
-			// From all the sub-query result sets of the i-th query vector,
-			//   find the sub-query result set index of the score j-th data,
-			//   and the index of the data in schemapb.SearchResultData
-			subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
-			if subSearchIdx == -1 {
-				break
-			}
-			id := typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)
-			score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
-
-			// remove duplicatessds
-			if _, ok := idSet[id]; !ok {
 				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
-				typeutil.AppendPKs(ret.Results.Ids, id)
+				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				idSet[id] = struct{}{}
-				j++
-			} else {
-				// skip entity with same id
-				skipDupCnt++
+				cursors[subSearchIdx]++
 			}
-			cursors[subSearchIdx]++
-		}
-		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-			// return nil, errors.New("the length (topk) between all result of query is different")
-		}
-		realTopK = j
-		ret.Results.Topks = append(ret.Results.Topks, realTopK)
+			if realTopK != -1 && realTopK != j {
+				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+				// return nil, errors.New("the length (topk) between all result of query is different")
+			}
+			realTopK = j
+			ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
-		// limit search result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			// limit search result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
 		}
-	}
-	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-
-	if skipDupCnt > 0 {
-		log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
+		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	}
 
-	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1

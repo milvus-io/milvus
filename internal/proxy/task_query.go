@@ -591,10 +591,8 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
 	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
-		ret = &milvuspb.QueryResults{}
-
-		skipDupCnt int64
-		loopEnd    int
+		ret     = &milvuspb.QueryResults{}
+		loopEnd int
 	)
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
@@ -611,7 +609,6 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		return ret, nil
 	}
 
-	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
@@ -636,21 +633,12 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; {
+	for j := 0; j < loopEnd; j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
 			break
 		}
-
-		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		if _, ok := idSet[pk]; !ok {
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
-			idSet[pk] = struct{}{}
-			j++
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-		}
+		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
@@ -658,10 +646,6 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 
 		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Ctx(ctx).Debug("skip duplicated query result while reducing QueryResults", zap.Int64("count", skipDupCnt))
 	}
 
 	return ret, nil

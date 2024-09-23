@@ -356,6 +356,7 @@ message SegmentInfo {
 
   // textStatsLogs is used to record tokenization index for fields.
   map<int64, TextIndexStats> textStatsLogs = 26;
+  repeated FieldBinlog bm25statslogs = 27;
 }
 
 message SegmentStartPosition {
@@ -379,6 +380,7 @@ message SaveBinlogPathsRequest {
   SegmentLevel seg_level =13;
   int64 partitionID =14; // report partitionID for create L0 segment
   int64 storageVersion = 15;
+  repeated FieldBinlog field2Bm25logPaths = 16;
 }
 
 message CheckPoint {
@@ -621,6 +623,7 @@ message CompactionSegment {
   repeated FieldBinlog deltalogs = 6;
   string channel = 7;
   bool is_sorted = 8;
+  repeated FieldBinlog bm25logs = 9;
 }
 
 message CompactionPlanResult {

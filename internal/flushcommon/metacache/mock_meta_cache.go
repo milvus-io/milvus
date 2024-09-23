@@ -26,14 +26,14 @@ func (_m *MockMetaCache) EXPECT() *MockMetaCache_Expecter {
 	return &MockMetaCache_Expecter{mock: &_m.Mock}
 }
 
-// AddSegment provides a mock function with given fields: segInfo, factory, actions
-func (_m *MockMetaCache) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction) {
+// AddSegment provides a mock function with given fields: segInfo, pkFactory, bmFactory, actions
+func (_m *MockMetaCache) AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction) {
 	_va := make([]interface{}, len(actions))
 	for _i := range actions {
 		_va[_i] = actions[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, segInfo, factory)
+	_ca = append(_ca, segInfo, pkFactory, bmFactory)
 	_ca = append(_ca, _va...)
 	_m.Called(_ca...)
 }
@@ -45,22 +45,23 @@ type MockMetaCache_AddSegment_Call struct {
 
 // AddSegment is a helper method to define mock.On call
 //   - segInfo *datapb.SegmentInfo
-//   - factory PkStatsFactory
+//   - pkFactory PkStatsFactory
+//   - bmFactory BM25StatsFactory
 //   - actions ...SegmentAction
-func (_e *MockMetaCache_Expecter) AddSegment(segInfo interface{}, factory interface{}, actions ...interface{}) *MockMetaCache_AddSegment_Call {
+func (_e *MockMetaCache_Expecter) AddSegment(segInfo interface{}, pkFactory interface{}, bmFactory interface{}, actions ...interface{}) *MockMetaCache_AddSegment_Call {
 	return &MockMetaCache_AddSegment_Call{Call: _e.mock.On("AddSegment",
-		append([]interface{}{segInfo, factory}, actions...)...)}
+		append([]interface{}{segInfo, pkFactory, bmFactory}, actions...)...)}
 }
 
-func (_c *MockMetaCache_AddSegment_Call) Run(run func(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction)) *MockMetaCache_AddSegment_Call {
+func (_c *MockMetaCache_AddSegment_Call) Run(run func(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction)) *MockMetaCache_AddSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]SegmentAction, len(args)-2)
-		for i, a := range args[2:] {
+		variadicArgs := make([]SegmentAction, len(args)-3)
+		for i, a := range args[3:] {
 			if a != nil {
 				variadicArgs[i] = a.(SegmentAction)
 			}
 		}
-		run(args[0].(*datapb.SegmentInfo), args[1].(PkStatsFactory), variadicArgs...)
+		run(args[0].(*datapb.SegmentInfo), args[1].(PkStatsFactory), args[2].(BM25StatsFactory), variadicArgs...)
 	})
 	return _c
 }
@@ -70,7 +71,7 @@ func (_c *MockMetaCache_AddSegment_Call) Return() *MockMetaCache_AddSegment_Call
 	return _c
 }
 
-func (_c *MockMetaCache_AddSegment_Call) RunAndReturn(run func(*datapb.SegmentInfo, PkStatsFactory, ...SegmentAction)) *MockMetaCache_AddSegment_Call {
+func (_c *MockMetaCache_AddSegment_Call) RunAndReturn(run func(*datapb.SegmentInfo, PkStatsFactory, BM25StatsFactory, ...SegmentAction)) *MockMetaCache_AddSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

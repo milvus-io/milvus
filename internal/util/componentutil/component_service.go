@@ -15,7 +15,7 @@ func NewComponentStateService(role string) *ComponentStateService {
 	return &ComponentStateService{
 		nodeID:    common.NotRegisteredID,
 		role:      role,
-		stateCode: commonpb.StateCode_StandBy,
+		stateCode: commonpb.StateCode_Initializing,
 	}
 }
 
@@ -27,16 +27,6 @@ type ComponentStateService struct {
 	nodeID    int64
 	role      string
 	stateCode commonpb.StateCode
-}
-
-// OnInitializing set the state to initializing
-func (s *ComponentStateService) OnInitializing() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stateCode != commonpb.StateCode_StandBy {
-		panic("standby -> initializing")
-	}
-	s.stateCode = commonpb.StateCode_Initializing
 }
 
 func (s *ComponentStateService) OnInitialized(nodeID int64) {

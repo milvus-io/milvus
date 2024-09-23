@@ -22,6 +22,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,7 @@ var (
 	k6 = buildFieldBinlogPath(collectionID, partitionID, segmentID2, fieldID)
 	k7 = buildFieldDeltalogPath(collectionID, partitionID, segmentID2, fieldID)
 	k8 = buildFieldStatslogPath(collectionID, partitionID, segmentID2, fieldID)
+	k9 = buildStatsTaskKey(10000)
 
 	keys = map[string]struct{}{
 		k1: {},
@@ -74,6 +76,7 @@ var (
 		k6: {},
 		k7: {},
 		k8: {},
+		k9: {},
 	}
 
 	invalidSegment = &datapb.SegmentInfo{
@@ -130,20 +133,6 @@ var (
 		},
 	}
 
-	getlogs = func(id int64) []*datapb.FieldBinlog {
-		return []*datapb.FieldBinlog{
-			{
-				FieldID: 1,
-				Binlogs: []*datapb.Binlog{
-					{
-						EntriesNum: 5,
-						LogID:      id,
-					},
-				},
-			},
-		}
-	}
-
 	segment1 = &datapb.SegmentInfo{
 		ID:           segmentID,
 		CollectionID: collectionID,
@@ -153,17 +142,6 @@ var (
 		Binlogs:      binlogs,
 		Deltalogs:    deltalogs,
 		Statslogs:    statslogs,
-	}
-
-	droppedSegment = &datapb.SegmentInfo{
-		ID:           segmentID2,
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
-		NumOfRows:    100,
-		State:        commonpb.SegmentState_Dropped,
-		Binlogs:      getlogs(logID),
-		Deltalogs:    getlogs(logID),
-		Statslogs:    getlogs(logID),
 	}
 )
 
@@ -227,6 +205,22 @@ func Test_ListSegments(t *testing.T) {
 		verifySegments(t, logID, ret)
 	})
 
+	t.Run("test compatibility with stats task", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+			if strings.HasPrefix(k9, path.Join(s)) {
+				return f([]byte(k9), nil)
+			}
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		ret, err := catalog.ListSegments(context.TODO())
+		assert.NotNil(t, ret)
+		assert.NoError(t, err)
+		assert.Zero(t, len(ret))
+	})
+
 	t.Run("list successfully", func(t *testing.T) {
 		var savedKvs map[string]string
 
@@ -254,6 +248,10 @@ func Test_ListSegments(t *testing.T) {
 			}
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
+			}
+			// return empty bm25log list
+			if strings.HasPrefix(s, SegmentBM25logPathPrefix) {
+				return nil
 			}
 			return errors.New("should not reach here")
 		})

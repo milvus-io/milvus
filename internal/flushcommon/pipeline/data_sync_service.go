@@ -142,6 +142,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
+	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -162,6 +163,14 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				segmentPks.Insert(segment.GetID(), pkoracle.NewBloomFilterSet(stats...))
 				if !streamingutil.IsStreamingServiceEnabled() {
 					tickler.Inc()
+				}
+
+				if segType == "growing" && len(segment.GetBm25Statslogs()) > 0 {
+					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetBm25Statslogs())
+					if err != nil {
+						return nil, err
+					}
+					segmentBm25.Insert(segment.GetID(), bm25stats)
 				}
 
 				return struct{}{}, nil
@@ -220,10 +229,21 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	}
 
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
+	pkStatsFactory := func(segment *datapb.SegmentInfo) pkoracle.PkStat {
 		pkStat, _ := segmentPks.Get(segment.GetID())
 		return pkStat
-	})
+	}
+
+	bm25StatsFactor := func(segment *datapb.SegmentInfo) *metacache.SegmentBM25Stats {
+		stats, ok := segmentBm25.Get(segment.GetID())
+		if !ok {
+			return nil
+		}
+		segmentStats := metacache.NewSegmentBM25Stats(stats)
+		return segmentStats
+	}
+	// return channel, nil
+	metacache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor)
 
 	return metacache, nil
 }
@@ -286,15 +306,15 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	// init flowgraph
 	fg := flowgraph.NewTimeTickedFlowGraph(params.Ctx)
+	nodeList := []flowgraph.Node{}
 
-	var dmStreamNode *flowgraph.InputNode
-	dmStreamNode, err = newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
+	dmStreamNode, err := newDmInputNode(initCtx, params.DispClient, info.GetVchan().GetSeekPosition(), config, input)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, dmStreamNode)
 
-	var ddNode *ddNode
-	ddNode, err = newDDNode(
+	ddNode, err := newDDNode(
 		params.Ctx,
 		collectionID,
 		channelName,
@@ -307,15 +327,29 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, ddNode)
 
-	writeNode := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
-	var ttNode *ttNode
-	ttNode, err = newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	if len(info.GetSchema().GetFunctions()) > 0 {
+		emNode, err := newEmbeddingNode(channelName, info.GetSchema())
+		if err != nil {
+			return nil, err
+		}
+		nodeList = append(nodeList, emNode)
+	}
+
+	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
+	nodeList = append(nodeList, writeNode)
 
-	if err := fg.AssembleNodes(dmStreamNode, ddNode, writeNode, ttNode); err != nil {
+	ttNode, err := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	if err != nil {
+		return nil, err
+	}
+	nodeList = append(nodeList, ttNode)
+
+	if err := fg.AssembleNodes(nodeList...); err != nil {
 		return nil, err
 	}
 	ds.fg = fg
@@ -371,7 +405,7 @@ func NewStreamingNodeDataSyncService(initCtx context.Context, pipelineParams *ut
 	info.Vchan.UnflushedSegments = unflushedSegmentInfos
 	metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) pkoracle.PkStat {
 		return pkoracle.NewBloomFilterSet()
-	})
+	}, metacache.NoneBm25StatsFactory)
 
 	return getServiceWithChannel(initCtx, pipelineParams, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos, input)
 }

@@ -353,7 +353,12 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			// Todo: support it
+			if fieldSchema.GetNullable() {
+				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
+				if err != nil {
+					return err
+				}
+			}
 
 		case *schemapb.ScalarField_JsonData:
 			if fieldSchema.GetNullable() {
@@ -391,10 +396,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_IntData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -406,10 +407,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_LongData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -419,9 +416,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			sd.LongData.Data, err = fillWithDefaultValueImpl(sd.LongData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
-			}
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
 			}
 
 		case *schemapb.ScalarField_FloatData:
@@ -435,10 +429,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_DoubleData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -450,10 +440,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		case *schemapb.ScalarField_StringData:
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
@@ -463,10 +449,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			sd.StringData.Data, err = fillWithDefaultValueImpl(sd.StringData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
-			}
-
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
 			}
 
 		case *schemapb.ScalarField_ArrayData:
@@ -485,10 +467,6 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.GetNullable() {
-				field.ValidData = []bool{}
-			}
-
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -499,6 +477,18 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+	}
+
+	if !typeutil.IsVectorType(field.Type) {
+		if fieldSchema.GetNullable() {
+			validData := make([]bool, numRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			field.ValidData = validData
+		} else {
+			field.ValidData = []bool{}
+		}
 	}
 
 	err = checkValidData(field, fieldSchema, numRows)
