@@ -33,6 +33,10 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 	return &IndexCoord{}, nil
 }
 
+func (s *IndexCoord) Prepare() error {
+	return nil
+}
+
 // Run starts service
 func (s *IndexCoord) Run() error {
 	log.Info("IndexCoord running ...")

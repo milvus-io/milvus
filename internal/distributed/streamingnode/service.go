@@ -18,10 +18,7 @@ package streamingnode
 
 import (
 	"context"
-	"fmt"
-	"net"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -55,8 +52,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -75,7 +72,7 @@ type Server struct {
 
 	// rpc
 	grpcServer *grpc.Server
-	lis        net.Listener
+	listener   *netutil.NetListener
 
 	factory dependency.Factory
 
@@ -96,6 +93,20 @@ func NewServer(f dependency.Factory) (*Server, error) {
 		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 	}, nil
+}
+
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().StreamingNodeGrpcServerCfg.IP),
+		netutil.OptHighPriorityToUsePort(paramtable.Get().StreamingNodeGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("StreamingNode fail to create net listener", zap.Error(err))
+		return err
+	}
+	s.listener = listener
+	log.Info("StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	return nil
 }
 
 // Run runs the server.
@@ -126,8 +137,7 @@ func (s *Server) Stop() (err error) {
 func (s *Server) stop() {
 	s.componentState.OnStopping()
 
-	addr, _ := s.getAddress()
-	log.Info("streamingnode stop", zap.String("Address", addr))
+	log.Info("streamingnode stop", zap.String("Address", s.listener.Address()))
 
 	// Unregister current server from etcd.
 	log.Info("streamingnode unregister session from etcd...")
@@ -164,6 +174,10 @@ func (s *Server) stop() {
 	log.Info("wait for grpc server stop...")
 	<-s.grpcServerChan
 	log.Info("streamingnode stop done")
+
+	if err := s.listener.Close(); err != nil {
+		log.Warn("streamingnode stop listener failed", zap.Error(err))
+	}
 }
 
 // Health check the health status of streamingnode.
@@ -188,9 +202,6 @@ func (s *Server) init(ctx context.Context) (err error) {
 		return err
 	}
 	if err := s.initChunkManager(ctx); err != nil {
-		return err
-	}
-	if err := s.allocateAddress(); err != nil {
 		return err
 	}
 	if err := s.initSession(ctx); err != nil {
@@ -249,13 +260,9 @@ func (s *Server) initSession(ctx context.Context) error {
 	if s.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
-	addr, err := s.getAddress()
-	if err != nil {
-		return err
-	}
-	s.session.Init(typeutil.StreamingNodeRole, addr, false, true)
+	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
 	paramtable.SetNodeID(s.session.ServerID)
-	log.Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", addr))
+	log.Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
 	return nil
 }
 
@@ -360,42 +367,13 @@ func (s *Server) initGRPCServer() {
 	streamingpb.RegisterStreamingNodeStateServiceServer(s.grpcServer, s.componentState)
 }
 
-// allocateAddress allocates a available address for streamingnode grpc server.
-func (s *Server) allocateAddress() (err error) {
-	port := paramtable.Get().StreamingNodeGrpcServerCfg.Port.GetAsInt()
-
-	retry.Do(context.Background(), func() error {
-		addr := ":" + strconv.Itoa(port)
-		s.lis, err = net.Listen("tcp", addr)
-		if err != nil {
-			if port != 0 {
-				// set port=0 to get next available port by os
-				log.Warn("StreamingNode suggested port is in used, try to get by os", zap.Error(err))
-				port = 0
-			}
-		}
-		return err
-	}, retry.Attempts(10))
-	return err
-}
-
-// getAddress returns the address of streamingnode grpc server.
-// must be called after allocateAddress.
-func (s *Server) getAddress() (string, error) {
-	if s.lis == nil {
-		return "", errors.New("StreamingNode grpc server is not initialized")
-	}
-	ip := paramtable.Get().StreamingNodeGrpcServerCfg.IP
-	return fmt.Sprintf("%s:%d", ip, s.lis.Addr().(*net.TCPAddr).Port), nil
-}
-
 // startGRPCServer starts the grpc server.
 func (s *Server) startGPRCServer(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(s.grpcServerChan)
 
-		if err := s.grpcServer.Serve(s.lis); err != nil {
+		if err := s.grpcServer.Serve(s.listener); err != nil {
 			select {
 			case errCh <- err:
 				// failure at initial startup.

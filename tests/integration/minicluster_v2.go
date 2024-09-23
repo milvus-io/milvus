@@ -223,7 +223,10 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	if err != nil {
 		return nil, err
 	}
-	cluster.DataCoord = grpcdatacoord.NewServer(ctx, cluster.factory)
+	cluster.DataCoord, err = grpcdatacoord.NewServer(ctx, cluster.factory)
+	if err != nil {
+		return nil, err
+	}
 	cluster.QueryCoord, err = grpcquerycoord.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
@@ -273,10 +276,7 @@ func (cluster *MiniClusterV2) AddQueryNode() *grpcquerynode.Server {
 	if err != nil {
 		return nil
 	}
-	err = node.Run()
-	if err != nil {
-		return nil
-	}
+	runComponent(node)
 	paramtable.SetNodeID(oid)
 
 	req := &milvuspb.GetComponentStatesRequest{}
@@ -301,10 +301,7 @@ func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
 	if err != nil {
 		return nil
 	}
-	err = node.Run()
-	if err != nil {
-		return nil
-	}
+	runComponent(node)
 	paramtable.SetNodeID(oid)
 
 	req := &milvuspb.GetComponentStatesRequest{}
@@ -325,50 +322,19 @@ func (cluster *MiniClusterV2) AddStreamingNode() {
 	if err != nil {
 		panic(err)
 	}
-	err = node.Run()
-	if err != nil {
-		panic(err)
-	}
-
+	runComponent(node)
 	cluster.streamingnodes = append(cluster.streamingnodes, node)
 }
 
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
-	err := cluster.RootCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.DataCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.QueryCoord.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.DataNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.QueryNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.IndexNode.Run()
-	if err != nil {
-		return err
-	}
-
-	err = cluster.Proxy.Run()
-	if err != nil {
-		return err
-	}
+	runComponent(cluster.RootCoord)
+	runComponent(cluster.DataCoord)
+	runComponent(cluster.QueryCoord)
+	runComponent(cluster.Proxy)
+	runComponent(cluster.DataNode)
+	runComponent(cluster.QueryNode)
+	runComponent(cluster.IndexNode)
 
 	ctx2, cancel := context.WithTimeout(context.Background(), time.Second*120)
 	defer cancel()
@@ -383,13 +349,11 @@ func (cluster *MiniClusterV2) Start() error {
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		err = cluster.StreamingNode.Run()
-		if err != nil {
-			return err
-		}
+		runComponent(cluster.StreamingNode)
 	}
 
 	port := params.ProxyGrpcServerCfg.Port.GetAsInt()
+	var err error
 	cluster.clientConn, err = grpc.DialContext(cluster.ctx, fmt.Sprintf("localhost:%d", port), getGrpcDialOpt()...)
 	if err != nil {
 		return err
@@ -571,4 +535,18 @@ func (r *ReportChanExtension) Report(info any) int {
 
 func (r *ReportChanExtension) GetReportChan() <-chan any {
 	return r.reportChan
+}
+
+type component interface {
+	Prepare() error
+	Run() error
+}
+
+func runComponent(c component) {
+	if err := c.Prepare(); err != nil {
+		panic(err)
+	}
+	if err := c.Run(); err != nil {
+		panic(err)
+	}
 }

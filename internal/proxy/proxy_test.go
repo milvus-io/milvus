@@ -103,6 +103,9 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 			panic(err)
 		}
 		wg.Done()
+		if err = rc.Prepare(); err != nil {
+			panic(err)
+		}
 		err = rc.Run()
 		if err != nil {
 			panic(err)
@@ -127,6 +130,9 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 			panic(err)
 		}
 		wg.Done()
+		if err = qs.Prepare(); err != nil {
+			panic(err)
+		}
 		err = qs.Run()
 		if err != nil {
 			panic(err)
@@ -151,6 +157,9 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 			panic(err)
 		}
 		wg.Done()
+		if err = qn.Prepare(); err != nil {
+			panic(err)
+		}
 		err = qn.Run()
 		if err != nil {
 			panic(err)
@@ -169,9 +178,16 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 	wg.Add(1)
 	go func() {
 		factory := dependency.NewDefaultFactory(localMsg)
-		ds = grpcdatacoordclient.NewServer(ctx, factory)
+		var err error
+		ds, err := grpcdatacoordclient.NewServer(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
 		wg.Done()
-		err := ds.Run()
+		if err = ds.Prepare(); err != nil {
+			panic(err)
+		}
+		err = ds.Run()
 		if err != nil {
 			panic(err)
 		}
@@ -195,6 +211,9 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 			panic(err)
 		}
 		wg.Done()
+		if err = dn.Prepare(); err != nil {
+			panic(err)
+		}
 		err = dn.Run()
 		if err != nil {
 			panic(err)
@@ -231,6 +250,9 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		in.SetEtcdClient(etcd)
+		if err = in.Prepare(); err != nil {
+			panic(err)
+		}
 		err = in.Run()
 		if err != nil {
 			panic(err)

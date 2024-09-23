@@ -18,9 +18,6 @@ package grpcquerynode
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -46,8 +43,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -65,6 +62,7 @@ type Server struct {
 	serverID atomic.Int64
 
 	grpcServer *grpc.Server
+	listener   *netutil.NetListener
 
 	etcdCli *clientv3.Client
 }
@@ -90,17 +88,24 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return s, nil
 }
 
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().QueryNodeGrpcServerCfg.IP),
+		netutil.OptHighPriorityToUsePort(paramtable.Get().QueryNodeGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("QueryNode fail to create net listener", zap.Error(err))
+		return err
+	}
+	s.listener = listener
+	log.Info("QueryNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	return nil
+}
+
 // init initializes QueryNode's grpc service.
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().QueryNodeGrpcServerCfg
-
-	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
-		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
-		log.Warn("QueryNode get available port when init", zap.Int("Port", Params.Port.GetAsInt()))
-	}
-
-	log.Debug("QueryNode", zap.Int("port", Params.Port.GetAsInt()))
+	log.Debug("QueryNode", zap.Int("port", s.listener.Port()))
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -119,10 +124,10 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
-	s.querynode.SetAddress(Params.GetAddress())
+	s.querynode.SetAddress(s.listener.Address())
 	log.Debug("QueryNode connect to etcd successfully")
 	s.grpcWG.Add(1)
-	go s.startGrpcLoop(Params.Port.GetAsInt())
+	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -154,7 +159,7 @@ func (s *Server) start() error {
 }
 
 // startGrpcLoop starts the grpc loop of QueryNode component.
-func (s *Server) startGrpcLoop(grpcPort int) {
+func (s *Server) startGrpcLoop() {
 	defer s.grpcWG.Done()
 	Params := &paramtable.Get().QueryNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
@@ -165,24 +170,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
-	}
-	var lis net.Listener
-	var err error
-	err = retry.Do(s.ctx, func() error {
-		addr := ":" + strconv.Itoa(grpcPort)
-		lis, err = net.Listen("tcp", addr)
-		if err == nil {
-			s.querynode.SetAddress(fmt.Sprintf("%s:%d", Params.IP, lis.Addr().(*net.TCPAddr).Port))
-		} else {
-			// set port=0 to get next available port
-			grpcPort = 0
-		}
-		return err
-	}, retry.Attempts(10))
-	if err != nil {
-		log.Error("QueryNode GrpcServer:failed to listen", zap.Error(err))
-		s.grpcErrChan <- err
-		return
 	}
 
 	s.grpcServer = grpc.NewServer(
@@ -220,7 +207,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer cancel()
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(s.listener); err != nil {
 		log.Debug("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
@@ -242,8 +229,7 @@ func (s *Server) Run() error {
 
 // Stop stops QueryNode's grpc service.
 func (s *Server) Stop() (err error) {
-	Params := &paramtable.Get().QueryNodeGrpcServerCfg
-	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger := log.With(zap.String("address", s.listener.Address()))
 	logger.Info("QueryNode stopping")
 	defer func() {
 		logger.Info("QueryNode stopped", zap.Error(err))
@@ -265,6 +251,9 @@ func (s *Server) Stop() (err error) {
 	s.grpcWG.Wait()
 
 	s.cancel()
+	if s.listener != nil {
+		s.listener.Close()
+	}
 	return nil
 }
 
