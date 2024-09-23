@@ -738,7 +738,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 	}
 
 	// length mismatch
-	assert.Error(t, fillFieldIDBySchema(columns, schema))
+	assert.Error(t, fillFieldPropertiesBySchema(columns, schema))
 	schema = &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -748,7 +748,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 			},
 		},
 	}
-	assert.NoError(t, fillFieldIDBySchema(columns, schema))
+	assert.NoError(t, fillFieldPropertiesBySchema(columns, schema))
 	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
 	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
 	assert.Equal(t, int64(1), columns[0].FieldId)
