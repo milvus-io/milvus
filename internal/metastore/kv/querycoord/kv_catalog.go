@@ -244,6 +244,21 @@ func (s Catalog) ReleaseReplica(collection int64, replicas ...int64) error {
 	keys := lo.Map(replicas, func(replica int64, _ int) string {
 		return encodeReplicaKey(collection, replica)
 	})
+	if len(replicas) >= MetaOpsBatchSize {
+		index := 0
+		for index < len(replicas) {
+			endIndex := index + MetaOpsBatchSize
+			if endIndex > len(replicas) {
+				endIndex = len(replicas)
+			}
+			err := s.cli.MultiRemove(keys[index:endIndex])
+			if err != nil {
+				return err
+			}
+			index = endIndex
+		}
+		return nil
+	}
 	return s.cli.MultiRemove(keys)
 }
 
