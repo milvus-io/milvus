@@ -491,17 +491,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 		remained int64 = 0
 	)
 
-	isDeletedValue := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
-
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
 		offSetPath := t.segmentIDOffsetMapping[segment.SegmentID]
@@ -567,7 +556,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			offset++
 
 			// Filtering deleted entity
-			if isDeletedValue(v) {
+			if isDeletedEntity(v, delta) {
 				deleted++
 				continue
 			}
