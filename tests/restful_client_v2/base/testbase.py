@@ -101,7 +101,8 @@ class TestBase(Base):
         batch_size = batch_size
         batch = nb // batch_size
         remainder = nb % batch_size
-        data = []
+
+        full_data = []
         insert_ids = []
         for i in range(batch):
             nb = batch_size
@@ -116,6 +117,7 @@ class TestBase(Base):
             assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
+            full_data.extend(data)
         # insert remainder data
         if remainder:
             nb = remainder
@@ -128,10 +130,11 @@ class TestBase(Base):
             assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
+            full_data.extend(data)
         if return_insert_id:
-            return schema_payload, data, insert_ids
+            return schema_payload, full_data, insert_ids
 
-        return schema_payload, data
+        return schema_payload, full_data
 
     def wait_collection_load_completed(self, name):
         t0 = time.time()
