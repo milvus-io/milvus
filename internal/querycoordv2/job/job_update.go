@@ -151,7 +151,12 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	utils.RecoverReplicaOfCollection(job.meta, job.collectionID)
 
 	// 7. update replica number in meta
-	job.meta.UpdateReplicaNumber(job.collectionID, job.newReplicaNumber)
+	err = job.meta.UpdateReplicaNumber(job.collectionID, job.newReplicaNumber)
+	if err != nil {
+		msg := "failed to update replica number"
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
 
 	// 8. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
 	_, err = job.targetObserver.UpdateNextTarget(job.collectionID)
@@ -159,9 +164,6 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		msg := "failed to update next target"
 		log.Warn(msg, zap.Error(err))
 	}
-
-	// 9. register load task into collection observer
-	job.collectionObserver.LoadCollection(job.Context(), job.collectionID)
 
 	return nil
 }
