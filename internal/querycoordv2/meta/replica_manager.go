@@ -260,6 +260,8 @@ func (m *ReplicaManager) RemoveReplicas(collectionID typeutil.UniqueID, replicas
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
+	log.Info("release replicas", zap.Int64("collectionID", collectionID), zap.Int64s("replicas", replicas))
+
 	return m.removeReplicas(collectionID, replicas...)
 }
 

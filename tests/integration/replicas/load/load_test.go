@@ -538,6 +538,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		s.Cluster.AddQueryNode()
 	}
 
+	nodesInRG := make(map[string][]int64)
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
@@ -548,6 +549,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 			s.True(merr.Ok(resp.GetStatus()))
 			if len(resp1.ResourceGroup.Nodes) == 1 {
 				matchCounter += 1
+				nodesInRG[rg] = []int64{resp1.ResourceGroup.Nodes[0].NodeId}
 			}
 		}
 		return matchCounter == rgNum
@@ -575,6 +577,18 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		return len(resp3.GetReplicas()) == 3
 	}, 30*time.Second, 1*time.Second)
 
+	s.Eventually(func() bool {
+		segmentNum, channelNum := 0, 0
+		for _, qn := range s.Cluster.GetAllQueryNodes() {
+			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+			s.NoError(err)
+			s.True(merr.Ok(resp.Status))
+			segmentNum += len(resp.Segments)
+			channelNum += len(resp.Channels)
+		}
+		return segmentNum == 9 && channelNum == 3
+	}, 30*time.Second, 1*time.Second)
+
 	s.loadCollection(collectionName, dbName, 2, rgs[3:])
 	s.Eventually(func() bool {
 		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
@@ -584,6 +598,18 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		s.NoError(err)
 		s.True(merr.Ok(resp3.Status))
 		return len(resp3.GetReplicas()) == 2
+	}, 30*time.Second, 1*time.Second)
+
+	s.Eventually(func() bool {
+		segmentNum, channelNum := 0, 0
+		for _, qn := range s.Cluster.GetAllQueryNodes() {
+			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+			s.NoError(err)
+			s.True(merr.Ok(resp.Status))
+			segmentNum += len(resp.Segments)
+			channelNum += len(resp.Channels)
+		}
+		return segmentNum == 6 && channelNum == 2
 	}, 30*time.Second, 1*time.Second)
 
 	// test load collection with dynamic update
