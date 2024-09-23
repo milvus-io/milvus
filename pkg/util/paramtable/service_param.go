@@ -484,6 +484,7 @@ type MQConfig struct {
 	EnablePursuitMode ParamItem `refreshable:"true"`
 	PursuitLag        ParamItem `refreshable:"true"`
 	PursuitBufferSize ParamItem `refreshable:"true"`
+	PursuitBufferTime ParamItem `refreshable:"true"`
 
 	MQBufSize         ParamItem `refreshable:"false"`
 	ReceiveBufSize    ParamItem `refreshable:"false"`
@@ -560,6 +561,15 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.PursuitBufferSize.Init(base.mgr)
+
+	p.PursuitBufferTime = ParamItem{
+		Key:          "mq.pursuitBufferTime",
+		Version:      "2.4.12",
+		DefaultValue: "60", // 60 s
+		Doc:          `pursuit mode buffer time in seconds`,
+		Export:       true,
+	}
+	p.PursuitBufferTime.Init(base.mgr)
 
 	p.MQBufSize = ParamItem{
 		Key:          "mq.mqBufSize",
