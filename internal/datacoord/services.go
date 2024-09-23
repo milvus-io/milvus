@@ -395,7 +395,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			info = s.meta.GetSegment(id)
 			// TODO: GetCompactionTo should be removed and add into GetSegment method and protected by lock.
 			// Too much modification need to be applied to SegmentInfo, a refactor is needed.
-			child, ok := s.meta.GetCompactionTo(id)
+			children, ok := s.meta.GetCompactionTo(id)
 
 			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
 			if info == nil || !ok {
@@ -406,7 +406,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			}
 
 			clonedInfo := info.Clone()
-			if child != nil {
+			for _, child := range children {
 				clonedChild := child.Clone()
 				// child segment should decompress binlog path
 				binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
