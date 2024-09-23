@@ -316,7 +316,7 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================restart Data Coordinators=========================")
-	c.DataCoord = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
+	c.DataCoord, err = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
 	s.NoError(err)
 	err = c.DataCoord.Run()
 	s.NoError(err)

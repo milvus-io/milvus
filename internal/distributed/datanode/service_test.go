@@ -227,6 +227,8 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		server.datanode = &MockDataNode{}
+		err = server.Prepare()
+		assert.NoError(t, err)
 		err = server.Run()
 		assert.NoError(t, err)
 	})
@@ -335,6 +337,8 @@ func Test_NewServer(t *testing.T) {
 }
 
 func Test_Run(t *testing.T) {
+	paramtable.Init()
+
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.NoError(t, err)
@@ -376,6 +380,8 @@ func Test_Run(t *testing.T) {
 		regErr: errors.New("error"),
 	}
 
+	err = server.Prepare()
+	assert.NoError(t, err)
 	err = server.Run()
 	assert.Error(t, err)
 

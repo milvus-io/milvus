@@ -248,7 +248,8 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 
 	c.RootCoord, err = grpcrootcoord.NewServer(context.TODO(), c.GetFactory())
 	s.NoError(err)
-	c.DataCoord = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
+	c.DataCoord, err = grpcdatacoord.NewServer(context.TODO(), c.GetFactory())
+	s.NoError(err)
 	c.QueryCoord, err = grpcquerycoord.NewServer(context.TODO(), c.GetFactory())
 	s.NoError(err)
 	log.Info("=========================Coordinators recreated=========================")

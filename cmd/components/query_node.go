@@ -50,6 +50,10 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) (*QueryNode, 
 	}, nil
 }
 
+func (q *QueryNode) Prepare() error {
+	return q.svr.Prepare()
+}
+
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {

@@ -18,8 +18,6 @@ package grpcquerycoord
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -50,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
@@ -60,6 +59,7 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 	grpcServer *grpc.Server
+	listener   *netutil.NetListener
 
 	serverID atomic.Int64
 
@@ -94,17 +94,31 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	}, nil
 }
 
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().QueryCoordGrpcServerCfg.IP),
+		netutil.OptPort(paramtable.Get().QueryCoordGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("QueryCoord fail to create net listener", zap.Error(err))
+		return err
+	}
+	log.Info("QueryCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	s.listener = listener
+	return nil
+}
+
 // Run initializes and starts QueryCoord's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("QueryCoord init done ...")
+	log.Info("QueryCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("QueryCoord start done ...")
+	log.Info("QueryCoord start done ...")
 	return nil
 }
 
@@ -114,7 +128,6 @@ var getTiKVClient = tikv.GetTiKVClient
 func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
-	rpcParams := &params.QueryCoordGrpcServerCfg
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -128,12 +141,12 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+		log.Warn("QueryCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
-	s.queryCoord.SetAddress(rpcParams.GetAddress())
+	s.queryCoord.SetAddress(s.listener.Address())
 
 	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 		log.Info("Connecting to tikv metadata storage.")
@@ -147,7 +160,7 @@ func (s *Server) init() error {
 	}
 
 	s.grpcWG.Add(1)
-	go s.startGrpcLoop(rpcParams.Port.GetAsInt())
+	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -164,7 +177,7 @@ func (s *Server) init() error {
 	}
 
 	// wait for master init or healthy
-	log.Debug("QueryCoord try to wait for RootCoord ready")
+	log.Info("QueryCoord try to wait for RootCoord ready")
 	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
@@ -174,7 +187,7 @@ func (s *Server) init() error {
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report RootCoord ready")
+	log.Info("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
@@ -185,7 +198,7 @@ func (s *Server) init() error {
 		}
 	}
 
-	log.Debug("QueryCoord try to wait for DataCoord ready")
+	log.Info("QueryCoord try to wait for DataCoord ready")
 	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
@@ -194,7 +207,7 @@ func (s *Server) init() error {
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report DataCoord ready")
+	log.Info("QueryCoord report DataCoord ready")
 
 	if err := s.queryCoord.Init(); err != nil {
 		return err
@@ -202,7 +215,7 @@ func (s *Server) init() error {
 	return nil
 }
 
-func (s *Server) startGrpcLoop(grpcPort int) {
+func (s *Server) startGrpcLoop() {
 	defer s.grpcWG.Done()
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
@@ -214,14 +227,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
-	if err != nil {
-		log.Debug("GrpcServer:failed to listen:", zap.Error(err))
-		s.grpcErrChan <- err
-		return
-	}
-
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
@@ -255,7 +260,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
 	}
 }
@@ -296,6 +301,11 @@ func (s *Server) Stop() (err error) {
 		log.Error("failed to close queryCoord", zap.Error(err))
 	}
 	s.loopCancel()
+
+	// release port resource
+	if s.listener != nil {
+		s.listener.Close()
+	}
 	return nil
 }
 

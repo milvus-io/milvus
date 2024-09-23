@@ -18,9 +18,6 @@ package grpcdatanode
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -50,8 +47,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 type Server struct {
@@ -59,15 +56,13 @@ type Server struct {
 	grpcWG      sync.WaitGroup
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
+	listener    *netutil.NetListener
 	ctx         context.Context
 	cancel      context.CancelFunc
 	etcdCli     *clientv3.Client
 	factory     dependency.Factory
 
 	serverID atomic.Int64
-
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
 
 	newRootCoordClient func() (types.RootCoordClient, error)
 	newDataCoordClient func() (types.DataCoordClient, error)
@@ -94,17 +89,30 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return s, nil
 }
 
+func (s *Server) Prepare() error {
+	listener, err := netutil.NewListener(
+		netutil.OptIP(paramtable.Get().DataNodeGrpcServerCfg.IP),
+		netutil.OptHighPriorityToUsePort(paramtable.Get().DataNodeGrpcServerCfg.Port.GetAsInt()),
+	)
+	if err != nil {
+		log.Warn("DataNode fail to create net listener", zap.Error(err))
+		return err
+	}
+	log.Info("DataNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	s.listener = listener
+	return nil
+}
+
 func (s *Server) startGrpc() error {
-	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	s.grpcWG.Add(1)
-	go s.startGrpcLoop(Params.Port.GetAsInt())
+	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
 }
 
 // startGrpcLoop starts the grep loop of datanode component.
-func (s *Server) startGrpcLoop(grpcPort int) {
+func (s *Server) startGrpcLoop() {
 	defer s.grpcWG.Done()
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
@@ -115,19 +123,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
-	}
-	var lis net.Listener
-
-	err := retry.Do(s.ctx, func() error {
-		addr := ":" + strconv.Itoa(grpcPort)
-		var err error
-		lis, err = net.Listen("tcp", addr)
-		return err
-	}, retry.Attempts(10))
-	if err != nil {
-		log.Error("DataNode GrpcServer:failed to listen", zap.Error(err))
-		s.grpcErrChan <- err
-		return
 	}
 
 	s.grpcServer = grpc.NewServer(
@@ -162,7 +157,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer cancel()
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(s.listener); err != nil {
 		log.Warn("DataNode failed to start gRPC")
 		s.grpcErrChan <- err
 	}
@@ -219,18 +214,17 @@ func (s *Server) Stop() (err error) {
 		return err
 	}
 	s.cancel()
+
+	if s.listener != nil {
+		s.listener.Close()
+	}
 	return nil
 }
 
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
-	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	ctx := context.Background()
-	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
-		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
-		log.Warn("DataNode found available port during init", zap.Int("port", Params.Port.GetAsInt()))
-	}
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -249,8 +243,8 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(s.etcdCli)
-	s.datanode.SetAddress(Params.GetAddress())
-	log.Info("DataNode address", zap.String("address", Params.IP+":"+strconv.Itoa(Params.Port.GetAsInt())))
+	s.datanode.SetAddress(s.listener.Address())
+	log.Info("DataNode address", zap.String("address", s.listener.Address()))
 	log.Info("DataNode serverID", zap.Int64("serverID", s.serverID.Load()))
 
 	err = s.startGrpc()

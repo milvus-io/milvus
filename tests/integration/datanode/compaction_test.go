@@ -153,7 +153,8 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	// Reboot
 	if planResp.GetMergeInfos()[0].GetTarget() == int64(-1) {
 		s.Cluster.DataCoord.Stop()
-		s.Cluster.DataCoord = grpcdatacoord.NewServer(ctx, s.Cluster.GetFactory())
+		s.Cluster.DataCoord, err = grpcdatacoord.NewServer(ctx, s.Cluster.GetFactory())
+		s.NoError(err)
 		err = s.Cluster.DataCoord.Run()
 		s.Require().NoError(err)
 
