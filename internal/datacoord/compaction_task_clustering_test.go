@@ -695,7 +695,6 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		task := s.generateBasicTask(false)
 		task.TmpSegments = task.ResultSegments
 		task.State = datapb.CompactionTaskState_statistic
-		task.TmpSegments = task.ResultSegments
 		task.maxRetryTimes = 3
 
 		for _, segID := range task.GetTmpSegments() {
@@ -729,7 +728,6 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		task := s.generateBasicTask(false)
 		task.TmpSegments = task.ResultSegments
 		task.State = datapb.CompactionTaskState_statistic
-		task.TmpSegments = task.ResultSegments
 		task.maxRetryTimes = 3
 
 		for _, segID := range task.GetTmpSegments() {
@@ -778,7 +776,6 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		task := s.generateBasicTask(false)
 		task.TmpSegments = task.ResultSegments
 		task.State = datapb.CompactionTaskState_statistic
-		task.TmpSegments = task.ResultSegments
 		task.maxRetryTimes = 3
 
 		for _, segID := range task.GetTmpSegments() {
@@ -836,6 +833,20 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 
 		err = cli.Write(context.Background(), partitionStatsFile, partitionStatsBytes)
 		s.NoError(err)
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
+		s.Equal(int32(0), task.RetryTimes)
+	})
+
+	s.Run("not enable stats task", func() {
+		Params.Save(Params.DataCoordCfg.EnableStatsTask.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.EnableStatsTask.Key)
+		task := s.generateBasicTask(false)
+		task.TmpSegments = task.ResultSegments
+		task.State = datapb.CompactionTaskState_statistic
+		task.maxRetryTimes = 3
+		task.ResultSegments = nil
 
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_indexing, task.GetState())
