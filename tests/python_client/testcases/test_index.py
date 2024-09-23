@@ -2338,7 +2338,7 @@ class TestBitmapIndex(TestcaseBase):
             1. create an empty collection
             2. build `BITMAP` index on primary key field
         expected:
-            1. Primary key filed does not support building bitmap index
+            1. Primary key field does not support building bitmap index
         """
         # init params
         collection_name = f"{request.function.__name__}_{primary_field}_{auto_id}"

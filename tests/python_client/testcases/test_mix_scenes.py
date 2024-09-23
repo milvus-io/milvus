@@ -1,20 +1,18 @@
 import re
 import math  # do not remove `math`
 import pytest
-from pymilvus import DataType, AnnSearchRequest, RRFRanker
 import numpy as np
-import random
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
-from utils.util_log import test_log as log
 from common.code_mapping import QueryErrorMessage as qem
 from common.common_params import (
     FieldParams, MetricType, DefaultVectorIndexParams, DefaultScalarIndexParams, Expr, AlterIndexParams
 )
 from base.client_base import TestcaseBase, TestCaseClassBase
+from utils.util_log import test_log as log
 
 
 @pytest.mark.xdist_group("TestNoIndexDQLExpr")
@@ -587,6 +585,36 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("limit", [10, 1000])
+    @pytest.mark.parametrize("group_by_field", ['INT8', 'INT16', 'INT32', 'INT64', 'BOOL', 'VARCHAR'])
+    @pytest.mark.parametrize(
+        "dim, search_params, vector_field",
+        [(3, {"metric_type": MetricType.L2, "ef": 32}, DataType.FLOAT16_VECTOR.name),
+         (1000, {"metric_type": MetricType.IP, "drop_ratio_search": 0.2}, DataType.SPARSE_FLOAT_VECTOR.name)])
+    def test_bitmap_index_search_group_by(self, limit, group_by_field, dim, search_params, vector_field):
+        """
+        target:
+            1. check search iterator with BITMAP index built on scalar fields
+        method:
+            1. prepare some data and build `BITMAP index` on scalar fields
+            2. search group by scalar fields and check result
+        expected:
+            1. search group by with BITMAP index
+        """
+        res, _ = self.collection_wrap.search(cf.gen_vectors(nb=1, dim=dim, vector_data_type=vector_field), vector_field,
+                                             search_params, limit, group_by_field=group_by_field,
+                                             output_fields=[group_by_field])
+        output_values = [i.fields for r in res for i in r]
+
+        # check output field
+        assert len([True for i in output_values if set(i.keys()) != {group_by_field}]) == 0, f"res: {output_values}"
+
+        # check `group_by_field` field values are unique
+        values = [v for i in output_values for k, v in i.items()]
+
+        assert len(values) == len(set(values)), f"values: {values}, output_values:{output_values}"
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("batch_size", [10, 1000])
     def test_bitmap_index_search_iterator(self, batch_size):
         """
@@ -601,7 +629,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         search_params, vector_field = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name
         self.collection_wrap.search_iterator(
             cf.gen_vectors(nb=1, dim=3, vector_data_type=vector_field), vector_field, search_params, batch_size,
-            expr='int64_pk > 15', check_task=CheckTasks.check_search_iterator, check_items={"batch_size": batch_size})
+            expr='INT16 > 15', check_task=CheckTasks.check_search_iterator, check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_index_hybrid_search(self):
@@ -659,7 +687,7 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
 
         # create a collection with fields
         self.collection_wrap.init_collection(
-            name=cf.gen_unique_str("test_bitmap_index_dql_expr"),
+            name=cf.gen_unique_str("test_bitmap_index_offset_cache"),
             schema=cf.set_collection_schema(
                 fields=[self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields],
                 field_params={
@@ -825,7 +853,7 @@ class TestBitmapIndexMmap(TestCaseClassBase):
 
         # create a collection with fields
         self.collection_wrap.init_collection(
-            name=cf.gen_unique_str("test_bitmap_index_dql_expr"),
+            name=cf.gen_unique_str("test_bitmap_index_bitmap"),
             schema=cf.set_collection_schema(
                 fields=[self.primary_field, DataType.FLOAT_VECTOR.name, *self().all_scalar_fields],
                 field_params={
@@ -991,7 +1019,7 @@ class TestIndexUnicodeString(TestCaseClassBase):
 
         # create a collection with fields
         self.collection_wrap.init_collection(
-            name=cf.gen_unique_str("test_bitmap_index_unicode"),
+            name=cf.gen_unique_str("test_index_unicode_string"),
             schema=cf.set_collection_schema(
                 fields=[self.primary_field, DataType.FLOAT_VECTOR.name,
                         f"{DataType.VARCHAR.name}_BITMAP", f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}_BITMAP",
@@ -1065,7 +1093,7 @@ class TestIndexUnicodeString(TestCaseClassBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("obj", cf.gen_varchar_unicode_expression_array(
         ['ARRAY_VARCHAR_BITMAP', 'ARRAY_VARCHAR_INVERTED', 'ARRAY_VARCHAR_NoIndex']))
-    @pytest.mark.parametrize("limit", [1])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
     def test_index_unicode_string_array_query(self, limit, obj):
         """
         target:
@@ -1162,7 +1190,7 @@ class TestMixScenes(TestcaseBase):
                                    check_items={"exp_res": []})
 
 
-@pytest.mark.xdist_group("TestMultiVectorsGroupSearch")
+@pytest.mark.xdist_group("TestGroupSearch")
 class TestGroupSearch(TestCaseClassBase):
     """
     Testing group search scenarios
