@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.53.0') _
+@Library('jenkins-shared-library@v0.56.0') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -131,6 +131,15 @@ pipeline {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    post {
+        unsuccessful {
+            container('jnlp') {
+                script {
+                    sendEmail.toQA()
                 }
             }
         }
