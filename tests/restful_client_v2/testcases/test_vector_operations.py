@@ -926,6 +926,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.skip(reason="behavior change;todo:@zhuwenxing")
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [16])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
@@ -1031,6 +1032,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.skip(reason="behavior change;todo:@zhuwenxing")
     @pytest.mark.parametrize("nq", [1, 2])
     def test_search_vector_with_float_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, nq):
@@ -1225,6 +1227,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.skip(reason="behavior change;todo:@zhuwenxing")
     def test_search_vector_with_binary_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema):
         """

@@ -136,6 +136,8 @@ const (
 	IsSparseKey               = "is_sparse"
 	AutoIndexName             = "AUTOINDEX"
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
+	IgnoreGrowing             = "ignore_growing"
+	ConsistencyLevel          = "consistency_level"
 )
 
 //  Collection properties key
