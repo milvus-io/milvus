@@ -31,6 +31,7 @@ type FunctionRunner interface {
 	GetOutputFields() []*schemapb.FieldSchema
 }
 
+
 func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	switch schema.GetType() {
 	case schemapb.FunctionType_BM25:
