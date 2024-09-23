@@ -629,7 +629,7 @@ func isDMLMsg(msg TsMsg) bool {
 	return msg.Type() == commonpb.MsgType_Insert || msg.Type() == commonpb.MsgType_Delete
 }
 
-func (ms *MqTtMsgStream) continueBuffering(endTs uint64, size uint64) bool {
+func (ms *MqTtMsgStream) continueBuffering(endTs, size uint64, startTime time.Time) bool {
 	if ms.ctx.Err() != nil {
 		return false
 	}
@@ -646,6 +646,10 @@ func (ms *MqTtMsgStream) continueBuffering(endTs uint64, size uint64) bool {
 
 	// buffer full
 	if size > paramtable.Get().ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64() {
+		return false
+	}
+
+	if time.Since(startTime) > paramtable.Get().ServiceParam.MQCfg.PursuitBufferTime.GetAsDuration(time.Second) {
 		return false
 	}
 
@@ -677,10 +681,11 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			// endMsgPositions := make([]*msgpb.MsgPosition, 0)
 			startPositions := make(map[string]*msgpb.MsgPosition)
 			endPositions := make(map[string]*msgpb.MsgPosition)
+			startBufTime := time.Now()
 			var endTs uint64
 			var size uint64
 
-			for ms.continueBuffering(endTs, size) {
+			for ms.continueBuffering(endTs, size, startBufTime) {
 				ms.consumerLock.Lock()
 				// wait all channels get ttMsg
 				for _, consumer := range ms.consumers {
