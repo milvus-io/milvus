@@ -349,3 +349,10 @@ func createStorageConfig() *indexpb.StorageConfig {
 
 	return storageConfig
 }
+
+func getSortStatus(sorted bool) string {
+	if sorted {
+		return "sorted"
+	}
+	return "unsorted"
+}

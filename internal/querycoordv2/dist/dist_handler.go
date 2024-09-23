@@ -146,6 +146,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 				PartitionID:   s.GetPartition(),
 				InsertChannel: s.GetChannel(),
 				Level:         s.GetLevel(),
+				IsSorted:      s.GetIsSorted(),
 			}
 		}
 		updates = append(updates, &meta.Segment{
