@@ -814,7 +814,7 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			}
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		for _, row := range array.GetData() {
+		for rowCnt, row := range array.GetData() {
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("string array", "nil array", "insert data does not match")
 			}
@@ -822,6 +822,17 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_StringData)(nil)) {
 				return merr.WrapErrParameterInvalid("string array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			if v.checkMaxLen {
+				maxLength, err := parameterutil.GetMaxLength(field)
+				if err != nil {
+					return err
+				}
+				if i, ok := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); !ok {
+					return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
+						field.GetDataType().String(), field.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
+					)
+				}
 			}
 		}
 	}
@@ -843,19 +854,6 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		}
 		if err := verifyCapacityPerRow(data.GetData(), maxCapacity, fieldSchema.GetElementType()); err != nil {
 			return err
-		}
-	}
-	if typeutil.IsStringType(data.GetElementType()) && v.checkMaxLen {
-		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
-		if err != nil {
-			return err
-		}
-		for rowCnt, row := range data.GetData() {
-			if i, ok := verifyLengthPerRow(row.GetStringData().GetData(), maxLength); !ok {
-				return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
-					fieldSchema.GetDataType().String(), fieldSchema.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
-				)
-			}
 		}
 	}
 	return v.checkArrayElement(data, fieldSchema)
