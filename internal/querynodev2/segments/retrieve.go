@@ -104,6 +104,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 		wg.Add(1)
 		go func(segment Segment, i int) {
 			defer wg.Done()
+			defer segment.Unpin()
 			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
 			var result *segcorepb.RetrieveResults
 			err := doOnSegment(ctx, mgr, segment, func(ctx context.Context, segment Segment) error {

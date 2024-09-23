@@ -212,9 +212,8 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 	server := client.CreateServer()
 
 	go func() {
-		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		_, err := RetrieveStream(ctx, suite.manager, plan, req, server)
 		suite.NoError(err)
-		suite.manager.Segment.Unpin(segments)
 		server.FinishSend(err)
 	}()
 
