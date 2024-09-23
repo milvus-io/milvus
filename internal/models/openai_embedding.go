@@ -22,13 +22,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"time"
-)
-
-const (
-	TextEmbeddingAda002  string = "text-embedding-ada-002"
-	TextEmbedding3Small string = "text-embedding-3-small"
-	TextEmbedding3Large string = "text-embedding-3-large"
 )
 
 
@@ -84,6 +79,16 @@ type EmbeddingResponse struct {
 	Usage  Usage           `json:"usage"`
 }
 
+
+type ByIndex struct {
+	resp *EmbeddingResponse
+}
+
+func (eb *ByIndex) Len() int           { return len(eb.resp.Data) }
+func (eb *ByIndex) Swap(i, j int)      { eb.resp.Data[i], eb.resp.Data[j] = eb.resp.Data[j], eb.resp.Data[i] }
+func (eb *ByIndex) Less(i, j int) bool { return eb.resp.Data[i].Index < eb.resp.Data[j].Index }
+
+
 type ErrorInfo struct {
 	Code string            `json:"code"`
 	Message string         `json:"message"`
@@ -96,25 +101,26 @@ type EmbedddingError struct {
 }
 
 type OpenAIEmbeddingClient struct {
-	api_key string
-	uri string
-	model_name string
+	apiKey string
+	url string
 }
 
 func (c *OpenAIEmbeddingClient) Check() error {
-	if c.model_name != TextEmbeddingAda002 && c.model_name != TextEmbedding3Small && c.model_name != TextEmbedding3Large {
-		return fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s]",
-			c.model_name, TextEmbeddingAda002, TextEmbedding3Small, TextEmbedding3Large)
-	}
-
-	if c.api_key == "" {
+	if c.apiKey == "" {
 		return fmt.Errorf("OpenAI api key is empty")
 	}
 
-	if c.uri == "" {
-		return fmt.Errorf("OpenAI embedding uri is empty")
+	if c.url == "" {
+		return fmt.Errorf("OpenAI embedding url is empty")
 	}
 	return nil
+}
+
+func NewOpenAIEmbeddingClient(apiKey string, url string) OpenAIEmbeddingClient{
+	return OpenAIEmbeddingClient{
+		apiKey: apiKey,
+		url: url,
+	}
 }
 
 
@@ -143,9 +149,9 @@ func (c *OpenAIEmbeddingClient) send(client *http.Client, req *http.Request, res
 	return nil
 }
 
-func (c *OpenAIEmbeddingClient) sendWithRetry(client *http.Client, req *http.Request,res *EmbeddingResponse, max_retries int) error {
+func (c *OpenAIEmbeddingClient) sendWithRetry(client *http.Client, req *http.Request,res *EmbeddingResponse, maxRetries int) error {
 	var err error
-	for i := 0; i < max_retries; i++ {
+	for i := 0; i < maxRetries; i++ {
 		err = c.send(client, req, res)
 		if err == nil {
 			return nil
@@ -154,9 +160,9 @@ func (c *OpenAIEmbeddingClient) sendWithRetry(client *http.Client, req *http.Req
 	return err
 }
 
-func (c *OpenAIEmbeddingClient) Embedding(texts []string, dim int, user string, timeout_sec time.Duration) (EmbeddingResponse, error) {
+func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
-	r.Model = c.model_name
+	r.Model = modelName
 	r.Input = texts
 	r.EncodingFormat = "float"
 	if user != "" {
@@ -166,27 +172,31 @@ func (c *OpenAIEmbeddingClient) Embedding(texts []string, dim int, user string, 
 		r.Dimensions = dim
 	}
 
-	var res EmbeddingResponse
 	data, err := json.Marshal(r)
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	
 	// call openai
-	if timeout_sec <= 0 {
-		timeout_sec = 30
+	if timeoutSec <= 0 {
+		timeoutSec = 30
 	}
 	client := &http.Client{
-		Timeout: timeout_sec * time.Second,
+		Timeout: timeoutSec * time.Second,
 	}
-	req, err := http.NewRequest("POST" , c.uri,  bytes.NewBuffer(data))
+	req, err := http.NewRequest("POST" , c.url,  bytes.NewBuffer(data))
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.api_key)
+	req.Header.Set("api-key", c.apiKey)
 
+	var res EmbeddingResponse
 	err = c.sendWithRetry(client, req, &res, 3)
-	return res, err
+	if err != nil {
+		return nil, err
+	}
+	sort.Sort(&ByIndex{&res})
+	return &res, err
 	
 }
