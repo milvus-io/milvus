@@ -255,7 +255,6 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 func (sd *shardDelegator) applyDelete(ctx context.Context,
 	nodeID int64,
 	worker cluster.Worker,
-	// delRecords map[int64]DeleteData,
 	delRecords func(segmentID int64) (DeleteData, bool),
 	entries []SegmentEntry,
 	scope querypb.DataScope,
@@ -272,7 +271,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
 		segmentEntry := segmentEntry
-		delRecord, ok := delRecords(segmentEntry.SegmentID) // delRecords[segmentEntry.SegmentID]
+		delRecord, ok := delRecords(segmentEntry.SegmentID)
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
