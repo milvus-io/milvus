@@ -191,8 +191,8 @@ type HybridSearchReq struct {
 	Search           []SubSearchReq `json:"search"`
 	Rerank           Rand           `json:"rerank"`
 	Limit            int32          `json:"limit"`
-	GroupByField   string         `json:"groupingField"`
-	GroupSize      int32          `json:"groupSize"`
+	GroupByField     string         `json:"groupingField"`
+	GroupSize        int32          `json:"groupSize"`
 	OutputFields     []string       `json:"outputFields"`
 	ConsistencyLevel string         `json:"consistencyLevel"`
 }
