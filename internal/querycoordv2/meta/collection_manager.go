@@ -582,9 +582,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		// if collection becomes loaded, clear it's recoverTimes in load info
 		newCollection.RecoverTimes = 0
 
-		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
-		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
-		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
+		metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Values(m.collections))))
 		elapsed := time.Since(newCollection.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
