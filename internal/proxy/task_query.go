@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -75,9 +76,9 @@ type queryTask struct {
 }
 
 type queryParams struct {
-	limit             int64
-	offset            int64
-	reduceStopForBest bool
+	limit      int64
+	offset     int64
+	reduceType reduce.IReduceType
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -142,6 +143,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		limit             int64
 		offset            int64
 		reduceStopForBest bool
+		isIterator        bool
 		err               error
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
@@ -154,10 +156,29 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	isIteratorStr, err := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, queryParamsPair)
+	// if reduce_stop_for_best is provided
+	if err == nil {
+		isIterator, err = strconv.ParseBool(isIteratorStr)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("true or false", isIteratorStr,
+				"value for iterator field is invalid")
+		}
+	}
+
+	reduceType := reduce.IReduceNoOrder
+	if isIterator {
+		if reduceStopForBest {
+			reduceType = reduce.IReduceInOrderForBest
+		} else {
+			reduceType = reduce.IReduceInOrder
+		}
+	}
+
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
 	// if limit is not provided
 	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited, reduceStopForBest: reduceStopForBest}, nil
+		return &queryParams{limit: typeutil.Unlimited, reduceType: reduceType}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
@@ -179,9 +200,9 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}
 
 	return &queryParams{
-		limit:             limit,
-		offset:            offset,
-		reduceStopForBest: reduceStopForBest,
+		limit:      limit,
+		offset:     offset,
+		reduceType: reduceType,
 	}, nil
 }
 
@@ -343,7 +364,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.RetrieveRequest.ReduceStopForBest = queryParams.reduceStopForBest
+	if queryParams.reduceType == reduce.IReduceInOrderForBest {
+		t.RetrieveRequest.ReduceStopForBest = true
+	}
+	t.RetrieveRequest.ReduceType = int32(queryParams.reduceType)
 
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
@@ -612,9 +636,10 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	cursors := make([]int64, len(validRetrieveResults))
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
-		// reduceStopForBest will try to get as many results as possible
+		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
-		if !queryParams.reduceStopForBest {
+		// to get as many qualified results as possible
+		if reduce.ShouldUseInputLimit(queryParams.reduceType) {
 			loopEnd = int(queryParams.limit)
 		}
 	}
@@ -623,7 +648,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	if queryParams != nil && queryParams.offset > 0 {
 		for i := int64(0); i < queryParams.offset; i++ {
 			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
-			if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+			if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 				return ret, nil
 			}
 			cursors[sel]++
@@ -635,7 +660,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
-		if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
 		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])

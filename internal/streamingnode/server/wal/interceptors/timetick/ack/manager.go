@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -18,7 +16,9 @@ type AckManager struct {
 	lastAllocatedTimeTick uint64                // The last allocated time tick, the latest timestamp allocated by the allocator.
 	lastConfirmedTimeTick uint64                // The last confirmed time tick, the message which time tick less than lastConfirmedTimeTick has been committed into wal.
 	notAckHeap            typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum allocated but not ack timestamp in list.
-	ackHeap               typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum ack timestamp in list.
+	// Actually, the notAckHeap can be replaced by a list because of the the allocate operation is protected by mutex,
+	// keep it as a heap to make the code more readable.
+	ackHeap typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum ack timestamp in list.
 	// It is used to detect the concurrent operation to find the last confirmed message id.
 	acknowledgedDetails  sortedDetails         // All ack details which time tick less than lastConfirmedTimeTick will be temporarily kept here until sync operation happens.
 	lastConfirmedManager *lastConfirmedManager // The last confirmed message id manager.
@@ -43,7 +43,7 @@ func NewAckManager(
 func (ta *AckManager) AllocateWithBarrier(ctx context.Context, barrierTimeTick uint64) (*Acker, error) {
 	// wait until the lastConfirmedTimeTick is greater than barrierTimeTick.
 	ta.cond.L.Lock()
-	if ta.lastConfirmedTimeTick <= barrierTimeTick {
+	for ta.lastConfirmedTimeTick <= barrierTimeTick {
 		if err := ta.cond.Wait(ctx); err != nil {
 			return nil, err
 		}
@@ -69,7 +69,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 	// create new timestampAck for ack process.
 	// add ts to heap wait for ack.
 	acker := &Acker{
-		acknowledged: atomic.NewBool(false),
+		acknowledged: false,
 		detail:       newAckDetail(ts, ta.lastConfirmedManager.GetLastConfirmedMessageID()),
 		manager:      ta,
 	}
@@ -104,6 +104,7 @@ func (ta *AckManager) ack(acker *Acker) {
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
+	acker.acknowledged = true
 	acker.detail.EndTimestamp = ta.lastAllocatedTimeTick
 	ta.ackHeap.Push(acker)
 	ta.popUntilLastAllAcknowledged()
@@ -113,7 +114,7 @@ func (ta *AckManager) ack(acker *Acker) {
 func (ta *AckManager) popUntilLastAllAcknowledged() {
 	// pop all acknowledged timestamps.
 	acknowledgedDetails := make(sortedDetails, 0, 5)
-	for ta.notAckHeap.Len() > 0 && ta.notAckHeap.Peek().acknowledged.Load() {
+	for ta.notAckHeap.Len() > 0 && ta.notAckHeap.Peek().acknowledged {
 		ack := ta.notAckHeap.Pop()
 		acknowledgedDetails = append(acknowledgedDetails, ack.ackDetail())
 	}
@@ -128,8 +129,8 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
 
 	// pop all EndTimestamp is less than lastConfirmedTimeTick.
-	// The message which EndTimetick less than lastConfirmedTimeTick has all been committed into wal.
-	// So the MessageID of the messages is dense and continuous.
+	// All the messages which EndTimetick less than lastConfirmedTimeTick have been committed into wal.
+	// So the MessageID of those messages is dense and continuous.
 	confirmedDetails := make(sortedDetails, 0, 5)
 	for ta.ackHeap.Len() > 0 && ta.ackHeap.Peek().detail.EndTimestamp < ta.lastConfirmedTimeTick {
 		ack := ta.ackHeap.Pop()
