@@ -645,6 +645,8 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 
+	assert.Equal(t, 60, params.ServiceParam.MQCfg.PursuitBufferTime.GetAsInt())
+
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 

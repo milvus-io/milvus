@@ -1349,7 +1349,7 @@ func TestSearchV2(t *testing.T) {
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(12)
+	}, nil).Times(11)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: outputFields,
@@ -1398,7 +1398,7 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"],"consistencyLevel": "Strong"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -1406,8 +1406,8 @@ func TestSearchV2(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
-		errMsg:      "can only accept json format request, error: invalid search params",
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"ignore_growing": "true"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.ignore_growing of type bool",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1528,6 +1528,12 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [{"1": 0.1}], "annsField": "sparseFloatVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"params":"a"}}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.params of type map[string]interface {}",
+		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 
 	for _, testcase := range queryTestCases {

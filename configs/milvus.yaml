@@ -161,6 +161,7 @@ mq:
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
+  pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
@@ -455,6 +456,7 @@ queryNode:
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
+  streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
