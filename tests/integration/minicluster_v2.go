@@ -364,6 +364,57 @@ func (cluster *MiniClusterV2) Start() error {
 	return nil
 }
 
+func (cluster *MiniClusterV2) StopRootCoord() {
+	if err := cluster.RootCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.RootCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartRootCoord() {
+	if cluster.RootCoord == nil {
+		var err error
+		if cluster.RootCoord, err = grpcrootcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.RootCoord)
+	}
+}
+
+func (cluster *MiniClusterV2) StopDataCoord() {
+	if err := cluster.DataCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.DataCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartDataCoord() {
+	if cluster.DataCoord == nil {
+		var err error
+		if cluster.DataCoord, err = grpcdatacoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.DataCoord)
+	}
+}
+
+func (cluster *MiniClusterV2) StopQueryCoord() {
+	if err := cluster.QueryCoord.Stop(); err != nil {
+		panic(err)
+	}
+	cluster.QueryCoord = nil
+}
+
+func (cluster *MiniClusterV2) StartQueryCoord() {
+	if cluster.QueryCoord == nil {
+		var err error
+		if cluster.QueryCoord, err = grpcquerycoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+			panic(err)
+		}
+		runComponent(cluster.QueryCoord)
+	}
+}
+
 func getGrpcDialOpt() []grpc.DialOption {
 	return []grpc.DialOption{
 		grpc.WithBlock(),
