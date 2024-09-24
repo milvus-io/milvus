@@ -752,7 +752,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
 		return resp, nil
 	}
-	if req.Req.MetricType == "" {
+	if req.Req.MetricType == "" && !req.GetReq().GetIsAdvanced() {
 		req.Req.MetricType = collection.GetMetricType()
 	}
 

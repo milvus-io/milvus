@@ -300,11 +300,13 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 }
 
 func GetMetricType(schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) string {
-	vecField, err := typeutil.GetVectorFieldSchema(schema)
-	if err != nil {
-		log.Warn("get vector field failed", zap.String("collection", schema.GetName()), zap.Error(err))
+	vecFields := typeutil.GetVectorFieldSchemas(schema)
+	// if vector field is not found or more than one, return empty string
+	// because we don't need the metric type for more than one vector fields
+	if len(vecFields) == 0 || len(vecFields) > 1 {
 		return ""
 	}
+	vecField := vecFields[0]
 	vecIndexMeta, ok := lo.Find(indexMeta.GetIndexMetas(), func(fieldIndexMeta *segcorepb.FieldIndexMeta) bool {
 		return fieldIndexMeta.GetFieldID() == vecField.GetFieldID()
 	})
