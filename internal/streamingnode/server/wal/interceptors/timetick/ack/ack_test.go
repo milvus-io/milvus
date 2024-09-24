@@ -3,7 +3,10 @@ package ack
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -13,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -132,4 +136,83 @@ func TestAck(t *testing.T) {
 
 	// no more timestamp to ack.
 	assert.Zero(t, ackManager.notAckHeap.Len())
+}
+
+func TestAckManager(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+
+	ctx := context.Background()
+
+	counter := atomic.NewUint64(1)
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+			if atr.Count > 1000 {
+				panic(fmt.Sprintf("count %d is too large", atr.Count))
+			}
+			c := counter.Add(uint64(atr.Count))
+			return &rootcoordpb.AllocTimestampResponse{
+				Status:    merr.Success(),
+				Timestamp: c - uint64(atr.Count),
+				Count:     atr.Count,
+			}, nil
+		},
+	)
+	resource.InitForTest(t, resource.OptRootCoordClient(rc))
+
+	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0))
+
+	// Test Concurrent Collect.
+	wg := sync.WaitGroup{}
+	details := make([]*AckDetail, 0, 10)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			currentDetails, err := ackManager.SyncAndGetAcknowledged(ctx)
+			assert.NoError(t, err)
+			for _, d := range currentDetails {
+				if !d.IsSync {
+					details = append(details, d)
+				}
+			}
+			if len(details) == 1100 {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
+			ts, err := ackManager.Allocate(ctx)
+			assert.NoError(t, err)
+			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
+			id, err := resource.Resource().TSOAllocator().Allocate(ctx)
+			assert.NoError(t, err)
+			ts.Ack(
+				OptMessageID(walimplstest.NewTestMessageID(int64(id))),
+			)
+		}()
+	}
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
+			ts, err := ackManager.AllocateWithBarrier(ctx, uint64(i*10))
+			assert.NoError(t, err)
+			assert.Greater(t, ts.Timestamp(), uint64(i*10))
+			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
+			id, err := resource.Resource().TSOAllocator().Allocate(ctx)
+			assert.NoError(t, err)
+			ts.Ack(
+				OptMessageID(walimplstest.NewTestMessageID(int64(id))),
+			)
+		}(i)
+	}
+	wg.Wait()
 }
