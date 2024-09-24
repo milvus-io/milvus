@@ -112,6 +112,50 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		suite.InDeltaSlice(FloatVector, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
 	})
 
+	suite.Run("test_duppk_multipke_segment", func() {
+		var fieldsData1 []*schemapb.FieldData
+		fieldsData1 = append(fieldsData1, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
+		fieldsData1 = append(fieldsData1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1, 1}, 1))
+		fieldsData1 = append(fieldsData1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
+
+		var fieldsData2 []*schemapb.FieldData
+		fieldsData2 = append(fieldsData2, genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2500}, 1))
+		fieldsData2 = append(fieldsData2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1}, 1))
+		fieldsData2 = append(fieldsData2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:8], Dim))
+
+		result1 := &segcorepb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 1},
+					},
+				},
+			},
+			Offset:     []int64{0, 1},
+			FieldsData: fieldsData1,
+		}
+		result2 := &segcorepb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1},
+					},
+				},
+			},
+			Offset:     []int64{0},
+			FieldsData: fieldsData2,
+		}
+
+		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+		suite.NoError(err)
+		suite.Equal(3, len(result.GetFieldsData()))
+		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
+		intFieldData, has := getFieldData(result, Int64FieldID)
+		suite.Require().True(has)
+		suite.ElementsMatch([]int64{1}, intFieldData.GetScalars().GetLongData().Data)
+	})
+
 	suite.Run("test nil results", func() {
 		ret, err := MergeSegcoreRetrieveResultsV1(context.Background(), nil,
 			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
