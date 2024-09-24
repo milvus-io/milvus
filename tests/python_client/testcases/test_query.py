@@ -4556,7 +4556,7 @@ class TestQueryTextMatch(TestcaseBase):
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
-        data_size = 5000
+        data_size = 3000
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix), schema=schema
         )
@@ -4587,7 +4587,6 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i : len(df)]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
@@ -4607,7 +4606,7 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             assert len(res) > 0
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             for r in res:
                 assert token in r[field]
 
@@ -4630,7 +4629,7 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"TextMatch({field}, '{string_of_top_10_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             for r in res:
                 assert any([token in r[field] for token in top_10_tokens])
 
@@ -4741,7 +4740,7 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"TextMatch({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             for r in res:
                 assert token in r[field]
 
@@ -4755,7 +4754,7 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"TextMatch({field}, '{string_of_top_10_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             for r in res:
                 assert any([token in r[field] for token in top_10_tokens])
 
@@ -4964,7 +4963,7 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"expr: {text_match_expr}")
             res, _ = collection_w.query(expr=text_match_expr, output_fields=text_fields)
             onetime_res = res
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             step_by_step_results = []
             for expr in query:
                 if isinstance(expr, dict):
@@ -4981,7 +4980,7 @@ class TestQueryTextMatch(TestcaseBase):
                     log.info(
                         f"text match res {len(text_match_df)}\n{text_match_df[key]}"
                     )
-                    log.info(f"tmp expr {tmp_expr} {len(res)}, {res}")
+                    log.info(f"tmp expr {tmp_expr} {len(res)}")
                     tmp_idx = [r["id"] for r in res]
                     step_by_step_results.append(tmp_idx)
                     pandas_filter_res = cf.generate_pandas_text_match_result(
@@ -5000,7 +4999,6 @@ class TestQueryTextMatch(TestcaseBase):
                     )
                 if isinstance(expr, str):
                     step_by_step_results.append(expr)
-            log.info(f"step by step results {step_by_step_results}")
             final_res = cf.evaluate_expression(step_by_step_results)
             log.info(f"one time res {len(onetime_res)}, final res {len(final_res)}")
             if len(onetime_res) != len(final_res):
@@ -5129,6 +5127,8 @@ class TestQueryTextMatch(TestcaseBase):
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
             assert len(res) > 0
+            for r in res:
+                assert token in r[field]
 
         # query single field for multi-word
         for field in text_fields:
@@ -5141,6 +5141,9 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
+            assert len(res) > 0
+            for r in res:
+                assert any([token in r[field] for token in multi_words])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_text_match_with_addition_inverted_index(self):
@@ -5202,14 +5205,13 @@ class TestQueryTextMatch(TestcaseBase):
         for i in range(data_size):
             d = {
                 "id": i,
-                "word": fake_en.word(),
-                "sentence": fake_en.sentence(),
-                "paragraph": fake_en.paragraph(),
-                "text": fake_en.text(),
+                "word": fake_en.word().lower(),
+                "sentence": fake_en.sentence().lower(),
+                "paragraph": fake_en.paragraph().lower(),
+                "text": fake_en.text().lower(),
                 "emb": cf.gen_vectors(1, dim)[0],
             }
             data.append(d)
-        log.info(f"data\n{data[:10]}")
         batch_size = 5000
         for i in range(0, data_size, batch_size):
             collection_w.insert(
@@ -5217,7 +5219,6 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < data_size
                 else data[i:data_size]
             )
-            collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
@@ -5225,6 +5226,7 @@ class TestQueryTextMatch(TestcaseBase):
         collection_w.create_index("word", {"index_type": "INVERTED"})
         collection_w.load()
         df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
         text_fields = ["word", "sentence", "paragraph", "text"]
         wf_map = {}
         for field in text_fields:
@@ -5235,14 +5237,17 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"TextMatch({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            log.info(f"res len {len(res)} res {res}")
+            log.info(f"res len {len(res)}")
             assert len(res) > 0
+            for r in res:
+                assert token in r[field]
             if field == "word":
                 assert len(res) == wf_map[field].most_common()[-1][1]
                 expr = f"{field} == '{token}'"
                 log.info(f"expr: {expr}")
                 res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                log.info(f"res len {len(res)} res {res}")
+                log.info(f"res len {len(res)}")
+                assert len(res) == wf_map[field].most_common()[-1][1]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_text_match_with_some_empty_string(self):
@@ -5346,9 +5351,9 @@ class TestQueryTextMatch(TestcaseBase):
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(
-                data[i : i + batch_size]
+                data[i: i + batch_size]
                 if i + batch_size < len(df)
-                else data[i : len(df)]
+                else data[i: len(df)]
             )
             collection_w.flush()
         collection_w.create_index(
@@ -5364,7 +5369,8 @@ class TestQueryTextMatch(TestcaseBase):
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
             assert len(res) > 0
-
+            for r in res:
+                assert token in r[field]
         # query single field for multi-word
         for field in text_fields:
             # match top 3 most common words
@@ -5376,6 +5382,9 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
+            assert len(res) > 0
+            for r in res:
+                assert any([token in r[field] for token in multi_words])
 
 
 class TestQueryTextMatchNegative(TestcaseBase):
