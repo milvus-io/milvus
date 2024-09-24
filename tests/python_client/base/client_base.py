@@ -242,7 +242,7 @@ class TestcaseBase(Base):
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
                                 enable_dynamic_field=False, with_json=True, random_primary_key=False,
                                 multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
-                                nullable_fields={}, default_value_fields={}, **kwargs):
+                                nullable_fields={}, default_value_fields={}, language=None, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -311,7 +311,7 @@ class TestcaseBase(Base):
                                dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json,
                                random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
                                primary_field=primary_field, vector_data_type=vector_data_type,
-                               nullable_fields=nullable_fields)
+                               nullable_fields=nullable_fields, language=language)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
@@ -324,7 +324,7 @@ class TestcaseBase(Base):
                 for vector_name in vector_name_list:
                     collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
             else:
-                if len(multiple_dim_array) == 0 or is_all_data_type == False:
+                if len(multiple_dim_array) == 0 or is_all_data_type is False:
                     vector_name_list.append(ct.default_float_vec_field_name)
                 for vector_name in vector_name_list:
                     # Unlike dense vectors, sparse vectors cannot create flat index.
