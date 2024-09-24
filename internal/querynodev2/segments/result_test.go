@@ -147,7 +147,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		}
 
 		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
