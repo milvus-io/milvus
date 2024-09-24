@@ -18,12 +18,14 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type CompactionView interface {
@@ -35,29 +37,6 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 }
 
-type FullViews struct {
-	collections map[int64][]*SegmentView // collectionID
-}
-
-type SegmentViewSelector func(view *SegmentView) bool
-
-func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selector SegmentViewSelector) []*SegmentView {
-	views, ok := v.collections[collectionID]
-	if !ok {
-		return nil
-	}
-
-	var ret []*SegmentView
-
-	for _, view := range views {
-		if selector == nil || selector(view) {
-			ret = append(ret, view.Clone())
-		}
-	}
-
-	return ret
-}
-
 type CompactionGroupLabel struct {
 	CollectionID UniqueID
 	PartitionID  UniqueID
@@ -66,10 +45,6 @@ type CompactionGroupLabel struct {
 
 func (label *CompactionGroupLabel) Key() string {
 	return fmt.Sprintf("%d-%s", label.PartitionID, label.Channel)
-}
-
-func (label *CompactionGroupLabel) IsMinGroup() bool {
-	return len(label.Channel) != 0 && label.PartitionID != 0 && label.CollectionID != 0
 }
 
 func (label *CompactionGroupLabel) Equal(other *CompactionGroupLabel) bool {
@@ -92,8 +67,7 @@ type SegmentView struct {
 	Level datapb.SegmentLevel
 
 	// positions
-	startPos *msgpb.MsgPosition
-	dmlPos   *msgpb.MsgPosition
+	dmlPos *msgpb.MsgPosition
 
 	// size
 	Size       float64
@@ -118,7 +92,6 @@ func (s *SegmentView) Clone() *SegmentView {
 		label:         s.label,
 		State:         s.State,
 		Level:         s.Level,
-		startPos:      s.startPos,
 		dmlPos:        s.dmlPos,
 		Size:          s.Size,
 		ExpireSize:    s.ExpireSize,
@@ -132,36 +105,40 @@ func (s *SegmentView) Clone() *SegmentView {
 	}
 }
 
+var canonizer = common.NewCanonizer[*SegmentInfo, *SegmentView](8196, 10*time.Minute, func(segment *SegmentInfo) *SegmentView {
+	return &SegmentView{
+		ID: segment.ID,
+		label: &CompactionGroupLabel{
+			CollectionID: segment.CollectionID,
+			PartitionID:  segment.PartitionID,
+			Channel:      segment.GetInsertChannel(),
+		},
+
+		State: segment.GetState(),
+		Level: segment.GetLevel(),
+
+		// positions
+		dmlPos: segment.GetDmlPosition(),
+
+		DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
+		DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
+		DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
+
+		Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
+		BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
+		StatslogCount: GetBinlogCount(segment.GetStatslogs()),
+
+		NumOfRows: segment.NumOfRows,
+		MaxRowNum: segment.MaxRowNum,
+		// TODO: set the following
+		// ExpireSize float64
+	}
+})
+
 func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
-		return &SegmentView{
-			ID: segment.ID,
-			label: &CompactionGroupLabel{
-				CollectionID: segment.CollectionID,
-				PartitionID:  segment.PartitionID,
-				Channel:      segment.GetInsertChannel(),
-			},
-
-			State: segment.GetState(),
-			Level: segment.GetLevel(),
-
-			// positions
-			startPos: segment.GetStartPosition(),
-			dmlPos:   segment.GetDmlPosition(),
-
-			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
-			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
-			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
-
-			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
-			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
-			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
-
-			NumOfRows: segment.NumOfRows,
-			MaxRowNum: segment.MaxRowNum,
-			// TODO: set the following
-			// ExpireSize float64
-		}
+		o, _ := canonizer.Canonize(segment)
+		return o
 	})
 }
 

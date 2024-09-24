@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
@@ -64,10 +63,6 @@ type CompactionTriggerManager struct {
 	handler           Handler
 	allocator         allocator.Allocator
 
-	view *FullViews
-	// todo handle this lock
-	viewGuard lock.RWMutex
-
 	meta             *meta
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
@@ -82,11 +77,8 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, com
 		allocator:         alloc,
 		handler:           handler,
 		compactionHandler: compactionHandler,
-		view: &FullViews{
-			collections: make(map[int64][]*SegmentView),
-		},
-		meta:     meta,
-		closeSig: make(chan struct{}),
+		meta:              meta,
+		closeSig:          make(chan struct{}),
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
@@ -210,10 +202,10 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 				m.SubmitL0ViewToScheduler(ctx, outView)
 			}
 		case TriggerTypeLevelZeroViewIDLE:
-			log.Debug("Start to trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewIDLE")
 			outView, reason := view.Trigger()
 			if outView == nil {
-				log.Info("Start to force trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+				log.Info("Start to force trigger a level zero compaction by TriggerTypeLevelZeroViewIDLE")
 				outView, reason = view.ForceTrigger()
 			}
 

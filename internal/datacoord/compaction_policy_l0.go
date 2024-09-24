@@ -11,7 +11,7 @@ import (
 
 type l0CompactionPolicy struct {
 	meta *meta
-	view *FullViews
+	view map[int64][]*SegmentView
 
 	emptyLoopCount *atomic.Int64
 }
@@ -20,7 +20,7 @@ func newL0CompactionPolicy(meta *meta) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
 		meta: meta,
 		// donot share views with other compaction policy
-		view:           &FullViews{collections: make(map[int64][]*SegmentView)},
+		view:           make(map[int64][]*SegmentView),
 		emptyLoopCount: atomic.NewInt64(0),
 	}
 }
@@ -51,11 +51,11 @@ func (policy *l0CompactionPolicy) Trigger() (map[CompactionTriggerType][]Compact
 func (policy *l0CompactionPolicy) generateEventForLevelZeroViewChange() (events map[CompactionTriggerType][]CompactionView) {
 	latestCollSegs := policy.meta.GetCompactableSegmentGroupByCollection()
 	latestCollIDs := lo.Keys(latestCollSegs)
-	viewCollIDs := lo.Keys(policy.view.collections)
+	viewCollIDs := lo.Keys(policy.view)
 
 	_, diffRemove := lo.Difference(latestCollIDs, viewCollIDs)
 	for _, collID := range diffRemove {
-		delete(policy.view.collections, collID)
+		delete(policy.view, collID)
 	}
 
 	refreshedL0Views := policy.RefreshLevelZeroViews(latestCollSegs)
@@ -81,7 +81,7 @@ func (policy *l0CompactionPolicy) RefreshLevelZeroViews(latestCollSegs map[int64
 				zap.Strings("views", lo.Map(collRefreshedViews, func(view CompactionView, _ int) string {
 					return view.String()
 				})))
-			policy.view.collections[collID] = latestL0Segments
+			policy.view[collID] = latestL0Segments
 		}
 
 		if len(collRefreshedViews) > 0 {
@@ -93,7 +93,7 @@ func (policy *l0CompactionPolicy) RefreshLevelZeroViews(latestCollSegs map[int64
 }
 
 func (policy *l0CompactionPolicy) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) (needRefresh bool, refreshed []CompactionView) {
-	cachedViews := policy.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
+	cachedViews := lo.Filter(policy.view[collID], func(v *SegmentView, _ int) bool {
 		return v.Level == datapb.SegmentLevel_L0
 	})
 
@@ -136,8 +136,8 @@ func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, 
 
 func (policy *l0CompactionPolicy) generateEventForLevelZeroViewIDLE() map[CompactionTriggerType][]CompactionView {
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
-	for collID := range policy.view.collections {
-		cachedViews := policy.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
+	for collID, sv := range policy.view {
+		cachedViews := lo.Filter(sv, func(v *SegmentView, _ int) bool {
 			return v.Level == datapb.SegmentLevel_L0
 		})
 		if len(cachedViews) > 0 {
