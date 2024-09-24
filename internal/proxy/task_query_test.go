@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -442,6 +443,101 @@ func TestTaskQuery_functions(t *testing.T) {
 		}
 	})
 
+	t.Run("test parseQueryParams for reduce type", func(t *testing.T) {
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "True",
+			})
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+			ret, err := parseQueryParams(inParams)
+			assert.NoError(t, err)
+			assert.Equal(t, reduce.IReduceInOrderForBest, ret.reduceType)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "True",
+			})
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "TrueXXXX",
+			})
+			ret, err := parseQueryParams(inParams)
+			assert.Error(t, err)
+			assert.Nil(t, ret)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "TrueXXXXX",
+			})
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+			ret, err := parseQueryParams(inParams)
+			assert.Error(t, err)
+			assert.Nil(t, ret)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "True",
+			})
+			// when not setting iterator tag, ignore reduce_stop_for_best
+			ret, err := parseQueryParams(inParams)
+			assert.NoError(t, err)
+			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+			// when not setting reduce_stop_for_best tag, reduce by keep results in order
+			ret, err := parseQueryParams(inParams)
+			assert.NoError(t, err)
+			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "False",
+			})
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "True",
+			})
+			ret, err := parseQueryParams(inParams)
+			assert.NoError(t, err)
+			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
+		}
+		{
+			var inParams []*commonpb.KeyValuePair
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   ReduceStopForBestKey,
+				Value: "False",
+			})
+			inParams = append(inParams, &commonpb.KeyValuePair{
+				Key:   IteratorField,
+				Value: "False",
+			})
+			ret, err := parseQueryParams(inParams)
+			assert.NoError(t, err)
+			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
+		}
+	})
+
 	t.Run("test reduceRetrieveResults", func(t *testing.T) {
 		const (
 			Dim                  = 8
@@ -572,7 +668,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 2, reduceStopForBest: true})
+					&queryParams{limit: 2, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -585,7 +681,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 1, offset: 1, reduceStopForBest: true})
+					&queryParams{limit: 1, offset: 1, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -596,7 +692,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 2, offset: 1, reduceStopForBest: true})
+					&queryParams{limit: 2, offset: 1, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 
@@ -609,7 +705,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: typeutil.Unlimited, reduceStopForBest: true})
+					&queryParams{limit: typeutil.Unlimited, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -620,10 +716,20 @@ func TestTaskQuery_functions(t *testing.T) {
 			t.Run("test stop reduce for best for unlimited set amd offset", func(t *testing.T) {
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceStopForBest: true})
+					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			})
+			t.Run("test iterator without setting reduce stop for best", func(t *testing.T) {
+				r1.HasMoreResult = true
+				r2.HasMoreResult = true
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 1, reduceType: reduce.IReduceInOrder})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+				assert.Equal(t, []int64{11}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			})
 		})
 	})

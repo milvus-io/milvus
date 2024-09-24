@@ -293,7 +293,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		return ret, nil
 	}
 
-	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
+	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
 		loopEnd = int(param.limit)
 	}
 
@@ -305,7 +305,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
 		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
-		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
+		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
 			break
 		}
 
@@ -416,7 +416,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	}
 
 	var limit int = -1
-	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
+	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
 		limit = int(param.limit)
 	}
 
@@ -438,7 +438,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); j++ {
 		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
-		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
+		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
 			break
 		}
 

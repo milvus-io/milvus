@@ -100,7 +100,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		}
 
 		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
@@ -114,7 +114,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 
 	suite.Run("test nil results", func() {
 		ret, err := MergeSegcoreRetrieveResultsV1(context.Background(), nil,
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Empty(ret.GetIds())
 		suite.Empty(ret.GetFieldsData())
@@ -133,7 +133,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 		}
 
 		ret, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Empty(ret.GetIds())
 		suite.Empty(ret.GetFieldsData())
@@ -185,7 +185,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 			for _, test := range tests {
 				suite.Run(test.description, func() {
 					result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-						NewMergeParam(test.limit, make([]int64, 0), nil, false))
+						NewMergeParam(test.limit, make([]int64, 0), nil, reduce.IReduceNoOrder))
 					suite.Equal(3, len(result.GetFieldsData()))
 					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
@@ -225,14 +225,14 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 			}
 
 			_, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result},
-				NewMergeParam(reqLimit, make([]int64, 0), nil, false))
+				NewMergeParam(reqLimit, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.Error(err)
 			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 		})
 
 		suite.Run("test int ID", func() {
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
 			intFieldData, has := getFieldData(result, Int64FieldID)
@@ -262,7 +262,7 @@ func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
 			}
 
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
@@ -321,7 +321,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 		}
 
 		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
@@ -335,7 +335,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 
 	suite.Run("test nil results", func() {
 		ret, err := MergeInternalRetrieveResult(context.Background(), nil,
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Empty(ret.GetIds())
 		suite.Empty(ret.GetFieldsData())
@@ -373,7 +373,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			},
 		}
 		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{ret1, ret2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 		suite.NoError(err)
 		suite.Equal(2, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
@@ -424,7 +424,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			for _, test := range tests {
 				suite.Run(test.description, func() {
 					result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-						NewMergeParam(test.limit, make([]int64, 0), nil, false))
+						NewMergeParam(test.limit, make([]int64, 0), nil, reduce.IReduceNoOrder))
 					suite.Equal(3, len(result.GetFieldsData()))
 					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
@@ -463,14 +463,14 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			}
 
 			_, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result, result},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.Error(err)
 			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 		})
 
 		suite.Run("test int ID", func() {
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
 
@@ -501,7 +501,7 @@ func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
 			}
 
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, false))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
@@ -568,7 +568,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result1.HasMoreResult = true
 			result2.HasMoreResult = true
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, true))
+				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			// has more result both, stop reduce when draining one result
@@ -586,7 +586,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result1.HasMoreResult = false
 			result2.HasMoreResult = false
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, true))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			// as result1 and result2 don't have better results neither
@@ -604,7 +604,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result1.HasMoreResult = true
 			result2.HasMoreResult = false
 			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, true))
+				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			// as result1 may have better results, stop reducing when draining it
@@ -643,7 +643,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 		result1.HasMoreResult = true
 		result2.HasMoreResult = false
 		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-			NewMergeParam(3, make([]int64, 0), nil, true))
+			NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 		suite.NoError(err)
 		suite.Equal(3, len(result.GetFieldsData()))
 		suite.Equal([]int64{0, 2, 4, 6, 7}, result.GetIds().GetIntId().GetData())
@@ -687,7 +687,7 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result1.HasMoreResult = false
 			result2.HasMoreResult = false
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, true))
+				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 2, 4, 7}, result.GetIds().GetIntId().GetData())
@@ -696,10 +696,19 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 			result1.HasMoreResult = false
 			result2.HasMoreResult = true
 			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, true))
+				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
 			suite.NoError(err)
 			suite.Equal(3, len(result.GetFieldsData()))
 			suite.Equal([]int64{0, 2}, result.GetIds().GetIntId().GetData())
+		})
+		suite.Run("test no stop reduce for best ", func() {
+			result1.HasMoreResult = true
+			result2.HasMoreResult = true
+			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
+				NewMergeParam(1, make([]int64, 0), nil, reduce.IReduceInOrder))
+			suite.NoError(err)
+			suite.Equal(3, len(result.GetFieldsData()))
+			suite.Equal([]int64{0}, result.GetIds().GetIntId().GetData())
 		})
 	})
 }
