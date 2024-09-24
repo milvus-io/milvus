@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -44,6 +45,12 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 				Name:     "text",
 				FieldID:  101,
 				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "enable_tokenizer",
+						Value: "true",
+					},
+				},
 			}, {
 				Name:             "sparse",
 				FieldID:          102,
