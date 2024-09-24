@@ -325,7 +325,9 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 					return err
 				}
 
-				msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
+				msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{
+					common.MsgTypeKey: v.Msgs[i].Type().String(),
+				}}
 				InjectCtx(spanCtx, msg.Properties)
 
 				ms.producerLock.RLock()
@@ -396,18 +398,11 @@ func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error
 
 // GetTsMsgFromConsumerMsg get TsMsg from consumer message
 func GetTsMsgFromConsumerMsg(unmarshalDispatcher UnmarshalDispatcher, msg common.Message) (TsMsg, error) {
-	header := commonpb.MsgHeader{}
-	if msg.Payload() == nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
-	}
-	err := proto.Unmarshal(msg.Payload(), &header)
+	msgType, err := common.GetMsgType(msg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+		return nil, err
 	}
-	if header.Base == nil {
-		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
-	}
-	tsMsg, err := unmarshalDispatcher.Unmarshal(msg.Payload(), header.Base.MsgType)
+	tsMsg, err := unmarshalDispatcher.Unmarshal(msg.Payload(), msgType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 	}
