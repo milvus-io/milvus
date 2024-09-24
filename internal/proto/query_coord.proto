@@ -606,6 +606,7 @@ message GetDataDistributionResponse {
     repeated ChannelVersionInfo channels = 4;
     repeated LeaderView leader_views = 5;
     int64 lastModifyTs = 6;
+    double memCapacityInMB = 7;
 }
 
 message LeaderView {
