@@ -109,7 +109,10 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		if err != nil {
 			// roll back replica from meta
 			replicaIDs := lo.Map(newReplicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
-			job.meta.ReplicaManager.RemoveReplicas(job.collectionID, replicaIDs...)
+			err := job.meta.ReplicaManager.RemoveReplicas(job.collectionID, replicaIDs...)
+			if err != nil {
+				log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", replicaIDs), zap.Error(err))
+			}
 		}
 	}()
 
@@ -145,7 +148,11 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}()
 
 	// 5. remove replica from meta
-	job.meta.ReplicaManager.RemoveReplicas(job.collectionID, toRelease...)
+	err = job.meta.ReplicaManager.RemoveReplicas(job.collectionID, toRelease...)
+	if err != nil {
+		log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
+		return err
+	}
 
 	// 6. recover node distribution among replicas
 	utils.RecoverReplicaOfCollection(job.meta, job.collectionID)
