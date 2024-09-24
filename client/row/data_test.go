@@ -1,6 +1,7 @@
 package row
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -126,6 +127,10 @@ func (s *RowsSuite) TestDynamicSchema() {
 }
 
 func (s *RowsSuite) TestReflectValueCandi() {
+	type DynamicRows struct {
+		Float float32 `json:"float" milvus:"name:float"`
+	}
+
 	cases := []struct {
 		tag       string
 		v         reflect.Value
@@ -149,6 +154,65 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			},
 			expectErr: false,
 		},
+		{
+			tag: "StructRow",
+			v: reflect.ValueOf(struct {
+				A string
+				B int64
+			}{A: "abc", B: 16}),
+			expect: map[string]fieldCandi{
+				"A": {
+					name: "A",
+					v:    reflect.ValueOf("abc"),
+				},
+				"B": {
+					name: "B",
+					v:    reflect.ValueOf(int64(16)),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			tag: "StructRow_DuplicateName",
+			v: reflect.ValueOf(struct {
+				A string `milvus:"name:a"`
+				B int64  `milvus:"name:a"`
+			}{A: "abc", B: 16}),
+			expectErr: true,
+		},
+		{
+			tag: "StructRow_EmbedStruct",
+			v: reflect.ValueOf(struct {
+				A string `milvus:"name:a"`
+				DynamicRows
+			}{A: "emb", DynamicRows: DynamicRows{Float: 0.1}}),
+			expect: map[string]fieldCandi{
+				"a": {
+					name: "a",
+					v:    reflect.ValueOf("emb"),
+				},
+				"float": {
+					name: "float",
+					v:    reflect.ValueOf(float32(0.1)),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			tag: "StructRow_EmbedDuplicateName",
+			v: reflect.ValueOf(struct {
+				Int64    int64     `json:"int64" milvus:"name:int64"`
+				Float    float32   `json:"float" milvus:"name:float"`
+				FloatVec []float32 `json:"floatVec" milvus:"name:floatVec"`
+				DynamicRows
+			}{}),
+			expectErr: true,
+		},
+		{
+			tag:       "Unsupported_primitive",
+			v:         reflect.ValueOf(int64(1)),
+			expectErr: true,
+		},
 	}
 
 	for _, c := range cases {
@@ -162,7 +226,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			s.Equal(len(c.expect), len(r))
 			for k, v := range c.expect {
 				rv, has := r[k]
-				s.Require().True(has)
+				s.Require().True(has, fmt.Sprintf("candidate with key(%s) must provided", k))
 				s.Equal(v.name, rv.name)
 			}
 		})
