@@ -1266,7 +1266,6 @@ class TestGroupSearch(TestCaseClassBase):
         self.collection_wrap.load()
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #36407")
     @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, "varchar_with_index"])
     def test_search_group_size(self, group_by_field):
         """
@@ -1308,7 +1307,6 @@ class TestGroupSearch(TestCaseClassBase):
                 assert len(set(group_values)) == limit
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #36407")
     def test_hybrid_search_group_size(self):
         """
         hybrid search group by on 3 different float vector fields with group by varchar field with group size
@@ -1360,7 +1358,6 @@ class TestGroupSearch(TestCaseClassBase):
                         group_distances = [res[i][l + 1].distance]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #36407")
     def test_hybrid_search_group_by(self):
         """
         verify hybrid search group by works with different Rankers
