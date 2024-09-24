@@ -101,7 +101,7 @@ USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
 USE_OPENDAL="OFF"
 INDEX_ENGINE="KNOWHERE"
-: "${ENABLE_GCP_NATIVE:="ON"}"
+: "${ENABLE_GCP_NATIVE:="OFF"}"
 
 while getopts "p:d:t:s:f:n:i:y:a:x:o:ulrcghzmebZ" arg; do
   case $arg in

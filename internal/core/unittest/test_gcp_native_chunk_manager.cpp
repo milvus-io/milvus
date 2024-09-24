@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "storage/GcpNativeChunkManager.h"
+#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
 #include "storage/Util.h"
 
 using namespace std;

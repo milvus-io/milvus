@@ -16,7 +16,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "monitor/prometheus_client.h"
-#include "storage/GcpNativeChunkManager.h"
+#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
 
 namespace milvus {
 namespace storage {

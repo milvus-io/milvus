@@ -12,4 +12,4 @@
 cmake_minimum_required (VERSION 3.12)
 set(CMAKE_CXX_STANDARD 17)
 
-add_library(gcp-native-storage OBJECT GcpNativeClientManager.cpp)
+add_library(gcp-native-storage OBJECT GcpNativeChunkManager.cpp GcpNativeClientManager.cpp)

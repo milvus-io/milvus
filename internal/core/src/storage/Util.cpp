@@ -30,7 +30,7 @@
 #include "storage/azure/AzureChunkManager.h"
 #endif
 #ifdef ENABLE_GCP_NATIVE
-#include "storage/GcpNativeChunkManager.h"
+#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
 #endif
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"

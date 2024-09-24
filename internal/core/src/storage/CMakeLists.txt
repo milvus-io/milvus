@@ -19,10 +19,6 @@ add_source_at_current_directory()
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
     add_subdirectory(gcp-native-storage)
-    set(SOURCE_FILES
-        ${SOURCE_FILES}
-        GcpNativeChunkManager.cpp
-        )
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)
