@@ -68,7 +68,7 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetMan
 			return err
 		}
 	}
-	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, meta.CurrentTarget)
+	segmentDist := targetMgr.GetSealedSegmentsByChannel(leader.CollectionID, leader.Channel, meta.CurrentTargetFirst)
 	// Check whether segments are fully loaded
 	for segmentID, info := range segmentDist {
 		_, exist := leader.Segments[segmentID]
@@ -83,6 +83,7 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, targetMgr meta.TargetMan
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 	}
+
 	return nil
 }
 
