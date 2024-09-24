@@ -181,12 +181,12 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
 	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
 	mmapConfig := C.CMmapConfig{
-		cache_read_ahead_policy: cCacheReadAheadPolicy,
-		mmap_path:               cMmapChunkManagerDir,
-		disk_limit:              C.uint64_t(diskLimit),
-		fix_file_size:           C.uint64_t(mmapFileSize),
-		growing_enable_mmap:     C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
-		enable_mmap:             C.bool(params.QueryNodeCfg.MmapEnabled.GetAsBool()),
+		cache_read_ahead_policy:  cCacheReadAheadPolicy,
+		mmap_path:                cMmapChunkManagerDir,
+		disk_limit:               C.uint64_t(diskLimit),
+		fix_file_size:            C.uint64_t(mmapFileSize),
+		growing_enable_mmap:      C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+		scalar_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarIndex.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")
