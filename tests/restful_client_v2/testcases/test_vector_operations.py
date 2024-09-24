@@ -4,8 +4,10 @@ import numpy as np
 import sys
 import json
 import time
+
+import utils.utils
 from utils import constant
-from utils.utils import gen_collection_name
+from utils.utils import gen_collection_name, get_sorted_distance
 from utils.util_log import test_log as logger
 import pytest
 from base.testbase import TestBase
@@ -921,7 +923,6 @@ class TestUpsertVector(TestBase):
 @pytest.mark.L0
 class TestSearchVector(TestBase):
 
-
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
@@ -1010,14 +1011,7 @@ class TestSearchVector(TestBase):
             "filter": "word_count > 100",
             "groupingField": "user_id",
             "outputFields": ["*"],
-            "searchParams": {
-                "metricType": "COSINE",
-                "params": {
-                    "radius": "0.1",
-                    "range_filter": "0.8"
-                }
-            },
-            "limit": 100,
+            "limit": 100
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
@@ -1032,8 +1026,9 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("nq", [1, 2])
+    @pytest.mark.parametrize("metric_type", ['COSINE', "L2", "IP"])
     def test_search_vector_with_float_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, nq):
+                                                      is_partition_key, enable_dynamic_schema, nq, metric_type):
         """
         Insert a vector with a simple payload
         """
@@ -1054,7 +1049,7 @@ class TestSearchVector(TestBase):
                 ]
             },
             "indexParams": [
-                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": "COSINE"},
+                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": metric_type},
             ]
         }
         rsp = self.collection_client.collection_create(payload)
@@ -1098,13 +1093,6 @@ class TestSearchVector(TestBase):
             "filter": "word_count > 100",
             "groupingField": "user_id",
             "outputFields": ["*"],
-            "searchParams": {
-                "metricType": "COSINE",
-                "params": {
-                    "radius": "0.1",
-                    "range_filter": "0.8"
-                }
-            },
             "limit": 100,
         }
         rsp = self.vector_client.vector_search(payload)
@@ -1225,7 +1213,8 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    def test_search_vector_with_binary_vector_datatype(self, nb, dim, insert_round, auto_id,
+    @pytest.mark.parametrize("metric_type", ['HAMMING'])
+    def test_search_vector_with_binary_vector_datatype(self, metric_type, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
@@ -1247,7 +1236,7 @@ class TestSearchVector(TestBase):
                 ]
             },
             "indexParams": [
-                {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
+                {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": metric_type,
                  "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
             ]
         }
@@ -1298,13 +1287,6 @@ class TestSearchVector(TestBase):
             "data": [gen_vector(datatype="BinaryVector", dim=dim)],
             "filter": "word_count > 100",
             "outputFields": ["*"],
-            "searchParams": {
-                "metricType": "HAMMING",
-                "params": {
-                    "radius": "0.1",
-                    "range_filter": "0.8"
-                }
-            },
             "limit": 100,
         }
         rsp = self.vector_client.vector_search(payload)
@@ -1545,6 +1527,130 @@ class TestSearchVector(TestBase):
                 assert name > prefix
             if "like" in varchar_expr:
                 assert name.startswith(prefix)
+
+    @pytest.mark.parametrize("consistency_level", ["Strong", "Bounded", "Eventually", "Session"])
+    def test_search_vector_with_consistency_level(self, consistency_level):
+        """
+        Search a vector with different consistency level
+        """
+        name = gen_collection_name()
+        self.name = name
+        nb = 200
+        dim = 128
+        limit = 100
+        schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
+        names = []
+        for item in data:
+            names.append(item.get("name"))
+        names.sort()
+        logger.info(f"names: {names}")
+        mid = len(names) // 2
+        prefix = names[mid][0:2]
+        vector_field = schema_payload.get("vectorField")
+        # search data
+        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+        output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
+        payload = {
+            "collectionName": name,
+            "data": [vector_to_search],
+            "outputFields": output_fields,
+            "limit": limit,
+            "offset": 0,
+            "consistencyLevel": consistency_level
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
+        res = rsp['data']
+        logger.info(f"res: {len(res)}")
+        assert len(res) == limit
+
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
+    def test_search_vector_with_range_search(self, metric_type):
+        """
+        Search a vector with range search with different metric type
+        """
+        name = gen_collection_name()
+        self.name = name
+        nb = 3000
+        dim = 128
+        limit = 100
+        schema_payload, data = self.init_collection(name, dim=dim, nb=nb, metric_type=metric_type)
+        vector_field = schema_payload.get("vectorField")
+        # search data
+        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+        training_data = [item[vector_field] for item in data]
+        distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
+        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.2*limit))] # recall is not 100% so add 20% to make sure the range is correct
+        if metric_type == "L2":
+            r1, r2 = r2, r1
+        output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
+        payload = {
+            "collectionName": name,
+            "data": [vector_to_search],
+            "outputFields": output_fields,
+            "limit": limit,
+            "offset": 0,
+            "searchParams": {
+                "params": {
+                    "radius": r1,
+                    "range_filter": r2,
+                }
+            }
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
+        res = rsp['data']
+        logger.info(f"res: {len(res)}")
+        assert len(res) == limit
+        for item in res:
+            distance = item.get("distance")
+            if metric_type == "L2":
+                assert r1 > distance > r2
+            else:
+                assert r1 < distance < r2
+
+    @pytest.mark.parametrize("ignore_growing", [True, False])
+    def test_search_vector_with_ignore_growing(self, ignore_growing):
+        """
+        Search a vector with range search with different metric type
+        """
+        name = gen_collection_name()
+        self.name = name
+        metric_type = "COSINE"
+        nb = 1000
+        dim = 128
+        limit = 100
+        schema_payload, data = self.init_collection(name, dim=dim, nb=nb, metric_type=metric_type)
+        vector_field = schema_payload.get("vectorField")
+        # search data
+        vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+        training_data = [item[vector_field] for item in data]
+        distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
+        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.2*limit))] # recall is not 100% so add 20% to make sure the range is correct
+        if metric_type == "L2":
+            r1, r2 = r2, r1
+        output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
+
+        payload = {
+            "collectionName": name,
+            "data": [vector_to_search],
+            "outputFields": output_fields,
+            "limit": limit,
+            "offset": 0,
+            "searchParams": {
+                "ignoreGrowing": ignore_growing
+
+            }
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 0
+        res = rsp['data']
+        logger.info(f"res: {len(res)}")
+        if ignore_growing is True:
+            assert len(res) == 0
+        else:
+            assert len(res) == limit
+
 
 
 @pytest.mark.L1
