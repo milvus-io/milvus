@@ -205,12 +205,10 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 			})
 			log.Info("resp", zap.Any("status", resp.GetStatus()), zap.Any("shards", resp.Shards))
 			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-
-			return len(resp.Shards) == 2
+			return merr.Ok(resp.GetStatus()) && len(resp.Shards) == 2
 		}
 		return false
-	}, 60*time.Second, 1*time.Second)
+	}, 10*time.Second, 1*time.Second)
 
 	close(closeInsertCh)
 	wg.Wait()
