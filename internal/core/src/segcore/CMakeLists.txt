@@ -9,6 +9,9 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
+add_subdirectory(aggregation)
 
 add_source_at_current_directory_recursively()
 add_library(milvus_segcore OBJECT ${SOURCE_FILES})
+
+target_link_libraries(milvus_segcore milvus_segcore_aggregation)

@@ -223,6 +223,10 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
 
+    if (plan_node_proto.query().has_aggregation()) {
+        retrieve_plan->aggr = std::make_unique<proto::plan::Aggr>(plan_node_proto.query().aggregation());
+    }
+
     return retrieve_plan;
 }
 

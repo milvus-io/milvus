@@ -4,14 +4,18 @@ import (
 	"context"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"google.golang.org/protobuf/proto"
 )
 
 type internalReducer interface {
@@ -19,8 +23,27 @@ type internalReducer interface {
 }
 
 func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) internalReducer {
+	var plan planpb.PlanNode
+	// TODO:ashkrisk unmarshall overhead may be high
+	err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), &plan)
+	if err != nil {
+		log.Error("couldn't unmarshall query plan", zap.Error(err))
+	}
+	queryPlan, ok := plan.GetNode().(*planpb.PlanNode_Query)
+	if !ok {
+		log.Error("plan in QueryRequest is not a QueryPlan")
+	}
+
 	if req.GetReq().GetIsCount() {
 		return &cntReducer{}
+	}
+	if aggr := queryPlan.Query.GetAggregation(); aggr != nil {
+		reducer, err := newAggrReducerInternal(aggr)
+		if err != nil {
+			// TODO:ashkrisk remove fatality
+			log.Fatal("Couldn't create aggregation reducer", zap.Error(err))
+		}
+		return reducer
 	}
 	return newDefaultLimitReducer(req, schema)
 }
@@ -33,6 +56,23 @@ func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.Collection
 	if req.GetReq().GetIsCount() {
 		return &cntReducerSegCore{}
 	}
+
+	// TODO:ashkrisk there's no need to deserialize here since plan(C) is already available in caller
+	var plan planpb.PlanNode
+	err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), &plan)
+	if err != nil {
+		log.Fatal("Couldn't deserialize plan in segcorereducer")
+		return nil // just in case
+	}
+	if aggr := plan.GetQuery().GetAggregation(); aggr != nil {
+		reducer, err := newAggrReducerSegcore(aggr)
+		if err != nil {
+			// TODO:ashkrisk this is the third time I'm repeating myself
+			log.Fatal("Couldn't create aggregation reducer", zap.Error(err))
+		}
+		return reducer
+	}
+
 	return newDefaultLimitReducerSegcore(req, schema, manager)
 }
 

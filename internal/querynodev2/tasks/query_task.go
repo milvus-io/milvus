@@ -157,6 +157,7 @@ func (t *QueryTask) Execute() error {
 		},
 		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
 		HasMoreResult:    reducedResult.HasMoreResult,
+		Aggr: 			  reducedResult.Aggr,
 	}
 	return nil
 }

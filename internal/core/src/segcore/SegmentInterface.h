@@ -360,6 +360,11 @@ class SegmentInternalInterface : public SegmentInterface {
         bool ignore_non_pk,
         bool fill_ids) const;
 
+    void
+    DoAggregation(
+        const proto::plan::Aggr& aggr,
+        std::unique_ptr<proto::segcore::RetrieveResults>& results) const;
+
     // return whether field mmap or not
     virtual bool
     is_mmap_field(FieldId field_id) const = 0;

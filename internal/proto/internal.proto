@@ -189,6 +189,35 @@ message RetrieveRequest {
 
 
 
+message MaxIR {
+  oneof max {
+    int64 int = 1;
+    double float = 2;
+    string str = 3;
+  }
+}
+
+message MinIR {
+  oneof max {
+    int64 int = 1;
+    double float = 2;
+    string str = 3;
+  }
+}
+
+message AvgIR {
+  double val = 1;
+  int64 weight = 2;
+}
+
+message AggrData {
+  oneof data {
+    MaxIR max_ir = 1;
+    MinIR min_ir = 2;
+    AvgIR avg_ir = 3;
+  }
+}
+
 message RetrieveResults {
   common.MsgBase base = 1;
   common.Status status = 2;
@@ -203,6 +232,9 @@ message RetrieveResults {
   CostAggregation costAggregation = 13;
   int64 all_retrieve_count = 14;
   bool has_more_result = 15;
+
+  // aggregations
+  AggrData aggr = 16;
 }
 
 message LoadIndex {

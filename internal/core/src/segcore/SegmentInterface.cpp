@@ -19,6 +19,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "aggregation/Aggregation.h"
 
 namespace milvus::segcore {
 
@@ -132,7 +133,60 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                     retrieve_results.result_offsets_.size(),
                     ignore_non_pk,
                     true);
+
+    if (plan->aggr) {
+        DoAggregation(*plan->aggr, results);
+    }
+
+    auto resultDebug = results->DebugString();
     return results;
+}
+
+void
+SegmentInternalInterface::DoAggregation(
+    const proto::plan::Aggr& aggr,
+    std::unique_ptr<proto::segcore::RetrieveResults>& results) const {
+
+    std::unordered_map<int64_t, size_t> wanted_fields;
+
+    auto args = aggr.arguments();
+    for (int i = 0; i < args.size(); i++) {
+        auto& col_info = args[i];
+        wanted_fields[col_info.field_id()] = i;
+    }
+
+    auto fields = results->fields_data();
+
+    std::vector<const proto::schema::FieldData*> ord_args(wanted_fields.size());
+
+    for (const auto& field : fields) {
+        auto found = wanted_fields.find(field.field_id());
+        if (found == wanted_fields.end()) {
+            continue;
+        }
+
+        auto index = found->second;
+        ord_args[index] = &field;
+    }
+
+    auto aggregation = aggregation::Aggregation::GetAggregation(aggr.fn_name());
+    if (!aggregation) {
+        throw std::runtime_error(fmt::format("unknown aggregation [{}]", aggr.fn_name()));
+    }
+
+    std::vector<proto::schema::DataType> input_types;
+    for (const auto &arg : ord_args) {
+        input_types.push_back(arg->type());
+    }
+
+    auto aggregator = aggregation->GetAggregator(input_types);
+    if (!aggregator) {
+        throw std::runtime_error(fmt::format("aggrgation \"{}\" not supported for the given types", aggr.fn_name()));
+    }
+
+    aggregator->Aggregate(fields, results->mutable_aggr());
+    auto aggrstr = results->aggr().DebugString();
+    int x = 3;
 }
 
 void

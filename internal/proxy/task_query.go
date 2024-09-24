@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -211,6 +212,92 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper) (*planpb.Pl
 	return plan, nil
 }
 
+func parseAggregationFunction(out_fields []string) (string, []string, bool) {
+	if len(out_fields) != 1 {
+		return "", nil, false
+	}
+	out_field := out_fields[0]
+
+	fn_re := regexp.MustCompile(`^([^()]*)\((.*)\)$`)
+	matches := fn_re.FindStringSubmatch(out_field)
+	if matches == nil {
+		return "", nil, false
+	}
+
+	log.Debug("regex matches", zap.Strings("matches", matches))
+	if len(matches) != 3 {
+		panic("regex match returned unexpected params")
+	}
+	fn_name := matches[1]
+	arg_str := matches[2]
+
+	args := strings.Split(arg_str, ",")
+	for i := 0; i < len(args); i++ {
+		args[i] = strings.TrimSpace(args[i])
+	}
+
+	return fn_name, args, true
+}
+
+func createAggrPlan(expr string, aggrFn string, args []string, schema *schemaInfo) (*planpb.PlanNode, error) {
+	// TODO:ashkrisk do any kind of type checking here?
+	schemaHelper := schema.schemaHelper
+
+	// TODO:ashkrisk set predicates to nil if expr is empty?
+	predicates, err := planparserv2.ParseExpr(schemaHelper, expr)
+	if err != nil {
+		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+	}
+
+	arg_cols := []*planpb.ColumnInfo{}
+	for _, col_name := range args {
+		// TODO:ashkrisk should support JSON fields?
+		field, err := schemaHelper.GetFieldFromNameDefaultJSON(col_name)
+		if err != nil {
+			return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+		}
+		// TODO:ashkrisk is there some code somewhere that already takes care of this?
+		// see parser_visitor.go and other files in internal/parser/planparserv2
+		// (search for `ColumnInfo{` to see creation points)
+		var nestedPath []string
+		if col_name != field.Name {
+			// TODO:ashkrisk remove if JSON not required
+			nestedPath = append(nestedPath, col_name)
+		}
+		arg_cols = append(arg_cols, &planpb.ColumnInfo{
+			FieldId:         field.FieldID,
+			DataType:        field.DataType,
+			IsPrimaryKey:    field.IsPrimaryKey,
+			IsAutoID:        field.AutoID,
+			NestedPath:      nestedPath,
+			IsPartitionKey:  field.IsPartitionKey,
+			IsClusteringKey: field.IsClusteringKey,
+			ElementType:     field.GetElementType(),
+		})
+	}
+
+	var outputFieldIds []int64 = nil
+	// TODO:ashkrisk translateToOutputFieldIds gives all fields if len(args) is 0
+	if len(args) > 0 {
+		outputFieldIds, err = translateToOutputFieldIDs(args, schema.CollectionSchema)
+	}
+
+	return &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: predicates,
+				Aggregation: &planpb.Aggr{
+					FnName: aggrFn,
+					Arguments: arg_cols,
+				},
+			},
+		},
+		// TODO:ashkrisk these are not actually output fields, but they do tell
+		// the C++ Segment code what data to fetch...
+		OutputFieldIds: outputFieldIds,
+	}, nil
+}
+
 func (t *queryTask) createPlan(ctx context.Context) error {
 	schema := t.schema
 
@@ -220,6 +307,16 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 		t.plan, err = createCntPlan(t.request.GetExpr(), schema.schemaHelper)
 		t.userOutputFields = []string{"count(*)"}
 		return err
+	}
+
+	aggrFn, args, ok := parseAggregationFunction(t.request.GetOutputFields())
+	if ok {
+		log.Debug("Found aggregation", zap.String("aggrFn", aggrFn), zap.Strings("args", args))
+		var err error
+		t.plan, err = createAggrPlan(t.request.GetExpr(), aggrFn, args, schema)
+		t.userOutputFields = append([]string{}, t.request.OutputFields...)
+		return err
+		// return fmt.Errorf("Aggregation functions not implemented: %s %s", aggrFn, args)
 	}
 
 	var err error

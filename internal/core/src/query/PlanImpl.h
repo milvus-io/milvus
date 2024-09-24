@@ -103,6 +103,7 @@ struct RetrievePlan {
     std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldId> field_ids_;
     std::vector<std::string> target_dynamic_fields_;
+    std::unique_ptr<proto::plan::Aggr> aggr;
 };
 
 using PlanPtr = std::unique_ptr<Plan>;
