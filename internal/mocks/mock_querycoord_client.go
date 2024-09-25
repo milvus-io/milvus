@@ -2592,6 +2592,76 @@ func (_c *MockQueryCoordClient_TransferSegment_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// UpdateLoadConfig provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) UpdateLoadConfig(ctx context.Context, in *querypb.UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateLoadConfigRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateLoadConfigRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateLoadConfigRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_UpdateLoadConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateLoadConfig'
+type MockQueryCoordClient_UpdateLoadConfig_Call struct {
+	*mock.Call
+}
+
+// UpdateLoadConfig is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.UpdateLoadConfigRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) UpdateLoadConfig(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_UpdateLoadConfig_Call {
+	return &MockQueryCoordClient_UpdateLoadConfig_Call{Call: _e.mock.On("UpdateLoadConfig",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_UpdateLoadConfig_Call) Run(run func(ctx context.Context, in *querypb.UpdateLoadConfigRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_UpdateLoadConfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.UpdateLoadConfigRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_UpdateLoadConfig_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_UpdateLoadConfig_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_UpdateLoadConfig_Call) RunAndReturn(run func(context.Context, *querypb.UpdateLoadConfigRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_UpdateLoadConfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateResourceGroups provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) UpdateResourceGroups(ctx context.Context, in *querypb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))

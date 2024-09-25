@@ -92,6 +92,10 @@ func (job *LoadCollectionJob) PreExecute() error {
 		req.ReplicaNumber = 1
 	}
 
+	if len(req.GetResourceGroups()) == 0 {
+		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+
 	collection := job.meta.GetCollection(req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -111,6 +115,14 @@ func (job *LoadCollectionJob) PreExecute() error {
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
 		)
 		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
+	}
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+	if len(left) > 0 || len(right) > 0 {
+		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
+			collectionUsedRG)
+		log.Warn(msg)
+		return merr.WrapErrParameterInvalid(collectionUsedRG, req.GetResourceGroups(), "can't change the resource groups for loaded partitions")
 	}
 
 	return nil
@@ -287,6 +299,10 @@ func (job *LoadPartitionJob) PreExecute() error {
 		req.ReplicaNumber = 1
 	}
 
+	if len(req.GetResourceGroups()) == 0 {
+		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+
 	collection := job.meta.GetCollection(req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -304,6 +320,14 @@ func (job *LoadPartitionJob) PreExecute() error {
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
 		)
 		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
+	}
+	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(collection.GetCollectionID()).Collect()
+	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+	if len(left) > 0 || len(right) > 0 {
+		msg := fmt.Sprintf("collection with different resource groups %v existed, release this collection first before changing its resource groups",
+			collectionUsedRG)
+		log.Warn(msg)
+		return merr.WrapErrParameterInvalid(collectionUsedRG, req.GetResourceGroups(), "can't change the resource groups for loaded partitions")
 	}
 
 	return nil

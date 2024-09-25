@@ -105,6 +105,8 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+
+  rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -892,4 +894,10 @@ message CheckQueryNodeDistributionRequest {
   int64 target_nodeID = 4;
 }
 
-
+message UpdateLoadConfigRequest {
+    common.MsgBase base = 1;
+    int64 dbID = 2;
+    repeated int64 collectionIDs = 3;
+    int32 replica_number = 4;
+    repeated string resource_groups = 5;
+}
