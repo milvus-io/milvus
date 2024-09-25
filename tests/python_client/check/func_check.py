@@ -297,7 +297,7 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_results_check: checking the searching results")
-        if func_name != 'search' or func_name != 'hybrid_search':
+        if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
