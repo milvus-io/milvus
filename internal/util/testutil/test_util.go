@@ -109,7 +109,7 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 		return nil, err
 	}
 	for _, f := range schema.GetFields() {
-		if f.GetAutoID() {
+		if f.GetAutoID() || f.IsFunctionOutput {
 			continue
 		}
 		switch f.GetDataType() {
@@ -213,7 +213,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 	mem := memory.NewGoAllocator()
 	columns := make([]arrow.Array, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
-		if field.GetIsPrimaryKey() && field.GetAutoID() {
+		if field.GetIsPrimaryKey() && field.GetAutoID() || field.GetIsFunctionOutput() {
 			continue
 		}
 		fieldID := field.GetFieldID()
@@ -531,7 +531,7 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 			field := fieldIDToField[fieldID]
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
-			if field.GetAutoID() {
+			if field.GetAutoID() || field.IsFunctionOutput {
 				continue
 			}
 			if v.GetRow(i) == nil {
@@ -590,11 +590,12 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 	csvData := make([][]string, 0, rowNum+1)
 
 	header := make([]string, 0)
-	nameToFields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+	fields := lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !field.GetAutoID() && !field.IsFunctionOutput
+	})
+	nameToFields := lo.KeyBy(fields, func(field *schemapb.FieldSchema) string {
 		name := field.GetName()
-		if !field.GetAutoID() {
-			header = append(header, name)
-		}
+		header = append(header, name)
 		return name
 	})
 	csvData = append(csvData, header)
@@ -606,9 +607,6 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 			value := insertData.Data[field.FieldID]
 			dataType := field.GetDataType()
 			elemType := field.GetElementType()
-			if field.GetAutoID() {
-				continue
-			}
 			// deal with null value
 			if field.GetNullable() && value.GetRow(i) == nil {
 				data = append(data, nullkey)

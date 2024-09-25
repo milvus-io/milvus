@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/x448/float16"
 
@@ -109,8 +110,21 @@ func GenerateVarCharArray(numRows int, maxLen int) []string {
 
 func GenerateStringArray(numRows int) []string {
 	ret := make([]string, 0, numRows)
+
+	genSentence := func() string {
+		words := []string{"hello", "world", "this", "is", "a", "test", "sentence", "milvus", "vector", "database", "search", "engine", "fast", "efficient", "scalable"}
+		selectedWords := make([]string, rand.Intn(6)+5) // 5 to 10 words
+		for i := range selectedWords {
+			selectedWords[i] = words[rand.Intn(len(words))]
+		}
+		rand.Shuffle(len(selectedWords), func(i, j int) {
+			selectedWords[i], selectedWords[j] = selectedWords[j], selectedWords[i]
+		})
+		return strings.Join(selectedWords, " ")
+	}
+
 	for i := 0; i < numRows; i++ {
-		ret = append(ret, strconv.Itoa(i))
+		ret = append(ret, genSentence())
 	}
 	return ret
 }

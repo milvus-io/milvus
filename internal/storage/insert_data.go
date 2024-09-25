@@ -50,10 +50,14 @@ type InsertData struct {
 }
 
 func NewInsertData(schema *schemapb.CollectionSchema) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0)
+	return NewInsertDataWithCap(schema, 0, false)
 }
 
-func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int) (*InsertData, error) {
+func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, true)
+}
+
+func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
 	if schema == nil {
 		return nil, merr.WrapErrParameterMissing("collection schema")
 	}
@@ -68,6 +72,14 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int) (*InsertDa
 		}
 		if field.IsPartitionKey && field.GetNullable() {
 			return nil, merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
+		}
+		if field.IsFunctionOutput {
+			if field.IsPrimaryKey || field.IsPartitionKey {
+				return nil, merr.WrapErrParameterInvalidMsg("function output field should not be primary key or partition key")
+			}
+			if !withFunctionOutput {
+				continue
+			}
 		}
 		fieldData, err := NewFieldData(field.DataType, field, cap)
 		if err != nil {

@@ -33,7 +33,7 @@ func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum i
 	for i := 0; i < channelNum; i++ {
 		res[i] = make([]*storage.InsertData, partitionNum)
 		for j := 0; j < partitionNum; j++ {
-			res[i][j], err = storage.NewInsertData(schema)
+			res[i][j], err = storage.NewInsertDataWithFunctionOutputField(schema)
 			if err != nil {
 				return nil, err
 			}
