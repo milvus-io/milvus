@@ -359,8 +359,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    field_data_size = var_column->ByteSize();
-                    stats_.mem_size += var_column->ByteSize();
+                    field_data_size = var_column->DataByteSize();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
                     LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
@@ -374,8 +374,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    stats_.mem_size += var_column->ByteSize();
-                    field_data_size = var_column->ByteSize();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
+                    field_data_size = var_column->DataByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -552,8 +552,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             }
             case milvus::DataType::VECTOR_SPARSE_FLOAT: {
                 auto sparse_column = std::make_shared<SparseFloatColumn>(
-                    file, total_written, field_meta);
-                sparse_column->Seal(std::move(indices));
+                    file, total_written, field_meta, std::move(indices));
                 column = std::move(sparse_column);
                 break;
             }
@@ -1173,10 +1172,10 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
             AssertInfo(
-                offset_in_binlog * row_bytes < column->ByteSize(),
+                offset_in_binlog < column->NumRows(),
                 "column idx out of range, idx: {}, size: {}, data_path: {}",
-                offset_in_binlog * row_bytes,
-                column->ByteSize(),
+                offset_in_binlog,
+                column->NumRows(),
                 data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
