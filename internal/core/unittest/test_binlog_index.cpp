@@ -171,7 +171,7 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::metric::IP,
                         knowhere::IndexEnum::INDEX_SPARSE_WAND)));
 
-TEST_P(BinlogIndexTest, Accuracy) {
+TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
@@ -198,6 +198,105 @@ TEST_P(BinlogIndexTest, Accuracy) {
     vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(vec_field_id.get());
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(topk);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type(metric_type);
+    query_info->set_search_params(R"({"nprobe": 1024})");
+    auto plan_str = plan_node.SerializeAsString();
+
+    auto ph_group_raw =
+        data_type == DataType::VECTOR_FLOAT
+            ? CreatePlaceholderGroupFromBlob(
+                  num_queries,
+                  data_d,
+                  GenRandomFloatVecData(num_queries, data_d).get())
+            : CreateSparseFloatPlaceholderGroup(num_queries);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        *schema, plan_str.data(), plan_str.size());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
+        ph_group.get()};
+    auto nlist = segcore_config.get_nlist();
+    auto binlog_index_sr =
+        segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
+    EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
+    EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
+    EXPECT_EQ(binlog_index_sr->seg_offsets_.size(), num_queries * topk);
+
+    // 3. update vector index
+    {
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = data_type;
+        create_index_info.metric_type = metric_type;
+        create_index_info.index_type = index_type;
+        create_index_info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, milvus::storage::FileManagerContext());
+
+        auto build_conf =
+            knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
+                           {knowhere::meta::DIM, std::to_string(data_d)},
+                           {knowhere::indexparam::NLIST, "1024"}};
+        indexing->BuildWithDataset(raw_dataset, build_conf);
+
+        LoadIndexInfo load_info;
+        load_info.field_id = vec_field_id.get();
+
+        load_info.index = std::move(indexing);
+        load_info.index_params["metric_type"] = metric_type;
+        segment->DropFieldData(vec_field_id);
+        ASSERT_NO_THROW(segment->LoadIndex(load_info));
+        EXPECT_TRUE(segment->HasIndex(vec_field_id));
+        EXPECT_EQ(segment->get_row_count(), data_n);
+        EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto similary = GetKnnSearchRecall(num_queries,
+                                           binlog_index_sr->seg_offsets_.data(),
+                                           topk,
+                                           ivf_sr->seg_offsets_.data(),
+                                           topk);
+        ASSERT_GT(similary, 0.45);
+    }
+}
+
+TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
+    IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
+
+    segment = CreateSealedSegment(schema, collection_index_meta);
+    LoadOtherFields();
+
+    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    segcore_config.set_enable_interim_segment_index(true);
+    segcore_config.set_nprobe(32);
+    // 1. load field data, and build binlog index for binlog data
+    FieldDataInfo field_data_info;
+    field_data_info.field_id = vec_field_id.get();
+    field_data_info.row_count = data_n;
+    field_data_info.mmap_dir_path = "./data/mmap-test";
+    field_data_info.channel->push(vec_field_data);
+    field_data_info.channel->close();
+    segment->MapFieldData(vec_field_id, field_data_info);
+
+    //assert segment has been built binlog index
+    EXPECT_TRUE(segment->HasIndex(vec_field_id));
+    EXPECT_EQ(segment->get_row_count(), data_n);
+    EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+
+    // 2. search binlog index
+    auto num_queries = 10;
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(vec_field_id.get());
+
     auto query_info = vector_anns->mutable_query_info();
     query_info->set_topk(topk);
     query_info->set_round_decimal(3);

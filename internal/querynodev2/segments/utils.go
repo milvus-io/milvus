@@ -289,3 +289,7 @@ func hasRawData(indexInfo *querypb.FieldIndexInfo) bool {
 	log.Warn("hasRawData is not implemented, please check it", zap.Int64("field_id", indexInfo.FieldID))
 	return true
 }
+
+func isGrowingMmapEnable() bool {
+	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
+}
